@@ -10,7 +10,7 @@
       --text:#e5e7eb; --muted:#9aa4b2; --link:#93c5fd; --linkhover:#bfdbfe;
       --goodbg:#063f2e; --good:#34d399; --goodbrd:#065f46;
       --badbg:#3b0d0d; --bad:#f87171; --badbrd:#7f1d1d;
-      --accent:#6366f1; --accenthover:#818cf8;
+      --accent:#6366f1; --accenthover:#818cf8; --bossh:#141a29;
     }
     * { box-sizing: border-box; }
     body { margin:0; padding:20px; background:var(--bg); color:var(--text); 
@@ -19,7 +19,6 @@
     h1 { margin:0 0 10px; }
     .subtitle { color:var(--muted); margin-bottom:20px; }
     
-    /* Config Panel */
     .config-panel { background:var(--panel); border:1px solid var(--border); 
                     border-radius:12px; padding:20px; margin-bottom:20px; }
     .config-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
@@ -36,24 +35,20 @@
     .form-group input, .form-group select, .form-group textarea { 
       background:var(--panel2); border:1px solid var(--border); color:var(--text); 
       padding:8px 12px; border-radius:6px; font-size:14px; }
-    .form-group textarea { min-height:80px; font-family:monospace; }
     .form-help { font-size:12px; color:var(--muted); margin-top:3px; }
     
-    /* Character Groups */
     .char-groups { margin-top:15px; }
     .char-group-item { display:flex; gap:10px; margin-bottom:10px; align-items:flex-start; }
     .char-group-item input { flex:1; }
     .btn-remove { background:var(--badbg); color:var(--bad); border:1px solid var(--badbrd); 
                   padding:8px 12px; border-radius:6px; cursor:pointer; }
     
-    /* Progress */
     .progress { background:var(--panel2); border:1px solid var(--border); 
                 border-radius:8px; padding:15px; margin-bottom:20px; display:none; }
     .progress-bar { background:var(--panel2); height:8px; border-radius:4px; overflow:hidden; margin:10px 0; }
     .progress-fill { background:var(--accent); height:100%; width:0%; transition:width 0.3s; }
     .progress-text { color:var(--muted); font-size:13px; }
     
-    /* Results (same as original) */
     .results { display:none; }
     details { margin-bottom:12px; border:1px solid var(--border); border-radius:10px; 
               padding:8px 12px; background:var(--panel); }
@@ -67,11 +62,11 @@
     .wipe { background:var(--badbg); color:var(--bad); border-color:var(--badbrd); }
     .muted { color:var(--muted); }
     .mono { font-family:monospace; }
+    .bossh { background:var(--bossh); font-weight:600; }
     .chips { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:15px; }
     .chip { background:var(--panel2); border:1px solid var(--border); padding:6px 12px; 
             border-radius:999px; cursor:pointer; user-select:none; }
     .chip.sel { outline:2px solid var(--accent); }
-    
     .error { background:var(--badbg); border:1px solid var(--badbrd); color:var(--bad); 
              padding:12px; border-radius:8px; margin-bottom:20px; display:none; }
   </style>
@@ -87,8 +82,8 @@
       <div class="config-header">
         <h2>⚙️ Configuration</h2>
         <div style="display:flex;gap:8px;">
-          <button class="btn btn-secondary btn-small" onclick="saveConfig()">💾 Save Config</button>
-          <button class="btn btn-secondary btn-small" onclick="loadConfig()">📂 Load Config</button>
+          <button class="btn btn-secondary btn-small" onclick="saveConfig()">💾 Save</button>
+          <button class="btn btn-secondary btn-small" onclick="loadConfig()">📂 Load</button>
         </div>
       </div>
       
@@ -96,7 +91,7 @@
         <div class="form-group">
           <label>WarcraftLogs API Key *</label>
           <input type="text" id="apiKey" placeholder="Your API key">
-          <span class="form-help">Go to <a href="https://www.warcraftlogs.com/profile" target="_blank" style="color:var(--link)">User Settings</a> and scroll down to find your API key</span>
+          <span class="form-help">Go to <a href="https://www.warcraftlogs.com/profile" target="_blank" style="color:var(--link)">User Settings</a> and scroll down</span>
         </div>
         
         <div class="form-group">
@@ -129,7 +124,6 @@
         <div class="form-group">
           <label>Fight Zone ID *</label>
           <input type="number" id="fightZone" placeholder="e.g., 2810">
-          <span class="form-help">Zone ID in fight data</span>
         </div>
         
         <div class="form-group">
@@ -145,24 +139,21 @@
         <div class="form-group">
           <label>Max Deaths to Count</label>
           <input type="number" id="maxCutoff" value="5" min="1" max="10">
-          <span class="form-help">Count first X deaths per pull</span>
         </div>
         
         <div class="form-group">
           <label>Date Cutoff</label>
           <input type="date" id="cutoffDate">
-          <span class="form-help">Include logs on or before this date</span>
         </div>
       </div>
       
       <div class="form-group" style="margin-top:15px;">
         <label>Author Filters (optional)</label>
-        <input type="text" id="authorFilters" placeholder="username1, username2, username3">
-        <span class="form-help">Comma-separated list of log uploaders to include (leave empty for all)</span>
+        <input type="text" id="authorFilters" placeholder="username1, username2">
       </div>
       
       <div class="char-groups">
-        <label style="font-weight:600; display:block; margin-bottom:10px;">Character Groups (Alt Merging)</label>
+        <label style="font-weight:600; display:block; margin-bottom:10px;">Character Groups</label>
         <div id="charGroupsList"></div>
         <button class="btn btn-secondary btn-small" onclick="addCharGroup()">+ Add Group</button>
       </div>
@@ -186,22 +177,14 @@
   </div>
 
   <script>
-    const state = {
-      config: {},
-      cache: {},
-      data: null,
-      selectedBosses: new Set()
-    };
+    const state = { config: {}, cache: new Map(), data: null, selectedBosses: new Set() };
     
-    // Initialize
     function init() {
-      const today = new Date().toISOString().split('T')[0];
-      document.getElementById('cutoffDate').value = today;
+      document.getElementById('cutoffDate').value = new Date().toISOString().split('T')[0];
       loadConfigFromStorage();
-      updateCharGroupsDisplay();
+      addCharGroup();
     }
     
-    // Character groups management
     function addCharGroup() {
       const list = document.getElementById('charGroupsList');
       const div = document.createElement('div');
@@ -214,21 +197,12 @@
       list.appendChild(div);
     }
     
-    function updateCharGroupsDisplay() {
-      const list = document.getElementById('charGroupsList');
-      list.innerHTML = '';
-      // Add one empty group by default
-      if (list.children.length === 0) addCharGroup();
-    }
-    
     function getCharacterGroups() {
       const groups = {};
       document.querySelectorAll('.char-group-item').forEach(item => {
         const main = item.querySelector('.char-main').value.trim();
         const alts = item.querySelector('.char-alts').value.split(',').map(s => s.trim()).filter(s => s);
-        if (main && alts.length > 0) {
-          groups[main] = [main, ...alts];
-        }
+        if (main && alts.length > 0) groups[main] = [main, ...alts];
       });
       return groups;
     }
@@ -240,7 +214,10 @@
       return playerName;
     }
     
-    // Config persistence
+    function hasAlts(player) {
+      return state.config.charGroups[player] && state.config.charGroups[player].length > 0;
+    }
+    
     function saveConfig() {
       const config = {
         apiKey: document.getElementById('apiKey').value,
@@ -255,20 +232,17 @@
         authorFilters: document.getElementById('authorFilters').value,
         charGroups: getCharacterGroups()
       };
-      localStorage.setItem('wclReportConfig', JSON.stringify(config));
+      localStorage.setItem('wclConfig', JSON.stringify(config));
       alert('✅ Configuration saved!');
     }
     
     function loadConfig() {
-      if (loadConfigFromStorage()) {
-        alert('✅ Configuration loaded!');
-      } else {
-        alert('ℹ️ No saved configuration found');
-      }
+      if (loadConfigFromStorage()) alert('✅ Configuration loaded!');
+      else alert('ℹ️ No saved configuration found');
     }
     
     function loadConfigFromStorage() {
-      const saved = localStorage.getItem('wclReportConfig');
+      const saved = localStorage.getItem('wclConfig');
       if (!saved) return false;
       
       const config = JSON.parse(saved);
@@ -283,7 +257,6 @@
       document.getElementById('cutoffDate').value = config.cutoffDate || '';
       document.getElementById('authorFilters').value = config.authorFilters || '';
       
-      // Load character groups
       const list = document.getElementById('charGroupsList');
       list.innerHTML = '';
       if (config.charGroups) {
@@ -291,27 +264,25 @@
           const div = document.createElement('div');
           div.className = 'char-group-item';
           div.innerHTML = `
-            <input type="text" placeholder="Main character" class="char-main" value="${main}">
-            <input type="text" placeholder="Alt1, Alt2, Alt3..." class="char-alts" value="${alts.filter(a => a !== main).join(', ')}">
+            <input type="text" class="char-main" value="${main}">
+            <input type="text" class="char-alts" value="${alts.filter(a => a !== main).join(', ')}">
             <button class="btn-remove" onclick="this.parentElement.remove()">✕</button>
           `;
           list.appendChild(div);
         }
       }
       if (list.children.length === 0) addCharGroup();
-      
       return true;
     }
     
     function clearCache() {
-      if (confirm('Are you sure you want to clear the cache?')) {
-        state.cache = {};
-        localStorage.removeItem('wclReportCache');
+      if (confirm('Clear cache?')) {
+        state.cache.clear();
+        localStorage.removeItem('wclCache');
         alert('✅ Cache cleared!');
       }
     }
     
-    // Progress UI
     function showProgress(text, percent) {
       document.getElementById('progressBox').style.display = 'block';
       document.getElementById('progressText').textContent = text;
@@ -329,24 +300,17 @@
       setTimeout(() => box.style.display = 'none', 10000);
     }
     
-    // API calls
-    async function fetchWithRetry(url, retries = 3) {
-      for (let i = 0; i < retries; i++) {
-        try {
-          const response = await fetch(url);
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          return await response.json();
-        } catch (e) {
-          if (i === retries - 1) throw e;
-          await new Promise(r => setTimeout(r, 1000 * (i + 1)));
-        }
-      }
+    async function cachedFetch(url) {
+      if (state.cache.has(url)) return state.cache.get(url);
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      state.cache.set(url, data);
+      return data;
     }
     
-    // Main generation logic
     async function generateReport() {
       try {
-        // Validate inputs
         const apiKey = document.getElementById('apiKey').value.trim();
         const guildName = document.getElementById('guildName').value.trim();
         const server = document.getElementById('server').value.trim();
@@ -371,30 +335,90 @@
         };
         
         document.getElementById('configPanel').style.display = 'none';
-        document.getElementById('resultsBox').style.display = 'none';
-        showProgress('Fetching guild reports...', 10);
+        showProgress('Fetching reports...', 5);
         
-        // Fetch reports
         const reports = await fetchGuildReports();
-        if (reports.length === 0) {
-          showError('No reports found matching your criteria');
+        if (!reports.length) {
+          showError('No reports found');
           hideProgress();
           document.getElementById('configPanel').style.display = 'block';
           return;
         }
         
-        showProgress(`Processing ${reports.length} reports...`, 20);
+        showProgress(`Processing ${reports.length} reports in parallel...`, 10);
         
-        // Process all fights
-        const allFights = await collectAllFights(reports);
-        showProgress('Deduplicating pulls...', 60);
+        // OPTIMIZATION: Fetch all fights in parallel
+        const fightPromises = reports.map(rep => 
+          cachedFetch(`https://www.warcraftlogs.com/v1/report/fights/${rep.id}?api_key=${apiKey}`)
+            .then(data => ({ reportId: rep.id, reportStart: data.start || rep.start, fights: data.fights || [] }))
+        );
         
+        const allReportFights = await Promise.all(fightPromises);
+        showProgress('Collecting fights...', 25);
+        
+        // Collect and deduplicate
+        const allFights = [];
+        for (const { reportId, reportStart, fights } of allReportFights) {
+          for (const fight of fights) {
+            if ((fight.boss || 0) <= 0) continue;
+            if (fight.zoneID !== state.config.fightZone && fight.zone !== state.config.fightZone) continue;
+            if (fight.zoneDifficulty !== state.config.difficulty && fight.difficulty !== state.config.difficulty) continue;
+            
+            allFights.push({
+              reportId,
+              fight,
+              bossName: fight.name || 'Unknown',
+              bossId: fight.boss,
+              isKill: !!fight.kill,
+              absStart: reportStart + fight.start_time,
+              absEnd: reportStart + fight.end_time,
+              reportAbsStart: reportStart
+            });
+          }
+        }
+        
+        allFights.sort((a, b) => a.absStart - b.absStart);
         const dedupedFights = deduplicateFights(allFights);
-        showProgress('Calculating statistics...', 80);
         
-        const results = await processFights(dedupedFights);
+        showProgress(`Fetching participants for ${dedupedFights.length} fights...`, 40);
         
-        showProgress('Rendering results...', 90);
+        // OPTIMIZATION: Fetch all participants in parallel (damage + healing for each fight)
+        const participantPromises = dedupedFights.map(async f => {
+          const participants = new Set();
+          
+          // Damage
+          try {
+            const data = await cachedFetch(`https://www.warcraftlogs.com/v1/report/tables/damage-done/${f.reportId}?start=${f.fight.start_time}&end=${f.fight.end_time}&api_key=${apiKey}`);
+            for (const e of data.entries || []) if (e.name) participants.add(e.name);
+          } catch(e) {}
+          
+          // Healing
+          try {
+            const data = await cachedFetch(`https://www.warcraftlogs.com/v1/report/tables/healing/${f.reportId}?start=${f.fight.start_time}&end=${f.fight.end_time}&api_key=${apiKey}`);
+            for (const e of data.entries || []) if (e.name) participants.add(e.name);
+          } catch(e) {}
+          
+          return { fight: f, participants: Array.from(participants) };
+        });
+        
+        const allParticipants = await Promise.all(participantPromises);
+        
+        showProgress(`Fetching deaths for ${dedupedFights.length} fights...`, 65);
+        
+        // OPTIMIZATION: Fetch all deaths in parallel
+        const deathPromises = dedupedFights.map(f => 
+          cachedFetch(`https://www.warcraftlogs.com/v1/report/tables/deaths/${f.reportId}?start=${f.fight.start_time}&end=${f.fight.end_time}&translate=true&api_key=${apiKey}`)
+            .then(data => ({ fight: f, deaths: data.entries || [] }))
+            .catch(() => ({ fight: f, deaths: [] }))
+        );
+        
+        const allDeaths = await Promise.all(deathPromises);
+        
+        showProgress('Processing results...', 85);
+        
+        const results = processFights(dedupedFights, allParticipants, allDeaths);
+        
+        showProgress('Rendering...', 95);
         displayResults(results);
         
         hideProgress();
@@ -402,7 +426,7 @@
         
       } catch (error) {
         console.error(error);
-        showError('Error: ' + error.message);
+        showError(error.message);
         hideProgress();
         document.getElementById('configPanel').style.display = 'block';
       }
@@ -412,7 +436,7 @@
       const { apiKey, guildName, server, region, reportZone, cutoffDate, authorFilters } = state.config;
       const url = `https://www.warcraftlogs.com/v1/reports/guild/${encodeURIComponent(guildName)}/${server}/${region}?api_key=${apiKey}`;
       
-      const data = await fetchWithRetry(url);
+      const data = await cachedFetch(url);
       const cutoffTs = new Date(cutoffDate).getTime() + 86400000 - 1;
       
       return data.filter(rep => {
@@ -421,43 +445,6 @@
         if (authorFilters.length > 0 && !authorFilters.includes(rep.owner)) return false;
         return true;
       });
-    }
-    
-    async function collectAllFights(reports) {
-      const allFights = [];
-      
-      for (let i = 0; i < reports.length; i++) {
-        const rep = reports[i];
-        showProgress(`Collecting fights from report ${i + 1}/${reports.length}...`, 20 + (i / reports.length) * 30);
-        
-        const url = `https://www.warcraftlogs.com/v1/report/fights/${rep.id}?api_key=${state.config.apiKey}`;
-        const data = await fetchWithRetry(url);
-        
-        const reportAbsStart = data.start || rep.start;
-        const fights = data.fights || [];
-        
-        for (const fight of fights) {
-          if ((fight.boss || 0) <= 0) continue;
-          if (fight.zoneID !== state.config.fightZone && fight.zone !== state.config.fightZone) continue;
-          if (fight.zoneDifficulty !== state.config.difficulty && fight.difficulty !== state.config.difficulty) continue;
-          
-          const absStart = reportAbsStart + fight.start_time;
-          const absEnd = reportAbsStart + fight.end_time;
-          
-          allFights.push({
-            reportId: rep.id,
-            fight,
-            bossName: fight.name || 'Unknown',
-            bossId: fight.boss,
-            isKill: !!fight.kill,
-            absStart,
-            absEnd,
-            reportAbsStart
-          });
-        }
-      }
-      
-      return allFights.sort((a, b) => a.absStart - b.absStart);
     }
     
     function deduplicateFights(allFights) {
@@ -486,23 +473,23 @@
       return result;
     }
     
-    async function processFights(fights) {
+    function processFights(fights, allParticipants, allDeaths) {
       const events = {};
       const pullParticipation = {};
       const bossParticipation = {};
+      const characterBreakdown = {};
       const pullCounter = {};
       
       for (let i = 0; i < fights.length; i++) {
         const fightData = fights[i];
-        showProgress(`Processing pull ${i + 1}/${fights.length}...`, 80 + (i / fights.length) * 10);
+        const participants = allParticipants[i].participants;
+        const deathData = allDeaths[i].deaths;
         
         const bossId = fightData.bossId;
         pullCounter[bossId] = (pullCounter[bossId] || 0) + 1;
         const pullNo = pullCounter[bossId];
         
-        // Get participants (damage + healing)
-        const participants = await getFightParticipants(fightData);
-        
+        // Track participation
         for (const player of participants) {
           const main = getMainCharacter(player, state.config.charGroups);
           if (!pullParticipation[main]) pullParticipation[main] = new Set();
@@ -513,91 +500,51 @@
           bossParticipation[fightData.bossName][main].add(`${fightData.reportId}_${fightData.fight.id}`);
         }
         
-        // Get deaths
-        const deaths = await getFightDeaths(fightData);
-        const topDeaths = deaths.slice(0, state.config.maxCutoff);
+        // Process deaths
+        const topDeaths = deathData.slice(0, state.config.maxCutoff);
         
         for (let rank = 0; rank < topDeaths.length; rank++) {
           const death = topDeaths[rank];
-          const main = getMainCharacter(death.targetName, state.config.charGroups);
+          const main = getMainCharacter(death.name, state.config.charGroups);
+          const originalChar = death.name;
           
-          if (!events[main]) events[main] = [];
-          events[main].push({
+          const deathEvent = {
             player: main,
-            originalCharacter: death.targetName,
+            originalCharacter: originalChar,
             boss: fightData.bossName,
-            bossId: fightData.bossId,
-            phase: death.phase || 1,
             reportId: fightData.reportId,
             fightId: fightData.fight.id,
             isKill: fightData.isKill,
             pullNo,
             rankWithinPull: rank + 1,
-            absTs: death.timestamp,
-            abilityName: death.abilityName || 'Unknown'
-          });
+            absTs: fightData.reportAbsStart + death.timestamp,
+            abilityName: (death.ability || {}).name || 'Unknown'
+          };
+          
+          if (!events[main]) events[main] = [];
+          events[main].push(deathEvent);
+          
+          if (!characterBreakdown[main]) characterBreakdown[main] = {};
+          if (!characterBreakdown[main][originalChar]) characterBreakdown[main][originalChar] = [];
+          characterBreakdown[main][originalChar].push(deathEvent);
         }
       }
       
       // Convert Sets to Arrays
-      for (const player in pullParticipation) {
-        pullParticipation[player] = Array.from(pullParticipation[player]);
-      }
+      for (const player in pullParticipation) pullParticipation[player] = Array.from(pullParticipation[player]);
       for (const boss in bossParticipation) {
         for (const player in bossParticipation[boss]) {
           bossParticipation[boss][player] = Array.from(bossParticipation[boss][player]);
         }
       }
       
-      return { events, pullParticipation, bossParticipation };
-    }
-    
-    async function getFightParticipants(fightData) {
-      const { reportId, fight } = fightData;
-      const { start_time, end_time } = fight;
-      const participants = new Set();
-      
-      // Damage dealers
-      try {
-        const url = `https://www.warcraftlogs.com/v1/report/tables/damage-done/${reportId}?start=${start_time}&end=${end_time}&api_key=${state.config.apiKey}`;
-        const data = await fetchWithRetry(url);
-        for (const entry of data.entries || []) {
-          if (entry.name) participants.add(entry.name);
-        }
-      } catch (e) {}
-      
-      // Healers
-      try {
-        const url = `https://www.warcraftlogs.com/v1/report/tables/healing/${reportId}?start=${start_time}&end=${end_time}&api_key=${state.config.apiKey}`;
-        const data = await fetchWithRetry(url);
-        for (const entry of data.entries || []) {
-          if (entry.name) participants.add(entry.name);
-        }
-      } catch (e) {}
-      
-      return Array.from(participants);
-    }
-    
-    async function getFightDeaths(fightData) {
-      const { reportId, fight, reportAbsStart } = fightData;
-      const { start_time, end_time } = fight;
-      
-      const url = `https://www.warcraftlogs.com/v1/report/tables/deaths/${reportId}?start=${start_time}&end=${end_time}&translate=true&api_key=${state.config.apiKey}`;
-      const data = await fetchWithRetry(url);
-      
-      return (data.entries || []).map(e => ({
-        targetName: e.name || 'Unknown',
-        timestamp: reportAbsStart + e.timestamp,
-        phase: 1,
-        abilityName: (e.ability || {}).name || 'Unknown'
-      }));
+      return { events, pullParticipation, bossParticipation, characterBreakdown };
     }
     
     function displayResults(results) {
-      const { events, pullParticipation, bossParticipation } = results;
-      state.data = { events, pullParticipation, bossParticipation };
+      const { events, pullParticipation, bossParticipation, characterBreakdown } = results;
+      state.data = { events, pullParticipation, bossParticipation, characterBreakdown };
       
-      // Build boss chips
       const chips = document.getElementById('bossChips');
       chips.innerHTML = '';
       const bosses = Object.keys(bossParticipation).sort();
@@ -606,13 +553,8 @@
         chip.className = 'chip';
         chip.textContent = boss;
         chip.onclick = () => {
-          if (state.selectedBosses.has(boss)) {
-            state.selectedBosses.delete(boss);
-            chip.classList.remove('sel');
-          } else {
-            state.selectedBosses.add(boss);
-            chip.classList.add('sel');
-          }
+          chip.classList.toggle('sel');
+          state.selectedBosses.has(boss) ? state.selectedBosses.delete(boss) : state.selectedBosses.add(boss);
           renderPlayerList();
         };
         chips.appendChild(chip);
@@ -625,12 +567,13 @@
       const content = document.getElementById('resultsContent');
       content.innerHTML = '';
       
-      const { events, pullParticipation, bossParticipation } = state.data;
+      const { events, pullParticipation, bossParticipation, characterBreakdown } = state.data;
       const stats = [];
+      const cutoff = state.config.maxCutoff;
       
       for (const player in events) {
         const playerEvents = events[player].filter(e => 
-          e.rankWithinPull <= 2 && 
+          e.rankWithinPull <= cutoff && 
           (state.selectedBosses.size === 0 || state.selectedBosses.has(e.boss))
         );
         
@@ -654,33 +597,109 @@
       for (const stat of stats) {
         const details = document.createElement('details');
         const summary = document.createElement('summary');
-        summary.innerHTML = `<strong>${stat.player}</strong> — <span class="muted">${stat.deaths} deaths / ${stat.pulls} pulls</span> · ${stat.rate.toFixed(1)}%`;
+        const altIndicator = hasAlts(stat.player) ? ' <span class="muted">(grouped)</span>' : '';
+        summary.innerHTML = `${stat.player}${altIndicator} <span class="muted">— ${stat.deaths} deaths / ${stat.pulls} pulls · ${stat.rate.toFixed(1)}%</span>`;
         details.appendChild(summary);
         
-        const table = document.createElement('table');
-        table.innerHTML = '<thead><tr><th>Boss</th><th>Pull</th><th>Outcome</th><th>Ability</th><th>Report</th></tr></thead><tbody></tbody>';
-        const tbody = table.querySelector('tbody');
+        details.addEventListener('toggle', () => {
+          if (!details.open || details.dataset.built) return;
+          details.dataset.built = '1';
+          
+          // Character breakdown
+          if (hasAlts(stat.player)) {
+            const charDetails = document.createElement('details');
+            charDetails.style.marginBottom = '12px';
+            charDetails.style.marginLeft = '16px';
+            const charSummary = document.createElement('summary');
+            charSummary.innerHTML = '<strong>📊 Character Breakdown</strong>';
+            charDetails.appendChild(charSummary);
+            
+            const charTable = document.createElement('table');
+            charTable.style.fontSize = '13px';
+            charTable.innerHTML = '<thead><tr><th>Character</th><th>Deaths</th><th>Rate</th></tr></thead><tbody></tbody>';
+            const charTbody = charTable.querySelector('tbody');
+            
+            const chars = characterBreakdown[stat.player] || {};
+            const playerAlts = state.config.charGroups[stat.player] || [];
+            const alts = playerAlts.filter(c => chars[c] && chars[c].length > 0);
+            
+            for (const char of alts) {
+              const charEvs = (chars[char] || []).filter(ev => ev.rankWithinPull <= cutoff && (state.selectedBosses.size === 0 || state.selectedBosses.has(ev.boss)));
+              const charDeaths = charEvs.length;
+              const charRate = stat.pulls > 0 ? (charDeaths / stat.pulls * 100) : 0;
+              
+              const tr = document.createElement('tr');
+              tr.innerHTML = `<td><strong>${char}</strong></td><td>${charDeaths}</td><td>${charRate.toFixed(1)}%</td>`;
+              charTbody.appendChild(tr);
+            }
+            
+            charDetails.appendChild(charTable);
+            details.appendChild(charDetails);
+          }
+          
+          const table = document.createElement('table');
+          table.innerHTML = '<thead><tr><th>Boss</th><th>Pull</th><th>Outcome</th><th>Character</th><th>Ability</th><th>Time</th><th>Report</th></tr></thead><tbody></tbody>';
+          const tbody = table.querySelector('tbody');
+          
+          const byBoss = {};
+          for (const ev of stat.events) (byBoss[ev.boss] ||= []).push(ev);
+          
+          for (const boss of Object.keys(byBoss).sort()) {
+            if (state.selectedBosses.size > 0 && !state.selectedBosses.has(boss)) continue;
+            
+            const bossRows = byBoss[boss];
+            const bossPulls = (bossParticipation[boss][stat.player] || []).length;
+            const bossDeaths = bossRows.length;
+            const bossRate = bossPulls > 0 ? (bossDeaths / bossPulls * 100) : 0;
+            
+            // Improvement trend
+            let trendIndicator = '';
+            if (bossPulls >= 10) {
+              const sorted = [...bossRows].sort((a, b) => a.pullNo - b.pullNo);
+              const midPoint = Math.ceil(sorted.length / 2);
+              const earlyDeaths = sorted.slice(0, midPoint);
+              const lateDeaths = sorted.slice(midPoint);
+              
+              const earlyPulls = Math.ceil(bossPulls / 2);
+              const latePulls = bossPulls - earlyPulls;
+              
+              const earlyRate = earlyPulls > 0 ? (earlyDeaths.length / earlyPulls * 100) : 0;
+              const lateRate = latePulls > 0 ? (lateDeaths.length / latePulls * 100) : 0;
+              const improvement = earlyRate - lateRate;
+              
+              if (improvement > 5) {
+                trendIndicator = `<span style="color:#34d399;margin-left:8px;font-size:11px">📈 Improving (${improvement.toFixed(1)}%)</span>`;
+              }
+            }
+            
+            // Top abilities
+            const abilityCounts = {};
+            for (const ev of bossRows) abilityCounts[ev.abilityName] = (abilityCounts[ev.abilityName] || 0) + 1;
+            const topAbilities = Object.entries(abilityCounts).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([n, c]) => `${n} (${c})`).join(' · ');
+            
+            const trH = document.createElement('tr');
+            trH.className = 'bossh';
+            trH.innerHTML = `<td colspan="7">${boss} — ${bossDeaths} deaths / ${bossPulls} pulls · ${bossRate.toFixed(1)}%${trendIndicator}<br><span class="muted" style="font-weight:normal;font-size:12px">${topAbilities}</span></td>`;
+            tbody.appendChild(trH);
+            
+            for (const ev of bossRows.sort((a, b) => a.absTs - b.absTs)) {
+              const tr = document.createElement('tr');
+              const pill = ev.isKill ? '<span class="pill kill">KILL</span>' : '<span class="pill wipe">wipe</span>';
+              const link = `https://www.warcraftlogs.com/reports/${ev.reportId}?fight=${ev.fightId}&type=deaths`;
+              const charDisplay = ev.originalCharacter !== stat.player ? `<span class="muted">${ev.originalCharacter}</span>` : '—';
+              const time = new Date(ev.absTs).toISOString().slice(0, 19).replace('T', ' ');
+              tr.innerHTML = `<td>${ev.boss}</td><td>${ev.pullNo}</td><td>${pill}</td><td>${charDisplay}</td><td class="muted">${ev.abilityName}</td><td class="mono muted">${time}</td><td><a href="${link}" target="_blank" style="color:var(--link)">${ev.reportId}</a></td>`;
+              tbody.appendChild(tr);
+            }
+          }
+          
+          details.appendChild(table);
+        }, {once: true});
         
-        for (const ev of stat.events.sort((a, b) => a.absTs - b.absTs)) {
-          const tr = document.createElement('tr');
-          const pill = ev.isKill ? '<span class="pill kill">KILL</span>' : '<span class="pill wipe">wipe</span>';
-          const link = `https://www.warcraftlogs.com/reports/${ev.reportId}?fight=${ev.fightId}&type=deaths`;
-          tr.innerHTML = `
-            <td>${ev.boss}</td>
-            <td>${ev.pullNo}</td>
-            <td>${pill}</td>
-            <td>${ev.abilityName}</td>
-            <td><a href="${link}" target="_blank" style="color:var(--link)">${ev.reportId}</a></td>
-          `;
-          tbody.appendChild(tr);
-        }
-        
-        details.appendChild(table);
         content.appendChild(details);
       }
     }
     
-    // Initialize on load
     init();
   </script>
 </body>
