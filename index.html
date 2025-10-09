@@ -1007,10 +1007,7 @@
 
 <!-- Minimal sanity indicator -->
 <style>
-  #sanity-pill{position:fixed;bottom:10px;left:12px;z-index:9999;background:rgba(30,32,40,.85);
-    color:#cbd5e1;border:1px solid rgba(255,255,255,.08);border-radius:999px;padding:6px 10px;
-    font:12px/1 ui-sans-serif,system-ui,Segoe UI,Roboto;display:flex;align-items:center;gap:8px;
-    box-shadow:0 4px 20px rgba(0,0,0,.25);backdrop-filter:blur(6px);opacity:.9}
+  #sanity-pill{position:fixed;top:10px;right:12px;z-index:2147483647;background:rgba(17,17,22,.92);color:#e5e7eb;border:1px solid rgba(255,255,255,.15);border-radius:999px;padding:6px 10px;font:12px/1 ui-sans-serif,system-ui,Segoe UI,Roboto;display:flex;align-items:center;gap:8px;box-shadow:0 6px 28px rgba(0,0,0,.45);backdrop-filter:blur(6px);opacity:1;pointer-events:none}
   #sanity-pill .dot{width:8px;height:8px;border-radius:999px;background:#60a5fa;animation:sp 1.2s infinite ease-in-out}
   @keyframes sp{0%{transform:scale(1);opacity:.7}50%{transform:scale(1.4);opacity:1}100%{transform:scale(1);opacity:.7}}
   #sanity-pill .txt{white-space:nowrap;max-width:46vw;overflow:hidden;text-overflow:ellipsis}
@@ -1022,6 +1019,7 @@
 </div>
 <script>
 (() => {
+  if (window.__SANITY_PILL_INIT__) return; window.__SANITY_PILL_INIT__ = true;
   // Stats (very small)
   const S = (window.__SANITY__ = window.__SANITY__ || {
     inFlight: 0, finished: 0, started: 0, errors: 0,
@@ -1080,6 +1078,20 @@
     }
     txt.textContent = line;
     requestAnimationFrame(render);
+  // Toggle with Alt+P
+  window.addEventListener('keydown', (e)=>{
+    if (e.altKey && (e.key.toLowerCase() === 'p')){
+      const el = document.getElementById('sanity-pill');
+      if (!el) return;
+      el.style.display = (el.style.display === 'none') ? 'flex' : 'none';
+    }
+  }, {passive:true});
+  // Heartbeat: log minimal stats every 5s while active
+  setInterval(()=>{
+    const s = window.__SANITY__;
+    if (!s) return;
+    console.log(`[sanity] inflight=${s.inFlight} finished=${s.finished} last=${s.lastStatus}`);
+  }, 5000);
   }
   requestAnimationFrame(render);
 })();
