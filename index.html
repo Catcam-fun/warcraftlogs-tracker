@@ -197,6 +197,165 @@
     RATE.MAX_CONCURRENCY, RATE.MIN_DELAY_MS, RATE.MAX_RETRIES);
 })();
 </script>
+<script>
+// ===== Lightweight Fetch Stats + HUD (non-blocking) =====
+(() => {
+  // Stats object exposed for debugging
+  const S = window.__FETCH_STATS__ = {
+    inFlight: 0,
+    started: 0,
+    finished: 0,
+    errors: 0,
+    recent429: 0,
+    avgMs: 0,
+    phase: "Initializing…",
+    queueEstimate: 0,
+    lastStatus: 0,
+    lastURL: "",
+    proxy: { remaining: null, capacity: null, rps: null },
+  };
+
+  // Monkeypatch the already-patched fetch to track stats without changing behavior
+  const patched = window.fetch;
+  window.fetch = async function fetchWithStats(input, init) {
+    const t0 = performance.now();
+    S.inFlight++; S.started++;
+    try {
+      const res = await patched(input, init);
+      S.lastStatus = res.status;
+      S.lastURL = (typeof input === 'string') ? input : (input?.url || "");
+      // Pull proxy headers if present
+      const rem = res.headers.get('X-Proxy-TokenBucket-Remaining');
+      const cap = res.headers.get('X-Proxy-TokenBucket-Capacity');
+      const rps = res.headers.get('X-Proxy-TokenBucket-RefillPerSec');
+      if (rem !== null) S.proxy.remaining = Number(rem);
+      if (cap !== null) S.proxy.capacity = Number(cap);
+      if (rps !== null) S.proxy.rps = Number(rps);
+      if (res.status === 429) S.recent429++;
+      return res;
+    } catch (e) {
+      S.errors++;
+      throw e;
+    } finally {
+      const dt = performance.now() - t0;
+      // simple EMA for average latency
+      S.avgMs = S.avgMs === 0 ? dt : (S.avgMs * 0.9 + dt * 0.1);
+      S.inFlight--;
+      S.finished++;
+    }
+  };
+
+  // Small HUD
+  const style = document.createElement('style');
+  style.textContent = `
+    #net-hud{position:fixed;right:12px;bottom:12px;z-index:9999;
+      background:rgba(30,32,40,.85);color:#eaeaff;border:1px solid rgba(255,255,255,.08);
+      border-radius:12px;padding:10px 12px;font:12px/1.3 ui-sans-serif,system-ui,Segoe UI,Roboto;
+      box-shadow:0 6px 24px rgba(0,0,0,.25);backdrop-filter:blur(6px);min-width:220px}
+    #net-hud h4{margin:0 0 6px 0;font-size:12px;letter-spacing:.3px;opacity:.9}
+    #net-hud .row{display:flex;justify-content:space-between;margin:2px 0}
+    #net-hud .muted{opacity:.7}
+    #net-hud .ok{color:#7dd3fc} /* sky */
+    #net-hud .warn{color:#fcd34d} /* amber */
+    #net-hud .err{color:#fca5a5} /* red */
+    #net-hud .bar{height:4px;border-radius:4px;background:rgba(255,255,255,.08);overflow:hidden;margin-top:6px}
+    #net-hud .bar>i{display:block;height:100%;width:0%}
+    #net-hud .tiny{font-size:11px;opacity:.75}
+    #net-hud .btn{cursor:pointer;margin-left:8px;color:#a5b4fc}
+  `;
+  document.head.appendChild(style);
+
+  const hud = document.createElement('div');
+  hud.id = "net-hud";
+  hud.innerHTML = `
+    <h4>Network Activity <span class="btn" id="net-hud-toggle">▾</span></h4>
+    <div id="net-hud-body">
+      <div class="row"><span class="muted">Phase</span><span id="nh-phase">—</span></div>
+      <div class="row"><span class="muted">In‑flight</span><span id="nh-inflight">0</span></div>
+      <div class="row"><span class="muted">Done / Total</span><span id="nh-done">0 / ?</span></div>
+      <div class="row"><span class="muted">Errors</span><span id="nh-err" class="err">0</span></div>
+      <div class="row"><span class="muted">Avg latency</span><span id="nh-avg">0 ms</span></div>
+      <div class="row"><span class="muted">Last status</span><span id="nh-status">—</span></div>
+      <div class="row"><span class="muted">Proxy tokens</span><span id="nh-proxy">—</span></div>
+      <div class="bar"><i id="nh-bar"></i></div>
+      <div class="tiny muted" id="nh-url">—</div>
+    </div>
+  `;
+  document.body.appendChild(hud);
+
+  // Collapsible
+  const toggle = hud.querySelector('#net-hud-toggle');
+  const body = hud.querySelector('#net-hud-body');
+  let collapsed = false;
+  toggle.addEventListener('click', () => {
+    collapsed = !collapsed;
+    body.style.display = collapsed ? 'none' : 'block';
+    toggle.textContent = collapsed ? '▸' : '▾';
+  });
+
+  // Expose helpers to update phase/total from app code if desired
+  window.__FETCH_STATS__.setPhase = (name, total=null) => {
+    S.phase = name || S.phase;
+    if (typeof total === 'number') S.total = total;
+  };
+  // Best-effort attempt to infer total from existing progress bar text on the page
+  const inferTotalFromDOM = () => {
+    const el = Array.from(document.querySelectorAll('*')).find(n => n.textContent && /Fetching participants for \d+ fights/i.test(n.textContent));
+    if (el) {
+      const m = el.textContent.match(/(\d+)\s*fights/i);
+      if (m) S.total = Number(m[1]);
+    }
+  };
+  inferTotalFromDOM();
+
+  // Render loop (non-blocking)
+  function render(){
+    const phase = hud.querySelector('#nh-phase');
+    const inflight = hud.querySelector('#nh-inflight');
+    const done = hud.querySelector('#nh-done');
+    const err = hud.querySelector('#nh-err');
+    const avg = hud.querySelector('#nh-avg');
+    const stat = hud.querySelector('#nh-status');
+    const url = hud.querySelector('#nh-url');
+    const bar = hud.querySelector('#nh-bar');
+    const proxy = hud.querySelector('#nh-proxy');
+
+    phase.textContent = S.phase;
+    inflight.textContent = String(S.inFlight);
+    const total = S.total || '?';
+    done.textContent = `${S.finished} / ${total}`;
+    err.textContent = String(S.errors);
+    avg.textContent = `${Math.round(S.avgMs)} ms`;
+    stat.textContent = S.lastStatus ? String(S.lastStatus) : '—';
+    url.textContent = S.lastURL || '—';
+    if (typeof total === 'number' && total > 0) {
+      const pct = Math.max(0, Math.min(100, (S.finished / total) * 100));
+      bar.style.width = pct.toFixed(1) + '%';
+    }
+    if (S.proxy.capacity != null && S.proxy.remaining != null) {
+      proxy.textContent = `${S.proxy.remaining}/${S.proxy.capacity}` + (S.proxy.rps != null ? ` @ ${S.proxy.rps}/s` : '');
+    }
+
+    requestAnimationFrame(render);
+  }
+  requestAnimationFrame(render);
+
+  // Try to auto-detect phases by watching URL patterns (optional)
+  const _setPhaseFromURL = (u) => {
+    if (!u) return;
+    if (/report\/fights\//.test(u)) S.phase = "Fetching fights";
+    else if (/tables\/damage-done\//.test(u) || /tables\/healing\//.test(u)) S.phase = "Fetching participants";
+    else if (/tables\/deaths\//.test(u) || /events\/deaths\//.test(u)) S.phase = "Fetching deaths";
+  };
+  const _origFetch = window.fetch;
+  window.fetch = async function fetchWithPhase(input, init){
+    const u = (typeof input === 'string') ? input : (input?.url || "");
+    _setPhaseFromURL(u);
+    return _origFetch(input, init);
+  };
+})();
+</script>
+
 
 </head>
 <body>
