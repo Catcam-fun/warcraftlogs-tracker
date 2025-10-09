@@ -187,6 +187,9 @@
   </div>
 
   <script>
+    // Cloudflare Worker URL for API proxy
+    const WORKER_URL = 'https://wcl-proxy.catcam-fun.workers.dev';
+    
     const state = { config: {}, cache: new Map(), data: null, selectedBosses: new Set() };
     
     function init() {
@@ -312,7 +315,11 @@
     
     async function cachedFetch(url) {
       if (state.cache.has(url)) return state.cache.get(url);
-      const response = await fetch(url);
+      
+      // Replace warcraftlogs.com with worker URL
+      const proxyUrl = url.replace('https://www.warcraftlogs.com', WORKER_URL);
+      
+      const response = await fetch(proxyUrl);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       state.cache.set(url, data);
