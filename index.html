@@ -1112,21 +1112,57 @@
     init();
   </script>
 
+
 <script>
-// ===== HUD + Phase Counters (safe after DOM ready) =====
+// ===== HUD + Phase Counters (safe after container exists) =====
 (() => {
-  function init() {
+  function whenContainerReady(selectors, cb){
+    const tryFind = () => {
+      for (const sel of selectors){
+        const node = document.querySelector(sel);
+        if (node) return node;
+      }
+      return null;
+    };
+    const node = tryFind();
+    if (node) { cb(node); return; }
+    const mo = new MutationObserver(() => {
+      const n = tryFind();
+      if (n) { mo.disconnect(); cb(n); }
+    });
+    mo.observe(document.documentElement, { childList: true, subtree: true });
+  }
+
+  function init(container){
     // Stats tracker
     const S = window.__FETCH_STATS__ = {
       inFlight: 0, started: 0, finished: 0, errors: 0, avgMs: 0,
       lastStatus: 0, lastURL: "",
       phase: "Initializing…",
+      // Totals can be set explicitly. If not set, participants/deaths totals track unique fights seen.
       total: undefined,
       fightsDone: 0, fightsTotal: undefined,
       partsDone: 0, partsTotal: undefined,
       deathsDone: 0, deathsTotal: undefined,
+      uniquePartsKeys: new Set(),
+      uniqueDeathKeys: new Set(),
       proxy: { remaining: null, capacity: null, rps: null }
     };
+
+    // Helper: parse key from WCL tables URL to dedupe per fight
+    function fightKeyFromURL(u){
+      try{
+        const url = new URL(u, location.origin);
+        const path = url.pathname;
+        // Expect /v1/report/tables/<type>/<reportId>
+        const pathParts = path.split('/').filter(Boolean);
+        const reportId = pathParts[pathParts.length - 1];
+        const start = url.searchParams.get('start') || '';
+        const end = url.searchParams.get('end') || '';
+        if (reportId && start && end) return `${reportId}:${start}-${end}`;
+      } catch(_){}
+      return null;
+    }
 
     // Patch fetch again to count phases (non-blocking)
     const orig = window.fetch;
@@ -1145,16 +1181,27 @@
         if (cap) S.proxy.capacity = Number(cap);
         if (rps) S.proxy.rps = Number(rps);
 
-        // Phase heuristics
+        // Phase heuristics + counters
         if (/report\/fights\//.test(url)) {
           S.phase = "Fetching fights";
           S.fightsDone++;
         } else if (/tables\/damage-done\//.test(url) || /tables\/healing\//.test(url)) {
           S.phase = "Fetching participants";
-          S.partsDone++;
+          const k = fightKeyFromURL(url);
+          if (k && !S.uniquePartsKeys.has(k)){
+            S.uniquePartsKeys.add(k);
+            S.partsDone = S.uniquePartsKeys.size;
+            // If no explicit total, track total = unique fights observed in this phase
+            if (S.partsTotal === undefined) S.partsTotal = S.partsDone;
+          }
         } else if (/tables\/deaths\//.test(url) || /events\/deaths\//.test(url)) {
           S.phase = "Fetching deaths";
-          S.deathsDone++;
+          const k = fightKeyFromURL(url);
+          if (k && !S.uniqueDeathKeys.has(k)){
+            S.uniqueDeathKeys.add(k);
+            S.deathsDone = S.uniqueDeathKeys.size;
+            if (S.deathsTotal === undefined) S.deathsTotal = S.deathsDone;
+          }
         }
 
         return res;
@@ -1168,28 +1215,12 @@
       }
     };
 
-    // Try to infer totals from existing text (e.g., "Fetching participants for 617 fights...")
-    const inferTotals = () => {
-      const el = Array.from(document.querySelectorAll('*')).find(n => n.textContent && /Fetching participants for \d+ fights/i.test(n.textContent));
-      if (el) {
-        const m = el.textContent.match(/(\d+)\s*fights/i);
-        if (m) {
-          const total = Number(m[1]);
-          S.total = total;
-          S.partsTotal = total;
-          S.deathsTotal = total;
-        }
-      }
-    };
-    inferTotals();
-
-    // Insert counters panel under the first progress card
-    const container = document.querySelector('.card, .progress, .wcl-progress') || document.querySelector('body');
+    // UI: Insert counters panel under the main progress card
     const panel = document.createElement('div');
     panel.id = "phase-counters";
     panel.style.marginTop = "8px";
     panel.style.fontSize = "12px";
-    panel.style.opacity = "0.9";
+    panel.style.opacity = "0.95";
     panel.style.display = "grid";
     panel.style.gridTemplateColumns = "repeat(3, 1fr)";
     panel.style.gap = "6px";
@@ -1199,9 +1230,9 @@
       wrap.style.background = "rgba(255,255,255,0.04)";
       wrap.style.border = "1px solid rgba(255,255,255,0.06)";
       wrap.style.borderRadius = "8px";
-      wrap.style.padding = "6px 8px";
-      const t = document.createElement('div'); t.textContent = label; t.style.opacity = "0.75"; t.style.marginBottom = "2px";
-      const v = document.createElement('div'); v.textContent = "—"; v.style.fontWeight = "600";
+      wrap.style.padding = "8px 10px";
+      const t = document.createElement('div'); t.textContent = label; t.style.opacity = "0.75"; t.style.marginBottom = "4px";
+      const v = document.createElement('div'); v.textContent = "—"; v.style.fontWeight = "700"; v.style.fontSize = "14px";
       wrap.appendChild(t); wrap.appendChild(v);
       return {wrap, v};
     }
@@ -1213,9 +1244,7 @@
     panel.appendChild(partsCell.wrap);
     panel.appendChild(deathsCell.wrap);
 
-    // Try to place under existing progress container (first .card)
-    const firstCard = document.querySelector('.card') || document.body;
-    firstCard.appendChild(panel);
+    container.appendChild(panel);
 
     // Render loop
     function render(){
@@ -1226,7 +1255,7 @@
     }
     requestAnimationFrame(render);
 
-    // Expose a tiny API to set totals from your app if you have exact numbers
+    // Optional public API to set precise totals
     window.__SET_PHASE_TOTALS__ = (totals) => {
       if (totals.fights != null) S.fightsTotal = totals.fights;
       if (totals.participants != null) S.partsTotal = totals.participants;
@@ -1234,12 +1263,15 @@
     };
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init, { once: true });
+  // Wait for a sensible container (.card) or fallback to body
+  const targets = ['.card', '.progress', '.wcl-progress', 'body'];
+  if (document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', () => whenContainerReady(targets, init), { once: true });
   } else {
-    init();
+    whenContainerReady(targets, init);
   }
 })();
 </script>
+
 </body>
 </html>
