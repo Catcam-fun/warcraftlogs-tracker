@@ -75,6 +75,9 @@
   <div class="container">
     <h1>🔮 WCL Death Report Generator</h1>
     <p class="subtitle">Configure your guild settings and generate death reports from WarcraftLogs</p>
+    <div style="background:var(--badbg);border:1px solid var(--badbrd);padding:12px;border-radius:8px;margin-bottom:20px;color:var(--bad);font-size:13px;">
+      ⚠️ <strong>API Rate Limit Warning:</strong> WarcraftLogs has API rate limits. If generation fails, check your <a href="https://www.warcraftlogs.com/profile" target="_blank" style="color:var(--bad);text-decoration:underline;">WCL Settings page</a> for rate limit info.
+    </div>
     
     <div class="error" id="errorBox"></div>
     
@@ -170,8 +173,15 @@
     </div>
     
     <div class="results" id="resultsBox">
-      <h2>📊 Results</h2>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;">
+        <h2 style="margin:0;">📊 Results</h2>
+        <button class="btn btn-secondary" onclick="newReport()">🔄 New Report</button>
+      </div>
       <div class="chips" id="bossChips"></div>
+      <details style="margin-bottom:20px;background:var(--panel2);">
+        <summary style="font-weight:700;padding:12px;">📊 All Bosses Overview (click to expand)</summary>
+        <div id="overviewTable" style="padding:12px;"></div>
+      </details>
       <div id="resultsContent"></div>
     </div>
   </div>
@@ -541,10 +551,18 @@
       return { events, pullParticipation, bossParticipation, characterBreakdown };
     }
     
+    function newReport() {
+      document.getElementById('resultsBox').style.display = 'none';
+      document.getElementById('configPanel').style.display = 'block';
+      state.data = null;
+      state.selectedBosses.clear();
+    }
+    
     function displayResults(results) {
       const { events, pullParticipation, bossParticipation, characterBreakdown } = results;
       state.data = { events, pullParticipation, bossParticipation, characterBreakdown };
       
+      // Build boss chips
       const chips = document.getElementById('bossChips');
       chips.innerHTML = '';
       const bosses = Object.keys(bossParticipation).sort();
@@ -560,7 +578,73 @@
         chips.appendChild(chip);
       }
       
+      // Build overview table
+      buildOverviewTable();
       renderPlayerList();
+    }
+    
+    function buildOverviewTable() {
+      const holder = document.getElementById('overviewTable');
+      const { events, pullParticipation, bossParticipation } = state.data;
+      const cutoff = state.config.maxCutoff;
+      
+      const bosses = Object.keys(bossParticipation).sort();
+      const players = Object.keys(events).sort();
+      
+      if (!players.length) {
+        holder.style.display = 'none';
+        return;
+      }
+      
+      const table = document.createElement('table');
+      table.style.fontSize = '13px';
+      const thead = document.createElement('thead');
+      const headerRow = document.createElement('tr');
+      headerRow.innerHTML = '<th style="cursor:pointer;">Player</th>' + bosses.map(b => `<th style="text-align:center;">${b}</th>`).join('') + '<th style="text-align:center;"><strong>Overall</strong></th>';
+      thead.appendChild(headerRow);
+      table.appendChild(thead);
+      
+      const tbody = document.createElement('tbody');
+      players.forEach(player => {
+        const tr = document.createElement('tr');
+        const playerCell = document.createElement('td');
+        playerCell.innerHTML = `<strong>${player}</strong>`;
+        tr.appendChild(playerCell);
+        
+        bosses.forEach(boss => {
+          const td = document.createElement('td');
+          td.style.textAlign = 'center';
+          const bossPulls = (bossParticipation[boss] && bossParticipation[boss][player]) ? bossParticipation[boss][player].length : 0;
+          const bossDeaths = (events[player] || []).filter(ev => ev.boss === boss && ev.rankWithinPull <= cutoff).length;
+          const rate = bossPulls > 0 ? (bossDeaths / bossPulls * 100) : 0;
+          
+          if (bossPulls === 0) {
+            td.textContent = '—';
+            td.style.opacity = '0.4';
+          } else {
+            td.textContent = rate.toFixed(1) + '%';
+            if (rate > 50) td.style.color = 'var(--bad)';
+            else if (rate < 20) td.style.color = 'var(--good)';
+          }
+          tr.appendChild(td);
+        });
+        
+        const overallTd = document.createElement('td');
+        overallTd.style.textAlign = 'center';
+        const totalPulls = (pullParticipation[player] || []).length;
+        const totalDeaths = (events[player] || []).filter(ev => ev.rankWithinPull <= cutoff).length;
+        const overallRate = totalPulls > 0 ? (totalDeaths / totalPulls * 100) : 0;
+        overallTd.innerHTML = `<strong>${overallRate.toFixed(1)}%</strong>`;
+        if (overallRate > 50) overallTd.style.color = 'var(--bad)';
+        else if (overallRate < 20) overallTd.style.color = 'var(--good)';
+        tr.appendChild(overallTd);
+        
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      
+      holder.innerHTML = '';
+      holder.appendChild(table);
     }
     
     function renderPlayerList() {
@@ -637,28 +721,28 @@
             details.appendChild(charDetails);
           }
           
-          const table = document.createElement('table');
-          table.innerHTML = '<thead><tr><th>Boss</th><th>Pull</th><th>Outcome</th><th>Character</th><th>Ability</th><th>Time</th><th>Report</th></tr></thead><tbody></tbody>';
-          const tbody = table.querySelector('tbody');
-          
+          // Group deaths by boss
           const byBoss = {};
-          for (const ev of stat.events) (byBoss[ev.boss] ||= []).push(ev);
+          for (const ev of stat.events) {
+            if (!byBoss[ev.boss]) byBoss[ev.boss] = [];
+            byBoss[ev.boss].push(ev);
+          }
           
+          // Create table for each boss
           for (const boss of Object.keys(byBoss).sort()) {
             if (state.selectedBosses.size > 0 && !state.selectedBosses.has(boss)) continue;
             
-            const bossRows = byBoss[boss];
+            const bossRows = byBoss[boss].sort((a, b) => a.pullNo - b.pullNo);
             const bossPulls = (bossParticipation[boss][stat.player] || []).length;
             const bossDeaths = bossRows.length;
             const bossRate = bossPulls > 0 ? (bossDeaths / bossPulls * 100) : 0;
             
             // Improvement trend
             let trendIndicator = '';
-            if (bossPulls >= 10) {
-              const sorted = [...bossRows].sort((a, b) => a.pullNo - b.pullNo);
-              const midPoint = Math.ceil(sorted.length / 2);
-              const earlyDeaths = sorted.slice(0, midPoint);
-              const lateDeaths = sorted.slice(midPoint);
+            if (bossPulls >= 10 && bossDeaths >= 5) {
+              const midPoint = Math.ceil(bossRows.length / 2);
+              const earlyDeaths = bossRows.slice(0, midPoint);
+              const lateDeaths = bossRows.slice(midPoint);
               
               const earlyPulls = Math.ceil(bossPulls / 2);
               const latePulls = bossPulls - earlyPulls;
@@ -668,32 +752,64 @@
               const improvement = earlyRate - lateRate;
               
               if (improvement > 5) {
-                trendIndicator = `<span style="color:#34d399;margin-left:8px;font-size:11px">📈 Improving (${improvement.toFixed(1)}%)</span>`;
+                trendIndicator = `<span style="color:#34d399;margin-left:8px;font-size:11px" title="Death rate improved by ${improvement.toFixed(1)}%">📈 Improving</span>`;
               }
             }
             
             // Top abilities
             const abilityCounts = {};
-            for (const ev of bossRows) abilityCounts[ev.abilityName] = (abilityCounts[ev.abilityName] || 0) + 1;
-            const topAbilities = Object.entries(abilityCounts).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([n, c]) => `${n} (${c})`).join(' · ');
+            for (const ev of bossRows) {
+              const ability = ev.abilityName || 'Unknown';
+              abilityCounts[ability] = (abilityCounts[ability] || 0) + 1;
+            }
+            const topAbilities = Object.entries(abilityCounts)
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 5)
+              .map(([name, count]) => `${name} (${count})`)
+              .join(' · ');
             
-            const trH = document.createElement('tr');
-            trH.className = 'bossh';
-            trH.innerHTML = `<td colspan="7">${boss} — ${bossDeaths} deaths / ${bossPulls} pulls · ${bossRate.toFixed(1)}%${trendIndicator}<br><span class="muted" style="font-weight:normal;font-size:12px">${topAbilities}</span></td>`;
-            tbody.appendChild(trH);
+            // Boss section
+            const bossSection = document.createElement('div');
+            bossSection.style.marginBottom = '20px';
+            bossSection.style.marginTop = '20px';
             
-            for (const ev of bossRows.sort((a, b) => a.absTs - b.absTs)) {
+            const bossHeader = document.createElement('div');
+            bossHeader.className = 'bossh';
+            bossHeader.style.padding = '12px';
+            bossHeader.style.borderRadius = '8px';
+            bossHeader.style.marginBottom = '8px';
+            bossHeader.innerHTML = `
+              <strong>${boss}</strong> — ${bossDeaths} counted death(s) / ${bossPulls} pulls · <span style="font-weight:700">${bossRate.toFixed(1)}%</span>${trendIndicator}
+              <br><span class="muted" style="font-weight:normal;font-size:12px;margin-top:4px;display:block;">${topAbilities}</span>
+            `;
+            bossSection.appendChild(bossHeader);
+            
+            // Deaths table
+            const table = document.createElement('table');
+            table.innerHTML = '<thead><tr><th>Pull #</th><th>Outcome</th><th>Character</th><th>Killing Blow</th><th>Date/Time</th><th>Report</th><th>Rank</th></tr></thead><tbody></tbody>';
+            const tbody = table.querySelector('tbody');
+            
+            for (const ev of bossRows) {
               const tr = document.createElement('tr');
               const pill = ev.isKill ? '<span class="pill kill">KILL</span>' : '<span class="pill wipe">wipe</span>';
               const link = `https://www.warcraftlogs.com/reports/${ev.reportId}?fight=${ev.fightId}&type=deaths`;
               const charDisplay = ev.originalCharacter !== stat.player ? `<span class="muted">${ev.originalCharacter}</span>` : '—';
               const time = new Date(ev.absTs).toISOString().slice(0, 19).replace('T', ' ');
-              tr.innerHTML = `<td>${ev.boss}</td><td>${ev.pullNo}</td><td>${pill}</td><td>${charDisplay}</td><td class="muted">${ev.abilityName}</td><td class="mono muted">${time}</td><td><a href="${link}" target="_blank" style="color:var(--link)">${ev.reportId}</a></td>`;
+              tr.innerHTML = `
+                <td>${ev.pullNo}</td>
+                <td>${pill}</td>
+                <td>${charDisplay}</td>
+                <td class="muted">${ev.abilityName}</td>
+                <td class="mono muted" style="font-size:12px;">${time}</td>
+                <td><a href="${link}" target="_blank" style="color:var(--link)">${ev.reportId}</a></td>
+                <td>${ev.rankWithinPull}</td>
+              `;
               tbody.appendChild(tr);
             }
+            
+            bossSection.appendChild(table);
+            details.appendChild(bossSection);
           }
-          
-          details.appendChild(table);
         }, {once: true});
         
         content.appendChild(details);
