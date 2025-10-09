@@ -104,13 +104,13 @@
         
         <div class="form-group">
           <label>Guild Name *</label>
-          <input type="text" id="guildName" placeholder="e.g., Do Over" title="Guild name — not case-sensitive">>
+          <input type="text" id="guildName" placeholder="e.g., Do Over" title="Guild name — not case-sensitive">
           <div class="field-hint">Not case‑sensitive. We match guilds regardless of letter case.</div>
         </div>
         
         <div class="form-group">
           <label>Server *</label>
-          <input type="text" id="server" placeholder="e.g., Thrall" title="Server/Realm — not case-sensitive; spaces ok" placeholder="e.g., Thrall">>
+          <input type="text" id="server" placeholder="e.g., Thrall" title="Server/Realm — not case-sensitive; spaces ok" placeholder="e.g., Thrall">
           <div class="field-hint">Not case‑sensitive. Spaces/apostrophes allowed; we normalize to <code>lowercase-hyphens</code> (e.g., <code>Illidán</code> → <code>illidan</code>).</div>
         </div>
         
@@ -159,7 +159,7 @@
       
       <div class="form-group" style="margin-top:15px;">
         <label>Author Filters (optional)</label>
-        <input type="text" id="authorFilters" placeholder="username1, username2" title="Optional: comma-separated character names (case-insensitive)">>
+        <input type="text" id="authorFilters" placeholder="username1, username2" title="Optional: comma-separated character names (case-insensitive)">
       </div>
       
       <div class="char-groups">
@@ -651,274 +651,129 @@
       renderPlayerList();
     }
     
-    function buildOverviewTable() {
-      const holder = document.getElementById('overviewTable');
-      if (!state.data) return;
-      
-      const { events, pullParticipation, bossParticipation } = state.data;
-      const cutoff = state.currentCutoff || 2;
-      
-      const allBosses = Object.keys(bossParticipation).sort();
-      const bosses = state.selectedBosses.size > 0 ? Array.from(state.selectedBosses).sort() : allBosses;
-      const players = Object.keys(events).sort();
-      
-      if (!players.length) {
-        holder.innerHTML = '<p class="muted">No data to display</p>';
-        return;
-      }
-      
-      const table = document.createElement('table');
-      table.style.fontSize = '13px';
-      const thead = document.createElement('thead');
-      const headerRow = document.createElement('tr');
-      headerRow.innerHTML = '<th style="cursor:pointer;">Player</th>' + bosses.map(b => `<th style="text-align:center;">${b}</th>`).join('') + '<th style="text-align:center;"><strong>Overall</strong></th>';
-      thead.appendChild(headerRow);
-      table.appendChild(thead);
-      
-      const tbody = document.createElement('tbody');
-      players.forEach(player => {
-        const tr = document.createElement('tr');
-        const playerCell = document.createElement('td');
-        playerCell.innerHTML = `<strong>${player}</strong>`;
-        tr.appendChild(playerCell);
-        
-        bosses.forEach(boss => {
-          const td = document.createElement('td');
-          td.style.textAlign = 'center';
-          const bossPulls = (bossParticipation[boss] && bossParticipation[boss][player]) ? bossParticipation[boss][player].length : 0;
-          const bossDeaths = (events[player] || []).filter(ev => ev.boss === boss && ev.rankWithinPull <= cutoff).length;
-          const rate = bossPulls > 0 ? (bossDeaths / bossPulls * 100) : 0;
-          
-          if (bossPulls === 0) {
-            td.textContent = '—';
-            td.style.opacity = '0.4';
-          } else {
-            td.textContent = rate.toFixed(1) + '%';
-            if (rate > 50) td.style.color = 'var(--bad)';
-            else if (rate < 20) td.style.color = 'var(--good)';
-          }
-          tr.appendChild(td);
-        });
-        
-        const overallTd = document.createElement('td');
-        overallTd.style.textAlign = 'center';
-        
-        let totalPulls, totalDeaths;
-        if (state.selectedBosses.size === 0) {
-          totalPulls = (pullParticipation[player] || []).length;
-          totalDeaths = (events[player] || []).filter(ev => ev.rankWithinPull <= cutoff).length;
-        } else {
-          totalPulls = 0;
-          totalDeaths = 0;
-          for (const boss of state.selectedBosses) {
-            totalPulls += (bossParticipation[boss] && bossParticipation[boss][player]) ? bossParticipation[boss][player].length : 0;
-            totalDeaths += (events[player] || []).filter(ev => ev.boss === boss && ev.rankWithinPull <= cutoff).length;
-          }
-        }
-        
-        const overallRate = totalPulls > 0 ? (totalDeaths / totalPulls * 100) : 0;
-        overallTd.innerHTML = `<strong>${overallRate.toFixed(1)}%</strong>`;
-        if (overallRate > 50) overallTd.style.color = 'var(--bad)';
-        else if (overallRate < 20) overallTd.style.color = 'var(--good)';
-        tr.appendChild(overallTd);
-        
-        tbody.appendChild(tr);
-      });
-      table.appendChild(tbody);
-      
-      holder.innerHTML = '';
-      holder.appendChild(table);
-    }
     
-    function renderPlayerList() {
-      const content = document.getElementById('resultsContent');
-      content.innerHTML = '';
-      
-      if (!state.data) return;
-      
-      const { events, pullParticipation, bossParticipation, characterBreakdown } = state.data;
-      const stats = [];
-      const cutoff = state.currentCutoff || 2;
-      
-      for (const player in events) {
-        const playerEvents = events[player].filter(e => 
-          e.rankWithinPull <= cutoff && 
-          (state.selectedBosses.size === 0 || state.selectedBosses.has(e.boss))
-        );
-        
-        if (playerEvents.length === 0) continue;
-        
-        let pulls = 0;
-        if (state.selectedBosses.size === 0) {
-          pulls = pullParticipation[player].length;
-        } else {
-          for (const boss of state.selectedBosses) {
-            pulls += (bossParticipation[boss][player] || []).length;
-          }
-        }
-        
-        const rate = pulls > 0 ? (playerEvents.length / pulls * 100) : 0;
-        stats.push({ player, deaths: playerEvents.length, pulls, rate, events: playerEvents });
-      }
-      
-      stats.sort((a, b) => b.rate - a.rate);
-      
-      for (const stat of stats) {
-        const details = document.createElement('details');
-        const summary = document.createElement('summary');
-        const altIndicator = hasAlts(stat.player) ? ' <span class="muted">(grouped)</span>' : '';
-        summary.innerHTML = `${stat.player}${altIndicator} <span class="muted">— ${stat.deaths} deaths / ${stat.pulls} pulls · ${stat.rate.toFixed(1)}%</span>`;
-        details.appendChild(summary);
-        
-        details.addEventListener('toggle', () => {
-          if (!details.open || details.dataset.built) return;
-          details.dataset.built = '1';
-          
-          // Character breakdown
-          if (hasAlts(stat.player)) {
-            const charDetails = document.createElement('details');
-            charDetails.style.marginBottom = '12px';
-            charDetails.style.marginLeft = '16px';
-            const charSummary = document.createElement('summary');
-            charSummary.innerHTML = '<strong>📊 Character Breakdown</strong>';
-            charDetails.appendChild(charSummary);
-            
-            const charTable = document.createElement('table');
-            charTable.style.fontSize = '13px';
-            charTable.innerHTML = '<thead><tr><th>Character</th><th>Deaths</th><th>Rate</th></tr></thead><tbody></tbody>';
-            const charTbody = charTable.querySelector('tbody');
-            
-            const chars = characterBreakdown[stat.player] || {};
-            const playerAlts = state.config.charGroups[stat.player] || [];
-            const alts = playerAlts.filter(c => chars[c] && chars[c].length > 0);
-            
-            for (const char of alts) {
-              const charEvs = (chars[char] || []).filter(ev => ev.rankWithinPull <= cutoff && (state.selectedBosses.size === 0 || state.selectedBosses.has(ev.boss)));
-              const charDeaths = charEvs.length;
-              const charRate = stat.pulls > 0 ? (charDeaths / stat.pulls * 100) : 0;
-              
-              const tr = document.createElement('tr');
-              tr.innerHTML = `<td><strong>${char}</strong></td><td>${charDeaths}</td><td>${charRate.toFixed(1)}%</td>`;
-              charTbody.appendChild(tr);
-            }
-            
-            charDetails.appendChild(charTable);
-            details.appendChild(charDetails);
-          }
-          
-          // Group deaths by boss
-          const byBoss = {};
-          for (const ev of stat.events) {
-            if (!byBoss[ev.boss]) byBoss[ev.boss] = [];
-            byBoss[ev.boss].push(ev);
-          }
-          
-          // Create table for each boss
-          for (const boss of Object.keys(byBoss).sort()) {
-            if (state.selectedBosses.size > 0 && !state.selectedBosses.has(boss)) continue;
-            
-            const bossRows = byBoss[boss].sort((a, b) => a.pullNo - b.pullNo);
-            const bossPulls = (bossParticipation[boss][stat.player] || []).length;
-            const bossDeaths = bossRows.length;
-            const bossRate = bossPulls > 0 ? (bossDeaths / bossPulls * 100) : 0;
-            
-            // Improvement trend
-            let trendIndicator = '';
-            if (bossPulls >= 10 && bossDeaths >= 5) {
-              const midPoint = Math.ceil(bossRows.length / 2);
-              const earlyDeaths = bossRows.slice(0, midPoint);
-              const lateDeaths = bossRows.slice(midPoint);
-              
-              const earlyPulls = Math.ceil(bossPulls / 2);
-              const latePulls = bossPulls - earlyPulls;
-              
-              const earlyRate = earlyPulls > 0 ? (earlyDeaths.length / earlyPulls * 100) : 0;
-              const lateRate = latePulls > 0 ? (lateDeaths.length / latePulls * 100) : 0;
-              const improvement = earlyRate - lateRate;
-              
-              if (improvement > 5) {
-                trendIndicator = `<span style="color:#34d399;margin-left:8px;font-size:11px" title="Death rate improved by ${improvement.toFixed(1)}%">📈 Improving</span>`;
-              }
-            }
-            
-            // Top abilities
-            const abilityCounts = {};
-            for (const ev of bossRows) {
-              const ability = ev.abilityName || 'Unknown';
-              abilityCounts[ability] = (abilityCounts[ability] || 0) + 1;
-            }
-            const topAbilities = Object.entries(abilityCounts)
-              .sort((a, b) => b[1] - a[1])
-              .slice(0, 5)
-              .map(function(x){return x[0] + ' (' + x[1] + ')';})
-              .join(' · ');
-            
-            // Boss section
-            const bossSection = document.createElement('div');
-            bossSection.style.marginBottom = '20px';
-            bossSection.style.marginTop = '20px';
-            
-            const bossHeader = document.createElement('div');
-            bossHeader.className = 'bossh';
-            bossHeader.style.padding = '12px';
-            bossHeader.style.borderRadius = '8px';
-            bossHeader.style.marginBottom = '8px';
-            bossHeader.innerHTML = `
-              <strong>${boss}</strong> — ${bossDeaths} counted death(s) / ${bossPulls} pulls · <span style="font-weight:700">${bossRate.toFixed(1)}%</span>${trendIndicator}
-              <br><span class="muted" style="font-weight:normal;font-size:12px;margin-top:4px;display:block;">${topAbilities}</span>
-            `;
-            bossSection.appendChild(bossHeader);
-            
-            // Deaths table
-            const table = document.createElement('table');
-            table.innerHTML = '<thead><tr><th>Pull #</th><th>Outcome</th><th>Character</th><th>Killing Blow</th><th>Date/Time</th><th>Report</th><th>Rank</th></tr></thead><tbody></tbody>';
-            const tbody = table.querySelector('tbody');
-            
-            for (const ev of bossRows) {
-              const tr = document.createElement('tr');
-              const pill = ev.isKill ? '<span class="pill kill">KILL</span>' : '<span class="pill wipe">wipe</span>';
-              const link = `https://www.warcraftlogs.com/reports/${ev.reportId}?fight=${ev.fightId}&type=deaths`;
-              const charDisplay = ev.originalCharacter !== stat.player ? `<span class="muted">${ev.originalCharacter}</span>` : '—';
-              const time = new Date(ev.absTs).toISOString().slice(0, 19).replace('T', ' ');
-              tr.innerHTML = `
-                <td>${ev.pullNo}</td>
-                <td>${pill}</td>
-                <td>${charDisplay}</td>
-                <td class="muted">${ev.abilityName}</td>
-                <td class="mono muted" style="font-size:12px;">${time}</td>
-                <td><a href="${link}" target="_blank" style="color:var(--link)">${ev.reportId}</a></td>
-                <td>${ev.rankWithinPull}</td>
-              `;
-              tbody.appendChild(tr);
-            }
-            
-            bossSection.appendChild(table);
-            details.appendChild(bossSection);
-          }
-        }, {once: true});
-        
-        content.appendChild(details);
-      }
-    }
-    
-    init();
-  </script>
+function buildOverviewTable() {
+  const holder = document.getElementById('overviewTable');
+  if (!state.data) return;
 
-<script>
-(() => {
-  const closeOverview = () => {
-    const all = Array.from(document.querySelectorAll('details'));
-    for (const d of all) {
-      const s = d.querySelector('summary');
-      if (s && /all bosses overview/i.test(s.textContent || '')) d.removeAttribute('open');
-    }
-  };
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', closeOverview, { once: true });
-  } else {
-    closeOverview();
+  const { events, pullParticipation, bossParticipation } = state.data;
+  const cutoff = state.currentCutoff || 2;
+
+  const allBosses = Object.keys(bossParticipation).sort();
+  const bosses = state.selectedBosses.size > 0 ? Array.from(state.selectedBosses).sort() : allBosses;
+  const players = Object.keys(events).sort();
+
+  if (!players.length) {
+    holder.innerHTML = '<p class="muted">No data to display</p>';
+    return;
   }
-})();
+
+  const rows = players.map(player => {
+    const perBoss = {};
+    let totalPulls = 0, totalDeaths = 0;
+
+    bosses.forEach(boss => {
+      const pulls = (bossParticipation[boss] && bossParticipation[boss][player]) ? bossParticipation[boss][player].length : 0;
+      const deaths = (events[player] || []).filter(ev => ev.boss === boss && ev.rankWithinPull <= cutoff).length;
+      const rate = pulls > 0 ? (deaths / pulls * 100) : 0;
+      perBoss[boss] = { pulls, deaths, rate };
+      totalPulls += pulls;
+      totalDeaths += deaths;
+    });
+
+    const overallRate = totalPulls > 0 ? (totalDeaths / totalPulls * 100) : 0;
+    return { player, perBoss, overallRate };
+  });
+
+  state.sort = state.sort || { key: 'player', dir: 'asc' };
+  const { key, dir } = state.sort;
+  const mul = dir === 'asc' ? 1 : -1;
+  rows.sort((a,b) => {
+    if (key === 'player') return a.player.localeCompare(b.player) * mul;
+    if (key === 'overall') return (a.overallRate - b.overallRate) * mul;
+    const ra = a.perBoss[key]?.rate || 0;
+    const rb = b.perBoss[key]?.rate || 0;
+    return (ra - rb) * mul;
+  });
+
+  const table = document.createElement('table');
+  table.style.fontSize = '13px';
+  const thead = document.createElement('thead');
+  const headerRow = document.createElement('tr');
+
+  const thPlayer = document.createElement('th');
+  thPlayer.style.cursor = 'pointer';
+  thPlayer.textContent = 'Player';
+  thPlayer.onclick = () => {
+    state.sort = { key: 'player', dir: (state.sort?.key==='player' && state.sort.dir==='asc') ? 'desc' : 'asc' };
+    buildOverviewTable();
+  };
+  headerRow.appendChild(thPlayer);
+
+  bosses.forEach(boss => {
+    const th = document.createElement('th');
+    th.style.cursor = 'pointer';
+    th.style.textAlign = 'center';
+    th.textContent = boss;
+    th.onclick = () => {
+      const nextDir = (state.sort?.key===boss && state.sort.dir==='asc') ? 'desc' : 'asc';
+      state.sort = { key: boss, dir: nextDir };
+      buildOverviewTable();
+    };
+    headerRow.appendChild(th);
+  });
+
+  const thOverall = document.createElement('th');
+  thOverall.style.cursor = 'pointer';
+  thOverall.style.textAlign = 'center';
+  thOverall.innerHTML = '<strong>Overall</strong>';
+  thOverall.onclick = () => {
+    const nextDir = (state.sort?.key==='overall' && state.sort.dir==='asc') ? 'desc' : 'asc';
+    state.sort = { key: 'overall', dir: nextDir };
+    buildOverviewTable();
+  };
+  headerRow.appendChild(thOverall);
+
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  rows.forEach(row => {
+    const tr = document.createElement('tr');
+
+    const playerCell = document.createElement('td');
+    playerCell.innerHTML = '<strong>' + row.player + '</strong>';
+    tr.appendChild(playerCell);
+
+    bosses.forEach(boss => {
+      const td = document.createElement('td');
+      td.style.textAlign = 'center';
+      const rate = row.perBoss[boss]?.rate ?? 0;
+      const pulls = row.perBoss[boss]?.pulls ?? 0;
+      if (!pulls) { td.textContent = '—'; td.style.opacity = '0.4'; }
+      else {
+        td.textContent = rate.toFixed(1) + '%';
+        if (rate > 50) td.style.color = 'var(--bad)';
+        else if (rate < 20) td.style.color = 'var(--good)';
+      }
+      tr.appendChild(td);
+    });
+
+    const overallTd = document.createElement('td');
+    overallTd.style.textAlign = 'center';
+    overallTd.innerHTML = '<strong>' + row.overallRate.toFixed(1) + '%</strong>';
+    if (row.overallRate > 50) overallTd.style.color = 'var(--bad)';
+    else if (row.overallRate < 20) overallTd.style.color = 'var(--good)';
+    tr.appendChild(overallTd);
+
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+
+  holder.innerHTML = '';
+  holder.appendChild(table);
+}
+)();
 </script>
 
 
