@@ -1113,49 +1113,52 @@
   </script>
 
 
+
 <script>
-// ===== HUD + Phase Counters (safe after container exists) =====
+// ===== HUD + Phase Counters (container-safe, no implicit totals) =====
 (() => {
-  function whenContainerReady(selectors, cb){
-    const tryFind = () => {
-      for (const sel of selectors){
-        const node = document.querySelector(sel);
-        if (node) return node;
+  const SELS = ['.card', '.progress', '.wcl-progress', 'body'];
+
+  function waitForContainer(cb){
+    // If HUD already exists, skip
+    if (document.getElementById('phase-counters')) return;
+    const find = () => {
+      for (const s of SELS) {
+        const n = document.querySelector(s);
+        if (n) return n;
       }
       return null;
     };
-    const node = tryFind();
-    if (node) { cb(node); return; }
+    const n = find();
+    if (n) { cb(n); return; }
     const mo = new MutationObserver(() => {
-      const n = tryFind();
-      if (n) { mo.disconnect(); cb(n); }
+      const el = find();
+      if (el) { mo.disconnect(); cb(el); }
     });
     mo.observe(document.documentElement, { childList: true, subtree: true });
   }
 
   function init(container){
-    // Stats tracker
+    if (document.getElementById('phase-counters')) return; // guard
+
+    // Stats store
     const S = window.__FETCH_STATS__ = {
       inFlight: 0, started: 0, finished: 0, errors: 0, avgMs: 0,
       lastStatus: 0, lastURL: "",
       phase: "Initializing…",
-      // Totals can be set explicitly. If not set, participants/deaths totals track unique fights seen.
-      total: undefined,
       fightsDone: 0, fightsTotal: undefined,
-      partsDone: 0, partsTotal: undefined,
+      partsDone: 0, partsTotal: undefined,     // totals remain undefined until set explicitly
       deathsDone: 0, deathsTotal: undefined,
       uniquePartsKeys: new Set(),
       uniqueDeathKeys: new Set(),
       proxy: { remaining: null, capacity: null, rps: null }
     };
 
-    // Helper: parse key from WCL tables URL to dedupe per fight
+    // Helper: per-fight key from URL
     function fightKeyFromURL(u){
       try{
         const url = new URL(u, location.origin);
-        const path = url.pathname;
-        // Expect /v1/report/tables/<type>/<reportId>
-        const pathParts = path.split('/').filter(Boolean);
+        const pathParts = url.pathname.split('/').filter(Boolean);
         const reportId = pathParts[pathParts.length - 1];
         const start = url.searchParams.get('start') || '';
         const end = url.searchParams.get('end') || '';
@@ -1164,7 +1167,7 @@
       return null;
     }
 
-    // Patch fetch again to count phases (non-blocking)
+    // Patch fetch to collect stats
     const orig = window.fetch;
     window.fetch = async function fetchWithStats(input, init){
       const url = (typeof input === 'string') ? input : (input?.url || "");
@@ -1173,37 +1176,34 @@
       try {
         const res = await orig(input, init);
         S.lastStatus = res.status; S.lastURL = url;
-        // Proxy headers (if any)
-        const rem = res.headers.get('X-Proxy-TokenBucket-Remaining');
-        const cap = res.headers.get('X-Proxy-TokenBucket-Capacity');
-        const rps = res.headers.get('X-Proxy-TokenBucket-RefillPerSec');
+
+        // Proxy headers (optional)
+        const rem = res.headers.get('X-Proxy-Global-Remaining') || res.headers.get('X-Proxy-TokenBucket-Remaining');
+        const cap = res.headers.get('X-Proxy-Global-Capacity') || res.headers.get('X-Proxy-TokenBucket-Capacity');
+        const rps = res.headers.get('X-Proxy-Global-RPS') || res.headers.get('X-Proxy-TokenBucket-RefillPerSec');
         if (rem) S.proxy.remaining = Number(rem);
         if (cap) S.proxy.capacity = Number(cap);
         if (rps) S.proxy.rps = Number(rps);
 
-        // Phase heuristics + counters
-        if (/report\/fights\//.test(url)) {
+        // Phase heuristics + deduped per-fight increments
+        if (/\/report\/fights\//.test(url)) {
           S.phase = "Fetching fights";
           S.fightsDone++;
-        } else if (/tables\/damage-done\//.test(url) || /tables\/healing\//.test(url)) {
+        } else if (/\/tables\/(damage-done|healing)\//.test(url)) {
           S.phase = "Fetching participants";
           const k = fightKeyFromURL(url);
-          if (k && !S.uniquePartsKeys.has(k)){
+          if (k && !S.uniquePartsKeys.has(k)) {
             S.uniquePartsKeys.add(k);
             S.partsDone = S.uniquePartsKeys.size;
-            // If no explicit total, track total = unique fights observed in this phase
-            if (S.partsTotal === undefined) S.partsTotal = S.partsDone;
           }
-        } else if (/tables\/deaths\//.test(url) || /events\/deaths\//.test(url)) {
+        } else if (/\/(tables|events)\/deaths\//.test(url)) {
           S.phase = "Fetching deaths";
           const k = fightKeyFromURL(url);
-          if (k && !S.uniqueDeathKeys.has(k)){
+          if (k && !S.uniqueDeathKeys.has(k)) {
             S.uniqueDeathKeys.add(k);
             S.deathsDone = S.uniqueDeathKeys.size;
-            if (S.deathsTotal === undefined) S.deathsTotal = S.deathsDone;
           }
         }
-
         return res;
       } catch(e) {
         S.errors++;
@@ -1215,7 +1215,7 @@
       }
     };
 
-    // UI: Insert counters panel under the main progress card
+    // Build counters panel
     const panel = document.createElement('div');
     panel.id = "phase-counters";
     panel.style.marginTop = "8px";
@@ -1225,7 +1225,7 @@
     panel.style.gridTemplateColumns = "repeat(3, 1fr)";
     panel.style.gap = "6px";
 
-    function makeCell(label){
+    function cell(label){
       const wrap = document.createElement('div');
       wrap.style.background = "rgba(255,255,255,0.04)";
       wrap.style.border = "1px solid rgba(255,255,255,0.06)";
@@ -1236,42 +1236,42 @@
       wrap.appendChild(t); wrap.appendChild(v);
       return {wrap, v};
     }
-
-    const fightsCell = makeCell("Fights");
-    const partsCell  = makeCell("Participants");
-    const deathsCell = makeCell("Deaths");
-    panel.appendChild(fightsCell.wrap);
-    panel.appendChild(partsCell.wrap);
-    panel.appendChild(deathsCell.wrap);
+    const fights = cell("Fights");
+    const parts  = cell("Participants");
+    const deaths = cell("Deaths");
+    panel.appendChild(fights.wrap); panel.appendChild(parts.wrap); panel.appendChild(deaths.wrap);
 
     container.appendChild(panel);
 
-    // Render loop
-    function render(){
-      fightsCell.v.textContent = (S.fightsTotal ? `${S.fightsDone}/${S.fightsTotal}` : `${S.fightsDone}`);
-      partsCell.v.textContent  = (S.partsTotal  ? `${S.partsDone}/${S.partsTotal}`   : `${S.partsDone}`);
-      deathsCell.v.textContent = (S.deathsTotal ? `${S.deathsDone}/${S.deathsTotal}` : `${S.deathsDone}`);
-      requestAnimationFrame(render);
+    // Render: show denominator only if total is explicitly set (avoid X/1)
+    function fmt(done, total){
+      return (typeof total === 'number') ? `${done}/${total}` : String(done);
     }
-    requestAnimationFrame(render);
+    function tick(){
+      fights.v.textContent = fmt(S.fightsDone, S.fightsTotal);
+      parts.v.textContent  = fmt(S.partsDone,  S.partsTotal);
+      deaths.v.textContent = fmt(S.deathsDone, S.deathsTotal);
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
 
-    // Optional public API to set precise totals
-    window.__SET_PHASE_TOTALS__ = (totals) => {
-      if (totals.fights != null) S.fightsTotal = totals.fights;
-      if (totals.participants != null) S.partsTotal = totals.participants;
-      if (totals.deaths != null) S.deathsTotal = totals.deaths;
+    // Public API to set exact totals
+    window.__SET_PHASE_TOTALS__ = (t) => {
+      if (t.fights != null) S.fightsTotal = t.fights;
+      if (t.participants != null) S.partsTotal = t.participants;
+      if (t.deaths != null) S.deathsTotal = t.deaths;
     };
   }
 
-  // Wait for a sensible container (.card) or fallback to body
-  const targets = ['.card', '.progress', '.wcl-progress', 'body'];
-  if (document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', () => whenContainerReady(targets, init), { once: true });
+  const startInit = () => waitForContainer(init);
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', startInit, { once: true });
   } else {
-    whenContainerReady(targets, init);
+    startInit();
   }
 })();
 </script>
+
 
 </body>
 </html>
