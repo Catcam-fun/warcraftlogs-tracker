@@ -69,7 +69,12 @@
     .chip.sel { outline:2px solid var(--accent); }
     .error { background:var(--badbg); border:1px solid var(--badbrd); color:var(--bad); 
              padding:12px; border-radius:8px; margin-bottom:20px; display:none; }
-  </style>
+  
+/* subtle field hint */
+.field-hint{margin-top:6px;font-size:12px;color:#9aa4b2}
+.field-hint code{background:#1f2430;color:#d1d5db;padding:1px 6px;border-radius:6px}
+
+</style>
 </head>
 <body>
   <div class="container">
@@ -99,12 +104,14 @@
         
         <div class="form-group">
           <label>Guild Name *</label>
-          <input type="text" id="guildName" placeholder="e.g., Do Over">
+          <input type="text" id="guildName" placeholder="e.g., Do Over" title="Guild name — not case-sensitive">>
+          <div class="field-hint">Not case‑sensitive. We match guilds regardless of letter case.</div>
         </div>
         
         <div class="form-group">
           <label>Server *</label>
-          <input type="text" id="server" placeholder="e.g., Thrall">
+          <input type="text" id="server" placeholder="e.g., Thrall" title="Server/Realm — not case-sensitive; spaces ok" placeholder="e.g., Thrall">>
+          <div class="field-hint">Not case‑sensitive. Spaces/apostrophes allowed; we normalize to <code>lowercase-hyphens</code> (e.g., <code>Illidán</code> → <code>illidan</code>).</div>
         </div>
         
         <div class="form-group">
@@ -152,7 +159,7 @@
       
       <div class="form-group" style="margin-top:15px;">
         <label>Author Filters (optional)</label>
-        <input type="text" id="authorFilters" placeholder="username1, username2">
+        <input type="text" id="authorFilters" placeholder="username1, username2" title="Optional: comma-separated character names (case-insensitive)">>
       </div>
       
       <div class="char-groups">
@@ -188,7 +195,7 @@
         </div>
       </div>
       <div class="chips" id="bossChips"></div>
-      <details style="margin-bottom:20px;background:var(--panel2);">
+      <details style="margin-bottom:20px;background:var(--panel2);" open>
         <summary style="font-weight:700;padding:12px;">📊 All Bosses Overview (click to collapse)</summary>
         <div id="overviewTable" style="padding:12px;"></div>
       </details>
@@ -560,7 +567,7 @@
         }
         
         // Process deaths
-        const topDeaths = filterMassDeaths(deathData).slice(0, state.config.maxCutoff);
+        const topDeaths = deathData.slice(0, state.config.maxCutoff);
         
         for (let rank = 0; rank < topDeaths.length; rank++) {
           const death = topDeaths[rank];
@@ -896,206 +903,5 @@
     
     init();
   </script>
-
-<script>
-// Overview sorting by clicking header cells or boss tabs
-(function(){
-  function normalize(s){ return (s||"").toString().trim().toLowerCase(); }
-  function findOverviewTable(){
-    // pick the first table under a <details> that has "All Bosses Overview" nearby
-    const detailsList = Array.from(document.querySelectorAll('details'));
-    for (const d of detailsList){
-      const label = (d.querySelector('summary')?.textContent||"").toLowerCase();
-      if (label.includes('all bosses overview')) {
-        const tbl = d.querySelector('table');
-        if (tbl) return tbl;
-      }
-    }
-    return null;
-  }
-  function parseCellValue(cell){
-    // expect "12.3%" or "—"; return number
-    const txt = (cell.textContent||"").trim();
-    const m = txt.match(/([0-9]+(?:\.[0-9]+)?)\s*%/);
-    return m ? parseFloat(m[1]) : -1;
-  }
-  function resortByHeaderName(name){
-    const tbl = findOverviewTable();
-    if (!tbl) return;
-    const thead = tbl.tHead;
-    const tbody = tbl.tBodies[0];
-    if (!thead || !tbody) return;
-    const headers = Array.from(thead.querySelectorAll('th'));
-    const ix = headers.findIndex(th => normalize(th.textContent) === normalize(name));
-    if (ix < 0) return;
-    const rows = Array.from(tbody.querySelectorAll('tr'));
-    rows.sort((a,b)=>{
-      const av = parseCellValue(a.cells[ix] || {textContent:''});
-      const bv = parseCellValue(b.cells[ix] || {textContent:''});
-      return bv - av; // desc
-    });
-    rows.forEach(r => tbody.appendChild(r));
-  }
-  function attachHeaderClicks(){
-    const tbl = findOverviewTable();
-    if (!tbl) return;
-    const headers = Array.from(tbl.tHead?.querySelectorAll('th') || []);
-    headers.forEach(th => {
-      th.style.cursor = 'pointer';
-      th.addEventListener('click', () => resortByHeaderName(th.textContent), { passive: true });
-    });
-  }
-  // boss tabs: click text maps to header
-  function attachBossTabClicks(){
-    document.addEventListener('click', (ev) => {
-      const el = ev.target.closest('button, .chip, .tab, .boss, .badge');
-      if (!el) return;
-      const label = normalize(el.textContent);
-      if (!label) return;
-      // only act if this boss exists as a header
-      const tbl = findOverviewTable();
-      if (!tbl) return;
-      const headers = Array.from(tbl.tHead?.querySelectorAll('th') || []);
-      const idx = headers.findIndex(th => normalize(th.textContent) === label);
-      if (idx >= 0) {
-        // resort after the app updates selection
-        setTimeout(() => resortByHeaderName(label), 0);
-      }
-    }, true);
-  }
-
-  // observe DOM to re-bind after app rebuilds the table
-  const mo = new MutationObserver(() => attachHeaderClicks());
-  mo.observe(document.documentElement, { childList: true, subtree: true });
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => { attachHeaderClicks(); attachBossTabClicks(); }, { once: true });
-  } else {
-    attachHeaderClicks();
-    attachBossTabClicks();
-  }
-
-  // Expose manual API
-  window.__resortOverview = resortByHeaderName;
-})();
-</script>
-
-<script>
-// Mass-death exclusion helper (standalone script tag)
-(function(){
-  function filterMassDeaths(deaths){
-    const d = Array.isArray(deaths) ? deaths.slice() : [];
-    const THRESH = (window.state?.config?.massDeathThreshold) ?? 7;
-    const WINDOW_MS = (window.state?.config?.massDeathWindowMs) ?? 10000;
-    if (d.length < THRESH) return deaths;
-    d.sort((a,b)=>a.timestamp-b.timestamp);
-    for (let i=0; i<=d.length-THRESH; i++){
-      const start = d[i].timestamp, end = start + WINDOW_MS;
-      let count = 0;
-      for (let j=i; j<d.length; j++){
-        if (d[j].timestamp <= end) count++; else break;
-      }
-      if (count >= THRESH){
-        return d.filter(x => x.timestamp < start);
-      }
-    }
-    return deaths;
-  }
-  window.filterMassDeaths = filterMassDeaths;
-})();
-</script>
-
-<!-- Minimal sanity indicator -->
-<style>
-  #sanity-pill{position:fixed;top:10px;right:12px;z-index:2147483647;background:rgba(17,17,22,.92);color:#e5e7eb;border:1px solid rgba(255,255,255,.15);border-radius:999px;padding:6px 10px;font:12px/1 ui-sans-serif,system-ui,Segoe UI,Roboto;display:flex;align-items:center;gap:8px;box-shadow:0 6px 28px rgba(0,0,0,.45);backdrop-filter:blur(6px);opacity:1;pointer-events:none}
-  #sanity-pill .dot{width:8px;height:8px;border-radius:999px;background:#60a5fa;animation:sp 1.2s infinite ease-in-out}
-  @keyframes sp{0%{transform:scale(1);opacity:.7}50%{transform:scale(1.4);opacity:1}100%{transform:scale(1);opacity:.7}}
-  #sanity-pill .txt{white-space:nowrap;max-width:46vw;overflow:hidden;text-overflow:ellipsis}
-  #sanity-pill .muted{opacity:.8}
-</style>
-<div id="sanity-pill" aria-live="polite" aria-atomic="true">
-  <i class="dot" aria-hidden="true"></i>
-  <div class="txt"><span class="muted">Working…</span></div>
-</div>
-<script>
-(() => {
-  if (window.__SANITY_PILL_INIT__) return; window.__SANITY_PILL_INIT__ = true;
-  // Stats (very small)
-  const S = (window.__SANITY__ = window.__SANITY__ || {
-    inFlight: 0, finished: 0, started: 0, errors: 0,
-    lastStatus: null, lastURL: "", t0: performance.now(),
-    proxy: { bucket: null, gRem: null, gCap: null, gRps: null, bRem: null, bCap: null, bRps: null },
-  });
-
-  // Patch fetch only once
-  if (!window.__SANITY_FETCH_PATCHED__) {
-    const orig = window.fetch.bind(window);
-    window.fetch = async function sanityFetch(input, init){
-      S.inFlight++; S.started++;
-      const t0 = performance.now();
-      try{
-        const res = await orig(input, init);
-        S.lastStatus = res.status;
-        S.lastURL = (typeof input === 'string') ? input : (input && input.url) || "";
-        // Read proxy headers if available
-        const H = res.headers;
-        if (H) {
-          S.proxy.bucket = H.get('X-Proxy-Bucket') || S.proxy.bucket;
-          S.proxy.gRem   = H.get('X-Proxy-Global-Remaining') || S.proxy.gRem;
-          S.proxy.gCap   = H.get('X-Proxy-Global-Capacity')  || S.proxy.gCap;
-          S.proxy.gRps   = H.get('X-Proxy-Global-RPS')       || S.proxy.gRps;
-          S.proxy.bRem   = H.get('X-Proxy-Bucket-Remaining') || S.proxy.bRem;
-          S.proxy.bCap   = H.get('X-Proxy-Bucket-Capacity')  || S.proxy.bCap;
-          S.proxy.bRps   = H.get('X-Proxy-Bucket-RPS')       || S.proxy.bRps;
-        }
-        return res;
-      } catch (e){
-        S.errors++;
-        throw e;
-      } finally {
-        S.inFlight--;
-        S.finished++;
-        S.lastDt = Math.round(performance.now() - t0);
-      }
-    };
-    window.__SANITY_FETCH_PATCHED__ = true;
-  }
-
-  const pill = document.getElementById('sanity-pill');
-  const txt = pill.querySelector('.txt');
-
-  function render(){
-    const elapsed = Math.max(1, (performance.now() - S.t0)/1000);
-    const rate = (S.finished/elapsed).toFixed(1);
-    let line = `in-flight ${S.inFlight} · done ${S.finished} · ${rate}/s`;
-    if (S.lastStatus) line += ` · last ${S.lastStatus}`;
-    if (S.proxy && (S.proxy.gRem != null || S.proxy.bRem != null)) {
-      const g = (S.proxy.gRem!=null && S.proxy.gCap!=null) ? `G ${S.proxy.gRem}/${S.proxy.gCap}` : null;
-      const b = (S.proxy.bucket && S.proxy.bRem!=null && S.proxy.bCap!=null) ? `${S.proxy.bucket} ${S.proxy.bRem}/${S.proxy.bCap}` : null;
-      const rps = (S.proxy.gRps || S.proxy.bRps) ? `@${S.proxy.gRps || S.proxy.bRps}/s` : '';
-      const bits = [g,b].filter(Boolean).join(' · ');
-      if (bits) line += ` · ${bits} ${rps}`;
-    }
-    txt.textContent = line;
-    requestAnimationFrame(render);
-  // Toggle with Alt+P
-  window.addEventListener('keydown', (e)=>{
-    if (e.altKey && (e.key.toLowerCase() === 'p')){
-      const el = document.getElementById('sanity-pill');
-      if (!el) return;
-      el.style.display = (el.style.display === 'none') ? 'flex' : 'none';
-    }
-  }, {passive:true});
-  // Heartbeat: log minimal stats every 5s while active
-  setInterval(()=>{
-    const s = window.__SANITY__;
-    if (!s) return;
-    console.log(`[sanity] inflight=${s.inFlight} finished=${s.finished} last=${s.lastStatus}`);
-  }, 5000);
-  }
-  requestAnimationFrame(render);
-})();
-</script>
-
 </body>
 </html>
