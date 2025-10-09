@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WCL Death Report Generator</title>
+  <style>
+    :root {
+      --bg:#0b0e14; --panel:#11151d; --panel2:#0f1420; --border:#1f2937;
+      --text:#e5e7eb; --muted:#9aa4b2; --link:#93c5fd; --linkhover:#bfdbfe;
+      --goodbg:#063f2e; --good:#34d399; --goodbrd:#065f46;
+      --badbg:#3b0d0d; --bad:#f87171; --badbrd:#7f1d1d;
+      --accent:#6366f1; --accenthover:#818cf8;
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; padding:20px; background:var(--bg); color:var(--text); 
+           font-family:system-ui,-apple-system,sans-serif; line-height:1.5; }
+    .container { max-width:1200px; margin:0 auto; }
+    h1 { margin:0 0 10px; }
+    .subtitle { color:var(--muted); margin-bottom:20px; }
+    
+    /* Config Panel */
+    .config-panel { background:var(--panel); border:1px solid var(--border); 
+                    border-radius:12px; padding:20px; margin-bottom:20px; }
+    .config-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
+    .config-header h2 { margin:0; }
+    .btn { background:var(--accent); color:white; border:none; padding:10px 20px; 
+           border-radius:8px; cursor:pointer; font-size:14px; font-weight:600; }
+    .btn:hover { background:var(--accenthover); }
+    .btn-secondary { background:var(--panel2); border:1px solid var(--border); color:var(--text); }
+    .btn-small { padding:6px 12px; font-size:13px; }
+    
+    .form-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:15px; }
+    .form-group { display:flex; flex-direction:column; }
+    .form-group label { font-weight:600; margin-bottom:5px; font-size:14px; }
+    .form-group input, .form-group select, .form-group textarea { 
+      background:var(--panel2); border:1px solid var(--border); color:var(--text); 
+      padding:8px 12px; border-radius:6px; font-size:14px; }
+    .form-group textarea { min-height:80px; font-family:monospace; }
+    .form-help { font-size:12px; color:var(--muted); margin-top:3px; }
+    
+    /* Character Groups */
+    .char-groups { margin-top:15px; }
+    .char-group-item { display:flex; gap:10px; margin-bottom:10px; align-items:flex-start; }
+    .char-group-item input { flex:1; }
+    .btn-remove { background:var(--badbg); color:var(--bad); border:1px solid var(--badbrd); 
+                  padding:8px 12px; border-radius:6px; cursor:pointer; }
+    
+    /* Progress */
+    .progress { background:var(--panel2); border:1px solid var(--border); 
+                border-radius:8px; padding:15px; margin-bottom:20px; display:none; }
+    .progress-bar { background:var(--panel2); height:8px; border-radius:4px; overflow:hidden; margin:10px 0; }
+    .progress-fill { background:var(--accent); height:100%; width:0%; transition:width 0.3s; }
+    .progress-text { color:var(--muted); font-size:13px; }
+    
+    /* Results (same as original) */
+    .results { display:none; }
+    details { margin-bottom:12px; border:1px solid var(--border); border-radius:10px; 
+              padding:8px 12px; background:var(--panel); }
+    summary { font-weight:600; cursor:pointer; }
+    table { width:100%; border-collapse:collapse; margin-top:8px; }
+    th,td { border-bottom:1px solid var(--border); padding:8px 10px; text-align:left; }
+    th { background:var(--panel2); }
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; 
+            font-size:12px; font-weight:600; border:1px solid; }
+    .kill { background:var(--goodbg); color:var(--good); border-color:var(--goodbrd); }
+    .wipe { background:var(--badbg); color:var(--bad); border-color:var(--badbrd); }
+    .muted { color:var(--muted); }
+    .mono { font-family:monospace; }
+    .chips { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:15px; }
+    .chip { background:var(--panel2); border:1px solid var(--border); padding:6px 12px; 
+            border-radius:999px; cursor:pointer; user-select:none; }
+    .chip.sel { outline:2px solid var(--accent); }
+    
+    .error { background:var(--badbg); border:1px solid var(--badbrd); color:var(--bad); 
+             padding:12px; border-radius:8px; margin-bottom:20px; display:none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔮 WCL Death Report Generator</h1>
+    <p class="subtitle">Configure your guild settings and generate death reports from WarcraftLogs</p>
+    
+    <div class="error" id="errorBox"></div>
+    
+    <div class="config-panel" id="configPanel">
+      <div class="config-header">
+        <h2>⚙️ Configuration</h2>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-secondary btn-small" onclick="saveConfig()">💾 Save Config</button>
+          <button class="btn btn-secondary btn-small" onclick="loadConfig()">📂 Load Config</button>
+        </div>
+      </div>
+      
+      <div class="form-grid">
+        <div class="form-group">
+          <label>WarcraftLogs API Key *</label>
+          <input type="text" id="apiKey" placeholder="Your API key">
+          <span class="form-help">Go to <a href="https://www.warcraftlogs.com/profile" target="_blank" style="color:var(--link)">User Settings</a> and scroll down to find your API key</span>
+        </div>
+        
+        <div class="form-group">
+          <label>Guild Name *</label>
+          <input type="text" id="guildName" placeholder="e.g., Do Over">
+        </div>
+        
+        <div class="form-group">
+          <label>Server *</label>
+          <input type="text" id="server" placeholder="e.g., Thrall">
+        </div>
+        
+        <div class="form-group">
+          <label>Region *</label>
+          <select id="region">
+            <option value="us">US</option>
+            <option value="eu">EU</option>
+            <option value="kr">KR</option>
+            <option value="tw">TW</option>
+            <option value="cn">CN</option>
+          </select>
+        </div>
+        
+        <div class="form-group">
+          <label>Report Zone ID *</label>
+          <input type="number" id="reportZone" placeholder="e.g., 44">
+          <span class="form-help">Zone ID from report URLs</span>
+        </div>
+        
+        <div class="form-group">
+          <label>Fight Zone ID *</label>
+          <input type="number" id="fightZone" placeholder="e.g., 2810">
+          <span class="form-help">Zone ID in fight data</span>
+        </div>
+        
+        <div class="form-group">
+          <label>Difficulty *</label>
+          <select id="difficulty">
+            <option value="5">Mythic</option>
+            <option value="4">Heroic</option>
+            <option value="3">Normal</option>
+            <option value="1">LFR</option>
+          </select>
+        </div>
+        
+        <div class="form-group">
+          <label>Max Deaths to Count</label>
+          <input type="number" id="maxCutoff" value="5" min="1" max="10">
+          <span class="form-help">Count first X deaths per pull</span>
+        </div>
+        
+        <div class="form-group">
+          <label>Date Cutoff</label>
+          <input type="date" id="cutoffDate">
+          <span class="form-help">Include logs on or before this date</span>
+        </div>
+      </div>
+      
+      <div class="form-group" style="margin-top:15px;">
+        <label>Author Filters (optional)</label>
+        <input type="text" id="authorFilters" placeholder="username1, username2, username3">
+        <span class="form-help">Comma-separated list of log uploaders to include (leave empty for all)</span>
+      </div>
+      
+      <div class="char-groups">
+        <label style="font-weight:600; display:block; margin-bottom:10px;">Character Groups (Alt Merging)</label>
+        <div id="charGroupsList"></div>
+        <button class="btn btn-secondary btn-small" onclick="addCharGroup()">+ Add Group</button>
+      </div>
+      
+      <div style="margin-top:20px; display:flex; gap:10px;">
+        <button class="btn" onclick="generateReport()">🚀 Generate Report</button>
+        <button class="btn btn-secondary" onclick="clearCache()">🗑️ Clear Cache</button>
+      </div>
+    </div>
+    
+    <div class="progress" id="progressBox">
+      <div class="progress-text" id="progressText">Initializing...</div>
+      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+    </div>
+    
+    <div class="results" id="resultsBox">
+      <h2>📊 Results</h2>
+      <div class="chips" id="bossChips"></div>
+      <div id="resultsContent"></div>
+    </div>
+  </div>
+
+  <script>
+    const state = {
+      config: {},
+      cache: {},
+      data: null,
+      selectedBosses: new Set()
+    };
+    
+    // Initialize
+    function init() {
+      const today = new Date().toISOString().split('T')[0];
+      document.getElementById('cutoffDate').value = today;
+      loadConfigFromStorage();
+      updateCharGroupsDisplay();
+    }
+    
+    // Character groups management
+    function addCharGroup() {
+      const list = document.getElementById('charGroupsList');
+      const div = document.createElement('div');
+      div.className = 'char-group-item';
+      div.innerHTML = `
+        <input type="text" placeholder="Main character" class="char-main">
+        <input type="text" placeholder="Alt1, Alt2, Alt3..." class="char-alts">
+        <button class="btn-remove" onclick="this.parentElement.remove()">✕</button>
+      `;
+      list.appendChild(div);
+    }
+    
+    function updateCharGroupsDisplay() {
+      const list = document.getElementById('charGroupsList');
+      list.innerHTML = '';
+      // Add one empty group by default
+      if (list.children.length === 0) addCharGroup();
+    }
+    
+    function getCharacterGroups() {
+      const groups = {};
+      document.querySelectorAll('.char-group-item').forEach(item => {
+        const main = item.querySelector('.char-main').value.trim();
+        const alts = item.querySelector('.char-alts').value.split(',').map(s => s.trim()).filter(s => s);
+        if (main && alts.length > 0) {
+          groups[main] = [main, ...alts];
+        }
+      });
+      return groups;
+    }
+    
+    function getMainCharacter(playerName, groups) {
+      for (const [main, alts] of Object.entries(groups)) {
+        if (alts.includes(playerName)) return main;
+      }
+      return playerName;
+    }
+    
+    // Config persistence
+    function saveConfig() {
+      const config = {
+        apiKey: document.getElementById('apiKey').value,
+        guildName: document.getElementById('guildName').value,
+        server: document.getElementById('server').value,
+        region: document.getElementById('region').value,
+        reportZone: document.getElementById('reportZone').value,
+        fightZone: document.getElementById('fightZone').value,
+        difficulty: document.getElementById('difficulty').value,
+        maxCutoff: document.getElementById('maxCutoff').value,
+        cutoffDate: document.getElementById('cutoffDate').value,
+        authorFilters: document.getElementById('authorFilters').value,
+        charGroups: getCharacterGroups()
+      };
+      localStorage.setItem('wclReportConfig', JSON.stringify(config));
+      alert('✅ Configuration saved!');
+    }
+    
+    function loadConfig() {
+      if (loadConfigFromStorage()) {
+        alert('✅ Configuration loaded!');
+      } else {
+        alert('ℹ️ No saved configuration found');
+      }
+    }
+    
+    function loadConfigFromStorage() {
+      const saved = localStorage.getItem('wclReportConfig');
+      if (!saved) return false;
+      
+      const config = JSON.parse(saved);
+      document.getElementById('apiKey').value = config.apiKey || '';
+      document.getElementById('guildName').value = config.guildName || '';
+      document.getElementById('server').value = config.server || '';
+      document.getElementById('region').value = config.region || 'us';
+      document.getElementById('reportZone').value = config.reportZone || '';
+      document.getElementById('fightZone').value = config.fightZone || '';
+      document.getElementById('difficulty').value = config.difficulty || '5';
+      document.getElementById('maxCutoff').value = config.maxCutoff || '5';
+      document.getElementById('cutoffDate').value = config.cutoffDate || '';
+      document.getElementById('authorFilters').value = config.authorFilters || '';
+      
+      // Load character groups
+      const list = document.getElementById('charGroupsList');
+      list.innerHTML = '';
+      if (config.charGroups) {
+        for (const [main, alts] of Object.entries(config.charGroups)) {
+          const div = document.createElement('div');
+          div.className = 'char-group-item';
+          div.innerHTML = `
+            <input type="text" placeholder="Main character" class="char-main" value="${main}">
+            <input type="text" placeholder="Alt1, Alt2, Alt3..." class="char-alts" value="${alts.filter(a => a !== main).join(', ')}">
+            <button class="btn-remove" onclick="this.parentElement.remove()">✕</button>
+          `;
+          list.appendChild(div);
+        }
+      }
+      if (list.children.length === 0) addCharGroup();
+      
+      return true;
+    }
+    
+    function clearCache() {
+      if (confirm('Are you sure you want to clear the cache?')) {
+        state.cache = {};
+        localStorage.removeItem('wclReportCache');
+        alert('✅ Cache cleared!');
+      }
+    }
+    
+    // Progress UI
+    function showProgress(text, percent) {
+      document.getElementById('progressBox').style.display = 'block';
+      document.getElementById('progressText').textContent = text;
+      document.getElementById('progressFill').style.width = `${percent}%`;
+    }
+    
+    function hideProgress() {
+      document.getElementById('progressBox').style.display = 'none';
+    }
+    
+    function showError(msg) {
+      const box = document.getElementById('errorBox');
+      box.textContent = '❌ ' + msg;
+      box.style.display = 'block';
+      setTimeout(() => box.style.display = 'none', 10000);
+    }
+    
+    // API calls
+    async function fetchWithRetry(url, retries = 3) {
+      for (let i = 0; i < retries; i++) {
+        try {
+          const response = await fetch(url);
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return await response.json();
+        } catch (e) {
+          if (i === retries - 1) throw e;
+          await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+        }
+      }
+    }
+    
+    // Main generation logic
+    async function generateReport() {
+      try {
+        // Validate inputs
+        const apiKey = document.getElementById('apiKey').value.trim();
+        const guildName = document.getElementById('guildName').value.trim();
+        const server = document.getElementById('server').value.trim();
+        
+        if (!apiKey || !guildName || !server) {
+          showError('Please fill in API Key, Guild Name, and Server');
+          return;
+        }
+        
+        state.config = {
+          apiKey,
+          guildName,
+          server,
+          region: document.getElementById('region').value,
+          reportZone: parseInt(document.getElementById('reportZone').value),
+          fightZone: parseInt(document.getElementById('fightZone').value),
+          difficulty: parseInt(document.getElementById('difficulty').value),
+          maxCutoff: parseInt(document.getElementById('maxCutoff').value),
+          cutoffDate: document.getElementById('cutoffDate').value,
+          authorFilters: document.getElementById('authorFilters').value.split(',').map(s => s.trim()).filter(s => s),
+          charGroups: getCharacterGroups()
+        };
+        
+        document.getElementById('configPanel').style.display = 'none';
+        document.getElementById('resultsBox').style.display = 'none';
+        showProgress('Fetching guild reports...', 10);
+        
+        // Fetch reports
+        const reports = await fetchGuildReports();
+        if (reports.length === 0) {
+          showError('No reports found matching your criteria');
+          hideProgress();
+          document.getElementById('configPanel').style.display = 'block';
+          return;
+        }
+        
+        showProgress(`Processing ${reports.length} reports...`, 20);
+        
+        // Process all fights
+        const allFights = await collectAllFights(reports);
+        showProgress('Deduplicating pulls...', 60);
+        
+        const dedupedFights = deduplicateFights(allFights);
+        showProgress('Calculating statistics...', 80);
+        
+        const results = await processFights(dedupedFights);
+        
+        showProgress('Rendering results...', 90);
+        displayResults(results);
+        
+        hideProgress();
+        document.getElementById('resultsBox').style.display = 'block';
+        
+      } catch (error) {
+        console.error(error);
+        showError('Error: ' + error.message);
+        hideProgress();
+        document.getElementById('configPanel').style.display = 'block';
+      }
+    }
+    
+    async function fetchGuildReports() {
+      const { apiKey, guildName, server, region, reportZone, cutoffDate, authorFilters } = state.config;
+      const url = `https://www.warcraftlogs.com/v1/reports/guild/${encodeURIComponent(guildName)}/${server}/${region}?api_key=${apiKey}`;
+      
+      const data = await fetchWithRetry(url);
+      const cutoffTs = new Date(cutoffDate).getTime() + 86400000 - 1;
+      
+      return data.filter(rep => {
+        if (rep.zone !== reportZone) return false;
+        if (rep.start > cutoffTs) return false;
+        if (authorFilters.length > 0 && !authorFilters.includes(rep.owner)) return false;
+        return true;
+      });
+    }
+    
+    async function collectAllFights(reports) {
+      const allFights = [];
+      
+      for (let i = 0; i < reports.length; i++) {
+        const rep = reports[i];
+        showProgress(`Collecting fights from report ${i + 1}/${reports.length}...`, 20 + (i / reports.length) * 30);
+        
+        const url = `https://www.warcraftlogs.com/v1/report/fights/${rep.id}?api_key=${state.config.apiKey}`;
+        const data = await fetchWithRetry(url);
+        
+        const reportAbsStart = data.start || rep.start;
+        const fights = data.fights || [];
+        
+        for (const fight of fights) {
+          if ((fight.boss || 0) <= 0) continue;
+          if (fight.zoneID !== state.config.fightZone && fight.zone !== state.config.fightZone) continue;
+          if (fight.zoneDifficulty !== state.config.difficulty && fight.difficulty !== state.config.difficulty) continue;
+          
+          const absStart = reportAbsStart + fight.start_time;
+          const absEnd = reportAbsStart + fight.end_time;
+          
+          allFights.push({
+            reportId: rep.id,
+            fight,
+            bossName: fight.name || 'Unknown',
+            bossId: fight.boss,
+            isKill: !!fight.kill,
+            absStart,
+            absEnd,
+            reportAbsStart
+          });
+        }
+      }
+      
+      return allFights.sort((a, b) => a.absStart - b.absStart);
+    }
+    
+    function deduplicateFights(allFights) {
+      const seen = {};
+      const result = [];
+      
+      for (const fight of allFights) {
+        const key = fight.bossId;
+        if (!seen[key]) seen[key] = [];
+        
+        let isDupe = false;
+        for (const [start, end] of seen[key]) {
+          const overlap = Math.max(0, Math.min(fight.absEnd, end) - Math.max(fight.absStart, start));
+          if (overlap >= 15000) {
+            isDupe = true;
+            break;
+          }
+        }
+        
+        if (!isDupe) {
+          seen[key].push([fight.absStart, fight.absEnd]);
+          result.push(fight);
+        }
+      }
+      
+      return result;
+    }
+    
+    async function processFights(fights) {
+      const events = {};
+      const pullParticipation = {};
+      const bossParticipation = {};
+      const pullCounter = {};
+      
+      for (let i = 0; i < fights.length; i++) {
+        const fightData = fights[i];
+        showProgress(`Processing pull ${i + 1}/${fights.length}...`, 80 + (i / fights.length) * 10);
+        
+        const bossId = fightData.bossId;
+        pullCounter[bossId] = (pullCounter[bossId] || 0) + 1;
+        const pullNo = pullCounter[bossId];
+        
+        // Get participants (damage + healing)
+        const participants = await getFightParticipants(fightData);
+        
+        for (const player of participants) {
+          const main = getMainCharacter(player, state.config.charGroups);
+          if (!pullParticipation[main]) pullParticipation[main] = new Set();
+          pullParticipation[main].add(`${fightData.reportId}_${fightData.fight.id}`);
+          
+          if (!bossParticipation[fightData.bossName]) bossParticipation[fightData.bossName] = {};
+          if (!bossParticipation[fightData.bossName][main]) bossParticipation[fightData.bossName][main] = new Set();
+          bossParticipation[fightData.bossName][main].add(`${fightData.reportId}_${fightData.fight.id}`);
+        }
+        
+        // Get deaths
+        const deaths = await getFightDeaths(fightData);
+        const topDeaths = deaths.slice(0, state.config.maxCutoff);
+        
+        for (let rank = 0; rank < topDeaths.length; rank++) {
+          const death = topDeaths[rank];
+          const main = getMainCharacter(death.targetName, state.config.charGroups);
+          
+          if (!events[main]) events[main] = [];
+          events[main].push({
+            player: main,
+            originalCharacter: death.targetName,
+            boss: fightData.bossName,
+            bossId: fightData.bossId,
+            phase: death.phase || 1,
+            reportId: fightData.reportId,
+            fightId: fightData.fight.id,
+            isKill: fightData.isKill,
+            pullNo,
+            rankWithinPull: rank + 1,
+            absTs: death.timestamp,
+            abilityName: death.abilityName || 'Unknown'
+          });
+        }
+      }
+      
+      // Convert Sets to Arrays
+      for (const player in pullParticipation) {
+        pullParticipation[player] = Array.from(pullParticipation[player]);
+      }
+      for (const boss in bossParticipation) {
+        for (const player in bossParticipation[boss]) {
+          bossParticipation[boss][player] = Array.from(bossParticipation[boss][player]);
+        }
+      }
+      
+      return { events, pullParticipation, bossParticipation };
+    }
+    
+    async function getFightParticipants(fightData) {
+      const { reportId, fight } = fightData;
+      const { start_time, end_time } = fight;
+      const participants = new Set();
+      
+      // Damage dealers
+      try {
+        const url = `https://www.warcraftlogs.com/v1/report/tables/damage-done/${reportId}?start=${start_time}&end=${end_time}&api_key=${state.config.apiKey}`;
+        const data = await fetchWithRetry(url);
+        for (const entry of data.entries || []) {
+          if (entry.name) participants.add(entry.name);
+        }
+      } catch (e) {}
+      
+      // Healers
+      try {
+        const url = `https://www.warcraftlogs.com/v1/report/tables/healing/${reportId}?start=${start_time}&end=${end_time}&api_key=${state.config.apiKey}`;
+        const data = await fetchWithRetry(url);
+        for (const entry of data.entries || []) {
+          if (entry.name) participants.add(entry.name);
+        }
+      } catch (e) {}
+      
+      return Array.from(participants);
+    }
+    
+    async function getFightDeaths(fightData) {
+      const { reportId, fight, reportAbsStart } = fightData;
+      const { start_time, end_time } = fight;
+      
+      const url = `https://www.warcraftlogs.com/v1/report/tables/deaths/${reportId}?start=${start_time}&end=${end_time}&translate=true&api_key=${state.config.apiKey}`;
+      const data = await fetchWithRetry(url);
+      
+      return (data.entries || []).map(e => ({
+        targetName: e.name || 'Unknown',
+        timestamp: reportAbsStart + e.timestamp,
+        phase: 1,
+        abilityName: (e.ability || {}).name || 'Unknown'
+      }));
+    }
+    
+    function displayResults(results) {
+      const { events, pullParticipation, bossParticipation } = results;
+      state.data = { events, pullParticipation, bossParticipation };
+      
+      // Build boss chips
+      const chips = document.getElementById('bossChips');
+      chips.innerHTML = '';
+      const bosses = Object.keys(bossParticipation).sort();
+      for (const boss of bosses) {
+        const chip = document.createElement('span');
+        chip.className = 'chip';
+        chip.textContent = boss;
+        chip.onclick = () => {
+          if (state.selectedBosses.has(boss)) {
+            state.selectedBosses.delete(boss);
+            chip.classList.remove('sel');
+          } else {
+            state.selectedBosses.add(boss);
+            chip.classList.add('sel');
+          }
+          renderPlayerList();
+        };
+        chips.appendChild(chip);
+      }
+      
+      renderPlayerList();
+    }
+    
+    function renderPlayerList() {
+      const content = document.getElementById('resultsContent');
+      content.innerHTML = '';
+      
+      const { events, pullParticipation, bossParticipation } = state.data;
+      const stats = [];
+      
+      for (const player in events) {
+        const playerEvents = events[player].filter(e => 
+          e.rankWithinPull <= 2 && 
+          (state.selectedBosses.size === 0 || state.selectedBosses.has(e.boss))
+        );
+        
+        if (playerEvents.length === 0) continue;
+        
+        let pulls = 0;
+        if (state.selectedBosses.size === 0) {
+          pulls = pullParticipation[player].length;
+        } else {
+          for (const boss of state.selectedBosses) {
+            pulls += (bossParticipation[boss][player] || []).length;
+          }
+        }
+        
+        const rate = pulls > 0 ? (playerEvents.length / pulls * 100) : 0;
+        stats.push({ player, deaths: playerEvents.length, pulls, rate, events: playerEvents });
+      }
+      
+      stats.sort((a, b) => b.rate - a.rate);
+      
+      for (const stat of stats) {
+        const details = document.createElement('details');
+        const summary = document.createElement('summary');
+        summary.innerHTML = `<strong>${stat.player}</strong> — <span class="muted">${stat.deaths} deaths / ${stat.pulls} pulls</span> · ${stat.rate.toFixed(1)}%`;
+        details.appendChild(summary);
+        
+        const table = document.createElement('table');
+        table.innerHTML = '<thead><tr><th>Boss</th><th>Pull</th><th>Outcome</th><th>Ability</th><th>Report</th></tr></thead><tbody></tbody>';
+        const tbody = table.querySelector('tbody');
+        
+        for (const ev of stat.events.sort((a, b) => a.absTs - b.absTs)) {
+          const tr = document.createElement('tr');
+          const pill = ev.isKill ? '<span class="pill kill">KILL</span>' : '<span class="pill wipe">wipe</span>';
+          const link = `https://www.warcraftlogs.com/reports/${ev.reportId}?fight=${ev.fightId}&type=deaths`;
+          tr.innerHTML = `
+            <td>${ev.boss}</td>
+            <td>${ev.pullNo}</td>
+            <td>${pill}</td>
+            <td>${ev.abilityName}</td>
+            <td><a href="${link}" target="_blank" style="color:var(--link)">${ev.reportId}</a></td>
+          `;
+          tbody.appendChild(tr);
+        }
+        
+        details.appendChild(table);
+        content.appendChild(details);
+      }
+    }
+    
+    // Initialize on load
+    init();
+  </script>
+</body>
+</html>
