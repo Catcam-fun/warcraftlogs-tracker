@@ -70,6 +70,106 @@
     .error { background:var(--badbg); border:1px solid var(--badbrd); color:var(--bad); 
              padding:12px; border-radius:8px; margin-bottom:20px; display:none; }
   </style>
+
+<script>
+// ===== Global Fetch Throttle + Backoff (auto-applies to ALL fetch calls) =====
+(() => {
+  const RATE = {
+    MAX_CONCURRENCY: 3,   // try 2–4 if you still see 429s, lower this
+    MIN_DELAY_MS: 150,    // gap between *starts* of requests
+    MAX_RETRIES: 4,       // retries on 429/5xx
+    BASE_BACKOFF_MS: 400  // base backoff; grows exponentially with jitter
+  };
+
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+  // Simple task queue with concurrency + inter-start spacing
+  class ThrottleQueue {
+    constructor({ concurrency, startGapMs }) {
+      this.concurrency = Math.max(1, concurrency|0);
+      this.startGapMs = Math.max(0, startGapMs|0);
+      this.queue = [];
+      this.active = 0;
+      this.lastStart = 0;
+    }
+    push(task) {
+      return new Promise((resolve, reject) => {
+        this.queue.push({ task, resolve, reject });
+        this._drain();
+      });
+    }
+    async _drain() {
+      while (this.active < this.concurrency && this.queue.length > 0) {
+        const now = Date.now();
+        const gap = Math.max(0, this.startGapMs - (now - this.lastStart));
+        if (gap > 0) {
+          // schedule after the necessary gap to smooth bursts
+          await sleep(gap);
+        }
+        const { task, resolve, reject } = this.queue.shift();
+        this.active++;
+        this.lastStart = Date.now();
+        (async () => {
+          try {
+            const res = await task();
+            resolve(res);
+          } catch (e) {
+            reject(e);
+          } finally {
+            this.active--;
+            // Continue draining if more remain
+            if (this.queue.length > 0) {
+              // let the event loop breathe
+              Promise.resolve().then(() => this._drain());
+            }
+          }
+        })();
+      }
+    }
+  }
+
+  async function withBackoff(run, attempt = 0) {
+    try {
+      return await run();
+    } catch (err) {
+      // Normalize error to detect status code
+      const msg = (err && (err.message || err.toString())) || "";
+      const is429 = /429/.test(msg);
+      const is5xx = /\b5\d{2}\b/.test(msg) || /HTTP 5\d{2}/.test(msg);
+      if ((is429 || is5xx) && attempt < RATE.MAX_RETRIES) {
+        const jitter = Math.floor(Math.random() * 250);
+        const wait = RATE.BASE_BACKOFF_MS * Math.pow(2, attempt) + jitter;
+        await sleep(wait);
+        return withBackoff(run, attempt + 1);
+      }
+      throw err;
+    }
+  }
+
+  const q = new ThrottleQueue({ concurrency: RATE.MAX_CONCURRENCY, startGapMs: RATE.MIN_DELAY_MS });
+  const __origFetch = window.fetch.bind(window);
+
+  // Monkeypatch: every fetch goes through queue + backoff
+  window.fetch = function throttledFetch(...args) {
+    return q.push(() => withBackoff(async () => {
+      const res = await __origFetch(...args);
+      // Convert non-ok statuses into throw to trigger backoff as needed
+      if (!res.ok) {
+        // Clone text for error while keeping stream consumable by callers if they handle it
+        // We throw with status so withBackoff can detect 429/5xx.
+        throw new Error(String(res.status));
+      }
+      return res;
+    }));
+  };
+
+  // Expose basic tuning in console
+  window.__FETCH_RATE__ = RATE;
+  console.log("[Throttle] fetch patched with concurrency=%d, gap=%dms, retries=%d",
+    RATE.MAX_CONCURRENCY, RATE.MIN_DELAY_MS, RATE.MAX_RETRIES);
+})();
+</script>
+
 </head>
 <body>
   <div class="container">
