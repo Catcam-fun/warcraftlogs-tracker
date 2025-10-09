@@ -70,221 +70,6 @@
     .error { background:var(--badbg); border:1px solid var(--badbrd); color:var(--bad); 
              padding:12px; border-radius:8px; margin-bottom:20px; display:none; }
   </style>
-
-<script>
-// ===== Global Fetch Backoff (no client-side throttling) =====
-(() => {
-  const RATE = {
-    MAX_RETRIES: 4,
-    BASE_BACKOFF_MS: 300
-  };
-
-  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-
-  async function withBackoff(run, attempt = 0) {
-    try {
-      const res = await run();
-      if (!res.ok) {
-        const status = res.status;
-        // Respect Retry-After on 429 if present
-        if (status === 429 || (status >= 500 && status <= 599)) {
-          if (attempt < RATE.MAX_RETRIES) {
-            let hinted = 0;
-            const ra = res.headers.get('retry-after');
-            if (ra) {
-              const n = Number(ra);
-              if (!Number.isNaN(n)) hinted = Math.max(0, n * 1000);
-            }
-            const jitter = Math.floor(Math.random() * 250);
-            const backoff = RATE.BASE_BACKOFF_MS * Math.pow(2, attempt) + jitter;
-            await sleep(Math.max(backoff, hinted));
-            return withBackoff(run, attempt + 1);
-          }
-        }
-        // Give up: return original response for caller to handle
-        return res;
-      }
-      return res;
-    } catch (err) {
-      // Network error -> retry backoff path
-      if (attempt < RATE.MAX_RETRIES) {
-        const jitter = Math.floor(Math.random() * 250);
-        const backoff = RATE.BASE_BACKOFF_MS * Math.pow(2, attempt) + jitter;
-        await sleep(backoff);
-        return withBackoff(run, attempt + 1);
-      }
-      throw err;
-    }
-  }
-
-  const __origFetch = window.fetch.bind(window);
-  window.fetch = function backoffFetch(input, init){
-    return withBackoff(() => __origFetch(input, init));
-  };
-
-  console.log("[Throttle] fetch patched with backoff only; no client throttling");
-})();
-</script>
-<script>
-// ===== Lightweight Fetch Stats + HUD (non-blocking) =====
-(() => {
-  // Stats object exposed for debugging
-  const S = window.__FETCH_STATS__ = {
-    inFlight: 0,
-    started: 0,
-    finished: 0,
-    errors: 0,
-    recent429: 0,
-    avgMs: 0,
-    phase: "Initializing…",
-    queueEstimate: 0,
-    lastStatus: 0,
-    lastURL: "",
-    proxy: { remaining: null, capacity: null, rps: null },
-  };
-
-  // Monkeypatch the already-patched fetch to track stats without changing behavior
-  const patched = window.fetch;
-  window.fetch = async function fetchWithStats(input, init) {
-    const t0 = performance.now();
-    S.inFlight++; S.started++;
-    try {
-      const res = await patched(input, init);
-      S.lastStatus = res.status;
-      S.lastURL = (typeof input === 'string') ? input : (input?.url || "");
-      // Pull proxy headers if present
-      const rem = res.headers.get('X-Proxy-TokenBucket-Remaining');
-      const cap = res.headers.get('X-Proxy-TokenBucket-Capacity');
-      const rps = res.headers.get('X-Proxy-TokenBucket-RefillPerSec');
-      if (rem !== null) S.proxy.remaining = Number(rem);
-      if (cap !== null) S.proxy.capacity = Number(cap);
-      if (rps !== null) S.proxy.rps = Number(rps);
-      if (res.status === 429) S.recent429++;
-      return res;
-    } catch (e) {
-      S.errors++;
-      throw e;
-    } finally {
-      const dt = performance.now() - t0;
-      // simple EMA for average latency
-      S.avgMs = S.avgMs === 0 ? dt : (S.avgMs * 0.9 + dt * 0.1);
-      S.inFlight--;
-      S.finished++;
-    }
-  };
-
-  // Small HUD
-  const style = document.createElement('style');
-  style.textContent = `
-    #net-hud{position:fixed;right:12px;bottom:12px;z-index:9999;
-      background:rgba(30,32,40,.85);color:#eaeaff;border:1px solid rgba(255,255,255,.08);
-      border-radius:12px;padding:10px 12px;font:12px/1.3 ui-sans-serif,system-ui,Segoe UI,Roboto;
-      box-shadow:0 6px 24px rgba(0,0,0,.25);backdrop-filter:blur(6px);min-width:220px}
-    #net-hud h4{margin:0 0 6px 0;font-size:12px;letter-spacing:.3px;opacity:.9}
-    #net-hud .row{display:flex;justify-content:space-between;margin:2px 0}
-    #net-hud .muted{opacity:.7}
-    #net-hud .ok{color:#7dd3fc} /* sky */
-    #net-hud .warn{color:#fcd34d} /* amber */
-    #net-hud .err{color:#fca5a5} /* red */
-    #net-hud .bar{height:4px;border-radius:4px;background:rgba(255,255,255,.08);overflow:hidden;margin-top:6px}
-    #net-hud .bar>i{display:block;height:100%;width:0%}
-    #net-hud .tiny{font-size:11px;opacity:.75}
-    #net-hud .btn{cursor:pointer;margin-left:8px;color:#a5b4fc}
-  `;
-  document.head.appendChild(style);
-
-  const hud = document.createElement('div');
-  hud.id = "net-hud";
-  hud.innerHTML = `
-    <h4>Network Activity <span class="btn" id="net-hud-toggle">▾</span></h4>
-    <div id="net-hud-body">
-      <div class="row"><span class="muted">Phase</span><span id="nh-phase">—</span></div>
-      <div class="row"><span class="muted">In‑flight</span><span id="nh-inflight">0</span></div>
-      <div class="row"><span class="muted">Done / Total</span><span id="nh-done">0 / ?</span></div>
-      <div class="row"><span class="muted">Errors</span><span id="nh-err" class="err">0</span></div>
-      <div class="row"><span class="muted">Avg latency</span><span id="nh-avg">0 ms</span></div>
-      <div class="row"><span class="muted">Last status</span><span id="nh-status">—</span></div>
-      <div class="row"><span class="muted">Proxy tokens</span><span id="nh-proxy">—</span></div>
-      <div class="bar"><i id="nh-bar"></i></div>
-      <div class="tiny muted" id="nh-url">—</div>
-    </div>
-  `;
-  document.body.appendChild(hud);
-
-  // Collapsible
-  const toggle = hud.querySelector('#net-hud-toggle');
-  const body = hud.querySelector('#net-hud-body');
-  let collapsed = false;
-  toggle.addEventListener('click', () => {
-    collapsed = !collapsed;
-    body.style.display = collapsed ? 'none' : 'block';
-    toggle.textContent = collapsed ? '▸' : '▾';
-  });
-
-  // Expose helpers to update phase/total from app code if desired
-  window.__FETCH_STATS__.setPhase = (name, total=null) => {
-    S.phase = name || S.phase;
-    if (typeof total === 'number') S.total = total;
-  };
-  // Best-effort attempt to infer total from existing progress bar text on the page
-  const inferTotalFromDOM = () => {
-    const el = Array.from(document.querySelectorAll('*')).find(n => n.textContent && /Fetching participants for \d+ fights/i.test(n.textContent));
-    if (el) {
-      const m = el.textContent.match(/(\d+)\s*fights/i);
-      if (m) S.total = Number(m[1]);
-    }
-  };
-  inferTotalFromDOM();
-
-  // Render loop (non-blocking)
-  function render(){
-    const phase = hud.querySelector('#nh-phase');
-    const inflight = hud.querySelector('#nh-inflight');
-    const done = hud.querySelector('#nh-done');
-    const err = hud.querySelector('#nh-err');
-    const avg = hud.querySelector('#nh-avg');
-    const stat = hud.querySelector('#nh-status');
-    const url = hud.querySelector('#nh-url');
-    const bar = hud.querySelector('#nh-bar');
-    const proxy = hud.querySelector('#nh-proxy');
-
-    phase.textContent = S.phase;
-    inflight.textContent = String(S.inFlight);
-    const total = S.total || '?';
-    done.textContent = `${S.finished} / ${total}`;
-    err.textContent = String(S.errors);
-    avg.textContent = `${Math.round(S.avgMs)} ms`;
-    stat.textContent = S.lastStatus ? String(S.lastStatus) : '—';
-    url.textContent = S.lastURL || '—';
-    if (typeof total === 'number' && total > 0) {
-      const pct = Math.max(0, Math.min(100, (S.finished / total) * 100));
-      bar.style.width = pct.toFixed(1) + '%';
-    }
-    if (S.proxy.capacity != null && S.proxy.remaining != null) {
-      proxy.textContent = `${S.proxy.remaining}/${S.proxy.capacity}` + (S.proxy.rps != null ? ` @ ${S.proxy.rps}/s` : '');
-    }
-
-    requestAnimationFrame(render);
-  }
-  requestAnimationFrame(render);
-
-  // Try to auto-detect phases by watching URL patterns (optional)
-  const _setPhaseFromURL = (u) => {
-    if (!u) return;
-    if (/report\/fights\//.test(u)) S.phase = "Fetching fights";
-    else if (/tables\/damage-done\//.test(u) || /tables\/healing\//.test(u)) S.phase = "Fetching participants";
-    else if (/tables\/deaths\//.test(u) || /events\/deaths\//.test(u)) S.phase = "Fetching deaths";
-  };
-  const _origFetch = window.fetch;
-  window.fetch = async function fetchWithPhase(input, init){
-    const u = (typeof input === 'string') ? input : (input?.url || "");
-    _setPhaseFromURL(u);
-    return _origFetch(input, init);
-  };
-})();
-</script>
-
-
 </head>
 <body>
   <div class="container">
@@ -403,7 +188,7 @@
         </div>
       </div>
       <div class="chips" id="bossChips"></div>
-      <details style="margin-bottom:20px;background:var(--panel2);" open>
+      <details style="margin-bottom:20px;background:var(--panel2);">
         <summary style="font-weight:700;padding:12px;">📊 All Bosses Overview (click to collapse)</summary>
         <div id="overviewTable" style="padding:12px;"></div>
       </details>
@@ -747,6 +532,23 @@
       return result;
     }
     
+    function filterMassDeaths(deaths){
+      const THRESH=7, WIN=10000; // match python
+      if (!Array.isArray(deaths) || deaths.length < THRESH) return deaths.slice();
+      const sd = deaths.slice().sort((a,b)=>a.timestamp-b.timestamp);
+      for (let i=0;i<=sd.length-THRESH;i++){
+        const winStart = sd[i].timestamp, winEnd = winStart + WIN;
+        let cnt = 0;
+        for (let j=i;j<sd.length;j++){
+          if (sd[j].timestamp <= winEnd) cnt++; else break;
+        }
+        if (cnt >= THRESH){
+          return sd.slice(0, i); // drop deaths at/after the start of mass-death window
+        }
+      }
+      return sd;
+    }
+
     function processFights(fights, allParticipants, allDeaths) {
       const events = {};
       const pullParticipation = {};
@@ -775,7 +577,8 @@
         }
         
         // Process deaths
-        const topDeaths = deathData.slice(0, state.config.maxCutoff);
+        const filteredDeaths = filterMassDeaths(deathData);
+        const topDeaths = filteredDeaths.slice(0, state.config.maxCutoff);
         
         for (let rank = 0; rank < topDeaths.length; rank++) {
           const death = topDeaths[rank];
@@ -826,6 +629,7 @@
     function displayResults(results) {
       const { events, pullParticipation, bossParticipation, characterBreakdown } = results;
       state.data = { events, pullParticipation, bossParticipation, characterBreakdown };
+      state.sortBoss = state.sortBoss || null;
       state.currentCutoff = 2; // Default to 2
       
       // Build boss chips
@@ -839,6 +643,7 @@
         chip.onclick = () => {
           chip.classList.toggle('sel');
           state.selectedBosses.has(boss) ? state.selectedBosses.delete(boss) : state.selectedBosses.add(boss);
+          state.sortBoss = boss; // sort by clicked boss column
           buildOverviewTable();
           renderPlayerList();
         };
@@ -868,7 +673,26 @@
       
       const allBosses = Object.keys(bossParticipation).sort();
       const bosses = state.selectedBosses.size > 0 ? Array.from(state.selectedBosses).sort() : allBosses;
-      const players = Object.keys(events).sort();
+      let players = Object.keys(events);
+      // Optional sorting by selected boss or overall
+      if (state.sortBoss === '__overall__') {
+        players = players.sort((a,b)=>{
+          const aPulls = (pullParticipation[a] ? pullParticipation[a].size : 0);
+          const bPulls = (pullParticipation[b] ? pullParticipation[b].size : 0);
+          const aDeaths = (events[a]||[]).filter(ev => (state.selectedBosses.size===0 || state.selectedBosses.has(ev.boss)) && ev.rankWithinPull <= (state.currentCutoff||2)).length;
+          const bDeaths = (events[b]||[]).filter(ev => (state.selectedBosses.size===0 || state.selectedBosses.has(ev.boss)) && ev.rankWithinPull <= (state.currentCutoff||2)).length;
+          const ar = aPulls>0 ? aDeaths/aPulls : 0; const br = bPulls>0 ? bDeaths/bPulls : 0; return br - ar;
+        });
+      } else if (state.sortBoss) {
+        const bos = state.sortBoss;
+        players = players.sort((a,b)=>{
+          const aPulls = (bossParticipation[bos] && bossParticipation[bos][a]) ? bossParticipation[bos][a].length : 0;
+          const bPulls = (bossParticipation[bos] && bossParticipation[bos][b]) ? bossParticipation[bos][b].length : 0;
+          const aDeaths = (events[a]||[]).filter(ev => ev.boss===bos && ev.rankWithinPull <= (state.currentCutoff||2)).length;
+          const bDeaths = (events[b]||[]).filter(ev => ev.boss===bos && ev.rankWithinPull <= (state.currentCutoff||2)).length;
+          const ar = aPulls>0 ? aDeaths/aPulls : 0; const br = bPulls>0 ? bDeaths/bPulls : 0; return br - ar;
+        });
+      } else { players = players.sort(); }
       
       if (!players.length) {
         holder.innerHTML = '<p class="muted">No data to display</p>';
@@ -881,6 +705,8 @@
       const headerRow = document.createElement('tr');
       headerRow.innerHTML = '<th style="cursor:pointer;">Player</th>' + bosses.map(b => `<th style="text-align:center;">${b}</th>`).join('') + '<th style="text-align:center;"><strong>Overall</strong></th>';
       thead.appendChild(headerRow);
+      const hdrO = headerRow.querySelector('#hdrOverall');
+      if (hdrO) hdrO.onclick = ()=>{ state.sortBoss='__overall__'; buildOverviewTable(); };
       table.appendChild(thead);
       
       const tbody = document.createElement('tbody');
@@ -935,50 +761,7 @@
       table.appendChild(tbody);
       
       holder.innerHTML = '';
-      holder.appendChild(table);
-    }
-    
-    function renderPlayerList() {
-      const content = document.getElementById('resultsContent');
-      content.innerHTML = '';
-      
-      if (!state.data) return;
-      
-      const { events, pullParticipation, bossParticipation, characterBreakdown } = state.data;
-      const stats = [];
-      const cutoff = state.currentCutoff || 2;
-      
-      for (const player in events) {
-        const playerEvents = events[player].filter(e => 
-          e.rankWithinPull <= cutoff && 
-          (state.selectedBosses.size === 0 || state.selectedBosses.has(e.boss))
-        );
-        
-        if (playerEvents.length === 0) continue;
-        
-        let pulls = 0;
-        if (state.selectedBosses.size === 0) {
-          pulls = pullParticipation[player].length;
-        } else {
-          for (const boss of state.selectedBosses) {
-            pulls += (bossParticipation[boss][player] || []).length;
-          }
-        }
-        
-        const rate = pulls > 0 ? (playerEvents.length / pulls * 100) : 0;
-        stats.push({ player, deaths: playerEvents.length, pulls, rate, events: playerEvents });
-      }
-      
-      stats.sort((a, b) => b.rate - a.rate);
-      
-      for (const stat of stats) {
-        const details = document.createElement('details');
-        const summary = document.createElement('summary');
-        const altIndicator = hasAlts(stat.player) ? ' <span class="muted">(grouped)</span>' : '';
-        summary.innerHTML = `${stat.player}${altIndicator} <span class="muted">— ${stat.deaths} deaths / ${stat.pulls} pulls · ${stat.rate.toFixed(1)}%</span>`;
-        details.appendChild(summary);
-        
-        details.addEventListener('toggle', () => {
+      'toggle', () => {
           if (!details.open || details.dataset.built) return;
           details.dataset.built = '1';
           
@@ -1111,167 +894,5 @@
     
     init();
   </script>
-
-
-
-<script>
-// ===== HUD + Phase Counters (container-safe, no implicit totals) =====
-(() => {
-  const SELS = ['.card', '.progress', '.wcl-progress', 'body'];
-
-  function waitForContainer(cb){
-    // If HUD already exists, skip
-    if (document.getElementById('phase-counters')) return;
-    const find = () => {
-      for (const s of SELS) {
-        const n = document.querySelector(s);
-        if (n) return n;
-      }
-      return null;
-    };
-    const n = find();
-    if (n) { cb(n); return; }
-    const mo = new MutationObserver(() => {
-      const el = find();
-      if (el) { mo.disconnect(); cb(el); }
-    });
-    mo.observe(document.documentElement, { childList: true, subtree: true });
-  }
-
-  function init(container){
-    if (document.getElementById('phase-counters')) return; // guard
-
-    // Stats store
-    const S = window.__FETCH_STATS__ = {
-      inFlight: 0, started: 0, finished: 0, errors: 0, avgMs: 0,
-      lastStatus: 0, lastURL: "",
-      phase: "Initializing…",
-      fightsDone: 0, fightsTotal: undefined,
-      partsDone: 0, partsTotal: undefined,     // totals remain undefined until set explicitly
-      deathsDone: 0, deathsTotal: undefined,
-      uniquePartsKeys: new Set(),
-      uniqueDeathKeys: new Set(),
-      proxy: { remaining: null, capacity: null, rps: null }
-    };
-
-    // Helper: per-fight key from URL
-    function fightKeyFromURL(u){
-      try{
-        const url = new URL(u, location.origin);
-        const pathParts = url.pathname.split('/').filter(Boolean);
-        const reportId = pathParts[pathParts.length - 1];
-        const start = url.searchParams.get('start') || '';
-        const end = url.searchParams.get('end') || '';
-        if (reportId && start && end) return `${reportId}:${start}-${end}`;
-      } catch(_){}
-      return null;
-    }
-
-    // Patch fetch to collect stats
-    const orig = window.fetch;
-    window.fetch = async function fetchWithStats(input, init){
-      const url = (typeof input === 'string') ? input : (input?.url || "");
-      const t0 = performance.now();
-      S.inFlight++; S.started++;
-      try {
-        const res = await orig(input, init);
-        S.lastStatus = res.status; S.lastURL = url;
-
-        // Proxy headers (optional)
-        const rem = res.headers.get('X-Proxy-Global-Remaining') || res.headers.get('X-Proxy-TokenBucket-Remaining');
-        const cap = res.headers.get('X-Proxy-Global-Capacity') || res.headers.get('X-Proxy-TokenBucket-Capacity');
-        const rps = res.headers.get('X-Proxy-Global-RPS') || res.headers.get('X-Proxy-TokenBucket-RefillPerSec');
-        if (rem) S.proxy.remaining = Number(rem);
-        if (cap) S.proxy.capacity = Number(cap);
-        if (rps) S.proxy.rps = Number(rps);
-
-        // Phase heuristics + deduped per-fight increments
-        if (/\/report\/fights\//.test(url)) {
-          S.phase = "Fetching fights";
-          S.fightsDone++;
-        } else if (/\/tables\/(damage-done|healing)\//.test(url)) {
-          S.phase = "Fetching participants";
-          const k = fightKeyFromURL(url);
-          if (k && !S.uniquePartsKeys.has(k)) {
-            S.uniquePartsKeys.add(k);
-            S.partsDone = S.uniquePartsKeys.size;
-          }
-        } else if (/\/(tables|events)\/deaths\//.test(url)) {
-          S.phase = "Fetching deaths";
-          const k = fightKeyFromURL(url);
-          if (k && !S.uniqueDeathKeys.has(k)) {
-            S.uniqueDeathKeys.add(k);
-            S.deathsDone = S.uniqueDeathKeys.size;
-          }
-        }
-        return res;
-      } catch(e) {
-        S.errors++;
-        throw e;
-      } finally {
-        const dt = performance.now() - t0;
-        S.avgMs = S.avgMs === 0 ? dt : (S.avgMs * 0.9 + dt * 0.1);
-        S.inFlight--; S.finished++;
-      }
-    };
-
-    // Build counters panel
-    const panel = document.createElement('div');
-    panel.id = "phase-counters";
-    panel.style.marginTop = "8px";
-    panel.style.fontSize = "12px";
-    panel.style.opacity = "0.95";
-    panel.style.display = "grid";
-    panel.style.gridTemplateColumns = "repeat(3, 1fr)";
-    panel.style.gap = "6px";
-
-    function cell(label){
-      const wrap = document.createElement('div');
-      wrap.style.background = "rgba(255,255,255,0.04)";
-      wrap.style.border = "1px solid rgba(255,255,255,0.06)";
-      wrap.style.borderRadius = "8px";
-      wrap.style.padding = "8px 10px";
-      const t = document.createElement('div'); t.textContent = label; t.style.opacity = "0.75"; t.style.marginBottom = "4px";
-      const v = document.createElement('div'); v.textContent = "—"; v.style.fontWeight = "700"; v.style.fontSize = "14px";
-      wrap.appendChild(t); wrap.appendChild(v);
-      return {wrap, v};
-    }
-    const fights = cell("Fights");
-    const parts  = cell("Participants");
-    const deaths = cell("Deaths");
-    panel.appendChild(fights.wrap); panel.appendChild(parts.wrap); panel.appendChild(deaths.wrap);
-
-    container.appendChild(panel);
-
-    // Render: show denominator only if total is explicitly set (avoid X/1)
-    function fmt(done, total){
-      return (typeof total === 'number') ? `${done}/${total}` : String(done);
-    }
-    function tick(){
-      fights.v.textContent = fmt(S.fightsDone, S.fightsTotal);
-      parts.v.textContent  = fmt(S.partsDone,  S.partsTotal);
-      deaths.v.textContent = fmt(S.deathsDone, S.deathsTotal);
-      requestAnimationFrame(tick);
-    }
-    requestAnimationFrame(tick);
-
-    // Public API to set exact totals
-    window.__SET_PHASE_TOTALS__ = (t) => {
-      if (t.fights != null) S.fightsTotal = t.fights;
-      if (t.participants != null) S.partsTotal = t.participants;
-      if (t.deaths != null) S.deathsTotal = t.deaths;
-    };
-  }
-
-  const startInit = () => waitForContainer(init);
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', startInit, { once: true });
-  } else {
-    startInit();
-  }
-})();
-</script>
-
-
 </body>
 </html>
