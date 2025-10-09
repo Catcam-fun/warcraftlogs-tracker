@@ -532,48 +532,7 @@
       return result;
     }
     
-    function filterMassDeaths(deaths){
-  const THRESH=7, WINDOW_MS=10000;
-  if (!Array.isArray(deaths) || deaths.length < THRESH) return deaths;
-  const sorted = deaths.slice().sort((a,b)=>a.timestamp-b.timestamp);
-  for (let i=0; i<=sorted.length-THRESH; i++){
-    const start = sorted[i].timestamp, end = start + WINDOW_MS;
-    let count = 0;
-    for (let j=i; j<sorted.length; j++){ if (sorted[j].timestamp <= end) count++; else break; }
-    if (count >= THRESH) return sorted.filter(d => d.timestamp < start);
-  }
-  return deaths;
-}
-
-
-<script>
-// Mass-death exclusion: ignore all deaths at/after the first window start
-// where >= THRESH deaths occur within WINDOW_MS.
-(function(){
-  function filterMassDeaths(deaths){
-    const d = Array.isArray(deaths) ? deaths.slice() : [];
-    const THRESH = (window.state?.config?.massDeathThreshold) ?? 7;
-    const WINDOW_MS = (window.state?.config?.massDeathWindowMs) ?? 10000;
-    if (d.length < THRESH) return deaths;
-    d.sort((a,b)=>a.timestamp-b.timestamp);
-    for (let i=0; i<=d.length-THRESH; i++){
-      const start = d[i].timestamp, end = start + WINDOW_MS;
-      let count = 0;
-      for (let j=i; j<d.length; j++){
-        if (d[j].timestamp <= end) count++; else break;
-      }
-      if (count >= THRESH){
-        return d.filter(x => x.timestamp < start);
-      }
-    }
-    return deaths;
-  }
-  // expose for app usage
-  window.filterMassDeaths = filterMassDeaths;
-})();
-</script>
-
-function processFights(fights, allParticipants, allDeaths) {
+    function processFights(fights, allParticipants, allDeaths) {
       const events = {};
       const pullParticipation = {};
       const bossParticipation = {};
@@ -1021,5 +980,29 @@ function processFights(fights, allParticipants, allDeaths) {
 })();
 </script>
 
+<script>
+// Mass-death exclusion helper (standalone script tag)
+(function(){
+  function filterMassDeaths(deaths){
+    const d = Array.isArray(deaths) ? deaths.slice() : [];
+    const THRESH = (window.state?.config?.massDeathThreshold) ?? 7;
+    const WINDOW_MS = (window.state?.config?.massDeathWindowMs) ?? 10000;
+    if (d.length < THRESH) return deaths;
+    d.sort((a,b)=>a.timestamp-b.timestamp);
+    for (let i=0; i<=d.length-THRESH; i++){
+      const start = d[i].timestamp, end = start + WINDOW_MS;
+      let count = 0;
+      for (let j=i; j<d.length; j++){
+        if (d[j].timestamp <= end) count++; else break;
+      }
+      if (count >= THRESH){
+        return d.filter(x => x.timestamp < start);
+      }
+    }
+    return deaths;
+  }
+  window.filterMassDeaths = filterMassDeaths;
+})();
+</script>
 </body>
 </html>
