@@ -104,13 +104,13 @@
         
         <div class="form-group">
           <label>Guild Name *</label>
-          <input type="text" id="guildName" placeholder="e.g., Do Over" title="Guild name — not case-sensitive">>
+          <input type="text" id="guildName" placeholder="e.g., Do Over" title="Guild name — not case-sensitive">
           <div class="field-hint">Not case‑sensitive. We match guilds regardless of letter case.</div>
         </div>
         
         <div class="form-group">
           <label>Server *</label>
-          <input type="text" id="server" placeholder="e.g., Thrall" title="Server/Realm — not case-sensitive; spaces ok" placeholder="e.g., Thrall">>
+          <input type="text" id="server" placeholder="e.g., Thrall" title="Server/Realm — not case-sensitive; spaces ok" placeholder="e.g., Thrall">
           <div class="field-hint">Not case‑sensitive. Spaces/apostrophes allowed; we normalize to <code>lowercase-hyphens</code> (e.g., <code>Illidán</code> → <code>illidan</code>).</div>
         </div>
         
@@ -159,7 +159,7 @@
       
       <div class="form-group" style="margin-top:15px;">
         <label>Author Filters (optional)</label>
-        <input type="text" id="authorFilters" placeholder="username1, username2" title="Optional: comma-separated character names (case-insensitive)">>
+        <input type="text" id="authorFilters" placeholder="username1, username2" title="Optional: comma-separated character names (case-insensitive)">
       </div>
       
       <div class="char-groups">
@@ -195,7 +195,7 @@
         </div>
       </div>
       <div class="chips" id="bossChips"></div>
-      <details style="margin-bottom:20px;background:var(--panel2);" open>
+      <details style="margin-bottom:20px;background:var(--panel2);">
         <summary style="font-weight:700;padding:12px;">📊 All Bosses Overview (click to collapse)</summary>
         <div id="overviewTable" style="padding:12px;"></div>
       </details>
@@ -651,21 +651,143 @@
       renderPlayerList();
     }
     
-    function buildOverviewTable() {
-      const holder = document.getElementById('overviewTable');
-      if (!state.data) return;
-      
-      const { events, pullParticipation, bossParticipation } = state.data;
-      const cutoff = state.currentCutoff || 2;
-      
-      const allBosses = Object.keys(bossParticipation).sort();
-      const bosses = state.selectedBosses.size > 0 ? Array.from(state.selectedBosses).sort() : allBosses;
-      const players = Object.keys(events).sort();
-      
-      if (!players.length) {
-        holder.innerHTML = '<p class="muted">No data to display</p>';
-        return;
+    
+function buildOverviewTable() {
+  const holder = document.getElementById('overviewTable');
+  if (!state.data) return;
+
+  const { events, pullParticipation, bossParticipation } = state.data;
+  const cutoff = state.currentCutoff || 2;
+
+  const allBosses = Object.keys(bossParticipation).sort();
+  const bosses = state.selectedBosses.size > 0 ? Array.from(state.selectedBosses).sort() : allBosses;
+  const players = Object.keys(events).sort();
+
+  if (!players.length) {
+    holder.innerHTML = '<p class="muted">No data to display</p>';
+    return;
+  }
+
+  // --- Build a model of rows with precomputed rates so we can sort quickly
+  const rows = players.map(player => {
+    const perBoss = {};
+    let totalPulls = 0, totalDeaths = 0;
+
+    bosses.forEach(boss => {
+      const pulls = (bossParticipation[boss] && bossParticipation[boss][player]) ? bossParticipation[boss][player].length : 0;
+      const deaths = (events[player] || []).filter(ev => ev.boss === boss && ev.rankWithinPull <= cutoff).length;
+      const rate = pulls > 0 ? (deaths / pulls * 100) : 0;
+      perBoss[boss] = { pulls, deaths, rate };
+      totalPulls += pulls;
+      totalDeaths += deaths;
+    });
+
+    const overallRate = totalPulls > 0 ? (totalDeaths / totalPulls * 100) : 0;
+    return { player, perBoss, overallRate };
+  });
+
+  // --- Sorting
+  state.sort = state.sort || { key: 'player', dir: 'asc' };
+  const { key, dir } = state.sort;
+  const mul = dir === 'asc' ? 1 : -1;
+  rows.sort((a,b) => {
+    if (key === 'player') {
+      return a.player.localeCompare(b.player) * mul;
+    } else if (key === 'overall') {
+      return (a.overallRate - b.overallRate) * mul;
+    } else {
+      // boss key
+      const ra = a.perBoss[key]?.rate || 0;
+      const rb = b.perBoss[key]?.rate || 0;
+      return (ra - rb) * mul;
+    }
+  });
+
+  // --- Render table
+  const table = document.createElement('table');
+  table.style.fontSize = '13px';
+  const thead = document.createElement('thead');
+  const headerRow = document.createElement('tr');
+
+  // Build header cells with sort handlers
+  const thPlayer = document.createElement('th');
+  thPlayer.style.cursor = 'pointer';
+  thPlayer.textContent = 'Player';
+  thPlayer.onclick = () => {
+    state.sort = { key: 'player', dir: (state.sort?.key==='player' && state.sort.dir==='asc') ? 'desc' : 'asc' };
+    buildOverviewTable();
+  };
+  headerRow.appendChild(thPlayer);
+
+  bosses.forEach(boss => {
+    const th = document.createElement('th');
+    th.style.textAlign = 'center';
+    th.style.cursor = 'pointer';
+    th.textContent = boss;
+    th.title = 'Sort by ' + boss + ' rate';
+    th.onclick = () => {
+      const nextDir = (state.sort?.key===boss && state.sort.dir==='asc') ? 'desc' : 'asc';
+      state.sort = { key: boss, dir: nextDir };
+      buildOverviewTable();
+    };
+    headerRow.appendChild(th);
+  });
+
+  const thOverall = document.createElement('th');
+  thOverall.style.textAlign = 'center';
+  thOverall.style.cursor = 'pointer';
+  thOverall.innerHTML = '<strong>Overall</strong>';
+  thOverall.title = 'Sort by overall rate';
+  thOverall.onclick = () => {
+    const nextDir = (state.sort?.key==='overall' && state.sort.dir==='asc') ? 'desc' : 'asc';
+    state.sort = { key: 'overall', dir: nextDir };
+    buildOverviewTable();
+  };
+  headerRow.appendChild(thOverall);
+
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  rows.forEach(row => {
+    const tr = document.createElement('tr');
+
+    const playerCell = document.createElement('td');
+    playerCell.innerHTML = `<strong>${row.player}</strong>`;
+    tr.appendChild(playerCell);
+
+    bosses.forEach(boss => {
+      const td = document.createElement('td');
+      td.style.textAlign = 'center';
+      const rate = row.perBoss[boss]?.rate ?? 0;
+      const pulls = row.perBoss[boss]?.pulls ?? 0;
+
+      if (!pulls) {
+        td.textContent = '—';
+        td.style.opacity = '0.4';
+      } else {
+        td.textContent = rate.toFixed(1) + '%';
+        if (rate > 50) td.style.color = 'var(--bad)';
+        else if (rate < 20) td.style.color = 'var(--good)';
       }
+      tr.appendChild(td);
+    });
+
+    const overallTd = document.createElement('td');
+    overallTd.style.textAlign = 'center';
+    overallTd.innerHTML = `<strong>${row.overallRate.toFixed(1)}%</strong>`;
+    if (row.overallRate > 50) overallTd.style.color = 'var(--bad)';
+    else if (row.overallRate < 20) overallTd.style.color = 'var(--good)';
+    tr.appendChild(overallTd);
+
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+
+  holder.innerHTML = '';
+  holder.appendChild(table);
+}
+
       
       const table = document.createElement('table');
       table.style.fontSize = '13px';
