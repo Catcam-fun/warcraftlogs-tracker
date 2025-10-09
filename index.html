@@ -173,13 +173,23 @@
     </div>
     
     <div class="results" id="resultsBox">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;flex-wrap:wrap;gap:10px;">
         <h2 style="margin:0;">📊 Results</h2>
-        <button class="btn btn-secondary" onclick="newReport()">🔄 New Report</button>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <label style="color:var(--muted);font-size:14px;">Deaths to show:</label>
+          <select id="cutoffFilter" class="select" style="padding:6px 10px;">
+            <option value="1">1 Death</option>
+            <option value="2" selected>2 Deaths</option>
+            <option value="3">3 Deaths</option>
+            <option value="4">4 Deaths</option>
+            <option value="5">5 Deaths</option>
+          </select>
+          <button class="btn btn-secondary" onclick="newReport()">🔄 New Report</button>
+        </div>
       </div>
       <div class="chips" id="bossChips"></div>
-      <details style="margin-bottom:20px;background:var(--panel2);">
-        <summary style="font-weight:700;padding:12px;">📊 All Bosses Overview (click to expand)</summary>
+      <details style="margin-bottom:20px;background:var(--panel2);" open>
+        <summary style="font-weight:700;padding:12px;">📊 All Bosses Overview (click to collapse)</summary>
         <div id="overviewTable" style="padding:12px;"></div>
       </details>
       <div id="resultsContent"></div>
@@ -190,7 +200,13 @@
     // Cloudflare Worker URL for API proxy
     const WORKER_URL = 'https://wcl-proxy.catcam-fun.workers.dev';
     
-    const state = { config: {}, cache: new Map(), data: null, selectedBosses: new Set() };
+    const state = { 
+      config: {}, 
+      cache: new Map(), 
+      data: null, 
+      selectedBosses: new Set(),
+      currentCutoff: 2  // Default death cutoff filter
+    };
     
     function init() {
       document.getElementById('cutoffDate').value = new Date().toISOString().split('T')[0];
@@ -422,12 +438,38 @@
         
         showProgress(`Fetching deaths for ${dedupedFights.length} fights...`, 65);
         
-        // OPTIMIZATION: Fetch all deaths in parallel
-        const deathPromises = dedupedFights.map(f => 
-          cachedFetch(`https://www.warcraftlogs.com/v1/report/tables/deaths/${f.reportId}?start=${f.fight.start_time}&end=${f.fight.end_time}&translate=true&api_key=${apiKey}`)
-            .then(data => ({ fight: f, deaths: data.entries || [] }))
-            .catch(() => ({ fight: f, deaths: [] }))
-        );
+        // OPTIMIZATION: Fetch all deaths AND death events in parallel for killing blow info
+        const deathPromises = dedupedFights.map(async f => {
+          // Fetch death events for killing blow
+          const eventsUrl = `https://www.warcraftlogs.com/v1/report/events/deaths/${f.reportId}?start=${f.fight.start_time}&end=${f.fight.end_time}&api_key=${apiKey}`;
+          let kbMap = {};
+          try {
+            const eventsData = await cachedFetch(eventsUrl);
+            for (const ev of eventsData.events || []) {
+              if (ev.type === 'death') {
+                const key = `${ev.targetID}_${ev.timestamp}`;
+                kbMap[key] = (ev.killingAbility || {}).name || 'Unknown';
+              }
+            }
+          } catch(e) {}
+          
+          // Fetch deaths table
+          try {
+            const data = await cachedFetch(`https://www.warcraftlogs.com/v1/report/tables/deaths/${f.reportId}?start=${f.fight.start_time}&end=${f.fight.end_time}&translate=true&api_key=${apiKey}`);
+            const deaths = (data.entries || []).map(e => {
+              const key = `${e.id}_${e.timestamp}`;
+              const ability = kbMap[key] || ((e.ability || {}).name || 'Unknown');
+              return {
+                targetName: e.name || 'Unknown',
+                timestamp: f.reportAbsStart + e.timestamp,
+                abilityName: ability
+              };
+            });
+            return { fight: f, deaths };
+          } catch(e) {
+            return { fight: f, deaths: [] };
+          }
+        });
         
         const allDeaths = await Promise.all(deathPromises);
         
@@ -522,8 +564,8 @@
         
         for (let rank = 0; rank < topDeaths.length; rank++) {
           const death = topDeaths[rank];
-          const main = getMainCharacter(death.name, state.config.charGroups);
-          const originalChar = death.name;
+          const main = getMainCharacter(death.targetName, state.config.charGroups);
+          const originalChar = death.targetName;
           
           const deathEvent = {
             player: main,
@@ -534,8 +576,8 @@
             isKill: fightData.isKill,
             pullNo,
             rankWithinPull: rank + 1,
-            absTs: fightData.reportAbsStart + death.timestamp,
-            abilityName: (death.ability || {}).name || 'Unknown'
+            absTs: death.timestamp, // Already absolute from our fetch
+            abilityName: death.abilityName || 'Unknown'
           };
           
           if (!events[main]) events[main] = [];
@@ -563,11 +605,13 @@
       document.getElementById('configPanel').style.display = 'block';
       state.data = null;
       state.selectedBosses.clear();
+      state.currentCutoff = 2;
     }
     
     function displayResults(results) {
       const { events, pullParticipation, bossParticipation, characterBreakdown } = results;
       state.data = { events, pullParticipation, bossParticipation, characterBreakdown };
+      state.currentCutoff = 2; // Default to 2
       
       // Build boss chips
       const chips = document.getElementById('bossChips');
@@ -580,10 +624,20 @@
         chip.onclick = () => {
           chip.classList.toggle('sel');
           state.selectedBosses.has(boss) ? state.selectedBosses.delete(boss) : state.selectedBosses.add(boss);
+          buildOverviewTable();
           renderPlayerList();
         };
         chips.appendChild(chip);
       }
+      
+      // Setup cutoff filter
+      const cutoffFilter = document.getElementById('cutoffFilter');
+      cutoffFilter.value = '2';
+      cutoffFilter.onchange = (e) => {
+        state.currentCutoff = parseInt(e.target.value);
+        buildOverviewTable();
+        renderPlayerList();
+      };
       
       // Build overview table
       buildOverviewTable();
@@ -592,14 +646,17 @@
     
     function buildOverviewTable() {
       const holder = document.getElementById('overviewTable');
-      const { events, pullParticipation, bossParticipation } = state.data;
-      const cutoff = state.config.maxCutoff;
+      if (!state.data) return;
       
-      const bosses = Object.keys(bossParticipation).sort();
+      const { events, pullParticipation, bossParticipation } = state.data;
+      const cutoff = state.currentCutoff || 2;
+      
+      const allBosses = Object.keys(bossParticipation).sort();
+      const bosses = state.selectedBosses.size > 0 ? Array.from(state.selectedBosses).sort() : allBosses;
       const players = Object.keys(events).sort();
       
       if (!players.length) {
-        holder.style.display = 'none';
+        holder.innerHTML = '<p class="muted">No data to display</p>';
         return;
       }
       
@@ -638,8 +695,20 @@
         
         const overallTd = document.createElement('td');
         overallTd.style.textAlign = 'center';
-        const totalPulls = (pullParticipation[player] || []).length;
-        const totalDeaths = (events[player] || []).filter(ev => ev.rankWithinPull <= cutoff).length;
+        
+        let totalPulls, totalDeaths;
+        if (state.selectedBosses.size === 0) {
+          totalPulls = (pullParticipation[player] || []).length;
+          totalDeaths = (events[player] || []).filter(ev => ev.rankWithinPull <= cutoff).length;
+        } else {
+          totalPulls = 0;
+          totalDeaths = 0;
+          for (const boss of state.selectedBosses) {
+            totalPulls += (bossParticipation[boss] && bossParticipation[boss][player]) ? bossParticipation[boss][player].length : 0;
+            totalDeaths += (events[player] || []).filter(ev => ev.boss === boss && ev.rankWithinPull <= cutoff).length;
+          }
+        }
+        
         const overallRate = totalPulls > 0 ? (totalDeaths / totalPulls * 100) : 0;
         overallTd.innerHTML = `<strong>${overallRate.toFixed(1)}%</strong>`;
         if (overallRate > 50) overallTd.style.color = 'var(--bad)';
@@ -658,9 +727,11 @@
       const content = document.getElementById('resultsContent');
       content.innerHTML = '';
       
+      if (!state.data) return;
+      
       const { events, pullParticipation, bossParticipation, characterBreakdown } = state.data;
       const stats = [];
-      const cutoff = state.config.maxCutoff;
+      const cutoff = state.currentCutoff || 2;
       
       for (const player in events) {
         const playerEvents = events[player].filter(e => 
