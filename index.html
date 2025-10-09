@@ -75,10 +75,10 @@
 // ===== Global Fetch Throttle + Backoff (auto-applies to ALL fetch calls) =====
 (() => {
   const RATE = {
-    MAX_CONCURRENCY: 2,   // lowered to ease 429s; try 2–3
-    MIN_DELAY_MS: 250,    // slightly higher spacing
-    MAX_RETRIES: 5,
-    BASE_BACKOFF_MS: 500
+    MAX_CONCURRENCY: 5,
+    MIN_DELAY_MS: 100,
+    MAX_RETRIES: 4,
+    BASE_BACKOFF_MS: 300
   };
 
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
