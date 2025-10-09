@@ -567,7 +567,7 @@
         }
         
         // Process deaths
-        const topDeaths = deathData.slice(0, state.config.maxCutoff);
+        const topDeaths = (window.filterMassDeaths ? window.filterMassDeaths(deathData) : deathData).slice(0, state.config.maxCutoff);
         
         for (let rank = 0; rank < topDeaths.length; rank++) {
           const death = topDeaths[rank];
@@ -1000,6 +1000,32 @@
       el.style.display = (el.style.display === 'none') ? 'flex' : 'none';
     }
   }, {passive:true});
+})();
+</script>
+
+
+<script>
+// Mass-death exclusion: drops all deaths at/after the first window where >=THRESH happen within WINDOW_MS
+(function(){
+  function filterMassDeaths(deaths){
+    const THRESH = (window.state?.config?.massDeathThreshold) ?? 7;
+    const WINDOW_MS = (window.state?.config?.massDeathWindowMs) ?? 10000;
+    if (!Array.isArray(deaths) || deaths.length < THRESH) return deaths;
+    const sorted = deaths.slice().sort((a,b)=>(a.timestamp||0)-(b.timestamp||0));
+    for (let i=0;i<=sorted.length-THRESH;i++){
+      const start = sorted[i].timestamp||0, end = start + WINDOW_MS;
+      let count = 0;
+      for (let j=i;j<sorted.length;j++){
+        const t = sorted[j].timestamp||0;
+        if (t <= end) count++; else break;
+      }
+      if (count >= THRESH){
+        return sorted.filter(d => (d.timestamp||0) < start);
+      }
+    }
+    return deaths;
+  }
+  window.filterMassDeaths = filterMassDeaths;
 })();
 </script>
 
