@@ -903,5 +903,105 @@
     
     init();
   </script>
+
+<script>
+(() => {
+  const closeOverview = () => {
+    const all = Array.from(document.querySelectorAll('details'));
+    for (const d of all) {
+      const s = d.querySelector('summary');
+      if (s && /all bosses overview/i.test(s.textContent || '')) d.removeAttribute('open');
+    }
+  };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', closeOverview, { once: true });
+  } else {
+    closeOverview();
+  }
+})();
+</script>
+
+
+<!-- Minimal sanity indicator -->
+<style>
+  #sanity-pill{position:fixed;top:10px;right:12px;z-index:2147483647;background:rgba(17,17,22,.92);
+    color:#e5e7eb;border:1px solid rgba(255,255,255,.15);border-radius:999px;padding:6px 10px;
+    font:12px/1 ui-sans-serif,system-ui,Segoe UI,Roboto;display:flex;align-items:center;gap:8px;
+    box-shadow:0 6px 28px rgba(0,0,0,.45);backdrop-filter:blur(6px);opacity:1;pointer-events:none}
+  #sanity-pill .dot{width:8px;height:8px;border-radius:999px;background:#60a5fa;animation:sp 1.2s infinite ease-in-out}
+  @keyframes sp{0%{transform:scale(1);opacity:.7}50%{transform:scale(1.4);opacity:1}100%{transform:scale(1);opacity:.7}}
+  #sanity-pill .txt{white-space:nowrap;max-width:46vw;overflow:hidden;text-overflow:ellipsis}
+  #sanity-pill .muted{opacity:.8}
+</style>
+<div id="sanity-pill" aria-live="polite" aria-atomic="true">
+  <i class="dot" aria-hidden="true"></i>
+  <div class="txt"><span class="muted">Working…</span></div>
+</div>
+<script>
+(() => {
+  if (window.__SANITY_PILL_INIT__) return; window.__SANITY_PILL_INIT__ = true;
+  const S = (window.__SANITY__ = window.__SANITY__ || {
+    inFlight: 0, finished: 0, started: 0, errors: 0,
+    lastStatus: null, lastURL: "", t0: performance.now(),
+    proxy: { bucket: null, gRem: null, gCap: null, gRps: null, bRem: null, bCap: null, bRps: null },
+  });
+  // Patch fetch once
+  if (!window.__SANITY_FETCH_PATCHED__) {
+    const orig = window.fetch.bind(window);
+    window.fetch = async function sanityFetch(input, init){
+      S.inFlight++; S.started++;
+      const t0 = performance.now();
+      try{
+        const res = await orig(input, init);
+        S.lastStatus = res.status;
+        S.lastURL = (typeof input === 'string') ? input : (input && input.url) || "";
+        const H = res.headers;
+        if (H) {
+          S.proxy.bucket = H.get('X-Proxy-Bucket') || S.proxy.bucket;
+          S.proxy.gRem   = H.get('X-Proxy-Global-Remaining') || S.proxy.gRem;
+          S.proxy.gCap   = H.get('X-Proxy-Global-Capacity')  || S.proxy.gCap;
+          S.proxy.gRps   = H.get('X-Proxy-Global-RPS')       || S.proxy.gRps;
+          S.proxy.bRem   = H.get('X-Proxy-Bucket-Remaining') || S.proxy.bRem;
+          S.proxy.bCap   = H.get('X-Proxy-Bucket-Capacity')  || S.proxy.bCap;
+          S.proxy.bRps   = H.get('X-Proxy-Bucket-RPS')       || S.proxy.bRps;
+        }
+        return res;
+      } catch (e){
+        S.errors++; throw e;
+      } finally {
+        S.inFlight--; S.finished++; S.lastDt = Math.round(performance.now() - t0);
+      }
+    };
+    window.__SANITY_FETCH_PATCHED__ = true;
+  }
+  const pill = document.getElementById('sanity-pill');
+  const txt = pill.querySelector('.txt');
+  function render(){
+    const elapsed = Math.max(1, (performance.now() - S.t0)/1000);
+    const rate = (S.finished/elapsed).toFixed(1);
+    let line = `in-flight ${S.inFlight} · done ${S.finished} · ${rate}/s`;
+    if (S.lastStatus) line += ` · last ${S.lastStatus}`;
+    if (S.proxy && (S.proxy.gRem != null || S.proxy.bRem != null)) {
+      const g = (S.proxy.gRem!=null && S.proxy.gCap!=null) ? `G ${S.proxy.gRem}/${S.proxy.gCap}` : null;
+      const b = (S.proxy.bucket && S.proxy.bRem!=null && S.proxy.bCap!=null) ? `${S.proxy.bucket} ${S.proxy.bRem}/${S.proxy.bCap}` : null;
+      const rps = (S.proxy.gRps || S.proxy.bRps) ? `@${S.proxy.gRps || S.proxy.bRps}/s` : '';
+      const bits = [g,b].filter(Boolean).join(' · ');
+      if (bits) line += ` · ${bits} ${rps}`;
+    }
+    txt.textContent = line;
+    requestAnimationFrame(render);
+  }
+  requestAnimationFrame(render);
+  // Alt+P toggle
+  window.addEventListener('keydown', (e)=>{
+    if (e.altKey && (e.key.toLowerCase() === 'p')){
+      const el = document.getElementById('sanity-pill');
+      if (!el) return;
+      el.style.display = (el.style.display === 'none') ? 'flex' : 'none';
+    }
+  }, {passive:true});
+})();
+</script>
+
 </body>
 </html>
