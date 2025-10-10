@@ -14,14 +14,12 @@ import os
 
 app = Flask(__name__)
 
-# Configure CORS for production
-CORS(app, resources={
-    r"/api/*": {
-        "origins": ["*"],  # In production, replace with your frontend URL
-        "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"]
-    }
-})
+# Configure CORS for production - allow all origins for API endpoints
+CORS(app, 
+     origins=["*"],
+     methods=["GET", "POST", "OPTIONS"],
+     allow_headers=["Content-Type", "Authorization"],
+     supports_credentials=False)
 
 # Constants
 MASS_DEATH_THRESHOLD = 7

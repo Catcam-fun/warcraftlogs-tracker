@@ -165,6 +165,53 @@ export default function WarcraftLogsApp() {
           <p style={{ color: '#94a3b8', margin: 0 }}>Analyze raid deaths and performance metrics</p>
         </div>
 
+        {loading && (
+          <div style={{ 
+            position: 'fixed', 
+            top: 0, 
+            left: 0, 
+            right: 0, 
+            bottom: 0, 
+            background: 'rgba(15, 23, 42, 0.95)', 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center', 
+            zIndex: 9999,
+            backdropFilter: 'blur(8px)'
+          }}>
+            <div style={{ textAlign: 'center', maxWidth: '400px', padding: '40px' }}>
+              <div style={{ 
+                width: '80px', 
+                height: '80px', 
+                border: '4px solid rgba(59, 130, 246, 0.3)', 
+                borderTop: '4px solid #3b82f6',
+                borderRadius: '50%',
+                animation: 'spin 1s linear infinite',
+                margin: '0 auto 24px'
+              }} />
+              <h2 style={{ margin: '0 0 12px', fontSize: '24px', fontWeight: '600', color: '#e2e8f0' }}>
+                Analyzing Reports...
+              </h2>
+              <p style={{ color: '#94a3b8', fontSize: '16px', lineHeight: '1.6' }}>
+                Fetching data from WarcraftLogs API
+                <br />
+                <span style={{ fontSize: '14px', opacity: 0.7 }}>This may take 30-60 seconds</span>
+              </p>
+              <div style={{ 
+                marginTop: '24px', 
+                padding: '12px', 
+                background: 'rgba(59, 130, 246, 0.1)', 
+                borderRadius: '8px',
+                border: '1px solid rgba(59, 130, 246, 0.3)'
+              }}>
+                <div style={{ fontSize: '13px', color: '#60a5fa' }}>
+                  💡 First request may take longer as the server wakes up
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {!data && (
           <div style={{ background: 'rgba(30, 41, 59, 0.6)', backdropFilter: 'blur(10px)', borderRadius: '16px', padding: '32px', marginBottom: '24px', border: '1px solid rgba(148, 163, 184, 0.1)' }}>
             <h2 style={{ margin: '0 0 24px', fontSize: '20px', fontWeight: '600' }}>Configuration</h2>
