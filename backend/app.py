@@ -231,12 +231,20 @@ def get_fights(token, report_code):
         return {"report_start": 0, "fights": [], "friendlies": []}
 
 
-def get_player_deaths(token, report_code, fight):
+def get_player_deaths(token, report_code, fight, friendlies):
     """Get player deaths using V2 GraphQL API"""
     
     fid = fight['id']
     start = fight['start_time']
     end = fight['end_time']
+    
+    # Build actor ID -> name lookup from friendlies
+    actor_id_to_name = {}
+    for friendly in friendlies:
+        actor_id = friendly.get('id')
+        name = friendly.get('name')
+        if actor_id and name:
+            actor_id_to_name[actor_id] = name
     
     query = """
     query($code: String!, $fightIDs: [Int]!, $startTime: Float!, $endTime: Float!) {
@@ -270,29 +278,26 @@ def get_player_deaths(token, report_code, fight):
         # DEBUG: Log the raw event structure (without json.dumps)
         if len(events_data) > 0:
             print(f"DEBUG: First event keys: {list(events_data[0].keys())}")
-            print(f"DEBUG: First event sample: {events_data[0]}")
         
         deaths = []
         for event in events_data:
             if event.get("type") != "death":
                 continue
             
-            target = event.get("target", {})
-            killing_ability = event.get("killingAbility", {})
+            # V2 API returns targetID, not target.name
+            target_id = event.get("targetID")
+            target_name = actor_id_to_name.get(target_id, "Unknown")
             
-            target_name = target.get("name", "Unknown")
+            killing_ability = event.get("killingAbility", {})
             
             # Debug: Log first death we find
             if len(deaths) == 0:
-                print(f"DEBUG: Death event structure:")
-                print(f"  - event keys: {list(event.keys())}")
-                print(f"  - target: {target}")
-                print(f"  - target_name: {target_name}")
+                print(f"DEBUG: Death event - targetID: {target_id}, mapped name: {target_name}")
             
             deaths.append({
                 "timestamp": event.get("timestamp", 0),
                 "targetName": target_name,
-                "targetID": target.get("id"),
+                "targetID": target_id,
                 "phase": 1,  # V2 API doesn't provide phase info in events
                 "fightId": fid,
                 "bossName": fight.get('name', 'Unknown'),
