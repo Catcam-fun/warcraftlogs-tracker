@@ -2,16 +2,17 @@
 """
 Flask API for WarcraftLogs Death Tracker - V2 GraphQL API
 Optimized for Render.com deployment
-Version 2.2 - Bulk death fetching for 20x faster performance
+Version 2.3 - Real-time progress updates via SSE
 """
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 import requests
 from collections import defaultdict
 from datetime import datetime
 import time
 import os
+import json
 
 app = Flask(__name__)
 
@@ -429,7 +430,7 @@ def is_duplicate_pull(seen_by_boss, boss_id, abs_start, abs_end, is_kill=None):
 
 @app.route('/api/analyze', methods=['POST', 'OPTIONS'])
 def analyze():
-    """Main API endpoint for analyzing WarcraftLogs data using V2 API"""
+    """Main API endpoint for analyzing WarcraftLogs data using V2 API with SSE progress"""
     
     # Handle preflight CORS
     if request.method == 'OPTIONS':
@@ -439,268 +440,249 @@ def analyze():
         response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
         return response, 200
     
-    try:
-        config = request.json
-        
-        # Extract configuration - V2 uses client_id and client_secret
-        client_id = config.get('clientId')
-        client_secret = config.get('clientSecret')
-        guild_name = config.get('guildName')
-        server = config.get('server')
-        region = config.get('region')
-        report_zone = config.get('reportZone')
-        fight_zone = config.get('fightZone')
-        difficulty = config.get('difficulty')
-        max_cutoff = int(config.get('maxCutoff', 5))
-        cutoff_date = config.get('cutoffDate')
-        author_filters = config.get('authorFilters', [])
-        character_groups = config.get('characterGroups', {})
-        
-        # Validate required fields
-        if not all([client_id, client_secret, guild_name, server, region]):
-            resp = jsonify({"error": "Missing required fields (clientId, clientSecret, guildName, server, region)"})
-            resp.headers.add('Access-Control-Allow-Origin', '*')
-            return resp, 400
-        
-        # Get OAuth2 token
+    def generate():
         try:
-            token = get_access_token(client_id, client_secret)
-        except Exception as e:
-            resp = jsonify({"error": f"Authentication failed: {str(e)}"})
-            resp.headers.add('Access-Control-Allow-Origin', '*')
-            return resp, 401
-        
-        # Get guild reports
-        print(f"Fetching reports for {guild_name}...")
-        reports = get_guild_reports(
-            token, guild_name, server, region, 
-            report_zone, cutoff_date
-        )
-        print(f"Found {len(reports)} reports")
-        
-        # Filter by author if specified
-        if author_filters:
-            reports = [r for r in reports if r.get('owner') in author_filters]
-            print(f"After author filter: {len(reports)} reports")
-        
-        if not reports:
-            resp = jsonify({"error": "No reports found matching criteria"})
-            resp.headers.add('Access-Control-Allow-Origin', '*')
-            return resp, 404
-        
-        # Collect all fights
-        print("Collecting fights from reports...")
-        all_fights_raw = []
-        report_ability_maps = {}  # Cache ability maps per report
-        
-        for i, rep in enumerate(reports, 1):
-            rid = rep["id"]
-            print(f"Processing report {i}/{len(reports)}: {rid}")
+            config = request.json
             
-            # Fetch abilities ONCE per report
-            if rid not in report_ability_maps:
-                report_ability_maps[rid] = get_abilities_map(token, rid)
+            # Extract configuration
+            client_id = config.get('clientId')
+            client_secret = config.get('clientSecret')
+            guild_name = config.get('guildName')
+            server = config.get('server')
+            region = config.get('region')
+            report_zone = config.get('reportZone')
+            fight_zone = config.get('fightZone')
+            difficulty = config.get('difficulty')
+            max_cutoff = int(config.get('maxCutoff', 5))
+            cutoff_date = config.get('cutoffDate')
+            author_filters = config.get('authorFilters', [])
+            character_groups = config.get('characterGroups', {})
             
-            fights_data = get_fights(token, rid)
-            fights = fights_data.get("fights", [])
-            report_abs_start = fights_data.get("report_start", rep["start"])
-            friendlies = fights_data.get("friendlies", [])
+            # Validate required fields
+            if not all([client_id, client_secret, guild_name, server, region]):
+                yield f"data: {json.dumps({'error': 'Missing required fields'})}\n\n"
+                return
             
-            if not fights:
-                continue
+            # Get OAuth2 token
+            yield f"data: {json.dumps({'stage': 'auth', 'message': 'Authenticating with WarcraftLogs...'})}\n\n"
+            try:
+                token = get_access_token(client_id, client_secret)
+            except Exception as e:
+                yield f"data: {json.dumps({'error': f'Authentication failed: {str(e)}'})}\n\n"
+                return
             
-            matching = analyze_fights(fights, fight_zone, difficulty)
+            # Get guild reports
+            yield f"data: {json.dumps({'stage': 'reports', 'message': 'Fetching guild reports...'})}\n\n"
+            reports = get_guild_reports(token, guild_name, server, region, report_zone, cutoff_date)
+            yield f"data: {json.dumps({'stage': 'reports', 'message': f'Found {len(reports)} reports'})}\n\n"
             
-            for fight in matching:
-                fid = fight['id']
-                boss_name = fight.get('name', 'Unknown')
-                boss_id = fight.get('boss', 0)
-                is_kill = bool(fight.get('kill'))
-                rel_start, rel_end = fight['start_time'], fight['end_time']
-                abs_start, abs_end = report_abs_start + rel_start, report_abs_start + rel_end
+            # Filter by author
+            if author_filters:
+                reports = [r for r in reports if r.get('owner') in author_filters]
+                yield f"data: {json.dumps({'stage': 'reports', 'message': f'After author filter: {len(reports)} reports'})}\n\n"
+            
+            if not reports:
+                yield f"data: {json.dumps({'error': 'No reports found matching criteria'})}\n\n"
+                return
+            
+            # Collect all fights
+            yield f"data: {json.dumps({'stage': 'fights', 'message': 'Collecting fights from reports...'})}\n\n"
+            all_fights_raw = []
+            report_ability_maps = {}
+            
+            for i, rep in enumerate(reports, 1):
+                rid = rep["id"]
+                yield f"data: {json.dumps({'stage': 'fights', 'message': f'Processing report {i}/{len(reports)}: {rid}'})}\n\n"
                 
-                all_fights_raw.append({
-                    'reportId': rid,
-                    'fight': fight,
-                    'boss_name': boss_name,
-                    'boss_id': boss_id,
-                    'is_kill': is_kill,
-                    'abs_start': abs_start,
-                    'abs_end': abs_end,
-                    'report_abs_start': report_abs_start,
-                    'friendlies': friendlies,
-                    'ability_map': report_ability_maps[rid]  # Store ability map with fight data
-                })
-        
-        # Sort chronologically
-        all_fights_raw.sort(key=lambda x: x['abs_start'])
-        print(f"Collected {len(all_fights_raw)} total fights")
-        
-        # Deduplicate
-        seen_pulls_by_boss = {}
-        all_fights_deduped = []
-        
-        for fight_data in all_fights_raw:
-            boss_id = fight_data['boss_id']
-            abs_start = fight_data['abs_start']
-            abs_end = fight_data['abs_end']
-            is_kill = fight_data['is_kill']
+                if rid not in report_ability_maps:
+                    report_ability_maps[rid] = get_abilities_map(token, rid)
+                
+                fights_data = get_fights(token, rid)
+                fights = fights_data.get("fights", [])
+                report_abs_start = fights_data.get("report_start", rep["start"])
+                friendlies = fights_data.get("friendlies", [])
+                
+                if not fights:
+                    continue
+                
+                matching = analyze_fights(fights, fight_zone, difficulty)
+                
+                for fight in matching:
+                    fid = fight['id']
+                    boss_name = fight.get('name', 'Unknown')
+                    boss_id = fight.get('boss', 0)
+                    is_kill = bool(fight.get('kill'))
+                    rel_start, rel_end = fight['start_time'], fight['end_time']
+                    abs_start, abs_end = report_abs_start + rel_start, report_abs_start + rel_end
+                    
+                    all_fights_raw.append({
+                        'reportId': rid,
+                        'fight': fight,
+                        'boss_name': boss_name,
+                        'boss_id': boss_id,
+                        'is_kill': is_kill,
+                        'abs_start': abs_start,
+                        'abs_end': abs_end,
+                        'report_abs_start': report_abs_start,
+                        'friendlies': friendlies,
+                        'ability_map': report_ability_maps[rid]
+                    })
             
-            if is_duplicate_pull(seen_pulls_by_boss, boss_id, abs_start, abs_end, is_kill):
-                continue
+            all_fights_raw.sort(key=lambda x: x['abs_start'])
+            yield f"data: {json.dumps({'stage': 'fights', 'message': f'Collected {len(all_fights_raw)} total fights'})}\n\n"
             
-            all_fights_deduped.append(fight_data)
-        
-        print(f"After deduplication: {len(all_fights_deduped)} unique fights")
-        
-        # Process pulls and deaths
-        print("Processing deaths...")
-        counted_death_events = defaultdict(list)
-        pull_participation = defaultdict(set)
-        boss_participation = defaultdict(lambda: defaultdict(set))
-        character_breakdown = defaultdict(lambda: defaultdict(list))
-        pull_counter_by_boss = defaultdict(int)
-        
-        # Group fights by report for bulk death fetching
-        fights_by_report = defaultdict(list)
-        for fight_data in all_fights_deduped:
-            fights_by_report[fight_data['reportId']].append(fight_data)
-        
-        # Fetch deaths in bulk per report (HUGE performance improvement!)
-        print(f"Fetching deaths for {len(fights_by_report)} reports in bulk...")
-        report_deaths_cache = {}
-        for rid, report_fights in fights_by_report.items():
-            # Get one representative fight_data to extract shared info
-            sample_fight_data = report_fights[0]
-            friendlies = sample_fight_data['friendlies']
-            ability_map = sample_fight_data['ability_map']
+            # Deduplicate
+            yield f"data: {json.dumps({'stage': 'dedup', 'message': 'Removing duplicate pulls...'})}\n\n"
+            seen_pulls_by_boss = {}
+            all_fights_deduped = []
             
-            # Extract just the fight objects
-            fights_list = [fd['fight'] for fd in report_fights]
+            for fight_data in all_fights_raw:
+                boss_id = fight_data['boss_id']
+                abs_start = fight_data['abs_start']
+                abs_end = fight_data['abs_end']
+                is_kill = fight_data['is_kill']
+                
+                if is_duplicate_pull(seen_pulls_by_boss, boss_id, abs_start, abs_end, is_kill):
+                    continue
+                
+                all_fights_deduped.append(fight_data)
             
-            # ONE API call per report instead of one per fight!
-            report_deaths_cache[rid] = get_report_deaths_bulk(
-                token, rid, fights_list, friendlies, ability_map
-            )
-        
-        print(f"Death fetching complete! Processing {len(all_fights_deduped)} fights...")
-        
-        for idx, fight_data in enumerate(all_fights_deduped, 1):
-            if idx % 10 == 0:
-                print(f"Processing fight {idx}/{len(all_fights_deduped)}")
+            yield f"data: {json.dumps({'stage': 'dedup', 'message': f'After deduplication: {len(all_fights_deduped)} unique fights'})}\n\n"
             
-            rid = fight_data['reportId']
-            fight = fight_data['fight']
-            boss_name = fight_data['boss_name']
-            boss_id = fight_data['boss_id']
-            is_kill = fight_data['is_kill']
-            report_abs_start = fight_data['report_abs_start']
-            friendlies = fight_data['friendlies']
+            # Process deaths
+            yield f"data: {json.dumps({'stage': 'deaths', 'message': 'Processing death events...'})}\n\n"
+            counted_death_events = defaultdict(list)
+            pull_participation = defaultdict(set)
+            boss_participation = defaultdict(lambda: defaultdict(set))
+            character_breakdown = defaultdict(lambda: defaultdict(list))
+            pull_counter_by_boss = defaultdict(int)
             
-            pull_counter_by_boss[boss_id] += 1
-            seq_no = pull_counter_by_boss[boss_id]
-            fid = fight['id']
+            # Group fights by report
+            fights_by_report = defaultdict(list)
+            for fight_data in all_fights_deduped:
+                fights_by_report[fight_data['reportId']].append(fight_data)
             
-            # Build participant list from friendlies - only those who were in THIS specific fight
-            fight_parts = set()
-            friendly_player_ids = set(fight.get('friendlyPlayers', []))
+            # Fetch deaths in bulk
+            yield f"data: {json.dumps({'stage': 'deaths', 'message': f'Fetching deaths for {len(fights_by_report)} reports...'})}\n\n"
+            report_deaths_cache = {}
+            for report_idx, (rid, report_fights) in enumerate(fights_by_report.items(), 1):
+                yield f"data: {json.dumps({'stage': 'deaths', 'message': f'Fetching deaths from report {report_idx}/{len(fights_by_report)}'})}\n\n"
+                sample_fight_data = report_fights[0]
+                friendlies = sample_fight_data['friendlies']
+                ability_map = sample_fight_data['ability_map']
+                fights_list = [fd['fight'] for fd in report_fights]
+                
+                report_deaths_cache[rid] = get_report_deaths_bulk(token, rid, fights_list, friendlies, ability_map)
             
-            if friendly_player_ids:
-                # Use the specific players who were in this fight
-                for friendly in friendlies:
-                    if friendly.get('id') in friendly_player_ids:
+            yield f"data: {json.dumps({'stage': 'processing', 'message': f'Processing {len(all_fights_deduped)} fights...'})}\n\n"
+            
+            total_deaths = 0
+            for idx, fight_data in enumerate(all_fights_deduped, 1):
+                if idx % 10 == 0:
+                    yield f"data: {json.dumps({'stage': 'processing', 'message': f'Processing fight {idx}/{len(all_fights_deduped)} - {total_deaths} deaths found'})}\n\n"
+                
+                rid = fight_data['reportId']
+                fight = fight_data['fight']
+                boss_name = fight_data['boss_name']
+                boss_id = fight_data['boss_id']
+                is_kill = fight_data['is_kill']
+                report_abs_start = fight_data['report_abs_start']
+                friendlies = fight_data['friendlies']
+                
+                pull_counter_by_boss[boss_id] += 1
+                seq_no = pull_counter_by_boss[boss_id]
+                fid = fight['id']
+                
+                fight_parts = set()
+                friendly_player_ids = set(fight.get('friendlyPlayers', []))
+                
+                if friendly_player_ids:
+                    for friendly in friendlies:
+                        if friendly.get('id') in friendly_player_ids:
+                            name = friendly.get('name')
+                            if name:
+                                fight_parts.add(name)
+                else:
+                    for friendly in friendlies:
                         name = friendly.get('name')
                         if name:
                             fight_parts.add(name)
-            else:
-                # Fallback: if friendlyPlayers is empty, use all friendlies
-                for friendly in friendlies:
-                    name = friendly.get('name')
-                    if name:
-                        fight_parts.add(name)
-            
-            # Debug: Log first fight's participants
-            if idx == 1:
-                print(f"First fight: {len(fight_parts)} participants present (out of {len(friendlies)} total in report)")
-            
-            # Track participation for EVERYONE in the raid (kill or wipe, deaths or no deaths)
-            for p in fight_parts:
-                main_char = get_main_character(p, character_groups)
-                pull_key = f"{rid}_{fid}"
-                pull_participation[main_char].add(pull_key)
-                boss_participation[boss_name][main_char].add(pull_key)
-            
-            # Get deaths from cache (already filtered for mass deaths)
-            deaths = report_deaths_cache[rid].get(fid, [])
-            deaths_sorted = sorted(deaths, key=lambda e: e["timestamp"])[:max_cutoff]
-            
-            for rank, ev in enumerate(deaths_sorted, start=1):
-                original_char = ev["targetName"]
-                main_char = get_main_character(original_char, character_groups)
                 
-                death_event = {
-                    "player": main_char,
-                    "originalCharacter": original_char,
-                    "boss": boss_name,
-                    "bossId": boss_id,
-                    "phase": ev.get("phase", 1),
-                    "reportId": rid,
-                    "fightId": fid,
-                    "isKill": is_kill,
-                    "pullNo": seq_no,
-                    "rankWithinPull": rank,
-                    "absTs": report_abs_start + ev["timestamp"],
-                    "abilityName": ev.get("abilityName", "Unknown")
-                }
-                counted_death_events[main_char].append(death_event)
-                character_breakdown[main_char][original_char].append(death_event)
+                for p in fight_parts:
+                    main_char = get_main_character(p, character_groups)
+                    pull_key = f"{rid}_{fid}"
+                    pull_participation[main_char].add(pull_key)
+                    boss_participation[boss_name][main_char].add(pull_key)
+                
+                deaths = report_deaths_cache[rid].get(fid, [])
+                deaths_sorted = sorted(deaths, key=lambda e: e["timestamp"])[:max_cutoff]
+                
+                for rank, ev in enumerate(deaths_sorted, start=1):
+                    original_char = ev["targetName"]
+                    main_char = get_main_character(original_char, character_groups)
+                    
+                    death_event = {
+                        "player": main_char,
+                        "originalCharacter": original_char,
+                        "boss": boss_name,
+                        "bossId": boss_id,
+                        "phase": ev.get("phase", 1),
+                        "reportId": rid,
+                        "fightId": fid,
+                        "isKill": is_kill,
+                        "pullNo": seq_no,
+                        "rankWithinPull": rank,
+                        "absTs": report_abs_start + ev["timestamp"],
+                        "abilityName": ev.get("abilityName", "Unknown")
+                    }
+                    counted_death_events[main_char].append(death_event)
+                    character_breakdown[main_char][original_char].append(death_event)
+                    total_deaths += 1
+            
+            yield f"data: {json.dumps({'stage': 'complete', 'message': f'Analysis complete! Tracked {total_deaths} deaths across {len(counted_death_events)} players'})}\n\n"
+            
+            # Convert sets to lists
+            pull_participation_json = {p: list(s) for p, s in pull_participation.items()}
+            boss_participation_json = {
+                b: {p: list(s2) for p, s2 in players.items()}
+                for b, players in boss_participation.items()
+            }
+            character_breakdown_json = {
+                main: {char: evs for char, evs in chars.items()}
+                for main, chars in character_breakdown.items()
+            }
+            
+            # Build final response
+            response = {
+                "meta": {
+                    "maxCutoff": max_cutoff,
+                    "authorFilters": author_filters,
+                    "dateCutoff": cutoff_date,
+                    "zone": fight_zone,
+                    "difficulty": difficulty,
+                    "generatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "characterGroups": character_groups,
+                    "reportCount": len(reports),
+                },
+                "events": counted_death_events,
+                "pullParticipation": pull_participation_json,
+                "bossParticipation": boss_participation_json,
+                "characterBreakdown": character_breakdown_json,
+            }
+            
+            yield f"data: {json.dumps({'result': response})}\n\n"
         
-        print(f"Analysis complete! Total deaths tracked: {sum(len(v) for v in counted_death_events.values())}")
-        print(f"Total unique players: {len(counted_death_events)}")
-        if len(counted_death_events) > 0:
-            sample_player = list(counted_death_events.keys())[0]
-            print(f"Sample player: {sample_player} with {len(counted_death_events[sample_player])} deaths")
-        
-        # Convert sets to lists for JSON serialization
-        pull_participation_json = {p: list(s) for p, s in pull_participation.items()}
-        boss_participation_json = {
-            b: {p: list(s2) for p, s2 in players.items()}
-            for b, players in boss_participation.items()
-        }
-        character_breakdown_json = {
-            main: {char: evs for char, evs in chars.items()}
-            for main, chars in character_breakdown.items()
-        }
-        
-        # Build response
-        response = {
-            "meta": {
-                "maxCutoff": max_cutoff,
-                "authorFilters": author_filters,
-                "dateCutoff": cutoff_date,
-                "zone": fight_zone,
-                "difficulty": difficulty,
-                "generatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "characterGroups": character_groups,
-                "reportCount": len(reports),
-            },
-            "events": counted_death_events,
-            "pullParticipation": pull_participation_json,
-            "bossParticipation": boss_participation_json,
-            "characterBreakdown": character_breakdown_json,
-        }
-        
-        resp = jsonify(response)
-        resp.headers.add('Access-Control-Allow-Origin', '*')
-        return resp
+        except Exception as e:
+            print(f"Error in analyze: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
     
-    except Exception as e:
-        print(f"Error in analyze: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        resp = jsonify({"error": str(e)})
-        resp.headers.add('Access-Control-Allow-Origin', '*')
-        return resp, 500
+    return Response(generate(), mimetype='text/event-stream', headers={
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no'
+    })
 
 
 @app.route('/api/health', methods=['GET'])
@@ -714,16 +696,16 @@ def root():
     """Root endpoint"""
     return jsonify({
         "service": "WarcraftLogs Death Tracker API",
-        "version": "2.2",
+        "version": "2.3",
         "status": "running",
         "endpoints": {
             "health": "/api/health",
-            "analyze": "/api/analyze (POST)"
+            "analyze": "/api/analyze (POST with SSE)"
         }
     })
 
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    print(f"Starting WarcraftLogs Death Tracker API v2.2 on port {port}...")
+    print(f"Starting WarcraftLogs Death Tracker API v2.3 on port {port}...")
     app.run(debug=False, host='0.0.0.0', port=port)
