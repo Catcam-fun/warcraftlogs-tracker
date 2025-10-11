@@ -400,17 +400,17 @@ export default function WarcraftLogsApp() {
             <h2 style={{ margin: '0 0 32px', fontSize: '20px', fontWeight: '600' }}>Configuration</h2>
             
             {/* API Credentials Info Box */}
-            <div style={{ marginBottom: '28px', padding: '16px 20px', background: 'rgba(74, 85, 104, 0.3)', border: '1px solid rgba(203, 213, 225, 0.2)', borderRadius: '12px' }}>
+            <div style={{ marginBottom: '28px', padding: '16px 20px', background: 'rgba(249, 115, 22, 0.15)', border: '1px solid rgba(249, 115, 22, 0.4)', borderRadius: '12px' }}>
               <div style={{ display: 'flex', alignItems: 'start', gap: '12px' }}>
                 <div style={{ fontSize: '20px' }}>🎃</div>
                 <div>
                   <h3 style={{ margin: '0 0 8px', fontSize: '15px', fontWeight: '600', color: '#f97316' }}>
                     Need API Credentials?
                   </h3>
-                  <p style={{ margin: '0 0 8px', fontSize: '13px', color: '#cbd5e1', lineHeight: '1.6' }}>
+                  <p style={{ margin: '0 0 8px', fontSize: '13px', color: '#e2e8f0', lineHeight: '1.6' }}>
                     You need a WarcraftLogs V2 API Client ID and Secret to use this tool.
                   </p>
-                  <ol style={{ margin: '8px 0 0 16px', padding: 0, fontSize: '13px', color: '#cbd5e1', lineHeight: '1.8' }}>
+                  <ol style={{ margin: '8px 0 0 16px', padding: 0, fontSize: '13px', color: '#e2e8f0', lineHeight: '1.8' }}>
                     <li>Go to <a href="https://www.warcraftlogs.com/api/clients/" target="_blank" rel="noopener noreferrer" style={{ color: '#f97316', textDecoration: 'underline' }}>WarcraftLogs API Clients</a></li>
                     <li>Click "Create a Client"</li>
                     <li>Enter a name (e.g., "Death Tracker")</li>
