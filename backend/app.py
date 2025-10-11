@@ -246,6 +246,35 @@ def get_player_deaths(token, report_code, fight, friendlies):
         if actor_id and name:
             actor_id_to_name[actor_id] = name
     
+    # First, get ability information from the report
+    abilities_query = """
+    query($code: String!) {
+      reportData {
+        report(code: $code) {
+          masterData {
+            abilities {
+              gameID
+              name
+              type
+            }
+          }
+        }
+      }
+    }
+    """
+    
+    ability_id_to_name = {}
+    try:
+        abilities_data = graphql_query(token, abilities_query, {"code": report_code})
+        abilities = abilities_data.get("reportData", {}).get("report", {}).get("masterData", {}).get("abilities", [])
+        for ability in abilities:
+            ability_id = ability.get("gameID")
+            ability_name = ability.get("name")
+            if ability_id and ability_name:
+                ability_id_to_name[ability_id] = ability_name
+    except Exception as e:
+        print(f"Warning: Could not fetch ability names: {e}")
+    
     query = """
     query($code: String!, $fightIDs: [Int]!, $startTime: Float!, $endTime: Float!) {
       reportData {
@@ -284,11 +313,13 @@ def get_player_deaths(token, report_code, fight, friendlies):
             target_id = event.get("targetID")
             target_name = actor_id_to_name.get(target_id, "Unknown")
             
-            killing_ability = event.get("killingAbility", {})
+            # Get ability name from killingAbilityGameID
+            killing_ability_id = event.get("killingAbilityGameID")
+            ability_name = ability_id_to_name.get(killing_ability_id, "Unknown")
             
             # Debug: Log first death we find
             if len(deaths) == 0:
-                print(f"DEBUG: Death event - targetID: {target_id}, mapped name: {target_name}")
+                print(f"DEBUG: Death event - targetID: {target_id}, mapped name: {target_name}, abilityID: {killing_ability_id}, ability: {ability_name}")
             
             deaths.append({
                 "timestamp": event.get("timestamp", 0),
@@ -297,7 +328,7 @@ def get_player_deaths(token, report_code, fight, friendlies):
                 "phase": 1,  # V2 API doesn't provide phase info in events
                 "fightId": fid,
                 "bossName": fight.get('name', 'Unknown'),
-                "abilityName": killing_ability.get("name", "Unknown"),
+                "abilityName": ability_name,
             })
         
         if len(deaths) > 0:
