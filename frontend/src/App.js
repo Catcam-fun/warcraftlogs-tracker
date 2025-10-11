@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Search, AlertCircle, Loader2, Download, Filter, TrendingUp } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Search, AlertCircle, Loader2, Filter, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react';
 
 export default function WarcraftLogsApp() {
   const [config, setConfig] = useState({
@@ -18,12 +18,14 @@ export default function WarcraftLogsApp() {
   });
 
   const [loading, setLoading] = useState(false);
+  const [loadingStage, setLoadingStage] = useState('');
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
   const [cutoff, setCutoff] = useState(2);
   const [selectedBosses, setSelectedBosses] = useState(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [view, setView] = useState('overview');
+  const [expandedPlayers, setExpandedPlayers] = useState(new Set());
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -37,6 +39,7 @@ export default function WarcraftLogsApp() {
     }
 
     setLoading(true);
+    setLoadingStage('Authenticating...');
     setError('');
     setData(null);
 
@@ -49,6 +52,11 @@ export default function WarcraftLogsApp() {
           throw new Error('Invalid JSON format for character groups');
         }
       }
+
+      // Simulate loading stages
+      setTimeout(() => setLoadingStage('Fetching guild reports...'), 500);
+      setTimeout(() => setLoadingStage('Analyzing fights...'), 2000);
+      setTimeout(() => setLoadingStage('Processing death events...'), 4000);
 
       const response = await fetch('https://deathwarcraftlogs-api.onrender.com/api/analyze', {
         method: 'POST',
@@ -67,8 +75,10 @@ export default function WarcraftLogsApp() {
 
       const result = await response.json();
       setData(result);
+      setLoadingStage('');
     } catch (err) {
       setError(err.message);
+      setLoadingStage('');
     } finally {
       setLoading(false);
     }
@@ -82,6 +92,16 @@ export default function WarcraftLogsApp() {
       newSelected.add(boss);
     }
     setSelectedBosses(newSelected);
+  };
+
+  const togglePlayer = (player) => {
+    const newExpanded = new Set(expandedPlayers);
+    if (newExpanded.has(player)) {
+      newExpanded.delete(player);
+    } else {
+      newExpanded.add(player);
+    }
+    setExpandedPlayers(newExpanded);
   };
 
   const getFilteredStats = () => {
@@ -117,7 +137,36 @@ export default function WarcraftLogsApp() {
         continue;
       }
 
-      stats.push({ player, deaths: evs.length, pulls, rate });
+      // Group deaths by boss
+      const deathsByBoss = {};
+      evs.forEach(ev => {
+        if (!deathsByBoss[ev.boss]) {
+          deathsByBoss[ev.boss] = [];
+        }
+        deathsByBoss[ev.boss].push(ev);
+      });
+
+      // Calculate top abilities per boss
+      const topAbilitiesByBoss = {};
+      Object.keys(deathsByBoss).forEach(boss => {
+        const abilityCounts = {};
+        deathsByBoss[boss].forEach(death => {
+          const ability = death.abilityName || 'Unknown';
+          abilityCounts[ability] = (abilityCounts[ability] || 0) + 1;
+        });
+        topAbilitiesByBoss[boss] = Object.entries(abilityCounts)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5);
+      });
+
+      stats.push({ 
+        player, 
+        deaths: evs.length, 
+        pulls, 
+        rate,
+        deathsByBoss,
+        topAbilitiesByBoss
+      });
     }
 
     return stats.sort((a, b) => b.rate - a.rate || b.deaths - a.deaths);
@@ -155,6 +204,20 @@ export default function WarcraftLogsApp() {
     return { bosses, players, grid };
   };
 
+  const formatTimestamp = (absTs) => {
+    const date = new Date(absTs);
+    return date.toLocaleString('en-US', { 
+      month: 'short', 
+      day: 'numeric', 
+      hour: '2-digit', 
+      minute: '2-digit' 
+    });
+  };
+
+  const getWCLLink = (reportId, fightId) => {
+    return `https://www.warcraftlogs.com/reports/${reportId}#fight=${fightId}`;
+  };
+
   return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)', color: '#e2e8f0', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
       <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '24px' }}>
@@ -190,24 +253,26 @@ export default function WarcraftLogsApp() {
                 margin: '0 auto 24px'
               }} />
               <h2 style={{ margin: '0 0 12px', fontSize: '24px', fontWeight: '600', color: '#e2e8f0' }}>
-                Analyzing Reports...
+                {loadingStage || 'Analyzing Reports...'}
               </h2>
-              <p style={{ color: '#94a3b8', fontSize: '16px', lineHeight: '1.6' }}>
-                Fetching data from WarcraftLogs API
-                <br />
-                <span style={{ fontSize: '14px', opacity: 0.7 }}>This may take 30-60 seconds</span>
-              </p>
               <div style={{ 
                 marginTop: '24px', 
-                padding: '12px', 
+                padding: '16px', 
                 background: 'rgba(59, 130, 246, 0.1)', 
                 borderRadius: '8px',
-                border: '1px solid rgba(59, 130, 246, 0.3)'
+                border: '1px solid rgba(59, 130, 246, 0.3)',
+                textAlign: 'left'
               }}>
-                <div style={{ fontSize: '13px', color: '#60a5fa' }}>
-                  💡 First request may take longer as the server wakes up
+                <div style={{ fontSize: '13px', color: '#94a3b8', lineHeight: '1.8' }}>
+                  <div style={{ marginBottom: '8px' }}>🔍 Fetching guild reports</div>
+                  <div style={{ marginBottom: '8px' }}>⚔️ Analyzing fight data</div>
+                  <div style={{ marginBottom: '8px' }}>💀 Processing death events</div>
+                  <div>📊 Building statistics</div>
                 </div>
               </div>
+              <p style={{ color: '#64748b', fontSize: '14px', marginTop: '16px' }}>
+                This may take 3-8 minutes for large datasets
+              </p>
             </div>
           </div>
         )}
@@ -404,7 +469,7 @@ export default function WarcraftLogsApp() {
             >
               {loading ? (
                 <>
-                  <Loader2 size={20} className="animate-spin" style={{ animation: 'spin 1s linear infinite' }} />
+                  <Loader2 size={20} style={{ animation: 'spin 1s linear infinite' }} />
                   Analyzing...
                 </>
               ) : (
@@ -434,7 +499,7 @@ export default function WarcraftLogsApp() {
                   Players
                 </button>
                 <button
-                  onClick={() => { setData(null); setError(''); }}
+                  onClick={() => { setData(null); setError(''); setExpandedPlayers(new Set()); }}
                   style={{ padding: '8px 16px', background: '#334155', border: 'none', borderRadius: '8px', color: 'white', cursor: 'pointer', fontSize: '14px', fontWeight: '500', marginLeft: 'auto' }}
                 >
                   New Analysis
@@ -534,38 +599,103 @@ export default function WarcraftLogsApp() {
             })()}
 
             {view === 'players' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                {getFilteredStats().map(({ player, deaths, pulls, rate }) => (
-                  <div key={player} style={{ background: 'rgba(30, 41, 59, 0.6)', backdropFilter: 'blur(10px)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(148, 163, 184, 0.1)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                      <div>
-                        <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '600' }}>{player}</h3>
-                        <p style={{ margin: '4px 0 0', fontSize: '14px', color: '#94a3b8' }}>
-                          {deaths} deaths / {pulls} pulls
-                        </p>
-                      </div>
-                      <div style={{ textAlign: 'right' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {getFilteredStats().map(({ player, deaths, pulls, rate, deathsByBoss, topAbilitiesByBoss }) => {
+                  const isExpanded = expandedPlayers.has(player);
+                  return (
+                    <div key={player} style={{ background: 'rgba(30, 41, 59, 0.6)', backdropFilter: 'blur(10px)', borderRadius: '12px', border: '1px solid rgba(148, 163, 184, 0.1)', overflow: 'hidden' }}>
+                      {/* Player Header */}
+                      <div 
+                        onClick={() => togglePlayer(player)}
+                        style={{ 
+                          padding: '16px 20px', 
+                          display: 'flex', 
+                          justifyContent: 'space-between', 
+                          alignItems: 'center', 
+                          cursor: 'pointer',
+                          background: isExpanded ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
+                          transition: 'background 0.2s'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          {isExpanded ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
+                          <div>
+                            <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '600' }}>{player}</h3>
+                            <p style={{ margin: '4px 0 0', fontSize: '14px', color: '#94a3b8' }}>
+                              {deaths} deaths / {pulls} pulls
+                            </p>
+                          </div>
+                        </div>
                         <div style={{ fontSize: '28px', fontWeight: '700', color: rate > 50 ? '#f87171' : rate > 25 ? '#fbbf24' : '#34d399' }}>
                           {rate.toFixed(1)}%
                         </div>
                       </div>
+
+                      {/* Expanded Content */}
+                      {isExpanded && (
+                        <div style={{ padding: '0 20px 20px', borderTop: '1px solid rgba(148, 163, 184, 0.1)' }}>
+                          {Object.entries(deathsByBoss).map(([boss, bossDeaths]) => (
+                            <div key={boss} style={{ marginTop: '16px' }}>
+                              <h4 style={{ margin: '0 0 12px', fontSize: '16px', fontWeight: '600', color: '#60a5fa' }}>
+                                {boss} ({bossDeaths.length} deaths)
+                              </h4>
+                              
+                              {/* Top Abilities */}
+                              {topAbilitiesByBoss[boss] && topAbilitiesByBoss[boss].length > 0 && (
+                                <div style={{ marginBottom: '12px', padding: '8px 12px', background: 'rgba(59, 130, 246, 0.05)', borderRadius: '6px' }}>
+                                  <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '4px' }}>Top Abilities:</div>
+                                  <div style={{ fontSize: '13px', color: '#cbd5e1' }}>
+                                    {topAbilitiesByBoss[boss].map(([ability, count], idx) => (
+                                      <span key={ability}>
+                                        {idx + 1}. {ability} ({count}){idx < topAbilitiesByBoss[boss].length - 1 ? ' • ' : ''}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Death List */}
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                {bossDeaths.map((death, idx) => (
+                                  <div key={idx} style={{ 
+                                    display: 'flex', 
+                                    justifyContent: 'space-between', 
+                                    alignItems: 'center',
+                                    padding: '10px 12px',
+                                    background: 'rgba(15, 23, 42, 0.5)',
+                                    borderRadius: '6px',
+                                    fontSize: '13px'
+                                  }}>
+                                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flex: 1 }}>
+                                      <span style={{ color: '#64748b', minWidth: '60px' }}>Pull #{death.pullNo}</span>
+                                      <span style={{ color: '#94a3b8', minWidth: '120px' }}>{formatTimestamp(death.absTs)}</span>
+                                      <span style={{ color: '#cbd5e1' }}>{death.abilityName}</span>
+                                    </div>
+                                    <a 
+                                      href={getWCLLink(death.reportId, death.fightId)} 
+                                      target="_blank" 
+                                      rel="noopener noreferrer"
+                                      style={{ 
+                                        display: 'flex', 
+                                        alignItems: 'center', 
+                                        gap: '4px', 
+                                        color: '#60a5fa', 
+                                        textDecoration: 'none',
+                                        fontSize: '12px'
+                                      }}
+                                    >
+                                      View Log <ExternalLink size={14} />
+                                    </a>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    
-                    <div style={{ fontSize: '13px', color: '#cbd5e1' }}>
-                      {Object.entries(
-                        data.events[player]
-                          .filter(ev => ev.rankWithinPull <= cutoff && (selectedBosses.size === 0 || selectedBosses.has(ev.boss)))
-                          .reduce((acc, ev) => {
-                            acc[ev.boss] = (acc[ev.boss] || 0) + 1;
-                            return acc;
-                          }, {})
-                      )
-                        .sort((a, b) => b[1] - a[1])
-                        .map(([boss, count]) => `${boss}: ${count}`)
-                        .join(' • ')}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -576,9 +706,6 @@ export default function WarcraftLogsApp() {
         @keyframes spin {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
-        }
-        .animate-spin {
-          animation: spin 1s linear infinite;
         }
       `}</style>
     </div>
