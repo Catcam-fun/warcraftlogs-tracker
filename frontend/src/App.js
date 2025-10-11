@@ -60,13 +60,6 @@ export default function WarcraftLogsApp() {
         characterGroups
       };
 
-      // Use EventSource for SSE
-      const eventSource = new EventSource(
-        'https://deathwarcraftlogs-api.onrender.com/api/analyze?' + 
-        new URLSearchParams({ config: JSON.stringify(payload) })
-      );
-
-      // Actually, EventSource doesn't support POST, so we'll use fetch with streaming
       const response = await fetch('https://deathwarcraftlogs-api.onrender.com/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -288,7 +281,6 @@ export default function WarcraftLogsApp() {
   return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #4a5568 0%, #2d3748 100%)', color: '#e2e8f0', fontFamily: 'system-ui, -apple-system, sans-serif', position: 'relative', overflow: 'hidden' }}>
       {/* Halloween Decorations */}
-      {/* Spider Web - Top Left */}
       <div style={{ position: 'fixed', top: 0, left: 0, width: '200px', height: '200px', opacity: 0.2, pointerEvents: 'none', zIndex: 1 }}>
         <svg viewBox="0 0 200 200" style={{ width: '100%', height: '100%' }}>
           <path d="M0,0 L100,100 M0,20 L100,100 M0,40 L100,100 M0,60 L100,100 M0,80 L100,100" stroke="#fff" strokeWidth="1" fill="none"/>
@@ -299,7 +291,6 @@ export default function WarcraftLogsApp() {
         </svg>
       </div>
       
-      {/* Spider Web - Top Right */}
       <div style={{ position: 'fixed', top: 0, right: 0, width: '200px', height: '200px', opacity: 0.2, pointerEvents: 'none', zIndex: 1, transform: 'scaleX(-1)' }}>
         <svg viewBox="0 0 200 200" style={{ width: '100%', height: '100%' }}>
           <path d="M0,0 L100,100 M0,20 L100,100 M0,40 L100,100 M0,60 L100,100 M0,80 L100,100" stroke="#fff" strokeWidth="1" fill="none"/>
@@ -310,7 +301,6 @@ export default function WarcraftLogsApp() {
         </svg>
       </div>
 
-      {/* Flying Bats */}
       <div style={{ position: 'fixed', top: '15%', right: '20%', fontSize: '32px', opacity: 0.6, animation: 'float 6s ease-in-out infinite', pointerEvents: 'none', zIndex: 1 }}>
         🦇
       </div>
@@ -321,7 +311,6 @@ export default function WarcraftLogsApp() {
         🦇
       </div>
 
-      {/* Pumpkins in corners */}
       <div style={{ position: 'fixed', top: '20px', left: '20px', fontSize: '48px', opacity: 0.7, pointerEvents: 'none', zIndex: 1 }}>
         🎃
       </div>
@@ -399,7 +388,6 @@ export default function WarcraftLogsApp() {
           <div style={{ background: 'rgba(74, 85, 104, 0.4)', backdropFilter: 'blur(10px)', borderRadius: '16px', padding: '32px', marginBottom: '24px', border: '1px solid rgba(203, 213, 225, 0.1)' }}>
             <h2 style={{ margin: '0 0 32px', fontSize: '20px', fontWeight: '600' }}>Configuration</h2>
             
-            {/* API Credentials Info Box */}
             <div style={{ marginBottom: '28px', padding: '16px 20px', background: 'rgba(249, 115, 22, 0.15)', border: '1px solid rgba(249, 115, 22, 0.4)', borderRadius: '12px' }}>
               <div style={{ display: 'flex', alignItems: 'start', gap: '12px' }}>
                 <div style={{ fontSize: '20px' }}>🎃</div>
@@ -423,7 +411,6 @@ export default function WarcraftLogsApp() {
             </div>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
-              {/* Row 1 */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px' }}>
                 <div>
                   <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
@@ -452,7 +439,6 @@ export default function WarcraftLogsApp() {
                 </div>
               </div>
 
-              {/* Row 2 */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px' }}>
                 <div>
                   <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
@@ -487,7 +473,6 @@ export default function WarcraftLogsApp() {
                 </div>
               </div>
 
-              {/* Row 3 */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px' }}>
                 <div>
                   <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
@@ -524,7 +509,6 @@ export default function WarcraftLogsApp() {
                 </div>
               </div>
 
-              {/* Row 4 */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px' }}>
                 <div>
                   <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
@@ -561,7 +545,6 @@ export default function WarcraftLogsApp() {
                 </div>
               </div>
 
-              {/* Row 5 */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px' }}>
                 <div>
                   <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
@@ -599,7 +582,6 @@ export default function WarcraftLogsApp() {
                 </div>
               </div>
 
-              {/* Row 6 - Author Filters */}
               <div>
                 <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
                   Author Filters <span style={{ fontSize: '12px', color: '#64748b', fontWeight: '400' }}>(optional, comma-separated)</span>
@@ -617,7 +599,6 @@ export default function WarcraftLogsApp() {
                 </p>
               </div>
 
-              {/* Row 7 - Character Groups */}
               <div>
                 <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
                   Character Groups <span style={{ fontSize: '12px', color: '#64748b', fontWeight: '400' }}>(optional, JSON format)</span>
@@ -665,34 +646,34 @@ export default function WarcraftLogsApp() {
 
         {data && (
           <div>
-            <div style={{ background: 'rgba(74, 85, 104, 0.4)', backdropFilter: 'blur(10px)', borderRadius: '16px', padding: '20px', marginBottom: '24px', border: '1px solid rgba(203, 213, 225, 0.1)' }}>
-              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '16px' }}>
+            <div style={{ background: '#1a1d23', borderRadius: '12px', padding: '16px', marginBottom: '20px', border: '1px solid #2d3238' }}>
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '14px' }}>
                 <button
                   onClick={() => setView('overview')}
-                  style={{ padding: '8px 16px', background: view === 'overview' ? '#f97316' : '#718096', border: 'none', borderRadius: '8px', color: 'white', cursor: 'pointer', fontSize: '14px', fontWeight: '500' }}
+                  style={{ padding: '8px 16px', background: view === 'overview' ? '#f97316' : '#2d3238', border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}
                 >
                   Overview
                 </button>
                 <button
                   onClick={() => setView('players')}
-                  style={{ padding: '8px 16px', background: view === 'players' ? '#f97316' : '#718096', border: 'none', borderRadius: '8px', color: 'white', cursor: 'pointer', fontSize: '14px', fontWeight: '500' }}
+                  style={{ padding: '8px 16px', background: view === 'players' ? '#f97316' : '#2d3238', border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}
                 >
                   Players
                 </button>
                 <button
                   onClick={() => { setData(null); setError(''); setExpandedPlayers(new Set()); setSortConfig({ key: null, direction: 'asc' }); }}
-                  style={{ padding: '8px 16px', background: '#718096', border: 'none', borderRadius: '8px', color: 'white', cursor: 'pointer', fontSize: '14px', fontWeight: '500', marginLeft: 'auto' }}
+                  style={{ padding: '8px 16px', background: '#2d3238', border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: '600', marginLeft: 'auto' }}
                 >
                   New Analysis
                 </button>
               </div>
 
-              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
-                <label style={{ fontSize: '14px', color: '#cbd5e1' }}>Deaths to count:</label>
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <label style={{ fontSize: '13px', color: '#cbd5e1' }}>Deaths to count:</label>
                 <select
                   value={cutoff}
                   onChange={(e) => setCutoff(parseInt(e.target.value))}
-                  style={{ padding: '8px 12px', background: '#2d3748', border: '1px solid #4a5568', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px' }}
+                  style={{ padding: '6px 10px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px' }}
                 >
                   {[...Array(data.meta.maxCutoff)].map((_, i) => (
                     <option key={i + 1} value={i + 1}>
@@ -701,15 +682,15 @@ export default function WarcraftLogsApp() {
                   ))}
                 </select>
 
-                <div style={{ marginLeft: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Filter size={16} />
-                  <span style={{ fontSize: '14px', color: '#cbd5e1' }}>Boss filters:</span>
+                <div style={{ marginLeft: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Filter size={14} />
+                  <span style={{ fontSize: '13px', color: '#cbd5e1' }}>Boss filters:</span>
                 </div>
                 {Object.keys(data.bossParticipation).sort().map(boss => (
                   <button
                     key={boss}
                     onClick={() => toggleBoss(boss)}
-                    style={{ padding: '6px 12px', background: selectedBosses.has(boss) ? '#f97316' : '#718096', border: '1px solid ' + (selectedBosses.has(boss) ? '#f97316' : '#94a3b8'), borderRadius: '16px', color: 'white', cursor: 'pointer', fontSize: '13px' }}
+                    style={{ padding: '5px 10px', background: selectedBosses.has(boss) ? '#f97316' : '#2d3238', border: '1px solid ' + (selectedBosses.has(boss) ? '#f97316' : '#3d424a'), borderRadius: '14px', color: 'white', cursor: 'pointer', fontSize: '12px' }}
                   >
                     {boss}
                   </button>
@@ -717,13 +698,13 @@ export default function WarcraftLogsApp() {
               </div>
 
               {view === 'players' && (
-                <div style={{ marginTop: '16px' }}>
+                <div style={{ marginTop: '14px' }}>
                   <input
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Search players..."
-                    style={{ width: '100%', maxWidth: '300px', padding: '8px 12px', background: '#2d3748', border: '1px solid #4a5568', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px' }}
+                    style={{ width: '100%', maxWidth: '300px', padding: '8px 12px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px' }}
                   />
                 </div>
               )}
@@ -734,14 +715,14 @@ export default function WarcraftLogsApp() {
               const sortedPlayers = sortConfig.key ? sortOverviewData(bosses, players, grid, sortConfig.key) : players;
               
               return (
-                <div style={{ background: 'rgba(74, 85, 104, 0.4)', backdropFilter: 'blur(10px)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(203, 213, 225, 0.1)', overflowX: 'auto' }}>
-                  <h2 style={{ margin: '0 0 16px', fontSize: '18px', fontWeight: '600' }}>Death Rate Overview</h2>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                <div style={{ background: '#1a1d23', borderRadius: '12px', padding: '16px', border: '1px solid #2d3238', overflowX: 'auto' }}>
+                  <h2 style={{ margin: '0 0 14px', fontSize: '16px', fontWeight: '600', color: '#ffffff' }}>Death Rate Overview</h2>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
                     <thead>
-                      <tr style={{ background: '#718096' }}>
+                      <tr style={{ background: '#252930' }}>
                         <th 
                           onClick={() => handleSort('player')}
-                          style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #94a3b8', position: 'sticky', left: 0, background: '#718096', zIndex: 2, cursor: 'pointer', userSelect: 'none' }}
+                          style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #3d424a', position: 'sticky', left: 0, background: '#252930', zIndex: 2, cursor: 'pointer', userSelect: 'none', color: '#ffffff' }}
                         >
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                             Player {getSortIcon('player')}
@@ -751,7 +732,7 @@ export default function WarcraftLogsApp() {
                           <th 
                             key={boss} 
                             onClick={() => handleSort(boss)}
-                            style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #94a3b8', minWidth: '80px', cursor: 'pointer', userSelect: 'none' }}
+                            style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #3d424a', minWidth: '80px', cursor: 'pointer', userSelect: 'none', color: '#ffffff' }}
                           >
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
                               {boss} {getSortIcon(boss)}
@@ -760,7 +741,7 @@ export default function WarcraftLogsApp() {
                         ))}
                         <th 
                           onClick={() => handleSort('overall')}
-                          style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #94a3b8', fontWeight: '700', minWidth: '80px', cursor: 'pointer', userSelect: 'none' }}
+                          style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #3d424a', fontWeight: '700', minWidth: '80px', cursor: 'pointer', userSelect: 'none', color: '#ffffff' }}
                         >
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
                             Overall {getSortIcon('overall')}
@@ -770,8 +751,8 @@ export default function WarcraftLogsApp() {
                     </thead>
                     <tbody>
                       {sortedPlayers.map(player => (
-                        <tr key={player} style={{ borderBottom: '1px solid #718096' }}>
-                          <td style={{ padding: '10px', fontWeight: '600', position: 'sticky', left: 0, background: 'rgba(74, 85, 104, 0.95)', zIndex: 1 }}>{player}</td>
+                        <tr key={player} style={{ borderBottom: '1px solid #2d3238' }}>
+                          <td style={{ padding: '10px', fontWeight: '600', position: 'sticky', left: 0, background: '#1a1d23', zIndex: 1, color: '#ffffff' }}>{player}</td>
                           {bosses.map(boss => {
                             const cellData = grid[player][boss];
                             return (
@@ -804,49 +785,49 @@ export default function WarcraftLogsApp() {
             })()}
 
             {view === 'players' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {getFilteredStats().map(({ player, deaths, pulls, rate, deathsByBoss, topAbilitiesByBoss }) => {
                   const isExpanded = expandedPlayers.has(player);
                   return (
-                    <div key={player} style={{ background: 'rgba(74, 85, 104, 0.4)', backdropFilter: 'blur(10px)', borderRadius: '12px', border: '1px solid rgba(203, 213, 225, 0.1)', overflow: 'hidden' }}>
+                    <div key={player} style={{ background: '#1a1d23', borderRadius: '8px', border: '1px solid #2d3238', overflow: 'hidden' }}>
                       <div 
                         onClick={() => togglePlayer(player)}
                         style={{ 
-                          padding: '16px 20px', 
+                          padding: '12px 16px', 
                           display: 'flex', 
                           justifyContent: 'space-between', 
                           alignItems: 'center', 
                           cursor: 'pointer',
-                          background: isExpanded ? 'rgba(74, 85, 104, 0.6)' : 'transparent',
+                          background: isExpanded ? '#252930' : '#1a1d23',
                           transition: 'background 0.2s'
                         }}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                          {isExpanded ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                           <div>
-                            <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '600' }}>{player}</h3>
-                            <p style={{ margin: '4px 0 0', fontSize: '14px', color: '#94a3b8' }}>
+                            <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '600', color: '#ffffff' }}>{player}</h3>
+                            <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#8b92a0' }}>
                               {deaths} deaths / {pulls} pulls
                             </p>
                           </div>
                         </div>
-                        <div style={{ fontSize: '28px', fontWeight: '700', color: rate > 50 ? '#f87171' : rate > 25 ? '#fbbf24' : '#34d399' }}>
+                        <div style={{ fontSize: '18px', fontWeight: '700', color: rate > 50 ? '#f87171' : rate > 25 ? '#fbbf24' : '#34d399' }}>
                           {rate.toFixed(1)}%
                         </div>
                       </div>
 
                       {isExpanded && (
-                        <div style={{ padding: '0 20px 20px', borderTop: '1px solid rgba(148, 163, 184, 0.1)' }}>
+                        <div style={{ padding: '0 16px 16px', borderTop: '1px solid #2d3238' }}>
                           {Object.entries(deathsByBoss).map(([boss, bossDeaths]) => (
-                            <div key={boss} style={{ marginTop: '16px' }}>
-                              <h4 style={{ margin: '0 0 12px', fontSize: '16px', fontWeight: '600', color: '#f97316' }}>
+                            <div key={boss} style={{ marginTop: '12px' }}>
+                              <h4 style={{ margin: '0 0 10px', fontSize: '14px', fontWeight: '600', color: '#f97316' }}>
                                 {boss} ({bossDeaths.length} deaths)
                               </h4>
                               
                               {topAbilitiesByBoss[boss] && topAbilitiesByBoss[boss].length > 0 && (
-                                <div style={{ marginBottom: '12px', padding: '8px 12px', background: 'rgba(74, 85, 104, 0.3)', borderRadius: '6px' }}>
-                                  <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '4px' }}>Top Abilities:</div>
-                                  <div style={{ fontSize: '13px', color: '#cbd5e1' }}>
+                                <div style={{ marginBottom: '10px', padding: '8px 10px', background: '#252930', borderRadius: '4px' }}>
+                                  <div style={{ fontSize: '11px', color: '#8b92a0', marginBottom: '4px' }}>Top Abilities:</div>
+                                  <div style={{ fontSize: '12px', color: '#cbd5e1' }}>
                                     {topAbilitiesByBoss[boss].map(([ability, count], idx) => (
                                       <span key={ability}>
                                         {idx + 1}. {ability} ({count}){idx < topAbilitiesByBoss[boss].length - 1 ? ' • ' : ''}
@@ -856,7 +837,7 @@ export default function WarcraftLogsApp() {
                                 </div>
                               )}
 
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                                 {bossDeaths
                                   .filter(death => death.abilityName && death.abilityName !== 'Unknown')
                                   .map((death, idx) => (
@@ -864,15 +845,15 @@ export default function WarcraftLogsApp() {
                                     display: 'flex', 
                                     justifyContent: 'space-between', 
                                     alignItems: 'center',
-                                    padding: '10px 12px',
-                                    background: 'rgba(45, 55, 72, 0.5)',
-                                    borderRadius: '6px',
-                                    fontSize: '13px'
+                                    padding: '8px 10px',
+                                    background: '#252930',
+                                    borderRadius: '4px',
+                                    fontSize: '12px'
                                   }}>
-                                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flex: 1 }}>
-                                      <span style={{ color: '#64748b', minWidth: '60px' }}>Pull #{death.pullNo}</span>
-                                      <span style={{ color: '#94a3b8', minWidth: '120px' }}>{formatTimestamp(death.absTs)}</span>
-                                      <span style={{ color: '#cbd5e1' }}>{death.abilityName}</span>
+                                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flex: 1 }}>
+                                      <span style={{ color: '#64748b', minWidth: '55px' }}>Pull #{death.pullNo}</span>
+                                      <span style={{ color: '#8b92a0', minWidth: '110px' }}>{formatTimestamp(death.absTs)}</span>
+                                      <span style={{ color: '#e2e8f0' }}>{death.abilityName}</span>
                                     </div>
                                     <a 
                                       href={getWCLLink(death.reportId, death.fightId)} 
@@ -884,10 +865,10 @@ export default function WarcraftLogsApp() {
                                         gap: '4px', 
                                         color: '#f97316', 
                                         textDecoration: 'none',
-                                        fontSize: '12px'
+                                        fontSize: '11px'
                                       }}
                                     >
-                                      View Log <ExternalLink size={14} />
+                                      View Log <ExternalLink size={12} />
                                     </a>
                                   </div>
                                 ))}
@@ -905,7 +886,6 @@ export default function WarcraftLogsApp() {
         )}
       </div>
 
-      {/* Tombstones at the bottom */}
       <div style={{ 
         position: 'fixed', 
         bottom: 0, 
