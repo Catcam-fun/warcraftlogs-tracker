@@ -97,7 +97,7 @@ def get_guild_reports(token, guild_name, server, region, zone_id, cutoff_date):
     query = """
     query($guildName: String!, $serverSlug: String!, $serverRegion: String!, $zoneID: Int!) {
       reportData {
-        reports(guildName: $guildName, guildServerSlug: $serverSlug, guildServerRegion: $serverRegion, zoneID: $zoneID, limit: 500) {
+        reports(guildName: $guildName, guildServerSlug: $serverSlug, guildServerRegion: $serverRegion, zoneID: $zoneID, limit: 100) {
           data {
             code
             startTime
