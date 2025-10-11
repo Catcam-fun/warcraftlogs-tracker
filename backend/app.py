@@ -440,9 +440,16 @@ def analyze():
         response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
         return response, 200
     
+    # Extract config BEFORE the generator to avoid request context issues
+    try:
+        config = request.json
+    except Exception as e:
+        resp = jsonify({"error": f"Invalid request: {str(e)}"})
+        resp.headers.add('Access-Control-Allow-Origin', '*')
+        return resp, 400
+    
     def generate():
         try:
-            config = request.json
             
             # Extract configuration
             client_id = config.get('clientId')
