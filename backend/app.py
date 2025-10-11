@@ -2,6 +2,7 @@
 """
 Flask API for WarcraftLogs Death Tracker - V2 GraphQL API
 Optimized for Render.com deployment
+Version 2.1 - Fixed player name mapping from targetID
 """
 
 from flask import Flask, request, jsonify
