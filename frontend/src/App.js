@@ -115,7 +115,8 @@ export default function WarcraftLogsApp() {
     for (const player of Object.keys(eventsAll)) {
       const evs = eventsAll[player].filter(
         ev => ev.rankWithinPull <= cutoff && 
-        (selectedBosses.size === 0 || selectedBosses.has(ev.boss))
+        (selectedBosses.size === 0 || selectedBosses.has(ev.boss)) &&
+        ev.abilityName && ev.abilityName !== 'Unknown'
       );
       
       if (!evs.length) continue;
@@ -152,7 +153,9 @@ export default function WarcraftLogsApp() {
         const abilityCounts = {};
         deathsByBoss[boss].forEach(death => {
           const ability = death.abilityName || 'Unknown';
-          abilityCounts[ability] = (abilityCounts[ability] || 0) + 1;
+          if (ability !== 'Unknown') {
+            abilityCounts[ability] = (abilityCounts[ability] || 0) + 1;
+          }
         });
         topAbilitiesByBoss[boss] = Object.entries(abilityCounts)
           .sort((a, b) => b[1] - a[1])
@@ -215,7 +218,7 @@ export default function WarcraftLogsApp() {
   };
 
   const getWCLLink = (reportId, fightId) => {
-    return `https://www.warcraftlogs.com/reports/${reportId}#fight=${fightId}`;
+    return `https://www.warcraftlogs.com/reports/${reportId}#fight=${fightId}&type=deaths`;
   };
 
   return (
@@ -656,7 +659,9 @@ export default function WarcraftLogsApp() {
 
                               {/* Death List */}
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                {bossDeaths.map((death, idx) => (
+                                {bossDeaths
+                                  .filter(death => death.abilityName && death.abilityName !== 'Unknown')
+                                  .map((death, idx) => (
                                   <div key={idx} style={{ 
                                     display: 'flex', 
                                     justifyContent: 'space-between', 
