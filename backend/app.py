@@ -190,6 +190,8 @@ def get_fights(token, report_code):
         actors = report.get("masterData", {}).get("actors", [])
         report_start = report.get("startTime", 0)
         
+        print(f"Report {report_code}: Found {len(fights)} fights, {len(actors)} actors")
+        
         # Convert to format compatible with existing code
         formatted_fights = []
         for fight in fights:
@@ -213,6 +215,10 @@ def get_fights(token, report_code):
                     "name": actor.get("name"),
                     "type": actor.get("subType")  # Class name
                 })
+        
+        print(f"Formatted {len(formatted_friendlies)} friendly players")
+        if len(formatted_friendlies) > 0:
+            print(f"Sample player: {formatted_friendlies[0]}")
         
         return {
             "report_start": report_start,
@@ -268,15 +274,24 @@ def get_player_deaths(token, report_code, fight):
             target = event.get("target", {})
             killing_ability = event.get("killingAbility", {})
             
+            target_name = target.get("name", "Unknown")
+            
+            # Debug: Log first death we find
+            if len(deaths) == 0 and target_name != "Unknown":
+                print(f"Sample death event - Target: {target_name}, Ability: {killing_ability.get('name', 'Unknown')}")
+            
             deaths.append({
                 "timestamp": event.get("timestamp", 0),
-                "targetName": target.get("name", "Unknown"),
+                "targetName": target_name,
                 "targetID": target.get("id"),
                 "phase": 1,  # V2 API doesn't provide phase info in events
                 "fightId": fid,
                 "bossName": fight.get('name', 'Unknown'),
                 "abilityName": killing_ability.get("name", "Unknown"),
             })
+        
+        if len(deaths) > 0:
+            print(f"Fight {fid}: Found {len(deaths)} deaths")
         
         return filter_mass_deaths(deaths)
     
@@ -579,6 +594,10 @@ def analyze():
             # No delay needed - worker handles rate limiting
         
         print(f"Analysis complete! Total deaths tracked: {sum(len(v) for v in counted_death_events.values())}")
+        print(f"Total unique players: {len(counted_death_events)}")
+        if len(counted_death_events) > 0:
+            sample_player = list(counted_death_events.keys())[0]
+            print(f"Sample player: {sample_player} with {len(counted_death_events[sample_player])} deaths")
         
         # Convert sets to lists for JSON serialization
         pull_participation_json = {p: list(s) for p, s in pull_participation.items()}
