@@ -8,7 +8,6 @@ Version 2.1 - Fixed player name mapping from targetID
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import requests
-import json
 from collections import defaultdict
 from datetime import datetime
 import time
@@ -276,10 +275,6 @@ def get_player_deaths(token, report_code, fight, friendlies):
         data = graphql_query(token, query, variables)
         events_data = data.get("reportData", {}).get("report", {}).get("events", {}).get("data", [])
         
-        # DEBUG: Log the raw event structure (without json.dumps)
-        if len(events_data) > 0:
-            print(f"DEBUG: First event keys: {list(events_data[0].keys())}")
-        
         deaths = []
         for event in events_data:
             if event.get("type") != "death":
@@ -329,46 +324,6 @@ def analyze_fights(fights, fight_zone, difficulty):
         out.append(f)
     
     return out
-
-
-def get_fight_participants(token, report_code, fight):
-    """Get participants for a specific fight using V2 GraphQL API"""
-    
-    fid = fight['id']
-    
-    query = """
-    query($code: String!, $fightIDs: [Int]!) {
-      reportData {
-        report(code: $code) {
-          table(fightIDs: $fightIDs, dataType: DamageDone)
-        }
-      }
-    }
-    """
-    
-    variables = {
-        "code": report_code,
-        "fightIDs": [fid]
-    }
-    
-    try:
-        data = graphql_query(token, query, variables)
-        table_data = data.get("reportData", {}).get("report", {}).get("table", {})
-        
-        participants = set()
-        
-        # Extract player names from damage done table
-        if table_data and "data" in table_data:
-            entries = table_data.get("data", {}).get("entries", [])
-            for entry in entries:
-                name = entry.get("name")
-                if name:
-                    participants.add(name)
-        
-        return participants
-    except Exception as e:
-        print(f"Error getting fight participants: {e}")
-        return set()
 
 
 def filter_mass_deaths(deaths):
@@ -558,6 +513,7 @@ def analyze():
         for idx, fight_data in enumerate(all_fights_deduped, 1):
             if idx % 10 == 0:
                 print(f"Processing fight {idx}/{len(all_fights_deduped)}")
+            
             rid = fight_data['reportId']
             fight = fight_data['fight']
             boss_name = fight_data['boss_name']
@@ -565,24 +521,36 @@ def analyze():
             is_kill = fight_data['is_kill']
             report_abs_start = fight_data['report_abs_start']
             participants = fight_data['participants']
+            friendlies = fight_data['friendlies']
             
             pull_counter_by_boss[boss_id] += 1
             seq_no = pull_counter_by_boss[boss_id]
             fid = fight['id']
             
-            # Use all raid members as participants (skip the extra API call)
-            # This is much faster and usually accurate enough
-            fight_parts = set(participants.values())
+            # Build participant list from friendlies - everyone in the raid
+            fight_parts = set()
+            for friendly in friendlies:
+                name = friendly.get('name')
+                if name:
+                    fight_parts.add(name)
             
-            # Track participation
+            # Fallback: use participants dict if friendlies is empty
+            if not fight_parts:
+                fight_parts = set(participants.values())
+            
+            # Debug: Log first fight's participants
+            if idx == 1:
+                print(f"First fight participants: {list(fight_parts)[:5]}")
+            
+            # Track participation for EVERYONE in the raid (kill or wipe, deaths or no deaths)
             for p in fight_parts:
                 main_char = get_main_character(p, character_groups)
                 pull_key = f"{rid}_{fid}"
                 pull_participation[main_char].add(pull_key)
                 boss_participation[boss_name][main_char].add(pull_key)
             
-            # Process deaths
-            deaths = get_player_deaths(token, rid, fight)
+            # Process deaths - PASS friendlies parameter
+            deaths = get_player_deaths(token, rid, fight, friendlies)
             deaths_sorted = sorted(deaths, key=lambda e: e["timestamp"])[:max_cutoff]
             
             for idx, ev in enumerate(deaths_sorted, start=1):
@@ -605,8 +573,6 @@ def analyze():
                 }
                 counted_death_events[main_char].append(death_event)
                 character_breakdown[main_char][original_char].append(death_event)
-            
-            # No delay needed - worker handles rate limiting
         
         print(f"Analysis complete! Total deaths tracked: {sum(len(v) for v in counted_death_events.values())}")
         print(f"Total unique players: {len(counted_death_events)}")
@@ -667,7 +633,7 @@ def root():
     """Root endpoint"""
     return jsonify({
         "service": "WarcraftLogs Death Tracker API",
-        "version": "2.0",
+        "version": "2.1",
         "status": "running",
         "endpoints": {
             "health": "/api/health",
@@ -678,5 +644,5 @@ def root():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    print(f"Starting WarcraftLogs Death Tracker API on port {port}...")
+    print(f"Starting WarcraftLogs Death Tracker API v2.1 on port {port}...")
     app.run(debug=False, host='0.0.0.0', port=port)
