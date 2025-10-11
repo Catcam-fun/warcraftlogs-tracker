@@ -266,6 +266,10 @@ def get_player_deaths(token, report_code, fight):
         data = graphql_query(token, query, variables)
         events_data = data.get("reportData", {}).get("report", {}).get("events", {}).get("data", [])
         
+        # DEBUG: Log the raw event structure
+        if len(events_data) > 0:
+            print(f"DEBUG: Raw event sample: {json.dumps(events_data[0], indent=2)}")
+        
         deaths = []
         for event in events_data:
             if event.get("type") != "death":
@@ -277,8 +281,11 @@ def get_player_deaths(token, report_code, fight):
             target_name = target.get("name", "Unknown")
             
             # Debug: Log first death we find
-            if len(deaths) == 0 and target_name != "Unknown":
-                print(f"Sample death event - Target: {target_name}, Ability: {killing_ability.get('name', 'Unknown')}")
+            if len(deaths) == 0:
+                print(f"DEBUG: Death event structure:")
+                print(f"  - event keys: {list(event.keys())}")
+                print(f"  - target: {target}")
+                print(f"  - target_name: {target_name}")
             
             deaths.append({
                 "timestamp": event.get("timestamp", 0),
