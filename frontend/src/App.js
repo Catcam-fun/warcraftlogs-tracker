@@ -50,7 +50,7 @@ export default function WarcraftLogsApp() {
         }
       }
 
-      const response = await fetch('https://deathwarcraftlogs-api.onrender.com/', {
+      const response = await fetch('https://deathwarcraftlogs-api.onrender.com/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
