@@ -20,7 +20,7 @@ CORS(app)
 # Constants
 MASS_DEATH_THRESHOLD = 7
 MASS_DEATH_WINDOW = 10000  # ms
-GRAPHQL_ENDPOINT = "https://www.warcraftlogs.com/api/v2/client"
+GRAPHQL_ENDPOINT = "https://wcl-proxy.catcam-fun.workers.dev/"
 
 # OAuth2 token cache
 _token_cache = {"token": None, "expires_at": 0}
@@ -35,7 +35,7 @@ def get_access_token(client_id, client_secret):
         return _token_cache["token"]
     
     # Request new token
-    url = "https://www.warcraftlogs.com/oauth/token"
+    url = "https://wcl-proxy.catcam-fun.workers.dev/oauth/token"
     data = {
         "grant_type": "client_credentials",
         "client_id": client_id,
@@ -400,7 +400,11 @@ def analyze():
     
     # Handle preflight CORS
     if request.method == 'OPTIONS':
-        return '', 204
+        response = jsonify({'status': 'ok'})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        return response, 200
     
     try:
         config = request.json
@@ -421,13 +425,17 @@ def analyze():
         
         # Validate required fields
         if not all([client_id, client_secret, guild_name, server, region]):
-            return jsonify({"error": "Missing required fields (clientId, clientSecret, guildName, server, region)"}), 400
+            resp = jsonify({"error": "Missing required fields (clientId, clientSecret, guildName, server, region)"})
+            resp.headers.add('Access-Control-Allow-Origin', '*')
+            return resp, 400
         
         # Get OAuth2 token
         try:
             token = get_access_token(client_id, client_secret)
         except Exception as e:
-            return jsonify({"error": f"Authentication failed: {str(e)}"}), 401
+            resp = jsonify({"error": f"Authentication failed: {str(e)}"})
+            resp.headers.add('Access-Control-Allow-Origin', '*')
+            return resp, 401
         
         # Get guild reports
         reports = get_guild_reports(
@@ -440,7 +448,9 @@ def analyze():
             reports = [r for r in reports if r.get('owner') in author_filters]
         
         if not reports:
-            return jsonify({"error": "No reports found matching criteria"}), 404
+            resp = jsonify({"error": "No reports found matching criteria"})
+            resp.headers.add('Access-Control-Allow-Origin', '*')
+            return resp, 404
         
         # Collect all fights
         all_fights_raw = []
@@ -556,7 +566,8 @@ def analyze():
                 counted_death_events[main_char].append(death_event)
                 character_breakdown[main_char][original_char].append(death_event)
             
-            time.sleep(0.1)  # Rate limiting for GraphQL API
+            # Worker handles rate limiting, so minimal delay
+            time.sleep(0.05)
         
         # Convert sets to lists for JSON serialization
         pull_participation_json = {p: list(s) for p, s in pull_participation.items()}
@@ -579,6 +590,7 @@ def analyze():
                 "difficulty": difficulty,
                 "generatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "characterGroups": character_groups,
+                "reportCount": len(reports),
             },
             "events": counted_death_events,
             "pullParticipation": pull_participation_json,
@@ -586,13 +598,17 @@ def analyze():
             "characterBreakdown": character_breakdown_json,
         }
         
-        return jsonify(response)
+        resp = jsonify(response)
+        resp.headers.add('Access-Control-Allow-Origin', '*')
+        return resp
     
     except Exception as e:
         print(f"Error in analyze: {str(e)}")
         import traceback
         traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+        resp = jsonify({"error": str(e)})
+        resp.headers.add('Access-Control-Allow-Origin', '*')
+        return resp, 500
 
 
 @app.route('/api/health', methods=['GET'])
