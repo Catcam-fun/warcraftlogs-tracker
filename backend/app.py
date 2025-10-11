@@ -7,6 +7,7 @@ Optimized for Render.com deployment
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import requests
+import json
 from collections import defaultdict
 from datetime import datetime
 import time
@@ -266,9 +267,10 @@ def get_player_deaths(token, report_code, fight):
         data = graphql_query(token, query, variables)
         events_data = data.get("reportData", {}).get("report", {}).get("events", {}).get("data", [])
         
-        # DEBUG: Log the raw event structure
+        # DEBUG: Log the raw event structure (without json.dumps)
         if len(events_data) > 0:
-            print(f"DEBUG: Raw event sample: {json.dumps(events_data[0], indent=2)}")
+            print(f"DEBUG: First event keys: {list(events_data[0].keys())}")
+            print(f"DEBUG: First event sample: {events_data[0]}")
         
         deaths = []
         for event in events_data:
