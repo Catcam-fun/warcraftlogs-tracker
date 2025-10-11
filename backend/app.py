@@ -2,7 +2,7 @@
 """
 Flask API for WarcraftLogs Death Tracker - V2 GraphQL API
 Optimized for Render.com deployment
-Version 2.1 - Fixed player name mapping from targetID
+Version 2.2 - Bulk death fetching for 20x faster performance
 """
 
 from flask import Flask, request, jsonify
@@ -205,6 +205,7 @@ def get_fights(token, report_code):
                 "difficulty": fight.get("difficulty"),
                 "kill": fight.get("kill"),
                 "zoneID": fight.get("gameZone", {}).get("id") if fight.get("gameZone") else None,
+                "friendlyPlayers": fight.get("friendlyPlayers", [])  # IDs of players in THIS fight
             })
         
         # Format friendlies
@@ -264,12 +265,11 @@ def get_abilities_map(token, report_code):
     return ability_id_to_name
 
 
-def get_player_deaths(token, report_code, fight, friendlies, ability_map):
-    """Get player deaths using V2 GraphQL API"""
+def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map):
+    """Get ALL player deaths for an entire report at once - MUCH faster than per-fight queries"""
     
-    fid = fight['id']
-    start = fight['start_time']
-    end = fight['end_time']
+    if not fights:
+        return {}
     
     # Build actor ID -> name lookup from friendlies
     actor_id_to_name = {}
@@ -279,12 +279,15 @@ def get_player_deaths(token, report_code, fight, friendlies, ability_map):
         if actor_id and name:
             actor_id_to_name[actor_id] = name
     
+    # Get the time range for ALL fights we care about
+    start_time = min(f['start_time'] for f in fights)
+    end_time = max(f['end_time'] for f in fights)
+    
     query = """
-    query($code: String!, $fightIDs: [Int]!, $startTime: Float!, $endTime: Float!) {
+    query($code: String!, $startTime: Float!, $endTime: Float!) {
       reportData {
         report(code: $code) {
           events(
-            fightIDs: $fightIDs
             startTime: $startTime
             endTime: $endTime
             dataType: Deaths
@@ -299,18 +302,26 @@ def get_player_deaths(token, report_code, fight, friendlies, ability_map):
     
     variables = {
         "code": report_code,
-        "fightIDs": [fid],
-        "startTime": start,
-        "endTime": end
+        "startTime": start_time,
+        "endTime": end_time
     }
     
     try:
         data = graphql_query(token, query, variables)
         events_data = data.get("reportData", {}).get("report", {}).get("events", {}).get("data", [])
         
-        deaths = []
+        # Build a map of fightId -> list of deaths
+        deaths_by_fight = {f['id']: [] for f in fights}
+        
         for event in events_data:
             if event.get("type") != "death":
+                continue
+            
+            event_timestamp = event.get("timestamp", 0)
+            fight_id = event.get("fight")
+            
+            # Find which fight this death belongs to
+            if fight_id not in deaths_by_fight:
                 continue
             
             # V2 API returns targetID, not target.name
@@ -321,21 +332,28 @@ def get_player_deaths(token, report_code, fight, friendlies, ability_map):
             killing_ability_id = event.get("killingAbilityGameID")
             ability_name = ability_map.get(killing_ability_id, "Unknown")
             
-            deaths.append({
-                "timestamp": event.get("timestamp", 0),
+            # Find the fight object to get its name
+            fight_obj = next((f for f in fights if f['id'] == fight_id), None)
+            
+            deaths_by_fight[fight_id].append({
+                "timestamp": event_timestamp,
                 "targetName": target_name,
                 "targetID": target_id,
                 "phase": 1,
-                "fightId": fid,
-                "bossName": fight.get('name', 'Unknown'),
+                "fightId": fight_id,
+                "bossName": fight_obj.get('name', 'Unknown') if fight_obj else 'Unknown',
                 "abilityName": ability_name,
             })
         
-        return filter_mass_deaths(deaths)
+        # Filter mass deaths for each fight
+        for fid in deaths_by_fight:
+            deaths_by_fight[fid] = filter_mass_deaths(deaths_by_fight[fid])
+        
+        return deaths_by_fight
     
     except Exception as e:
-        print(f"Error fetching deaths: {e}")
-        return []
+        print(f"Error fetching deaths for report: {e}")
+        return {f['id']: [] for f in fights}
 
 
 def analyze_fights(fights, fight_zone, difficulty):
@@ -491,7 +509,6 @@ def analyze():
             if not fights:
                 continue
             
-            participants = get_raid_participants(friendlies)
             matching = analyze_fights(fights, fight_zone, difficulty)
             
             for fight in matching:
@@ -545,6 +562,30 @@ def analyze():
         character_breakdown = defaultdict(lambda: defaultdict(list))
         pull_counter_by_boss = defaultdict(int)
         
+        # Group fights by report for bulk death fetching
+        fights_by_report = defaultdict(list)
+        for fight_data in all_fights_deduped:
+            fights_by_report[fight_data['reportId']].append(fight_data)
+        
+        # Fetch deaths in bulk per report (HUGE performance improvement!)
+        print(f"Fetching deaths for {len(fights_by_report)} reports in bulk...")
+        report_deaths_cache = {}
+        for rid, report_fights in fights_by_report.items():
+            # Get one representative fight_data to extract shared info
+            sample_fight_data = report_fights[0]
+            friendlies = sample_fight_data['friendlies']
+            ability_map = sample_fight_data['ability_map']
+            
+            # Extract just the fight objects
+            fights_list = [fd['fight'] for fd in report_fights]
+            
+            # ONE API call per report instead of one per fight!
+            report_deaths_cache[rid] = get_report_deaths_bulk(
+                token, rid, fights_list, friendlies, ability_map
+            )
+        
+        print(f"Death fetching complete! Processing {len(all_fights_deduped)} fights...")
+        
         for idx, fight_data in enumerate(all_fights_deduped, 1):
             if idx % 10 == 0:
                 print(f"Processing fight {idx}/{len(all_fights_deduped)}")
@@ -555,27 +596,33 @@ def analyze():
             boss_id = fight_data['boss_id']
             is_kill = fight_data['is_kill']
             report_abs_start = fight_data['report_abs_start']
-            participants = fight_data['participants']
             friendlies = fight_data['friendlies']
             
             pull_counter_by_boss[boss_id] += 1
             seq_no = pull_counter_by_boss[boss_id]
             fid = fight['id']
             
-            # Build participant list from friendlies - everyone in the raid
+            # Build participant list from friendlies - only those who were in THIS specific fight
             fight_parts = set()
-            for friendly in friendlies:
-                name = friendly.get('name')
-                if name:
-                    fight_parts.add(name)
+            friendly_player_ids = set(fight.get('friendlyPlayers', []))
             
-            # Fallback: use participants dict if friendlies is empty
-            if not fight_parts:
-                fight_parts = set(participants.values())
+            if friendly_player_ids:
+                # Use the specific players who were in this fight
+                for friendly in friendlies:
+                    if friendly.get('id') in friendly_player_ids:
+                        name = friendly.get('name')
+                        if name:
+                            fight_parts.add(name)
+            else:
+                # Fallback: if friendlyPlayers is empty, use all friendlies
+                for friendly in friendlies:
+                    name = friendly.get('name')
+                    if name:
+                        fight_parts.add(name)
             
             # Debug: Log first fight's participants
             if idx == 1:
-                print(f"First fight participants: {list(fight_parts)[:5]}")
+                print(f"First fight: {len(fight_parts)} participants present (out of {len(friendlies)} total in report)")
             
             # Track participation for EVERYONE in the raid (kill or wipe, deaths or no deaths)
             for p in fight_parts:
@@ -584,8 +631,8 @@ def analyze():
                 pull_participation[main_char].add(pull_key)
                 boss_participation[boss_name][main_char].add(pull_key)
             
-            # Process deaths - PASS friendlies and ability_map parameters
-            deaths = get_player_deaths(token, rid, fight, friendlies, fight_data['ability_map'])
+            # Get deaths from cache (already filtered for mass deaths)
+            deaths = report_deaths_cache[rid].get(fid, [])
             deaths_sorted = sorted(deaths, key=lambda e: e["timestamp"])[:max_cutoff]
             
             for idx, ev in enumerate(deaths_sorted, start=1):
@@ -668,7 +715,7 @@ def root():
     """Root endpoint"""
     return jsonify({
         "service": "WarcraftLogs Death Tracker API",
-        "version": "2.1",
+        "version": "2.2",
         "status": "running",
         "endpoints": {
             "health": "/api/health",
@@ -679,5 +726,5 @@ def root():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    print(f"Starting WarcraftLogs Death Tracker API v2.1 on port {port}...")
+    print(f"Starting WarcraftLogs Death Tracker API v2.2 on port {port}...")
     app.run(debug=False, host='0.0.0.0', port=port)
