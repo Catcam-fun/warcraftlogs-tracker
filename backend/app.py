@@ -528,7 +528,6 @@ def analyze():
                     'abs_start': abs_start,
                     'abs_end': abs_end,
                     'report_abs_start': report_abs_start,
-                    'participants': participants,
                     'friendlies': friendlies,
                     'ability_map': report_ability_maps[rid]  # Store ability map with fight data
                 })
@@ -635,7 +634,7 @@ def analyze():
             deaths = report_deaths_cache[rid].get(fid, [])
             deaths_sorted = sorted(deaths, key=lambda e: e["timestamp"])[:max_cutoff]
             
-            for idx, ev in enumerate(deaths_sorted, start=1):
+            for rank, ev in enumerate(deaths_sorted, start=1):
                 original_char = ev["targetName"]
                 main_char = get_main_character(original_char, character_groups)
                 
@@ -649,7 +648,7 @@ def analyze():
                     "fightId": fid,
                     "isKill": is_kill,
                     "pullNo": seq_no,
-                    "rankWithinPull": idx,
+                    "rankWithinPull": rank,
                     "absTs": report_abs_start + ev["timestamp"],
                     "abilityName": ev.get("abilityName", "Unknown")
                 }
