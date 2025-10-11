@@ -231,22 +231,8 @@ def get_fights(token, report_code):
         return {"report_start": 0, "fights": [], "friendlies": []}
 
 
-def get_player_deaths(token, report_code, fight, friendlies):
-    """Get player deaths using V2 GraphQL API"""
-    
-    fid = fight['id']
-    start = fight['start_time']
-    end = fight['end_time']
-    
-    # Build actor ID -> name lookup from friendlies
-    actor_id_to_name = {}
-    for friendly in friendlies:
-        actor_id = friendly.get('id')
-        name = friendly.get('name')
-        if actor_id and name:
-            actor_id_to_name[actor_id] = name
-    
-    # First, get ability information from the report
+def get_abilities_map(token, report_code):
+    """Get ability ID to name mapping for a report - ONCE per report"""
     abilities_query = """
     query($code: String!) {
       reportData {
@@ -255,7 +241,6 @@ def get_player_deaths(token, report_code, fight, friendlies):
             abilities {
               gameID
               name
-              type
             }
           }
         }
@@ -272,8 +257,27 @@ def get_player_deaths(token, report_code, fight, friendlies):
             ability_name = ability.get("name")
             if ability_id and ability_name:
                 ability_id_to_name[ability_id] = ability_name
+        print(f"Loaded {len(ability_id_to_name)} abilities for report {report_code}")
     except Exception as e:
         print(f"Warning: Could not fetch ability names: {e}")
+    
+    return ability_id_to_name
+
+
+def get_player_deaths(token, report_code, fight, friendlies, ability_map):
+    """Get player deaths using V2 GraphQL API"""
+    
+    fid = fight['id']
+    start = fight['start_time']
+    end = fight['end_time']
+    
+    # Build actor ID -> name lookup from friendlies
+    actor_id_to_name = {}
+    for friendly in friendlies:
+        actor_id = friendly.get('id')
+        name = friendly.get('name')
+        if actor_id and name:
+            actor_id_to_name[actor_id] = name
     
     query = """
     query($code: String!, $fightIDs: [Int]!, $startTime: Float!, $endTime: Float!) {
@@ -313,26 +317,19 @@ def get_player_deaths(token, report_code, fight, friendlies):
             target_id = event.get("targetID")
             target_name = actor_id_to_name.get(target_id, "Unknown")
             
-            # Get ability name from killingAbilityGameID
+            # Get ability name from killingAbilityGameID using the pre-loaded map
             killing_ability_id = event.get("killingAbilityGameID")
-            ability_name = ability_id_to_name.get(killing_ability_id, "Unknown")
-            
-            # Debug: Log first death we find
-            if len(deaths) == 0:
-                print(f"DEBUG: Death event - targetID: {target_id}, mapped name: {target_name}, abilityID: {killing_ability_id}, ability: {ability_name}")
+            ability_name = ability_map.get(killing_ability_id, "Unknown")
             
             deaths.append({
                 "timestamp": event.get("timestamp", 0),
                 "targetName": target_name,
                 "targetID": target_id,
-                "phase": 1,  # V2 API doesn't provide phase info in events
+                "phase": 1,
                 "fightId": fid,
                 "bossName": fight.get('name', 'Unknown'),
                 "abilityName": ability_name,
             })
-        
-        if len(deaths) > 0:
-            print(f"Fight {fid}: Found {len(deaths)} deaths")
         
         return filter_mass_deaths(deaths)
     
@@ -476,10 +473,16 @@ def analyze():
         # Collect all fights
         print("Collecting fights from reports...")
         all_fights_raw = []
+        report_ability_maps = {}  # Cache ability maps per report
         
         for i, rep in enumerate(reports, 1):
             rid = rep["id"]
             print(f"Processing report {i}/{len(reports)}: {rid}")
+            
+            # Fetch abilities ONCE per report
+            if rid not in report_ability_maps:
+                report_ability_maps[rid] = get_abilities_map(token, rid)
+            
             fights_data = get_fights(token, rid)
             fights = fights_data.get("fights", [])
             report_abs_start = fights_data.get("report_start", rep["start"])
@@ -509,7 +512,8 @@ def analyze():
                     'abs_end': abs_end,
                     'report_abs_start': report_abs_start,
                     'participants': participants,
-                    'friendlies': friendlies
+                    'friendlies': friendlies,
+                    'ability_map': report_ability_maps[rid]  # Store ability map with fight data
                 })
         
         # Sort chronologically
