@@ -318,165 +318,212 @@ export default function WarcraftLogsApp() {
 
         {!data && (
           <div style={{ background: 'rgba(30, 41, 59, 0.6)', backdropFilter: 'blur(10px)', borderRadius: '16px', padding: '32px', marginBottom: '24px', border: '1px solid rgba(148, 163, 184, 0.1)' }}>
-            <h2 style={{ margin: '0 0 24px', fontSize: '20px', fontWeight: '600' }}>Configuration</h2>
+            <h2 style={{ margin: '0 0 32px', fontSize: '20px', fontWeight: '600' }}>Configuration</h2>
             
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '24px' }}>
-              <div>
-                <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
-                  Client ID (V2 API) *
-                </label>
-                <input
-                  type="text"
-                  name="clientId"
-                  value={config.clientId}
-                  onChange={handleInputChange}
-                  placeholder="a015aa47-2244-4e9b-b74b-6bf6a2b3ad93"
-                  style={{ width: '100%', padding: '12px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px' }}
-                />
+            {/* API Credentials Info Box */}
+            <div style={{ marginBottom: '28px', padding: '16px 20px', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.3)', borderRadius: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'start', gap: '12px' }}>
+                <div style={{ fontSize: '20px' }}>ℹ️</div>
+                <div>
+                  <h3 style={{ margin: '0 0 8px', fontSize: '15px', fontWeight: '600', color: '#60a5fa' }}>
+                    Need API Credentials?
+                  </h3>
+                  <p style={{ margin: '0 0 8px', fontSize: '13px', color: '#cbd5e1', lineHeight: '1.6' }}>
+                    You need a WarcraftLogs V2 API Client ID and Secret to use this tool.
+                  </p>
+                  <ol style={{ margin: '8px 0 0 16px', padding: 0, fontSize: '13px', color: '#cbd5e1', lineHeight: '1.8' }}>
+                    <li>Go to <a href="https://www.warcraftlogs.com/api/clients/" target="_blank" rel="noopener noreferrer" style={{ color: '#60a5fa', textDecoration: 'underline' }}>WarcraftLogs API Clients</a></li>
+                    <li>Click "Create a Client"</li>
+                    <li>Enter a name (e.g., "Death Tracker")</li>
+                    <li>For redirect URL, enter the website URL or just use: <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px', fontSize: '12px' }}>http://localhost</code></li>
+                    <li><strong>Do NOT check</strong> the "Public Client" box</li>
+                    <li>Click "Create" and copy your Client ID and Client Secret</li>
+                  </ol>
+                </div>
+              </div>
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
+              {/* Row 1 */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px' }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
+                    Client ID (V2 API) *
+                  </label>
+                  <input
+                    type="text"
+                    name="clientId"
+                    value={config.clientId}
+                    onChange={handleInputChange}
+                    style={{ width: '100%', padding: '12px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
+                    Client Secret (V2 API) *
+                  </label>
+                  <input
+                    type="password"
+                    name="clientSecret"
+                    value={config.clientSecret}
+                    onChange={handleInputChange}
+                    style={{ width: '100%', padding: '12px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
+                  />
+                </div>
               </div>
 
-              <div>
-                <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
-                  Client Secret (V2 API) *
-                </label>
-                <input
-                  type="password"
-                  name="clientSecret"
-                  value={config.clientSecret}
-                  onChange={handleInputChange}
-                  placeholder="Your secret key"
-                  style={{ width: '100%', padding: '12px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px' }}
-                />
+              {/* Row 2 */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px' }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
+                    Guild Name *
+                  </label>
+                  <input
+                    type="text"
+                    name="guildName"
+                    value={config.guildName}
+                    onChange={handleInputChange}
+                    style={{ width: '100%', padding: '12px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
+                  />
+                  <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#64748b', lineHeight: '1.4' }}>
+                    Examples: Do Over, Complexity Limit, Method
+                  </p>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
+                    Server *
+                  </label>
+                  <input
+                    type="text"
+                    name="server"
+                    value={config.server}
+                    onChange={handleInputChange}
+                    style={{ width: '100%', padding: '12px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
+                  />
+                  <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#64748b', lineHeight: '1.4' }}>
+                    Remove spaces/apostrophes - Examples: Thrall, Area52, TwistingNether
+                  </p>
+                </div>
               </div>
 
-              <div>
-                <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
-                  Guild Name *
-                </label>
-                <input
-                  type="text"
-                  name="guildName"
-                  value={config.guildName}
-                  onChange={handleInputChange}
-                  placeholder="Do Over"
-                  style={{ width: '100%', padding: '12px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px' }}
-                />
+              {/* Row 3 */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px' }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
+                    Region *
+                  </label>
+                  <select
+                    name="region"
+                    value={config.region}
+                    onChange={handleInputChange}
+                    style={{ width: '100%', padding: '12px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
+                  >
+                    <option value="us">US</option>
+                    <option value="eu">EU</option>
+                    <option value="kr">KR</option>
+                    <option value="tw">TW</option>
+                    <option value="cn">CN</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
+                    Difficulty *
+                  </label>
+                  <select
+                    name="difficulty"
+                    value={config.difficulty}
+                    onChange={handleInputChange}
+                    style={{ width: '100%', padding: '12px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
+                  >
+                    <option value="3">Normal</option>
+                    <option value="4">Heroic</option>
+                    <option value="5">Mythic</option>
+                  </select>
+                </div>
               </div>
 
-              <div>
-                <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
-                  Server * <span style={{ fontSize: '12px', color: '#64748b' }}>(Remove spaces/apostrophes)</span>
-                </label>
-                <input
-                  type="text"
-                  name="server"
-                  value={config.server}
-                  onChange={handleInputChange}
-                  placeholder="Thrall (not Area 52 - use Area52)"
-                  style={{ width: '100%', padding: '12px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px' }}
-                />
-                <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#64748b' }}>
-                  Examples: Thrall, Area52, TwistingNether, SistersofElune
-                </p>
+              {/* Row 4 */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px' }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
+                    Report Zone ID
+                  </label>
+                  <input
+                    type="text"
+                    name="reportZone"
+                    value={config.reportZone}
+                    onChange={handleInputChange}
+                    placeholder="44"
+                    style={{ width: '100%', padding: '12px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
+                  />
+                  <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#64748b', lineHeight: '1.4' }}>
+                    Examples: 44 (Nerubar Palace), 38 (Nerub-ar Palace), 37 (Aberrus)
+                  </p>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
+                    Fight Zone ID
+                  </label>
+                  <input
+                    type="text"
+                    name="fightZone"
+                    value={config.fightZone}
+                    onChange={handleInputChange}
+                    placeholder="2810"
+                    style={{ width: '100%', padding: '12px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
+                  />
+                  <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#64748b', lineHeight: '1.4' }}>
+                    Examples: 2810 (Manaforge Omega), 2829 (Queen Ansurek)
+                  </p>
+                </div>
               </div>
 
-              <div>
-                <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
-                  Region *
-                </label>
-                <select
-                  name="region"
-                  value={config.region}
-                  onChange={handleInputChange}
-                  style={{ width: '100%', padding: '12px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px' }}
-                >
-                  <option value="us">US</option>
-                  <option value="eu">EU</option>
-                  <option value="kr">KR</option>
-                  <option value="tw">TW</option>
-                  <option value="cn">CN</option>
-                </select>
+              {/* Row 5 */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px' }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
+                    Cutoff Date
+                  </label>
+                  <input
+                    type="date"
+                    name="cutoffDate"
+                    value={config.cutoffDate}
+                    onChange={handleInputChange}
+                    style={{ width: '100%', padding: '12px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
+                  />
+                  <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#64748b', lineHeight: '1.4' }}>
+                    Only analyze reports before this date
+                  </p>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
+                    Max Deaths to Track
+                  </label>
+                  <input
+                    type="number"
+                    name="maxCutoff"
+                    value={config.maxCutoff}
+                    onChange={handleInputChange}
+                    min="1"
+                    max="10"
+                    placeholder="5"
+                    style={{ width: '100%', padding: '12px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
+                  />
+                  <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#64748b', lineHeight: '1.4' }}>
+                    Track only the first X deaths per pull (1-10)
+                  </p>
+                </div>
               </div>
 
+              {/* Row 6 - Author Filters */}
               <div>
                 <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
-                  Report Zone ID
-                </label>
-                <input
-                  type="text"
-                  name="reportZone"
-                  value={config.reportZone}
-                  onChange={handleInputChange}
-                  placeholder="44 (Nerubar Palace)"
-                  style={{ width: '100%', padding: '12px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px' }}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
-                  Fight Zone ID
-                </label>
-                <input
-                  type="text"
-                  name="fightZone"
-                  value={config.fightZone}
-                  onChange={handleInputChange}
-                  placeholder="2810 (Specific encounter)"
-                  style={{ width: '100%', padding: '12px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px' }}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
-                  Difficulty
-                </label>
-                <select
-                  name="difficulty"
-                  value={config.difficulty}
-                  onChange={handleInputChange}
-                  style={{ width: '100%', padding: '12px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px' }}
-                >
-                  <option value="3">Normal</option>
-                  <option value="4">Heroic</option>
-                  <option value="5">Mythic</option>
-                </select>
-              </div>
-
-              <div>
-                <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
-                  Cutoff Date
-                </label>
-                <input
-                  type="date"
-                  name="cutoffDate"
-                  value={config.cutoffDate}
-                  onChange={handleInputChange}
-                  style={{ width: '100%', padding: '12px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px' }}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
-                  Max Deaths to Track
-                </label>
-                <input
-                  type="number"
-                  name="maxCutoff"
-                  value={config.maxCutoff}
-                  onChange={handleInputChange}
-                  min="1"
-                  max="10"
-                  placeholder="5"
-                  style={{ width: '100%', padding: '12px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px' }}
-                />
-                <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#64748b' }}>
-                  Only track first X deaths per pull (1-10)
-                </p>
-              </div>
-
-              <div style={{ gridColumn: '1 / -1' }}>
-                <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
-                  Author Filters <span style={{ fontSize: '12px', color: '#64748b' }}>(comma-separated)</span>
+                  Author Filters <span style={{ fontSize: '12px', color: '#64748b', fontWeight: '400' }}>(optional, comma-separated)</span>
                 </label>
                 <input
                   type="text"
@@ -484,16 +531,17 @@ export default function WarcraftLogsApp() {
                   value={config.authorFilters}
                   onChange={handleInputChange}
                   placeholder="PlayerName1, PlayerName2, PlayerName3"
-                  style={{ width: '100%', padding: '12px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px' }}
+                  style={{ width: '100%', padding: '12px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
                 />
-                <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#64748b' }}>
-                  Only analyze reports uploaded by these players (optional)
+                <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#64748b', lineHeight: '1.4' }}>
+                  Only analyze reports uploaded by these players
                 </p>
               </div>
 
-              <div style={{ gridColumn: '1 / -1' }}>
+              {/* Row 7 - Character Groups */}
+              <div>
                 <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
-                  Character Groups <span style={{ fontSize: '12px', color: '#64748b' }}>(JSON format)</span>
+                  Character Groups <span style={{ fontSize: '12px', color: '#64748b', fontWeight: '400' }}>(optional, JSON format)</span>
                 </label>
                 <textarea
                   name="characterGroups"
@@ -501,16 +549,16 @@ export default function WarcraftLogsApp() {
                   onChange={handleInputChange}
                   placeholder='{"MainCharacter": ["AltName1", "AltName2"], "AnotherMain": ["TheirAlt"]}'
                   rows="3"
-                  style={{ width: '100%', padding: '12px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px', fontFamily: 'monospace', resize: 'vertical' }}
+                  style={{ width: '100%', padding: '12px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px', fontFamily: 'monospace', resize: 'vertical', boxSizing: 'border-box' }}
                 />
-                <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#64748b' }}>
-                  Merge alt characters with mains (optional)
+                <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#64748b', lineHeight: '1.4' }}>
+                  Merge alt characters with their mains for combined statistics
                 </p>
               </div>
             </div>
 
             {error && (
-              <div style={{ marginTop: '20px', padding: '12px 16px', background: '#7f1d1d', border: '1px solid #991b1b', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ marginTop: '24px', padding: '12px 16px', background: '#7f1d1d', border: '1px solid #991b1b', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <AlertCircle size={20} />
                 <span>{error}</span>
               </div>
@@ -519,7 +567,7 @@ export default function WarcraftLogsApp() {
             <button
               onClick={handleSubmit}
               disabled={loading}
-              style={{ marginTop: '24px', padding: '12px 24px', background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)', border: 'none', borderRadius: '8px', color: 'white', fontSize: '16px', fontWeight: '600', cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.6 : 1, display: 'flex', alignItems: 'center', gap: '8px' }}
+              style={{ marginTop: '32px', padding: '14px 28px', background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)', border: 'none', borderRadius: '8px', color: 'white', fontSize: '16px', fontWeight: '600', cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.6 : 1, display: 'flex', alignItems: 'center', gap: '8px' }}
             >
               {loading ? (
                 <>
