@@ -40,7 +40,7 @@ export default function WarcraftLogsApp() {
     }
 
     setLoading(true);
-    setLoadingStage('Authenticating...');
+    setLoadingStage('Initializing...');
     setError('');
     setData(null);
 
@@ -54,32 +54,60 @@ export default function WarcraftLogsApp() {
         }
       }
 
-      setTimeout(() => setLoadingStage('Fetching guild reports...'), 500);
-      setTimeout(() => setLoadingStage('Analyzing fights...'), 2000);
-      setTimeout(() => setLoadingStage('Processing death events...'), 4000);
+      const payload = {
+        ...config,
+        authorFilters: config.authorFilters.split(',').map(s => s.trim()).filter(Boolean),
+        characterGroups
+      };
 
+      // Use EventSource for SSE
+      const eventSource = new EventSource(
+        'https://deathwarcraftlogs-api.onrender.com/api/analyze?' + 
+        new URLSearchParams({ config: JSON.stringify(payload) })
+      );
+
+      // Actually, EventSource doesn't support POST, so we'll use fetch with streaming
       const response = await fetch('https://deathwarcraftlogs-api.onrender.com/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...config,
-          authorFilters: config.authorFilters.split(',').map(s => s.trim()).filter(Boolean),
-          characterGroups
-        })
+        body: JSON.stringify(payload)
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to fetch data');
+        throw new Error('Failed to connect to server');
       }
 
-      const result = await response.json();
-      setData(result);
-      setLoadingStage('');
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = JSON.parse(line.slice(6));
+            
+            if (data.error) {
+              throw new Error(data.error);
+            } else if (data.message) {
+              setLoadingStage(data.message);
+            } else if (data.result) {
+              setData(data.result);
+              setLoadingStage('');
+              setLoading(false);
+            }
+          }
+        }
+      }
     } catch (err) {
       setError(err.message);
       setLoadingStage('');
-    } finally {
       setLoading(false);
     }
   };
@@ -460,7 +488,7 @@ export default function WarcraftLogsApp() {
                     style={{ width: '100%', padding: '12px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
                   />
                   <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#64748b', lineHeight: '1.4' }}>
-                    Examples: 44 (Nerubar Palace), 38 (Nerub-ar Palace), 37 (Aberrus)
+                    The raid zone ID (e.g., 44 for Manaforge Omega) - find in WarcraftLogs URLs
                   </p>
                 </div>
 
@@ -477,7 +505,7 @@ export default function WarcraftLogsApp() {
                     style={{ width: '100%', padding: '12px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
                   />
                   <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#64748b', lineHeight: '1.4' }}>
-                    Examples: 2810 (Manaforge Omega), 2829 (Queen Ansurek)
+                    Same for entire raid (e.g., 2810 for Manaforge Omega) - matches Report Zone
                   </p>
                 </div>
               </div>
