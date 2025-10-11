@@ -440,14 +440,17 @@ def analyze():
             return resp, 401
         
         # Get guild reports
+        print(f"Fetching reports for {guild_name}...")
         reports = get_guild_reports(
             token, guild_name, server, region, 
             report_zone, cutoff_date
         )
+        print(f"Found {len(reports)} reports")
         
         # Filter by author if specified
         if author_filters:
             reports = [r for r in reports if r.get('owner') in author_filters]
+            print(f"After author filter: {len(reports)} reports")
         
         if not reports:
             resp = jsonify({"error": "No reports found matching criteria"})
@@ -455,10 +458,12 @@ def analyze():
             return resp, 404
         
         # Collect all fights
+        print("Collecting fights from reports...")
         all_fights_raw = []
         
-        for rep in reports:
+        for i, rep in enumerate(reports, 1):
             rid = rep["id"]
+            print(f"Processing report {i}/{len(reports)}: {rid}")
             fights_data = get_fights(token, rid)
             fights = fights_data.get("fights", [])
             report_abs_start = fights_data.get("report_start", rep["start"])
@@ -493,6 +498,7 @@ def analyze():
         
         # Sort chronologically
         all_fights_raw.sort(key=lambda x: x['abs_start'])
+        print(f"Collected {len(all_fights_raw)} total fights")
         
         # Deduplicate
         seen_pulls_by_boss = {}
@@ -509,14 +515,19 @@ def analyze():
             
             all_fights_deduped.append(fight_data)
         
+        print(f"After deduplication: {len(all_fights_deduped)} unique fights")
+        
         # Process pulls and deaths
+        print("Processing deaths...")
         counted_death_events = defaultdict(list)
         pull_participation = defaultdict(set)
         boss_participation = defaultdict(lambda: defaultdict(set))
         character_breakdown = defaultdict(lambda: defaultdict(list))
         pull_counter_by_boss = defaultdict(int)
         
-        for fight_data in all_fights_deduped:
+        for idx, fight_data in enumerate(all_fights_deduped, 1):
+            if idx % 10 == 0:
+                print(f"Processing fight {idx}/{len(all_fights_deduped)}")
             rid = fight_data['reportId']
             fight = fight_data['fight']
             boss_name = fight_data['boss_name']
@@ -529,12 +540,9 @@ def analyze():
             seq_no = pull_counter_by_boss[boss_id]
             fid = fight['id']
             
-            # Get fight participants
-            fight_parts = get_fight_participants(token, rid, fight)
-            
-            # If no participants found, use all raid members
-            if not fight_parts:
-                fight_parts = set(participants.values())
+            # Use all raid members as participants (skip the extra API call)
+            # This is much faster and usually accurate enough
+            fight_parts = set(participants.values())
             
             # Track participation
             for p in fight_parts:
@@ -568,8 +576,9 @@ def analyze():
                 counted_death_events[main_char].append(death_event)
                 character_breakdown[main_char][original_char].append(death_event)
             
-            # Worker handles rate limiting, so minimal delay
-            time.sleep(0.05)
+            # No delay needed - worker handles rate limiting
+        
+        print(f"Analysis complete! Total deaths tracked: {sum(len(v) for v in counted_death_events.values())}")
         
         # Convert sets to lists for JSON serialization
         pull_participation_json = {p: list(s) for p, s in pull_participation.items()}
