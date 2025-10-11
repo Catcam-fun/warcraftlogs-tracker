@@ -14,8 +14,8 @@ import os
 
 app = Flask(__name__)
 
-# Configure CORS - allow all origins
-CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "OPTIONS"]}})
+# Configure CORS - simplest approach, allow everything
+CORS(app)
 
 # Constants
 MASS_DEATH_THRESHOLD = 7
