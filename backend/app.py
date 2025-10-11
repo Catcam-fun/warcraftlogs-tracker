@@ -584,8 +584,8 @@ def analyze():
                 pull_participation[main_char].add(pull_key)
                 boss_participation[boss_name][main_char].add(pull_key)
             
-            # Process deaths - PASS friendlies parameter
-            deaths = get_player_deaths(token, rid, fight, friendlies)
+            # Process deaths - PASS friendlies and ability_map parameters
+            deaths = get_player_deaths(token, rid, fight, friendlies, fight_data['ability_map'])
             deaths_sorted = sorted(deaths, key=lambda e: e["timestamp"])[:max_cutoff]
             
             for idx, ev in enumerate(deaths_sorted, start=1):
