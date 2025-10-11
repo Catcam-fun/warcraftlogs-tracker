@@ -286,13 +286,57 @@ export default function WarcraftLogsApp() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)', color: '#e2e8f0', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-      <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '24px' }}>
-        <div style={{ background: 'rgba(30, 41, 59, 0.6)', backdropFilter: 'blur(10px)', borderRadius: '16px', padding: '32px', marginBottom: '24px', border: '1px solid rgba(148, 163, 184, 0.1)' }}>
-          <h1 style={{ margin: '0 0 8px', fontSize: '32px', fontWeight: '700', background: 'linear-gradient(135deg, #60a5fa 0%, #a78bfa 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #2d3748 0%, #1a202c 100%)', color: '#e2e8f0', fontFamily: 'system-ui, -apple-system, sans-serif', position: 'relative', overflow: 'hidden' }}>
+      {/* Halloween Decorations */}
+      {/* Spider Web - Top Left */}
+      <div style={{ position: 'fixed', top: 0, left: 0, width: '200px', height: '200px', opacity: 0.3, pointerEvents: 'none', zIndex: 1 }}>
+        <svg viewBox="0 0 200 200" style={{ width: '100%', height: '100%' }}>
+          <path d="M0,0 L100,100 M0,20 L100,100 M0,40 L100,100 M0,60 L100,100 M0,80 L100,100" stroke="#ddd" strokeWidth="1" fill="none"/>
+          <path d="M0,0 L100,100 M20,0 L100,100 M40,0 L100,100 M60,0 L100,100 M80,0 L100,100" stroke="#ddd" strokeWidth="1" fill="none"/>
+          <circle cx="100" cy="100" r="60" stroke="#ddd" strokeWidth="1" fill="none"/>
+          <circle cx="100" cy="100" r="40" stroke="#ddd" strokeWidth="1" fill="none"/>
+          <circle cx="100" cy="100" r="20" stroke="#ddd" strokeWidth="1" fill="none"/>
+        </svg>
+      </div>
+      
+      {/* Spider Web - Top Right */}
+      <div style={{ position: 'fixed', top: 0, right: 0, width: '200px', height: '200px', opacity: 0.3, pointerEvents: 'none', zIndex: 1, transform: 'scaleX(-1)' }}>
+        <svg viewBox="0 0 200 200" style={{ width: '100%', height: '100%' }}>
+          <path d="M0,0 L100,100 M0,20 L100,100 M0,40 L100,100 M0,60 L100,100 M0,80 L100,100" stroke="#ddd" strokeWidth="1" fill="none"/>
+          <path d="M0,0 L100,100 M20,0 L100,100 M40,0 L100,100 M60,0 L100,100 M80,0 L100,100" stroke="#ddd" strokeWidth="1" fill="none"/>
+          <circle cx="100" cy="100" r="60" stroke="#ddd" strokeWidth="1" fill="none"/>
+          <circle cx="100" cy="100" r="40" stroke="#ddd" strokeWidth="1" fill="none"/>
+          <circle cx="100" cy="100" r="20" stroke="#ddd" strokeWidth="1" fill="none"/>
+        </svg>
+      </div>
+
+      {/* Flying Bats */}
+      <div style={{ position: 'fixed', top: '15%', right: '20%', fontSize: '32px', opacity: 0.6, animation: 'float 6s ease-in-out infinite', pointerEvents: 'none', zIndex: 1 }}>
+        🦇
+      </div>
+      <div style={{ position: 'fixed', top: '25%', left: '15%', fontSize: '28px', opacity: 0.5, animation: 'float 8s ease-in-out infinite 2s', pointerEvents: 'none', zIndex: 1 }}>
+        🦇
+      </div>
+      <div style={{ position: 'fixed', top: '40%', right: '10%', fontSize: '24px', opacity: 0.4, animation: 'float 7s ease-in-out infinite 4s', pointerEvents: 'none', zIndex: 1 }}>
+        🦇
+      </div>
+
+      {/* Pumpkins in corners */}
+      <div style={{ position: 'fixed', top: '20px', left: '20px', fontSize: '48px', opacity: 0.7, pointerEvents: 'none', zIndex: 1 }}>
+        🎃
+      </div>
+      <div style={{ position: 'fixed', top: '20px', right: '20px', fontSize: '48px', opacity: 0.7, pointerEvents: 'none', zIndex: 1 }}>
+        🎃
+      </div>
+
+      <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '24px', position: 'relative', zIndex: 2 }}>
+        <div style={{ background: 'rgba(45, 55, 72, 0.6)', backdropFilter: 'blur(10px)', borderRadius: '16px', padding: '32px', marginBottom: '24px', border: '1px solid rgba(148, 163, 184, 0.1)' }}>
+          <h1 style={{ margin: '0 0 8px', fontSize: '32px', fontWeight: '700', background: 'linear-gradient(135deg, #f97316 0%, #c026d3 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', display: 'flex', alignItems: 'center', gap: '12px', justifyContent: 'center' }}>
+            <span>🎃</span>
             WarcraftLogs Death Tracker
+            <span>💀</span>
           </h1>
-          <p style={{ color: '#94a3b8', margin: 0 }}>Analyze raid deaths and performance metrics</p>
+          <p style={{ color: '#94a3b8', margin: 0, textAlign: 'center' }}>Analyze raid deaths and performance metrics 👻</p>
         </div>
 
         {loading && (
@@ -309,61 +353,68 @@ export default function WarcraftLogsApp() {
             zIndex: 9999,
             backdropFilter: 'blur(8px)'
           }}>
-            <div style={{ textAlign: 'center', maxWidth: '400px', padding: '40px' }}>
+            <div style={{ textAlign: 'center', maxWidth: '500px', padding: '40px' }}>
               <div style={{ 
                 width: '80px', 
                 height: '80px', 
-                border: '4px solid rgba(59, 130, 246, 0.3)', 
-                borderTop: '4px solid #3b82f6',
+                border: '4px solid rgba(249, 115, 22, 0.3)', 
+                borderTop: '4px solid #f97316',
                 borderRadius: '50%',
                 animation: 'spin 1s linear infinite',
                 margin: '0 auto 24px'
               }} />
-              <h2 style={{ margin: '0 0 12px', fontSize: '24px', fontWeight: '600', color: '#e2e8f0' }}>
-                {loadingStage || 'Analyzing Reports...'}
+              <h2 style={{ margin: '0 0 16px', fontSize: '24px', fontWeight: '600', color: '#e2e8f0' }}>
+                Analyzing Reports
               </h2>
               <div style={{ 
-                marginTop: '24px', 
-                padding: '16px', 
-                background: 'rgba(59, 130, 246, 0.1)', 
+                padding: '16px 20px', 
+                background: 'rgba(249, 115, 22, 0.15)', 
                 borderRadius: '8px',
-                border: '1px solid rgba(59, 130, 246, 0.3)',
-                textAlign: 'left'
+                border: '1px solid rgba(249, 115, 22, 0.3)',
+                marginBottom: '16px',
+                minHeight: '60px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
               }}>
-                <div style={{ fontSize: '13px', color: '#94a3b8', lineHeight: '1.8' }}>
-                  <div style={{ marginBottom: '8px' }}>🔍 Fetching guild reports</div>
-                  <div style={{ marginBottom: '8px' }}>⚔️ Analyzing fight data</div>
-                  <div style={{ marginBottom: '8px' }}>💀 Processing death events</div>
-                  <div>📊 Building statistics</div>
-                </div>
+                <p style={{ 
+                  margin: 0, 
+                  fontSize: '15px', 
+                  color: '#fb923c', 
+                  fontWeight: '500',
+                  lineHeight: '1.6'
+                }}>
+                  {loadingStage || 'Starting analysis...'}
+                </p>
               </div>
-              <p style={{ color: '#64748b', fontSize: '14px', marginTop: '16px' }}>
-                This may take 30 seconds to 2 minutes
+              <p style={{ color: '#64748b', fontSize: '13px', margin: '0', lineHeight: '1.6' }}>
+                Processing data from WarcraftLogs...<br />
+                This may take a while
               </p>
             </div>
           </div>
         )}
 
         {!data && (
-          <div style={{ background: 'rgba(30, 41, 59, 0.6)', backdropFilter: 'blur(10px)', borderRadius: '16px', padding: '32px', marginBottom: '24px', border: '1px solid rgba(148, 163, 184, 0.1)' }}>
+          <div style={{ background: 'rgba(45, 55, 72, 0.6)', backdropFilter: 'blur(10px)', borderRadius: '16px', padding: '32px', marginBottom: '24px', border: '1px solid rgba(148, 163, 184, 0.1)' }}>
             <h2 style={{ margin: '0 0 32px', fontSize: '20px', fontWeight: '600' }}>Configuration</h2>
             
             {/* API Credentials Info Box */}
-            <div style={{ marginBottom: '28px', padding: '16px 20px', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.3)', borderRadius: '12px' }}>
+            <div style={{ marginBottom: '28px', padding: '16px 20px', background: 'rgba(249, 115, 22, 0.1)', border: '1px solid rgba(249, 115, 22, 0.3)', borderRadius: '12px' }}>
               <div style={{ display: 'flex', alignItems: 'start', gap: '12px' }}>
-                <div style={{ fontSize: '20px' }}>ℹ️</div>
+                <div style={{ fontSize: '20px' }}>🎃</div>
                 <div>
-                  <h3 style={{ margin: '0 0 8px', fontSize: '15px', fontWeight: '600', color: '#60a5fa' }}>
+                  <h3 style={{ margin: '0 0 8px', fontSize: '15px', fontWeight: '600', color: '#fb923c' }}>
                     Need API Credentials?
                   </h3>
                   <p style={{ margin: '0 0 8px', fontSize: '13px', color: '#cbd5e1', lineHeight: '1.6' }}>
                     You need a WarcraftLogs V2 API Client ID and Secret to use this tool.
                   </p>
                   <ol style={{ margin: '8px 0 0 16px', padding: 0, fontSize: '13px', color: '#cbd5e1', lineHeight: '1.8' }}>
-                    <li>Go to <a href="https://www.warcraftlogs.com/api/clients/" target="_blank" rel="noopener noreferrer" style={{ color: '#60a5fa', textDecoration: 'underline' }}>WarcraftLogs API Clients</a></li>
+                    <li>Go to <a href="https://www.warcraftlogs.com/api/clients/" target="_blank" rel="noopener noreferrer" style={{ color: '#fb923c', textDecoration: 'underline' }}>WarcraftLogs API Clients</a></li>
                     <li>Click "Create a Client"</li>
                     <li>Enter a name (e.g., "Death Tracker")</li>
-                    <li>For redirect URL, enter the website URL or just use: <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px', fontSize: '12px' }}>http://localhost</code></li>
+                    <li>For redirect URL, enter the website URL or just use: <code style={{ background: '#1a202c', padding: '2px 6px', borderRadius: '4px', fontSize: '12px' }}>http://localhost</code></li>
                     <li><strong>Do NOT check</strong> the "Public Client" box</li>
                     <li>Click "Create" and copy your Client ID and Client Secret</li>
                   </ol>
@@ -383,7 +434,7 @@ export default function WarcraftLogsApp() {
                     name="clientId"
                     value={config.clientId}
                     onChange={handleInputChange}
-                    style={{ width: '100%', padding: '12px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
+                    style={{ width: '100%', padding: '12px 16px', background: '#2d3748', border: '1px solid #4a5568', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
                   />
                 </div>
 
@@ -595,7 +646,7 @@ export default function WarcraftLogsApp() {
             <button
               onClick={handleSubmit}
               disabled={loading}
-              style={{ marginTop: '32px', padding: '14px 28px', background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)', border: 'none', borderRadius: '8px', color: 'white', fontSize: '16px', fontWeight: '600', cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.6 : 1, display: 'flex', alignItems: 'center', gap: '8px' }}
+              style={{ marginTop: '32px', padding: '14px 28px', background: 'linear-gradient(135deg, #f97316 0%, #c026d3 100%)', border: 'none', borderRadius: '8px', color: 'white', fontSize: '16px', fontWeight: '600', cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.6 : 1, display: 'flex', alignItems: 'center', gap: '8px' }}
             >
               {loading ? (
                 <>
@@ -614,23 +665,23 @@ export default function WarcraftLogsApp() {
 
         {data && (
           <div>
-            <div style={{ background: 'rgba(30, 41, 59, 0.6)', backdropFilter: 'blur(10px)', borderRadius: '16px', padding: '20px', marginBottom: '24px', border: '1px solid rgba(148, 163, 184, 0.1)' }}>
+            <div style={{ background: 'rgba(45, 55, 72, 0.6)', backdropFilter: 'blur(10px)', borderRadius: '16px', padding: '20px', marginBottom: '24px', border: '1px solid rgba(148, 163, 184, 0.1)' }}>
               <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '16px' }}>
                 <button
                   onClick={() => setView('overview')}
-                  style={{ padding: '8px 16px', background: view === 'overview' ? '#3b82f6' : '#334155', border: 'none', borderRadius: '8px', color: 'white', cursor: 'pointer', fontSize: '14px', fontWeight: '500' }}
+                  style={{ padding: '8px 16px', background: view === 'overview' ? 'linear-gradient(135deg, #f97316 0%, #c026d3 100%)' : '#4a5568', border: 'none', borderRadius: '8px', color: 'white', cursor: 'pointer', fontSize: '14px', fontWeight: '500' }}
                 >
                   Overview
                 </button>
                 <button
                   onClick={() => setView('players')}
-                  style={{ padding: '8px 16px', background: view === 'players' ? '#3b82f6' : '#334155', border: 'none', borderRadius: '8px', color: 'white', cursor: 'pointer', fontSize: '14px', fontWeight: '500' }}
+                  style={{ padding: '8px 16px', background: view === 'players' ? 'linear-gradient(135deg, #f97316 0%, #c026d3 100%)' : '#4a5568', border: 'none', borderRadius: '8px', color: 'white', cursor: 'pointer', fontSize: '14px', fontWeight: '500' }}
                 >
                   Players
                 </button>
                 <button
                   onClick={() => { setData(null); setError(''); setExpandedPlayers(new Set()); setSortConfig({ key: null, direction: 'asc' }); }}
-                  style={{ padding: '8px 16px', background: '#334155', border: 'none', borderRadius: '8px', color: 'white', cursor: 'pointer', fontSize: '14px', fontWeight: '500', marginLeft: 'auto' }}
+                  style={{ padding: '8px 16px', background: '#4a5568', border: 'none', borderRadius: '8px', color: 'white', cursor: 'pointer', fontSize: '14px', fontWeight: '500', marginLeft: 'auto' }}
                 >
                   New Analysis
                 </button>
@@ -658,7 +709,7 @@ export default function WarcraftLogsApp() {
                   <button
                     key={boss}
                     onClick={() => toggleBoss(boss)}
-                    style={{ padding: '6px 12px', background: selectedBosses.has(boss) ? '#3b82f6' : '#334155', border: '1px solid ' + (selectedBosses.has(boss) ? '#60a5fa' : '#475569'), borderRadius: '16px', color: 'white', cursor: 'pointer', fontSize: '13px' }}
+                    style={{ padding: '6px 12px', background: selectedBosses.has(boss) ? 'linear-gradient(135deg, #f97316 0%, #c026d3 100%)' : '#4a5568', border: '1px solid ' + (selectedBosses.has(boss) ? '#f97316' : '#718096'), borderRadius: '16px', color: 'white', cursor: 'pointer', fontSize: '13px' }}
                   >
                     {boss}
                   </button>
@@ -683,7 +734,7 @@ export default function WarcraftLogsApp() {
               const sortedPlayers = sortConfig.key ? sortOverviewData(bosses, players, grid, sortConfig.key) : players;
               
               return (
-                <div style={{ background: 'rgba(30, 41, 59, 0.6)', backdropFilter: 'blur(10px)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(148, 163, 184, 0.1)', overflowX: 'auto' }}>
+                <div style={{ background: 'rgba(45, 55, 72, 0.6)', backdropFilter: 'blur(10px)', borderRadius: '16px', padding: '20px', border: '1px solid rgba(148, 163, 184, 0.1)', overflowX: 'auto' }}>
                   <h2 style={{ margin: '0 0 16px', fontSize: '18px', fontWeight: '600' }}>Death Rate Overview</h2>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                     <thead>
@@ -757,7 +808,7 @@ export default function WarcraftLogsApp() {
                 {getFilteredStats().map(({ player, deaths, pulls, rate, deathsByBoss, topAbilitiesByBoss }) => {
                   const isExpanded = expandedPlayers.has(player);
                   return (
-                    <div key={player} style={{ background: 'rgba(30, 41, 59, 0.6)', backdropFilter: 'blur(10px)', borderRadius: '12px', border: '1px solid rgba(148, 163, 184, 0.1)', overflow: 'hidden' }}>
+                    <div key={player} style={{ background: 'rgba(45, 55, 72, 0.6)', backdropFilter: 'blur(10px)', borderRadius: '12px', border: '1px solid rgba(148, 163, 184, 0.1)', overflow: 'hidden' }}>
                       <div 
                         onClick={() => togglePlayer(player)}
                         style={{ 
@@ -854,10 +905,37 @@ export default function WarcraftLogsApp() {
         )}
       </div>
 
+      {/* Tombstones at the bottom */}
+      <div style={{ 
+        position: 'fixed', 
+        bottom: 0, 
+        left: 0, 
+        right: 0, 
+        height: '80px', 
+        display: 'flex', 
+        justifyContent: 'space-around', 
+        alignItems: 'flex-end',
+        padding: '0 40px',
+        pointerEvents: 'none',
+        zIndex: 1,
+        opacity: 0.6
+      }}>
+        <div style={{ fontSize: '64px' }}>🪦</div>
+        <div style={{ fontSize: '56px' }}>🪦</div>
+        <div style={{ fontSize: '60px' }}>🪦</div>
+        <div style={{ fontSize: '52px' }}>🪦</div>
+        <div style={{ fontSize: '58px' }}>🪦</div>
+        <div style={{ fontSize: '54px' }}>🪦</div>
+      </div>
+
       <style>{`
         @keyframes spin {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
+        }
+        @keyframes float {
+          0%, 100% { transform: translateY(0px); }
+          50% { transform: translateY(-20px); }
         }
       `}</style>
     </div>
