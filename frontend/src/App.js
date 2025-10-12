@@ -279,9 +279,9 @@ export default function WarcraftLogsApp() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #4a5568 0%, #2d3748 100%)', color: '#e2e8f0', fontFamily: 'system-ui, -apple-system, sans-serif', position: 'relative', overflow: 'hidden' }}>
+    <div style={{ minHeight: '100vh', background: '#0d1117', color: '#e2e8f0', fontFamily: 'system-ui, -apple-system, sans-serif', position: 'relative', overflow: 'hidden' }}>
       {/* Halloween Decorations */}
-      <div style={{ position: 'fixed', top: 0, left: 0, width: '200px', height: '200px', opacity: 0.2, pointerEvents: 'none', zIndex: 1 }}>
+      <div style={{ position: 'fixed', top: 0, left: 0, width: '200px', height: '200px', opacity: 0.15, pointerEvents: 'none', zIndex: 1 }}>
         <svg viewBox="0 0 200 200" style={{ width: '100%', height: '100%' }}>
           <path d="M0,0 L100,100 M0,20 L100,100 M0,40 L100,100 M0,60 L100,100 M0,80 L100,100" stroke="#fff" strokeWidth="1" fill="none"/>
           <path d="M0,0 L100,100 M20,0 L100,100 M40,0 L100,100 M60,0 L100,100 M80,0 L100,100" stroke="#fff" strokeWidth="1" fill="none"/>
@@ -291,7 +291,7 @@ export default function WarcraftLogsApp() {
         </svg>
       </div>
       
-      <div style={{ position: 'fixed', top: 0, right: 0, width: '200px', height: '200px', opacity: 0.2, pointerEvents: 'none', zIndex: 1, transform: 'scaleX(-1)' }}>
+      <div style={{ position: 'fixed', top: 0, right: 0, width: '200px', height: '200px', opacity: 0.15, pointerEvents: 'none', zIndex: 1, transform: 'scaleX(-1)' }}>
         <svg viewBox="0 0 200 200" style={{ width: '100%', height: '100%' }}>
           <path d="M0,0 L100,100 M0,20 L100,100 M0,40 L100,100 M0,60 L100,100 M0,80 L100,100" stroke="#fff" strokeWidth="1" fill="none"/>
           <path d="M0,0 L100,100 M20,0 L100,100 M40,0 L100,100 M60,0 L100,100 M80,0 L100,100" stroke="#fff" strokeWidth="1" fill="none"/>
@@ -301,31 +301,31 @@ export default function WarcraftLogsApp() {
         </svg>
       </div>
 
-      <div style={{ position: 'fixed', top: '15%', right: '20%', fontSize: '32px', opacity: 0.6, animation: 'float 6s ease-in-out infinite', pointerEvents: 'none', zIndex: 1 }}>
+      <div style={{ position: 'fixed', top: '15%', right: '20%', fontSize: '32px', opacity: 0.4, animation: 'float 6s ease-in-out infinite', pointerEvents: 'none', zIndex: 1 }}>
         🦇
       </div>
-      <div style={{ position: 'fixed', top: '25%', left: '15%', fontSize: '28px', opacity: 0.5, animation: 'float 8s ease-in-out infinite 2s', pointerEvents: 'none', zIndex: 1 }}>
+      <div style={{ position: 'fixed', top: '25%', left: '15%', fontSize: '28px', opacity: 0.3, animation: 'float 8s ease-in-out infinite 2s', pointerEvents: 'none', zIndex: 1 }}>
         🦇
       </div>
-      <div style={{ position: 'fixed', top: '40%', right: '10%', fontSize: '24px', opacity: 0.4, animation: 'float 7s ease-in-out infinite 4s', pointerEvents: 'none', zIndex: 1 }}>
+      <div style={{ position: 'fixed', top: '40%', right: '10%', fontSize: '24px', opacity: 0.25, animation: 'float 7s ease-in-out infinite 4s', pointerEvents: 'none', zIndex: 1 }}>
         🦇
       </div>
 
-      <div style={{ position: 'fixed', top: '20px', left: '20px', fontSize: '48px', opacity: 0.7, pointerEvents: 'none', zIndex: 1 }}>
+      <div style={{ position: 'fixed', top: '20px', left: '20px', fontSize: '48px', opacity: 0.5, pointerEvents: 'none', zIndex: 1 }}>
         🎃
       </div>
-      <div style={{ position: 'fixed', top: '20px', right: '20px', fontSize: '48px', opacity: 0.7, pointerEvents: 'none', zIndex: 1 }}>
+      <div style={{ position: 'fixed', top: '20px', right: '20px', fontSize: '48px', opacity: 0.5, pointerEvents: 'none', zIndex: 1 }}>
         🎃
       </div>
 
       <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '24px', position: 'relative', zIndex: 2 }}>
-        <div style={{ background: 'rgba(74, 85, 104, 0.4)', backdropFilter: 'blur(10px)', borderRadius: '16px', padding: '32px', marginBottom: '24px', border: '1px solid rgba(203, 213, 225, 0.1)' }}>
-          <h1 style={{ margin: '0 0 8px', fontSize: '32px', fontWeight: '700', color: '#e2e8f0', display: 'flex', alignItems: 'center', gap: '12px', justifyContent: 'center' }}>
+        <div style={{ background: '#1a1d23', borderRadius: '12px', padding: '24px', marginBottom: '20px', border: '1px solid #2d3238' }}>
+          <h1 style={{ margin: '0 0 6px', fontSize: '28px', fontWeight: '700', color: '#ffffff', display: 'flex', alignItems: 'center', gap: '10px', justifyContent: 'center' }}>
             <span>🎃</span>
             WarcraftLogs Death Tracker
             <span>💀</span>
           </h1>
-          <p style={{ color: '#cbd5e1', margin: 0, textAlign: 'center' }}>Analyze raid deaths and performance metrics 👻</p>
+          <p style={{ color: '#8b92a0', margin: 0, textAlign: 'center', fontSize: '14px' }}>Analyze raid deaths and performance metrics 👻</p>
         </div>
 
         {loading && (
@@ -335,7 +335,7 @@ export default function WarcraftLogsApp() {
             left: 0, 
             right: 0, 
             bottom: 0, 
-            background: 'rgba(45, 55, 72, 0.98)', 
+            background: 'rgba(13, 17, 23, 0.98)', 
             display: 'flex', 
             alignItems: 'center', 
             justifyContent: 'center', 
@@ -346,20 +346,20 @@ export default function WarcraftLogsApp() {
               <div style={{ 
                 width: '80px', 
                 height: '80px', 
-                border: '4px solid rgba(203, 213, 225, 0.2)', 
+                border: '4px solid #2d3238', 
                 borderTop: '4px solid #f97316',
                 borderRadius: '50%',
                 animation: 'spin 1s linear infinite',
                 margin: '0 auto 24px'
               }} />
-              <h2 style={{ margin: '0 0 16px', fontSize: '24px', fontWeight: '600', color: '#e2e8f0' }}>
+              <h2 style={{ margin: '0 0 16px', fontSize: '22px', fontWeight: '600', color: '#ffffff' }}>
                 Analyzing Reports
               </h2>
               <div style={{ 
-                padding: '16px 20px', 
-                background: 'rgba(74, 85, 104, 0.4)', 
+                padding: '14px 18px', 
+                background: '#1a1d23', 
                 borderRadius: '8px',
-                border: '1px solid rgba(203, 213, 225, 0.2)',
+                border: '1px solid #2d3238',
                 marginBottom: '16px',
                 minHeight: '60px',
                 display: 'flex',
@@ -368,7 +368,7 @@ export default function WarcraftLogsApp() {
               }}>
                 <p style={{ 
                   margin: 0, 
-                  fontSize: '15px', 
+                  fontSize: '14px', 
                   color: '#f97316', 
                   fontWeight: '500',
                   lineHeight: '1.6'
@@ -376,7 +376,7 @@ export default function WarcraftLogsApp() {
                   {loadingStage || 'Starting analysis...'}
                 </p>
               </div>
-              <p style={{ color: '#94a3b8', fontSize: '13px', margin: '0', lineHeight: '1.6' }}>
+              <p style={{ color: '#8b92a0', fontSize: '13px', margin: '0', lineHeight: '1.6' }}>
                 Processing data from WarcraftLogs...<br />
                 This may take a while
               </p>
@@ -385,24 +385,24 @@ export default function WarcraftLogsApp() {
         )}
 
         {!data && (
-          <div style={{ background: 'rgba(74, 85, 104, 0.4)', backdropFilter: 'blur(10px)', borderRadius: '16px', padding: '32px', marginBottom: '24px', border: '1px solid rgba(203, 213, 225, 0.1)' }}>
-            <h2 style={{ margin: '0 0 32px', fontSize: '20px', fontWeight: '600' }}>Configuration</h2>
+          <div style={{ background: '#1a1d23', borderRadius: '12px', padding: '24px', marginBottom: '20px', border: '1px solid #2d3238' }}>
+            <h2 style={{ margin: '0 0 24px', fontSize: '18px', fontWeight: '600', color: '#ffffff' }}>Configuration</h2>
             
-            <div style={{ marginBottom: '28px', padding: '16px 20px', background: 'rgba(249, 115, 22, 0.15)', border: '1px solid rgba(249, 115, 22, 0.4)', borderRadius: '12px' }}>
-              <div style={{ display: 'flex', alignItems: 'start', gap: '12px' }}>
-                <div style={{ fontSize: '20px' }}>🎃</div>
+            <div style={{ marginBottom: '24px', padding: '14px 16px', background: 'rgba(249, 115, 22, 0.1)', border: '1px solid rgba(249, 115, 22, 0.3)', borderRadius: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'start', gap: '10px' }}>
+                <div style={{ fontSize: '18px' }}>🎃</div>
                 <div>
-                  <h3 style={{ margin: '0 0 8px', fontSize: '15px', fontWeight: '600', color: '#f97316' }}>
+                  <h3 style={{ margin: '0 0 6px', fontSize: '14px', fontWeight: '600', color: '#f97316' }}>
                     Need API Credentials?
                   </h3>
-                  <p style={{ margin: '0 0 8px', fontSize: '13px', color: '#e2e8f0', lineHeight: '1.6' }}>
+                  <p style={{ margin: '0 0 6px', fontSize: '12px', color: '#cbd5e1', lineHeight: '1.6' }}>
                     You need a WarcraftLogs V2 API Client ID and Secret to use this tool.
                   </p>
-                  <ol style={{ margin: '8px 0 0 16px', padding: 0, fontSize: '13px', color: '#e2e8f0', lineHeight: '1.8' }}>
+                  <ol style={{ margin: '6px 0 0 16px', padding: 0, fontSize: '12px', color: '#cbd5e1', lineHeight: '1.7' }}>
                     <li>Go to <a href="https://www.warcraftlogs.com/api/clients/" target="_blank" rel="noopener noreferrer" style={{ color: '#f97316', textDecoration: 'underline' }}>WarcraftLogs API Clients</a></li>
                     <li>Click "Create a Client"</li>
                     <li>Enter a name (e.g., "Death Tracker")</li>
-                    <li>For redirect URL, enter the website URL or just use: <code style={{ background: '#2d3748', padding: '2px 6px', borderRadius: '4px', fontSize: '12px' }}>http://localhost</code></li>
+                    <li>For redirect URL, enter the website URL or just use: <code style={{ background: '#252930', padding: '2px 6px', borderRadius: '3px', fontSize: '11px' }}>http://localhost</code></li>
                     <li><strong>Do NOT check</strong> the "Public Client" box</li>
                     <li>Click "Create" and copy your Client ID and Client Secret</li>
                   </ol>
@@ -410,10 +410,10 @@ export default function WarcraftLogsApp() {
               </div>
             </div>
             
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px' }}>
                 <div>
-                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
                     Client ID (V2 API) *
                   </label>
                   <input
@@ -421,12 +421,12 @@ export default function WarcraftLogsApp() {
                     name="clientId"
                     value={config.clientId}
                     onChange={handleInputChange}
-                    style={{ width: '100%', padding: '12px 16px', background: '#2d3748', border: '1px solid #4a5568', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
+                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
                   />
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
                     Client Secret (V2 API) *
                   </label>
                   <input
@@ -434,14 +434,14 @@ export default function WarcraftLogsApp() {
                     name="clientSecret"
                     value={config.clientSecret}
                     onChange={handleInputChange}
-                    style={{ width: '100%', padding: '12px 16px', background: '#2d3748', border: '1px solid #4a5568', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
+                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
                   />
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px' }}>
                 <div>
-                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
                     Guild Name *
                   </label>
                   <input
@@ -449,15 +449,15 @@ export default function WarcraftLogsApp() {
                     name="guildName"
                     value={config.guildName}
                     onChange={handleInputChange}
-                    style={{ width: '100%', padding: '12px 16px', background: '#2d3748', border: '1px solid #4a5568', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
+                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
                   />
-                  <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#64748b', lineHeight: '1.4' }}>
+                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
                     Examples: Do Over, Complexity Limit, Method
                   </p>
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
                     Server *
                   </label>
                   <input
@@ -465,24 +465,24 @@ export default function WarcraftLogsApp() {
                     name="server"
                     value={config.server}
                     onChange={handleInputChange}
-                    style={{ width: '100%', padding: '12px 16px', background: '#2d3748', border: '1px solid #4a5568', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
+                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
                   />
-                  <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#64748b', lineHeight: '1.4' }}>
+                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
                     Remove spaces/apostrophes - Examples: Thrall, Area52, TwistingNether
                   </p>
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px' }}>
                 <div>
-                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
                     Region *
                   </label>
                   <select
                     name="region"
                     value={config.region}
                     onChange={handleInputChange}
-                    style={{ width: '100%', padding: '12px 16px', background: '#2d3748', border: '1px solid #4a5568', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
+                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
                   >
                     <option value="us">US</option>
                     <option value="eu">EU</option>
@@ -493,14 +493,14 @@ export default function WarcraftLogsApp() {
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
                     Difficulty *
                   </label>
                   <select
                     name="difficulty"
                     value={config.difficulty}
                     onChange={handleInputChange}
-                    style={{ width: '100%', padding: '12px 16px', background: '#2d3748', border: '1px solid #4a5568', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
+                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
                   >
                     <option value="3">Normal</option>
                     <option value="4">Heroic</option>
@@ -509,9 +509,9 @@ export default function WarcraftLogsApp() {
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px' }}>
                 <div>
-                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
                     Report Zone ID
                   </label>
                   <input
@@ -520,15 +520,15 @@ export default function WarcraftLogsApp() {
                     value={config.reportZone}
                     onChange={handleInputChange}
                     placeholder="44"
-                    style={{ width: '100%', padding: '12px 16px', background: '#2d3748', border: '1px solid #4a5568', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
+                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
                   />
-                  <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#64748b', lineHeight: '1.4' }}>
+                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
                     The raid zone ID (e.g., 44 for Manaforge Omega) - find in WarcraftLogs URLs
                   </p>
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
                     Fight Zone ID
                   </label>
                   <input
@@ -537,17 +537,17 @@ export default function WarcraftLogsApp() {
                     value={config.fightZone}
                     onChange={handleInputChange}
                     placeholder="2810"
-                    style={{ width: '100%', padding: '12px 16px', background: '#2d3748', border: '1px solid #4a5568', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
+                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
                   />
-                  <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#64748b', lineHeight: '1.4' }}>
+                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
                     Same for entire raid (e.g., 2810 for Manaforge Omega) - matches Report Zone
                   </p>
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px' }}>
                 <div>
-                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
                     Cutoff Date
                   </label>
                   <input
@@ -555,15 +555,15 @@ export default function WarcraftLogsApp() {
                     name="cutoffDate"
                     value={config.cutoffDate}
                     onChange={handleInputChange}
-                    style={{ width: '100%', padding: '12px 16px', background: '#2d3748', border: '1px solid #4a5568', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
+                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
                   />
-                  <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#64748b', lineHeight: '1.4' }}>
+                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
                     Only analyze reports before this date
                   </p>
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
                     Max Deaths to Track
                   </label>
                   <input
@@ -574,17 +574,17 @@ export default function WarcraftLogsApp() {
                     min="1"
                     max="10"
                     placeholder="5"
-                    style={{ width: '100%', padding: '12px 16px', background: '#2d3748', border: '1px solid #4a5568', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
+                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
                   />
-                  <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#64748b', lineHeight: '1.4' }}>
+                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
                     Track only the first X deaths per pull (1-10)
                   </p>
                 </div>
               </div>
 
               <div>
-                <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
-                  Author Filters <span style={{ fontSize: '12px', color: '#64748b', fontWeight: '400' }}>(optional, comma-separated)</span>
+                <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
+                  Author Filters <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '400' }}>(optional, comma-separated)</span>
                 </label>
                 <input
                   type="text"
@@ -592,16 +592,16 @@ export default function WarcraftLogsApp() {
                   value={config.authorFilters}
                   onChange={handleInputChange}
                   placeholder="PlayerName1, PlayerName2, PlayerName3"
-                  style={{ width: '100%', padding: '12px 16px', background: '#2d3748', border: '1px solid #4a5568', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px', boxSizing: 'border-box' }}
+                  style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
                 />
-                <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#64748b', lineHeight: '1.4' }}>
+                <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
                   Only analyze reports uploaded by these players
                 </p>
               </div>
 
               <div>
-                <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: '#cbd5e1' }}>
-                  Character Groups <span style={{ fontSize: '12px', color: '#64748b', fontWeight: '400' }}>(optional, JSON format)</span>
+                <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
+                  Character Groups <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '400' }}>(optional, JSON format)</span>
                 </label>
                 <textarea
                   name="characterGroups"
@@ -609,17 +609,17 @@ export default function WarcraftLogsApp() {
                   onChange={handleInputChange}
                   placeholder='{"MainCharacter": ["AltName1", "AltName2"], "AnotherMain": ["TheirAlt"]}'
                   rows="3"
-                  style={{ width: '100%', padding: '12px 16px', background: '#2d3748', border: '1px solid #4a5568', borderRadius: '8px', color: '#e2e8f0', fontSize: '14px', fontFamily: 'monospace', resize: 'vertical', boxSizing: 'border-box' }}
+                  style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', fontFamily: 'monospace', resize: 'vertical', boxSizing: 'border-box' }}
                 />
-                <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#64748b', lineHeight: '1.4' }}>
+                <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
                   Merge alt characters with their mains for combined statistics
                 </p>
               </div>
             </div>
 
             {error && (
-              <div style={{ marginTop: '24px', padding: '12px 16px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <AlertCircle size={20} />
+              <div style={{ marginTop: '20px', padding: '10px 14px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
+                <AlertCircle size={18} />
                 <span>{error}</span>
               </div>
             )}
@@ -627,16 +627,16 @@ export default function WarcraftLogsApp() {
             <button
               onClick={handleSubmit}
               disabled={loading}
-              style={{ marginTop: '32px', padding: '14px 28px', background: loading ? '#718096' : '#f97316', border: 'none', borderRadius: '8px', color: 'white', fontSize: '16px', fontWeight: '600', cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.6 : 1, display: 'flex', alignItems: 'center', gap: '8px' }}
+              style={{ marginTop: '24px', padding: '12px 24px', background: loading ? '#3d424a' : '#f97316', border: 'none', borderRadius: '6px', color: 'white', fontSize: '14px', fontWeight: '600', cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.6 : 1, display: 'flex', alignItems: 'center', gap: '8px' }}
             >
               {loading ? (
                 <>
-                  <Loader2 size={20} style={{ animation: 'spin 1s linear infinite' }} />
+                  <Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} />
                   Analyzing...
                 </>
               ) : (
                 <>
-                  <Search size={20} />
+                  <Search size={18} />
                   Analyze Reports
                 </>
               )}
@@ -898,7 +898,7 @@ export default function WarcraftLogsApp() {
         padding: '0 40px',
         pointerEvents: 'none',
         zIndex: 1,
-        opacity: 0.6
+        opacity: 0.4
       }}>
         <div style={{ fontSize: '64px' }}>🪦</div>
         <div style={{ fontSize: '56px' }}>🪦</div>
