@@ -818,10 +818,13 @@ export default function WarcraftLogsApp() {
 
                       {isExpanded && (
                         <div style={{ padding: '0 16px 16px', borderTop: '1px solid #2d3238' }}>
-                          {Object.entries(deathsByBoss).map(([boss, bossDeaths]) => (
+                          {Object.entries(deathsByBoss).map(([boss, bossDeaths]) => {
+                            const bossPulls = data.bossParticipation[boss]?.[player]?.length || 0;
+                            const bossRate = bossPulls > 0 ? (bossDeaths.length / bossPulls * 100) : 0;
+                            return (
                             <div key={boss} style={{ marginTop: '12px' }}>
                               <h4 style={{ margin: '0 0 10px', fontSize: '14px', fontWeight: '600', color: '#f97316' }}>
-                                {boss} ({bossDeaths.length} deaths)
+                                {boss} ({bossDeaths.length} deaths / {bossPulls} pulls - {bossRate.toFixed(1)}%)
                               </h4>
                               
                               {topAbilitiesByBoss[boss] && topAbilitiesByBoss[boss].length > 0 && (
@@ -874,7 +877,8 @@ export default function WarcraftLogsApp() {
                                 ))}
                               </div>
                             </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>
