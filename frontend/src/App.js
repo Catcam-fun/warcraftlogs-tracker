@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Search, AlertCircle, Loader2, Filter, ChevronDown, ChevronRight, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown, X } from 'lucide-react';
 
 export default function WarcraftLogsApp() {
@@ -12,12 +12,11 @@ export default function WarcraftLogsApp() {
     fightZone: '2810',
     difficulty: '5',
     maxCutoff: '5',
-    cutoffDate: '2025-10-10',
+    cutoffDate: '',
     authorFilters: '',
     characterGroups: ''
   });
 
-  // NEW: cheat-death toggle + cancel controller
   const [includeCheatEvents, setIncludeCheatEvents] = useState(false);
   const [cancelCtrl, setCancelCtrl] = useState(null);
 
@@ -53,7 +52,7 @@ export default function WarcraftLogsApp() {
       if (config.characterGroups.trim()) {
         try {
           characterGroups = JSON.parse(config.characterGroups);
-        } catch (e) {
+        } catch {
           throw new Error('Invalid JSON format for character groups');
         }
       }
@@ -65,7 +64,6 @@ export default function WarcraftLogsApp() {
         includeCheatEvents
       };
 
-      // Abort + idle-timeout setup
       const controller = new AbortController();
       const signal = controller.signal;
       setCancelCtrl(controller);
@@ -76,22 +74,19 @@ export default function WarcraftLogsApp() {
         body: JSON.stringify(payload),
         signal
       });
-
-      if (!response.ok) {
-        throw new Error('Failed to connect to server');
-      }
+      if (!response.ok) throw new Error('Failed to connect to server');
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
 
       let lastChunkAt = Date.now();
-      const IDLE_LIMIT_MS = 45000; // 45 seconds idle => abort
+      const IDLE_LIMIT_MS = 45000;
       const idleWatch = setInterval(() => {
         if (Date.now() - lastChunkAt > IDLE_LIMIT_MS) {
           controller.abort();
           clearInterval(idleWatch);
-          setError('No data received for 45s. Request canceled (likely throttling or very large page). Try again.');
+          setError('No data received for 45s. Canceled (throttle/slow page). Try again.');
           setLoading(false);
           setLoadingStage('');
         }
@@ -101,20 +96,19 @@ export default function WarcraftLogsApp() {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-
           lastChunkAt = Date.now();
+
           buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\\n\\n');
+          const lines = buffer.split('\n\n');
           buffer = lines.pop() || '';
 
           for (const line of lines) {
             if (!line.startsWith('data: ')) continue;
             const chunk = JSON.parse(line.slice(6));
-
             if (chunk.error) {
               throw new Error(chunk.error);
-            } else if (chunk.message) {
-              setLoadingStage(chunk.message);
+            } else if (chunk.stage) {
+              setLoadingStage(chunk.message || chunk.stage);
             } else if (chunk.result) {
               setData(chunk.result);
               setLoadingStage('');
@@ -126,33 +120,28 @@ export default function WarcraftLogsApp() {
         clearInterval(idleWatch);
       }
     } catch (err) {
-      if (err.name === 'AbortError') {
-        // user-initiated or idle timeout
-      } else {
+      if (err.name !== 'AbortError') {
         setError(err.message);
       }
-      setLoadingStage('');
       setLoading(false);
+      setLoadingStage('');
     }
   };
 
   const toggleBoss = (boss) => {
-    const newSelected = new Set(selectedBosses);
-    if (newSelected.has(boss)) newSelected.delete(boss);
-    else newSelected.add(boss);
-    setSelectedBosses(newSelected);
+    const next = new Set(selectedBosses);
+    next.has(boss) ? next.delete(boss) : next.add(boss);
+    setSelectedBosses(next);
   };
 
   const togglePlayer = (player) => {
-    const newExpanded = new Set(expandedPlayers);
-    if (newExpanded.has(player)) newExpanded.delete(player);
-    else newExpanded.add(player);
-    setExpandedPlayers(newExpanded);
+    const next = new Set(expandedPlayers);
+    next.has(player) ? next.delete(player) : next.add(player);
+    setExpandedPlayers(next);
   };
 
   const getFilteredStats = () => {
     if (!data) return [];
-
     const stats = [];
     const eventsAll = data.events;
     const pullsMap = data.pullParticipation;
@@ -160,842 +149,60 @@ export default function WarcraftLogsApp() {
 
     for (const player of Object.keys(eventsAll)) {
       const evs = eventsAll[player].filter(
-        ev => ev.rankWithinPull <= cutoff && 
+        ev => ev.rankWithinPull <= cutoff &&
         (selectedBosses.size === 0 || selectedBosses.has(ev.boss)) &&
         ev.abilityName && ev.abilityName !== 'Unknown'
       );
-      
       if (!evs.length) continue;
 
       let pulls = 0;
-      if (selectedBosses.size === 0) {
-        pulls = pullsMap[player]?.length || 0;
-      } else {
+      if (selectedBosses.size === 0) pulls = pullsMap[player]?.length || 0;
+      else {
         for (const boss of selectedBosses) {
-          if (bossPart[boss]?.[player]) {
-            pulls += bossPart[boss][player].length;
-          }
+          if (bossPart[boss]?.[player]) pulls += bossPart[boss][player].length;
         }
       }
 
       const rate = pulls > 0 ? (evs.length / pulls * 100) : 0;
-      
-      if (searchQuery && !player.toLowerCase().includes(searchQuery.toLowerCase())) {
-        continue;
-      }
+      if (searchQuery && !player.toLowerCase().includes(searchQuery.toLowerCase())) continue;
 
       const deathsByBoss = {};
       evs.forEach(ev => {
-        if (!deathsByBoss[ev.boss]) {
-          deathsByBoss[ev.boss] = [];
-        }
+        deathsByBoss[ev.boss] = deathsByBoss[ev.boss] || [];
         deathsByBoss[ev.boss].push(ev);
       });
 
       const topAbilitiesByBoss = {};
       Object.keys(deathsByBoss).forEach(boss => {
-        const abilityCounts = {};
-        deathsByBoss[boss].forEach(death => {
-          const ability = death.abilityName || 'Unknown';
-          if (ability !== 'Unknown') {
-            abilityCounts[ability] = (abilityCounts[ability] || 0) + 1;
-          }
+        const counts = {};
+        deathsByBoss[boss].forEach(d => {
+          const ab = d.abilityName || 'Unknown';
+          if (ab !== 'Unknown') counts[ab] = (counts[ab] || 0) + 1;
         });
-        topAbilitiesByBoss[boss] = Object.entries(abilityCounts)
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 5);
+        topAbilitiesByBoss[boss] = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,5);
       });
 
-      stats.push({ 
-        player, 
-        deaths: evs.length, 
-        pulls, 
-        rate,
-        deathsByBoss,
-        topAbilitiesByBoss
-      });
+      stats.push({ player, deaths: evs.length, pulls, rate, deathsByBoss, topAbilitiesByBoss });
     }
-
-    return stats.sort((a, b) => b.rate - a.rate || b.deaths - a.deaths);
+    return stats.sort((a,b)=> b.rate - a.rate || b.deaths - a.deaths);
   };
 
   const getOverviewData = () => {
     if (!data) return { bosses: [], players: [], grid: {} };
-
     const bosses = Object.keys(data.bossParticipation).sort();
     const players = Object.keys(data.events).sort();
     const grid = {};
 
-    players.forEach(player => {
-      grid[player] = {};
+    players.forEach(p => {
+      grid[p] = {};
       bosses.forEach(boss => {
-        const bossPulls = data.bossParticipation[boss]?.[player]?.length || 0;
-        const bossDeaths = data.events[player]?.filter(
-          ev => ev.boss === boss && ev.rankWithinPull <= cutoff
-        ).length || 0;
-        const rate = bossPulls > 0 ? (bossDeaths / bossPulls * 100) : null;
-        grid[player][boss] = { deaths: bossDeaths, pulls: bossPulls, rate };
+        const pulls = data.bossParticipation[boss]?.[p]?.length || 0;
+        const deaths = data.events[p]?.filter(ev => ev.boss === boss && ev.rankWithinPull <= cutoff).length || 0;
+        const rate = pulls > 0 ? (deaths / pulls * 100) : null;
+        grid[p][boss] = { deaths, pulls, rate };
       });
-
-      const totalPulls = data.pullParticipation[player]?.length || 0;
-      const totalDeaths = data.events[player]?.filter(
-        ev => ev.rankWithinPull <= cutoff
-      ).length || 0;
-      grid[player].overall = {
-        deaths: totalDeaths,
-        pulls: totalPulls,
-        rate: totalPulls > 0 ? (totalDeaths / totalPulls * 100) : null
-      };
+      const totalPulls = data.pullParticipation[p]?.length || 0;
+      const totalDeaths = data.events[p]?.filter(ev => ev.rankWithinPull <= cutoff).length || 0;
+      grid[p].overall = { deaths: totalDeaths, pulls: totalPulls, rate: totalPulls > 0 ? (totalDeaths / totalPulls * 100) : null };
     });
-
-    return { bosses, players, grid };
-  };
-
-  const sortOverviewData = (bosses, players, grid, key) => {
-    const sorted = [...players].sort((a, b) => {
-      let aVal, bVal;
-
-      if (key === 'player') {
-        return sortConfig.direction === 'asc' 
-          ? a.localeCompare(b) 
-          : b.localeCompare(a);
-      } else if (key === 'overall') {
-        aVal = grid[a].overall.rate ?? -1;
-        bVal = grid[b].overall.rate ?? -1;
-      } else {
-        aVal = grid[a][key]?.rate ?? -1;
-        bVal = grid[b][key]?.rate ?? -1;
-      }
-
-      if (sortConfig.direction === 'asc') {
-        return aVal - bVal;
-      } else {
-        return bVal - aVal;
-      }
-    });
-
-    return sorted;
-  };
-
-  const handleSort = (key) => {
-    setSortConfig(prev => ({
-      key,
-      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
-    }));
-  };
-
-  const getSortIcon = (key) => {
-    if (sortConfig.key !== key) return <ArrowUpDown size={14} />;
-    return sortConfig.direction === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />;
-  };
-
-  const formatTimestamp = (absTs) => {
-    const date = new Date(absTs);
-    return date.toLocaleString('en-US', { 
-      month: 'short', 
-      day: 'numeric', 
-      hour: '2-digit', 
-      minute: '2-digit' 
-    });
-  };
-
-  const getWCLLink = (reportId, fightId) => {
-    return `https://www.warcraftlogs.com/reports/${reportId}#fight=${fightId}&type=deaths`;
-  };
-
-  return (
-    <div style={{ minHeight: '100vh', background: '#0d1117', color: '#e2e8f0', fontFamily: 'system-ui, -apple-system, sans-serif', position: 'relative', overflow: 'hidden' }}>
-      {/* Halloween Decorations */}
-      <div style={{ position: 'fixed', top: 0, left: 0, width: '200px', height: '200px', opacity: 0.15, pointerEvents: 'none', zIndex: 1 }}>
-        <svg viewBox="0 0 200 200" style={{ width: '100%', height: '100%' }}>
-          <path d="M0,0 L100,100 M0,20 L100,100 M0,40 L100,100 M0,60 L100,100 M0,80 L100,100" stroke="#fff" strokeWidth="1" fill="none"/>
-          <path d="M0,0 L100,100 M20,0 L100,100 M40,0 L100,100 M60,0 L100,100 M80,0 L100,100" stroke="#fff" strokeWidth="1" fill="none"/>
-          <circle cx="100" cy="100" r="60" stroke="#fff" strokeWidth="1" fill="none"/>
-          <circle cx="100" cy="100" r="40" stroke="#fff" strokeWidth="1" fill="none"/>
-          <circle cx="100" cy="100" r="20" stroke="#fff" strokeWidth="1" fill="none"/>
-        </svg>
-      </div>
-      
-      <div style={{ position: 'fixed', top: 0, right: 0, width: '200px', height: '200px', opacity: 0.15, pointerEvents: 'none', zIndex: 1, transform: 'scaleX(-1)' }}>
-        <svg viewBox="0 0 200 200" style={{ width: '100%', height: '100%' }}>
-          <path d="M0,0 L100,100 M0,20 L100,100 M0,40 L100,100 M0,60 L100,100 M0,80 L100,100" stroke="#fff" strokeWidth="1" fill="none"/>
-          <path d="M0,0 L100,100 M20,0 L100,100 M40,0 L100,100 M60,0 L100,100 M80,0 L100,100" stroke="#fff" strokeWidth="1" fill="none"/>
-          <circle cx="100" cy="100" r="60" stroke="#fff" strokeWidth="1" fill="none"/>
-          <circle cx="100" cy="100" r="40" stroke="#fff" strokeWidth="1" fill="none"/>
-          <circle cx="100" cy="100" r="20" stroke="#fff" strokeWidth="1" fill="none"/>
-        </svg>
-      </div>
-
-      <div style={{ position: 'fixed', top: '15%', right: '20%', fontSize: '32px', opacity: 0.4, animation: 'float 6s ease-in-out infinite', pointerEvents: 'none', zIndex: 1 }}>
-        🦇
-      </div>
-      <div style={{ position: 'fixed', top: '25%', left: '15%', fontSize: '28px', opacity: 0.3, animation: 'float 8s ease-in-out infinite 2s', pointerEvents: 'none', zIndex: 1 }}>
-        🦇
-      </div>
-      <div style={{ position: 'fixed', top: '40%', right: '10%', fontSize: '24px', opacity: 0.25, animation: 'float 7s ease-in-out infinite 4s', pointerEvents: 'none', zIndex: 1 }}>
-        🦇
-      </div>
-
-      <div style={{ position: 'fixed', top: '20px', left: '20px', fontSize: '48px', opacity: 0.5, pointerEvents: 'none', zIndex: 1 }}>
-        🎃
-      </div>
-      <div style={{ position: 'fixed', top: '20px', right: '20px', fontSize: '48px', opacity: 0.5, pointerEvents: 'none', zIndex: 1 }}>
-        🎃
-      </div>
-
-      <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '24px', position: 'relative', zIndex: 2 }}>
-        <div style={{ background: '#1a1d23', borderRadius: '12px', padding: '24px', marginBottom: '20px', border: '1px solid #2d3238' }}>
-          <h1 style={{ margin: '0 0 6px', fontSize: '28px', fontWeight: '700', color: '#ffffff', display: 'flex', alignItems: 'center', gap: '10px', justifyContent: 'center' }}>
-            <span>🎃</span>
-            WarcraftLogs Death Tracker
-            <span>💀</span>
-          </h1>
-          <p style={{ color: '#8b92a0', margin: 0, textAlign: 'center', fontSize: '14px' }}>Analyze raid deaths and performance metrics 👻</p>
-        </div>
-
-        {loading && (
-          <div style={{ 
-            position: 'fixed', 
-            top: 0, 
-            left: 0, 
-            right: 0, 
-            bottom: 0, 
-            background: 'rgba(13, 17, 23, 0.98)', 
-            display: 'flex', 
-            alignItems: 'center', 
-            justifyContent: 'center', 
-            zIndex: 9999,
-            backdropFilter: 'blur(8px)'
-          }}>
-            <div style={{ textAlign: 'center', maxWidth: '500px', padding: '40px' }}>
-              <div style={{ 
-                width: '80px', 
-                height: '80px', 
-                border: '4px solid #2d3238', 
-                borderTop: '4px solid #f97316',
-                borderRadius: '50%',
-                animation: 'spin 1s linear infinite',
-                margin: '0 auto 24px'
-              }} />
-              <h2 style={{ margin: '0 0 16px', fontSize: '22px', fontWeight: '600', color: '#ffffff' }}>
-                Analyzing Reports
-              </h2>
-              <div style={{ 
-                padding: '14px 18px', 
-                background: '#1a1d23', 
-                borderRadius: '8px',
-                border: '1px solid #2d3238',
-                marginBottom: '16px',
-                minHeight: '60px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}>
-                <p style={{ 
-                  margin: 0, 
-                  fontSize: '14px', 
-                  color: '#f97316', 
-                  fontWeight: '500',
-                  lineHeight: '1.6'
-                }}>
-                  {loadingStage || 'Starting analysis...'}
-                </p>
-              </div>
-              <p style={{ color: '#8b92a0', fontSize: '13px', margin: '0', lineHeight: '1.6' }}>
-                Processing data from WarcraftLogs...<br />
-                This may take a while
-              </p>
-              <button
-                onClick={() => { cancelCtrl?.abort(); setLoading(false); setLoadingStage(''); }}
-                style={{ marginTop: 16, padding: '10px 16px', background: '#2d3238', border: '1px solid #3d424a', color: '#e2e8f0', borderRadius: 6, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8 }}
-              >
-                <X size={16} /> Cancel
-              </button>
-            </div>
-          </div>
-        )}
-
-        {!data && (
-          <div style={{ background: '#1a1d23', borderRadius: '12px', padding: '24px', marginBottom: '20px', border: '1px solid #2d3238' }}>
-            <h2 style={{ margin: '0 0 24px', fontSize: '18px', fontWeight: '600', color: '#ffffff' }}>Configuration</h2>
-            
-            <div style={{ marginBottom: '24px', padding: '14px 16px', background: 'rgba(249, 115, 22, 0.1)', border: '1px solid rgba(249, 115, 22, 0.3)', borderRadius: '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'start', gap: '10px' }}>
-                <div style={{ fontSize: '18px' }}>🎃</div>
-                <div>
-                  <h3 style={{ margin: '0 0 6px', fontSize: '14px', fontWeight: '600', color: '#f97316' }}>
-                    Need API Credentials?
-                  </h3>
-                  <p style={{ margin: '0 0 6px', fontSize: '12px', color: '#cbd5e1', lineHeight: '1.6' }}>
-                    You need a WarcraftLogs V2 API Client ID and Secret to use this tool.
-                  </p>
-                  <ol style={{ margin: '6px 0 0 16px', padding: 0, fontSize: '12px', color: '#cbd5e1', lineHeight: '1.7' }}>
-                    <li>Go to <a href="https://www.warcraftlogs.com/api/clients/" target="_blank" rel="noopener noreferrer" style={{ color: '#f97316', textDecoration: 'underline' }}>WarcraftLogs API Clients</a></li>
-                    <li>Click "Create a Client"</li>
-                    <li>Enter a name (e.g., "Death Tracker")</li>
-                    <li>For redirect URL, enter the website URL or just use: <code style={{ background: '#252930', padding: '2px 6px', borderRadius: '3px', fontSize: '11px' }}>http://localhost</code></li>
-                    <li><strong>Do NOT check</strong> the "Public Client" box</li>
-                    <li>Click "Create" and copy your Client ID and Client Secret</li>
-                  </ol>
-                </div>
-              </div>
-            </div>
-            
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px' }}>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
-                    Client ID (V2 API) *
-                  </label>
-                  <input
-                    type="text"
-                    name="clientId"
-                    value={config.clientId}
-                    onChange={handleInputChange}
-                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
-                    Client Secret (V2 API) *
-                  </label>
-                  <input
-                    type="password"
-                    name="clientSecret"
-                    value={config.clientSecret}
-                    onChange={handleInputChange}
-                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px' }}>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
-                    Guild Name *
-                  </label>
-                  <input
-                    type="text"
-                    name="guildName"
-                    value={config.guildName}
-                    onChange={handleInputChange}
-                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
-                  />
-                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                    Examples: Do Over, Complexity Limit, Method
-                  </p>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
-                    Server *
-                  </label>
-                  <input
-                    type="text"
-                    name="server"
-                    value={config.server}
-                    onChange={handleInputChange}
-                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
-                  />
-                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                    Remove spaces/apostrophes - Examples: Thrall, Area52, TwistingNether
-                  </p>
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px' }}>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
-                    Region *
-                  </label>
-                  <select
-                    name="region"
-                    value={config.region}
-                    onChange={handleInputChange}
-                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
-                  >
-                    <option value="us">US</option>
-                    <option value="eu">EU</option>
-                    <option value="kr">KR</option>
-                    <option value="tw">TW</option>
-                    <option value="cn">CN</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
-                    Difficulty *
-                  </label>
-                  <select
-                    name="difficulty"
-                    value={config.difficulty}
-                    onChange={handleInputChange}
-                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
-                  >
-                    <option value="3">Normal</option>
-                    <option value="4">Heroic</option>
-                    <option value="5">Mythic</option>
-                  </select>
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px' }}>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
-                    Report Zone ID
-                  </label>
-                  <input
-                    type="text"
-                    name="reportZone"
-                    value={config.reportZone}
-                    onChange={handleInputChange}
-                    placeholder="44"
-                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
-                  />
-                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                    The raid zone ID (e.g., 44 for Manaforge Omega) - find in WarcraftLogs URLs
-                  </p>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
-                    Fight Zone ID
-                  </label>
-                  <input
-                    type="text"
-                    name="fightZone"
-                    value={config.fightZone}
-                    onChange={handleInputChange}
-                    placeholder="2810"
-                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
-                  />
-                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                    Same for entire raid (e.g., 2810 for Manaforge Omega) - matches Report Zone
-                  </p>
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px' }}>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
-                    Cutoff Date
-                  </label>
-                  <input
-                    type="date"
-                    name="cutoffDate"
-                    value={config.cutoffDate}
-                    onChange={handleInputChange}
-                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
-                  />
-                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                    Only analyze reports before this date
-                  </p>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
-                    Max Deaths to Track
-                  </label>
-                  <input
-                    type="number"
-                    name="maxCutoff"
-                    value={config.maxCutoff}
-                    onChange={handleInputChange}
-                    min="1"
-                    max="10"
-                    placeholder="5"
-                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
-                  />
-                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                    Track only the first X deaths per pull (1-10)
-                  </p>
-                </div>
-              </div>
-
-              {/* NEW: cheat-death toggle */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '6px' }}>
-                <input
-                  type="checkbox"
-                  id="includeCheatEvents"
-                  checked={includeCheatEvents}
-                  onChange={(e) => setIncludeCheatEvents(e.target.checked)}
-                  style={{ width: 16, height: 16 }}
-                />
-                <label htmlFor="includeCheatEvents" style={{ fontSize: '13px', color: '#cbd5e1' }}>
-                  Include “Cheat Death” events (Cheat Death, Purgatory, Ardent Defender, Cauterize, Guardian Spirit, Spirit of Redemption, Reincarnation)
-                </label>
-              </div>
-
-              <div>
-                <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
-                  Author Filters <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '400' }}>(optional, comma-separated)</span>
-                </label>
-                <input
-                  type="text"
-                  name="authorFilters"
-                  value={config.authorFilters}
-                  onChange={handleInputChange}
-                  placeholder="PlayerName1, PlayerName2, PlayerName3"
-                  style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
-                />
-                <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                  Only analyze reports uploaded by these players
-                </p>
-              </div>
-
-              <div>
-                <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
-                  Character Groups <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '400' }}>(optional, JSON format)</span>
-                </label>
-                <textarea
-                  name="characterGroups"
-                  value={config.characterGroups}
-                  onChange={handleInputChange}
-                  placeholder='{"MainCharacter": ["AltName1", "AltName2"], "AnotherMain": ["TheirAlt"]}'
-                  rows="3"
-                  style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontFamily: 'monospace', resize: 'vertical', boxSizing: 'border-box' }}
-                />
-                <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                  Merge alt characters with their mains for combined statistics
-                </p>
-              </div>
-            </div>
-
-            {error && (
-              <div style={{ marginTop: '20px', padding: '10px 14px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
-                <AlertCircle size={18} />
-                <span>{error}</span>
-              </div>
-            )}
-
-            <button
-              onClick={handleSubmit}
-              disabled={loading}
-              style={{ marginTop: '24px', padding: '12px 24px', background: loading ? '#3d424a' : '#f97316', border: 'none', borderRadius: '6px', color: 'white', fontSize: '14px', fontWeight: '600', cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.6 : 1, display: 'flex', alignItems: 'center', gap: '8px' }}
-            >
-              {loading ? (
-                <>
-                  <Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} />
-                  Analyzing...
-                </>
-              ) : (
-                <>
-                  <Search size={18} />
-                  Analyze Reports
-                </>
-              )}
-            </button>
-          </div>
-        )}
-
-        {data && (
-          <div>
-            <div style={{ background: '#1a1d23', borderRadius: '12px', padding: '16px', marginBottom: '20px', border: '1px solid #2d3238' }}>
-              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '14px' }}>
-                <button
-                  onClick={() => setView('overview')}
-                  style={{ padding: '8px 16px', background: view === 'overview' ? '#f97316' : '#2d3238', border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}
-                >
-                  Overview
-                </button>
-                <button
-                  onClick={() => setView('players')}
-                  style={{ padding: '8px 16px', background: view === 'players' ? '#f97316' : '#2d3238', border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}
-                >
-                  Players
-                </button>
-                <button
-                  onClick={() => { setData(null); setError(''); setExpandedPlayers(new Set()); setSortConfig({ key: null, direction: 'asc' }); }}
-                  style={{ padding: '8px 16px', background: '#2d3238', border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: '600', marginLeft: 'auto' }}
-                >
-                  New Analysis
-                </button>
-              </div>
-
-              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
-                <label style={{ fontSize: '13px', color: '#cbd5e1' }}>Deaths to count:</label>
-                <select
-                  value={cutoff}
-                  onChange={(e) => setCutoff(parseInt(e.target.value))}
-                  style={{ padding: '6px 10px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px' }}
-                >
-                  {[...Array(data.meta.maxCutoff)].map((_, i) => (
-                    <option key={i + 1} value={i + 1}>
-                      {i + 1} {i === 0 ? 'Death' : 'Deaths'}
-                    </option>
-                  ))}
-                </select>
-
-                <div style={{ marginLeft: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Filter size={14} />
-                  <span style={{ fontSize: '13px', color: '#cbd5e1' }}>Boss filters:</span>
-                </div>
-                {Object.keys(data.bossParticipation).sort().map(boss => (
-                  <button
-                    key={boss}
-                    onClick={() => toggleBoss(boss)}
-                    style={{ padding: '5px 10px', background: selectedBosses.has(boss) ? '#f97316' : '#2d3238', border: '1px solid ' + (selectedBosses.has(boss) ? '#f97316' : '#3d424a'), borderRadius: '14px', color: 'white', cursor: 'pointer', fontSize: '12px' }}
-                  >
-                    {boss}
-                  </button>
-                ))}
-              </div>
-
-              {view === 'players' && (
-                <div style={{ marginTop: '14px' }}>
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search players..."
-                    style={{ width: '100%', maxWidth: '300px', padding: '8px 12px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px' }}
-                  />
-                </div>
-              )}
-            </div>
-
-            {view === 'overview' && (() => {
-              const { bosses, players, grid } = getOverviewData();
-              const sortedPlayers = sortConfig.key ? sortOverviewData(bosses, players, grid, sortConfig.key) : players;
-              
-              return (
-                <div style={{ background: '#1a1d23', borderRadius: '12px', padding: '16px', border: '1px solid #2d3238', overflowX: 'auto' }}>
-                  <h2 style={{ margin: '0 0 14px', fontSize: '16px', fontWeight: '600', color: '#ffffff' }}>Death Rate Overview</h2>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                    <thead>
-                      <tr style={{ background: '#252930' }}>
-                        <th 
-                          onClick={() => handleSort('player')}
-                          style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #3d424a', position: 'sticky', left: 0, background: '#252930', zIndex: 2, cursor: 'pointer', userSelect: 'none', color: '#ffffff' }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            Player {getSortIcon('player')}
-                          </div>
-                        </th>
-                        {bosses.map(boss => (
-                          <th 
-                            key={boss} 
-                            onClick={() => handleSort(boss)}
-                            style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #3d424a', minWidth: '80px', cursor: 'pointer', userSelect: 'none', color: '#ffffff' }}
-                          >
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
-                              {boss} {getSortIcon(boss)}
-                            </div>
-                          </th>
-                        ))}
-                        <th 
-                          onClick={() => handleSort('overall')}
-                          style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #3d424a', fontWeight: '700', minWidth: '80px', cursor: 'pointer', userSelect: 'none', color: '#ffffff' }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
-                            Overall {getSortIcon('overall')}
-                          </div>
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sortedPlayers.map(player => (
-                        <tr key={player} style={{ borderBottom: '1px solid #2d3238' }}>
-                          <td style={{ padding: '10px', fontWeight: '600', position: 'sticky', left: 0, background: '#1a1d23', zIndex: 1, color: '#ffffff' }}>{player}</td>
-                          {bosses.map(boss => {
-                            const cellData = grid[player][boss];
-                            return (
-                              <td key={boss} style={{ padding: '10px', textAlign: 'center' }}>
-                                {cellData.rate !== null ? (
-                                  <span style={{ color: cellData.rate > 50 ? '#f87171' : cellData.rate > 25 ? '#fbbf24' : '#34d399', fontWeight: '600' }}>
-                                    {cellData.rate.toFixed(1)}%
-                                  </span>
-                                ) : (
-                                  <span style={{ color: '#475569' }}>—</span>
-                                )}
-                              </td>
-                            );
-                          })}
-                          <td style={{ padding: '10px', textAlign: 'center', fontWeight: '700' }}>
-                            {grid[player].overall.rate !== null ? (
-                              <span style={{ color: grid[player].overall.rate > 50 ? '#f87171' : grid[player].overall.rate > 25 ? '#fbbf24' : '#34d399' }}>
-                                {grid[player].overall.rate.toFixed(1)}%
-                              </span>
-                            ) : (
-                              <span style={{ color: '#475569' }}>—</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              );
-            })()}
-
-            {view === 'players' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {getFilteredStats().map(({ player, deaths, pulls, rate, deathsByBoss, topAbilitiesByBoss }) => {
-                  const isExpanded = expandedPlayers.has(player);
-                  return (
-                    <div key={player} style={{ background: '#1a1d23', borderRadius: '8px', border: '1px solid #2d3238', overflow: 'hidden' }}>
-                      <div 
-                        onClick={() => togglePlayer(player)}
-                        style={{ 
-                          padding: '12px 16px', 
-                          display: 'flex', 
-                          justifyContent: 'space-between', 
-                          alignItems: 'center', 
-                          cursor: 'pointer',
-                          background: isExpanded ? '#252930' : '#1a1d23',
-                          transition: 'background 0.2s'
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                          <div>
-                            <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '600', color: '#ffffff' }}>{player}</h3>
-                            <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#8b92a0' }}>
-                              {deaths} deaths / {pulls} pulls
-                            </p>
-                          </div>
-                        </div>
-                        <div style={{ fontSize: '18px', fontWeight: '700', color: rate > 50 ? '#f87171' : rate > 25 ? '#fbbf24' : '#34d399' }}>
-                          {rate.toFixed(1)}%
-                        </div>
-                      </div>
-
-                      {isExpanded && (
-                        <div style={{ padding: '0 16px 16px', borderTop: '1px solid #2d3238' }}>
-                          {Object.entries(deathsByBoss).map(([boss, bossDeaths]) => {
-                            const bossPulls = data.bossParticipation[boss]?.[player]?.length || 0;
-                            const bossRate = bossPulls > 0 ? (bossDeaths.length / bossPulls * 100) : 0;
-                            return (
-                            <div key={boss} style={{ marginTop: '12px' }}>
-                              <h4 style={{ margin: '0 0 10px', fontSize: '14px', fontWeight: '600', color: '#f97316' }}>
-                                {boss} ({bossDeaths.length} deaths / {bossPulls} pulls - {bossRate.toFixed(1)}%)
-                              </h4>
-                              
-                              {topAbilitiesByBoss[boss] && topAbilitiesByBoss[boss].length > 0 && (
-                                <div style={{ marginBottom: '10px', padding: '8px 10px', background: '#252930', borderRadius: '4px' }}>
-                                  <div style={{ fontSize: '11px', color: '#8b92a0', marginBottom: '4px' }}>Top Abilities:</div>
-                                  <div style={{ fontSize: '12px', color: '#cbd5e1' }}>
-                                    {topAbilitiesByBoss[boss].map(([ability, count], idx) => (
-                                      <span key={ability}>
-                                        {idx + 1}. {ability} ({count}){idx < topAbilitiesByBoss[boss].length - 1 ? ' • ' : ''}
-                                      </span>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                {bossDeaths
-                                  .filter(death => death.abilityName && death.abilityName !== 'Unknown')
-                                  .map((death, idx) => (
-                                  <div key={idx} style={{ 
-                                    display: 'flex', 
-                                    justifyContent: 'space-between', 
-                                    alignItems: 'center',
-                                    padding: '8px 10px',
-                                    background: '#252930',
-                                    borderRadius: '4px',
-                                    fontSize: '12px'
-                                  }}>
-                                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flex: 1 }}>
-                                      <span style={{ color: '#64748b', minWidth: '55px' }}>Pull #{death.pullNo}</span>
-                                      <span style={{ color: '#8b92a0', minWidth: '110px' }}>{formatTimestamp(death.absTs)}</span>
-                                      <span style={{ color: '#e2e8f0' }}>{death.abilityName}</span>
-                                      {death.isCheat && (
-                                        <span style={{ marginLeft: 8, padding: '2px 6px', fontSize: 11, background: '#0e7490', color: 'white', borderRadius: 6 }}>
-                                          Saved
-                                        </span>
-                                      )}
-                                    </div>
-                                    <a 
-                                      href={getWCLLink(death.reportId, death.fightId)} 
-                                      target="_blank" 
-                                      rel="noopener noreferrer"
-                                      style={{ 
-                                        display: 'flex', 
-                                        alignItems: 'center', 
-                                        gap: '4px', 
-                                        color: '#f97316', 
-                                        textDecoration: 'none',
-                                        fontSize: '11px'
-                                      }}
-                                    >
-                                      View Log <ExternalLink size={12} />
-                                    </a>
-                                  </div>
-                                ))}
-                              </div>
-
-                              {/* If backend provided cheatEvents separately, show a compact panel */}
-                              {data.cheatEvents && data.cheatEvents[player] && data.cheatEvents[player].some(ev => ev.boss === boss) && (
-                                <div style={{ marginTop: 8, padding: '8px 10px', background: '#1f2937', borderRadius: 6 }}>
-                                  <div style={{ fontSize: 12, color: '#93c5fd', marginBottom: 6 }}>
-                                    Cheat-Death Triggers:
-                                  </div>
-                                  {data.cheatEvents[player].filter(ev => ev.boss === boss).map((cev, i) => (
-                                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '4px 0' }}>
-                                      <div>
-                                        <span style={{ color: '#e2e8f0' }}>{cev.abilityName}</span>
-                                        <span style={{ color: '#94a3b8' }}> @ {formatTimestamp(cev.absTs)}</span>
-                                      </div>
-                                      <a 
-                                        href={getWCLLink(cev.reportId, cev.fightId)} 
-                                        target="_blank" rel="noopener noreferrer"
-                                        style={{ color: '#60a5fa', textDecoration: 'none', fontSize: 11 }}
-                                      >
-                                        View
-                                      </a>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      <div style={{ 
-        position: 'fixed', 
-        bottom: 0, 
-        left: 0, 
-        right: 0, 
-        height: '80px', 
-        display: 'flex', 
-        justifyContent: 'space-around', 
-        alignItems: 'flex-end',
-        padding: '0 40px',
-        pointerEvents: 'none',
-        zIndex: 1,
-        opacity: 0.4
-      }}>
-        <div style={{ fontSize: '64px' }}>🪦</div>
-        <div style={{ fontSize: '56px' }}>🪦</div>
-        <div style={{ fontSize: '60px' }}>🪦</div>
-        <div style={{ fontSize: '52px' }}>🪦</div>
-        <div style={{ fontSize: '58px' }}>🪦</div>
-        <div style={{ fontSize: '54px' }}>🪦</div>
-      </div>
-
-      <style>{`
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-        @keyframes float {
-          0%, 100% { transform: translateY(0px); }
-          50% { transform: translateY(-20px); }
-        }
-      `}</style>
-    </div>
-  );
-}
+    retu
