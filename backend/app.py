@@ -84,6 +84,145 @@ def graphql_query(token, query, variables=None):
         raise Exception(f"GraphQL query failed: {str(e)}")
 
 
+
+# === Cheat-Death & Pagination Helpers (no report cap) ===================
+try:
+    WCL_TIMEOUT
+except NameError:
+    WCL_TIMEOUT = 25
+try:
+    WCL_MAX_RETRIES
+except NameError:
+    WCL_MAX_RETRIES = 5
+
+def fetch_events_paginated(token, report_code, start_time, end_time, data_type,
+                           page_limit=10000, max_pages=500, filter_expression=None,
+                           on_progress=None):
+    q = """
+    query($code:String!, $start:Float!, $end:Float!, $after:Float, $limit:Int!, $type:EventDataType!, $expr:String) {
+      reportData {
+        report(code:$code) {
+          events(
+            startTime:$start
+            endTime:$end
+            page:$after
+            limit:$limit
+            dataType:$type
+            filterExpression:$expr
+          ) {
+            data
+            nextPageTimestamp
+          }
+        }
+      }
+    }
+    """
+    variables = {
+        "code": report_code,
+        "start": start_time,
+        "end": end_time,
+        "after": None,
+        "limit": int(page_limit),
+        "type": data_type,
+        "expr": filter_expression
+    }
+    all_events, pages = [], 0
+    while True:
+        pages += 1
+        data = graphql_query(token, q, variables)
+        report = (data.get("reportData", {}) or {}).get("report", {}) or {}
+        evs = report.get("events", {}) or {}
+        all_events.extend(evs.get("data", []) or [])
+        nxt = evs.get("nextPageTimestamp")
+        if on_progress:
+            try:
+                on_progress(pages, bool(nxt))
+            except Exception:
+                pass
+        if not nxt or pages >= max_pages:
+            break
+        variables["after"] = nxt
+    return all_events
+
+def invert_ability_map(ability_id_to_name):
+    name_to_ids = {}
+    for aid, nm in (ability_id_to_name or {}).items():
+        if not nm:
+            continue
+        name_to_ids.setdefault(str(nm).lower(), set()).add(int(aid))
+    return name_to_ids
+
+def fetch_cheat_buffs_for_fight(token, report_code, fight, ability_ids, on_progress=None):
+    if not ability_ids:
+        return []
+    expr = '(type in ("applybuff","refreshbuff","removebuff","applybuffstack")) and (' +            ' or '.join([f"ability.id={aid}" for aid in ability_ids]) + ')'
+    return fetch_events_paginated(
+        token=token,
+        report_code=report_code,
+        start_time=fight["start_time"],
+        end_time=fight["end_time"],
+        data_type="Buffs",
+        page_limit=10000,
+        max_pages=200,
+        filter_expression=expr,
+        on_progress=on_progress
+    )
+
+def get_report_cheat_events_bulk(token, report_code, fights, friendlies, ability_map,
+                                 cheat_names=None, send_progress=None, report_abs_start=0):
+    cheat_names = cheat_names or [
+        "Cheat Death", "Purgatory", "Ardent Defender", "Cauterize",
+        "Guardian Spirit", "Spirit of Redemption", "Reincarnation",
+    ]
+    cheat_names_lower = {n.lower() for n in cheat_names}
+    name_to_ids = invert_ability_map(ability_map)
+
+    ability_ids = set()
+    for nm in cheat_names_lower:
+        ability_ids |= name_to_ids.get(nm, set())
+
+    if not fights or not ability_ids:
+        return {f['id']: [] for f in fights} if fights else {}
+
+    actor_id_to_name = {}
+    for fr in friendlies or []:
+        if fr.get("id") and fr.get("name"):
+            actor_id_to_name[fr["id"]] = fr["name"]
+
+    cheat_by_fight = {f['id']: [] for f in fights}
+
+    for idx, f in enumerate(fights, start=1):
+        if send_progress:
+            try:
+                send_progress(f"Cheat-death scan {idx}/{len(fights)}")
+            except Exception:
+                pass
+
+        events = fetch_cheat_buffs_for_fight(
+            token, report_code, f, sorted(ability_ids),
+            on_progress=lambda page, more: (send_progress and send_progress(f"  p.{page}{'…' if more else ''}"))
+        )
+
+        for ev in events:
+            ability_id = ev.get("abilityGameID") or (ev.get("ability") or {}).get("gameID")
+            if ability_id not in ability_ids:
+                continue
+            target_id = ev.get("targetID")
+            if target_id is None:
+                continue
+            player_name = actor_id_to_name.get(target_id, "Unknown")
+            ability_name = ability_map.get(ability_id, "Unknown")
+            cheat_by_fight[f['id']].append({
+                "timestamp": ev.get("timestamp", 0),
+                "targetName": player_name,
+                "targetID": target_id,
+                "fightId": f['id'],
+                "abilityName": ability_name,
+                "eventType": ev.get("type", "applybuff"),
+            })
+
+    return cheat_by_fight
+# === /Helpers ===========================================================
 def get_main_character(player_name, character_groups):
     """Return the main character name for a player, or the player name if not grouped."""
     for main, alts in character_groups.items():
@@ -357,102 +496,6 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map):
         return {f['id']: [] for f in fights}
 
 
-
-def invert_ability_map(ability_id_to_name):
-    """Return mapping: lowercased ability name -> set(ids)."""
-    name_to_ids = {}
-    for aid, nm in (ability_id_to_name or {}).items():
-        if not nm:
-            continue
-        name_to_ids.setdefault(str(nm).lower(), set()).add(aid)
-    return name_to_ids
-
-
-def get_report_cheat_events_bulk(token, report_code, fights, friendlies, ability_map, cheat_names=None):
-    """
-    Fetch 'cheat death' procs across the report window, bucketed per fight.
-    We pull Buff events and filter locally using the ability map.
-    """
-    if not fights:
-        return {}
-
-    cheat_names = cheat_names or ["Cheat Death", "Purgatory", "Ardent Defender", "Cauterize", "Guardian Spirit", "Spirit of Redemption", "Reincarnation"]
-    cheat_names_lower = {n.lower() for n in cheat_names}
-
-    # Lookups
-    actor_id_to_name = {}
-    for fr in (friendlies or []):
-        if fr.get("id") and fr.get("name"):
-            actor_id_to_name[fr["id"]] = fr["name"]
-
-    # Time window for events
-    start_time = min(f.get('start_time') or f.get('startTime') for f in fights if f)
-    end_time   = max(f.get('end_time') or f.get('endTime') for f in fights if f)
-
-    # Invert abilities to name -> ids
-    name_to_ids = invert_ability_map(ability_map or {})
-
-    # Which ids correspond to the cheat names in this report
-    cheat_ability_ids = set()
-    for nm in cheat_names_lower:
-        cheat_ability_ids |= name_to_ids.get(nm, set())
-
-    # If none present, return empty buckets
-    cheat_by_fight = {f.get('id'): [] for f in fights}
-    if not cheat_ability_ids:
-        return cheat_by_fight
-
-    # Query Buff events in one shot
-    query = """
-    query($code: String!, $startTime: Float!, $endTime: Float!) {
-      reportData {
-        report(code: $code) {
-          events(
-            startTime: $startTime
-            endTime: $endTime
-            dataType: Buffs
-            limit: 10000
-          ) {
-            data
-          }
-        }
-      }
-    }
-    """
-    variables = {"code": report_code, "startTime": start_time, "endTime": end_time}
-    try:
-        data = graphql_query(token, query, variables)
-        events_data = data.get("reportData", {}).get("report", {}).get("events", {}).get("data", [])
-    except Exception as e:
-        print(f"Error fetching cheat events for report {report_code}: {e}")
-        return cheat_by_fight
-
-    ACCEPT_TYPES = {"applybuff", "removebuff", "applybuffstack", "refreshbuff"}
-
-    for ev in events_data:
-        if (ev.get("type") or "").lower() not in ACCEPT_TYPES:
-            continue
-        ability_id = ev.get("abilityGameID") or (ev.get("ability") or {}).get("gameID")
-        if ability_id not in cheat_ability_ids:
-            continue
-        fight_id = ev.get("fight")
-        if fight_id not in cheat_by_fight:
-            continue
-        target_id = ev.get("targetID")
-        player_name = actor_id_to_name.get(target_id, "Unknown")
-        ability_name = ability_map.get(ability_id, "Unknown")
-        cheat_by_fight[fight_id].append({
-            "timestamp": ev.get("timestamp", 0),
-            "targetName": player_name,
-            "targetID": target_id,
-            "fightId": fight_id,
-            "abilityName": ability_name,
-            "eventType": ev.get("type")
-        })
-
-    return cheat_by_fight
-
-
 def analyze_fights(fights, fight_zone, difficulty):
     """Filter fights by zone and difficulty"""
     out = []
@@ -559,9 +602,11 @@ def analyze():
             max_cutoff = int(config.get('maxCutoff', 5))
             cutoff_date = config.get('cutoffDate')
             author_filters = config.get('authorFilters', [])
-            character_groups = config.get('characterGroups', {})
+            \1
             include_cheat = bool(config.get('includeCheatEvents', False))
-            cheatAbilityNames = config.get('cheatAbilityNames', ["Cheat Death", "Purgatory", "Ardent Defender", "Cauterize", "Guardian Spirit", "Spirit of Redemption", "Reincarnation"])
+            cheatAbilityNames = config.get('cheatAbilityNames', [
+                'Cheat Death','Purgatory','Ardent Defender','Cauterize','Guardian Spirit','Spirit of Redemption','Reincarnation'
+            ])
             
             # Validate required fields
             if not all([client_id, client_secret, guild_name, server, region]):
@@ -657,7 +702,6 @@ def analyze():
             # Process deaths
             yield f"data: {json.dumps({'stage': 'deaths', 'message': 'Processing death events...'})}\n\n"
             counted_death_events = defaultdict(list)
-            cheat_events_by_player = defaultdict(list)  # NEW
             pull_participation = defaultdict(set)
             boss_participation = defaultdict(lambda: defaultdict(set))
             character_breakdown = defaultdict(lambda: defaultdict(list))
@@ -678,12 +722,13 @@ def analyze():
                 ability_map = sample_fight_data['ability_map']
                 fights_list = [fd['fight'] for fd in report_fights]
                 
-                report_deaths_cache[rid] = get_report_deaths_bulk(token, rid, fights_list, friendlies, ability_map)
-                # If enabled, fetch cheat-death style events for this report
+                \1
                 if include_cheat:
-                    if 'report_cheats_cache' not in locals():
-                        report_cheats_cache = {}
-                    report_cheats_cache[rid] = get_report_cheat_events_bulk(token, rid, fights_list, friendlies, ability_map, cheatAbilityNames)
+                    report_cheats_cache = locals().get('report_cheats_cache', {})
+                    report_cheats_cache[rid] = get_report_cheat_events_bulk(
+                        token, rid, fights_list, friendlies, ability_map, cheatAbilityNames
+                    )
+                    locals()['report_cheats_cache'] = report_cheats_cache
             
             yield f"data: {json.dumps({'stage': 'processing', 'message': f'Processing {len(all_fights_deduped)} fights...'})}\n\n"
             
@@ -749,30 +794,6 @@ def analyze():
                     counted_death_events[main_char].append(death_event)
                     character_breakdown[main_char][original_char].append(death_event)
                     total_deaths += 1
-                # Attach cheat events for this fight if enabled
-                if include_cheat and 'report_cheats_cache' in locals():
-                    _cheats = report_cheats_cache.get(rid, {}).get(fight.get('id'), [])
-                    _cheats_sorted = sorted(_cheats, key=lambda e: e.get('timestamp', 0))[:max_cutoff]
-                    for rnk, cev in enumerate(_cheats_sorted, start=1):
-                        original_char = cev.get('targetName')
-                        main_char = get_main_character(original_char, character_groups)
-                        cheat_event = {
-                            'player': main_char,
-                            'originalCharacter': original_char,
-                            'boss': boss_name,
-                            'bossId': boss_id,
-                            'phase': 1,
-                            'reportId': rid,
-                            'fightId': fight.get('id'),
-                            'isKill': is_kill,
-                            'pullNo': seq_no,
-                            'rankWithinPull': rnk,
-                            'absTs': report_abs_start + (cev.get('timestamp') or 0),
-                            'abilityName': cev.get('abilityName', 'Unknown'),
-                            'isCheat': True,
-                            'eventType': cev.get('eventType', 'applybuff')
-                        }
-                        cheat_events_by_player[main_char].append(cheat_event)
             
             yield f"data: {json.dumps({'stage': 'complete', 'message': f'Analysis complete! Tracked {total_deaths} deaths across {len(counted_death_events)} players'})}\n\n"
             
@@ -789,9 +810,6 @@ def analyze():
             
             # Build final response
             response = {
-            # Add cheatEvents only if requested
-            if include_cheat:
-                response["cheatEvents"] = {p: evs for p, evs in cheat_events_by_player.items()}
                 "meta": {
                     "maxCutoff": max_cutoff,
                     "authorFilters": author_filters,
@@ -800,11 +818,11 @@ def analyze():
                     "difficulty": difficulty,
                     "generatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "characterGroups": character_groups,
-                    "reportCount": len(reports),
+                    \1
                     "includeCheatEvents": include_cheat,
                     "cheatAbilityNames": cheatAbilityNames,
-                },
-                "events": counted_death_events,
+                \1
+                "cheatEvents": (cheat_events_by_player if include_cheat else {}),
                 "pullParticipation": pull_participation_json,
                 "bossParticipation": boss_participation_json,
                 "characterBreakdown": character_breakdown_json,
