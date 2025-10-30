@@ -17,6 +17,9 @@ export default function WarcraftLogsApp() {
     characterGroups: ''
   });
 
+  const [includeCheatEvents, setIncludeCheatEvents] = useState(false);
+
+
   const [loading, setLoading] = useState(false);
   const [loadingStage, setLoadingStage] = useState('');
   const [error, setError] = useState('');
@@ -58,6 +61,8 @@ export default function WarcraftLogsApp() {
         ...config,
         authorFilters: config.authorFilters.split(',').map(s => s.trim()).filter(Boolean),
         characterGroups
+      ,
+        includeCheatEvents
       };
 
       const response = await fetch('https://deathwarcraftlogs-api.onrender.com/api/analyze', {
@@ -598,6 +603,19 @@ export default function WarcraftLogsApp() {
                   Only analyze reports uploaded by these players
                 </p>
               </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '4px' }}>
+                <input
+                  type="checkbox"
+                  id="includeCheatEvents"
+                  checked={includeCheatEvents}
+                  onChange={(e) => setIncludeCheatEvents(e.target.checked)}
+                  style={{ width: '16px', height: '16px' }}
+                />
+                <label htmlFor="includeCheatEvents" style={{ fontSize: '13px', color: '#cbd5e1' }}>
+                  Include “Cheat Death” events (Cheat Death, Purgatory, Ardent Defender, Cauterize, Guardian Spirit, Spirit of Redemption, Reincarnation)
+                </label>
+              </div>
+
 
               <div>
                 <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
