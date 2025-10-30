@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, AlertCircle, Loader2, Filter, ChevronDown, ChevronRight, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Search, AlertCircle, Loader2, Filter, ChevronDown, ChevronRight, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown, X } from 'lucide-react';
 
 export default function WarcraftLogsApp() {
   const [config, setConfig] = useState({
@@ -17,8 +17,9 @@ export default function WarcraftLogsApp() {
     characterGroups: ''
   });
 
+  // NEW: cheat-death toggle + cancel controller
   const [includeCheatEvents, setIncludeCheatEvents] = useState(false);
-
+  const [cancelCtrl, setCancelCtrl] = useState(null);
 
   const [loading, setLoading] = useState(false);
   const [loadingStage, setLoadingStage] = useState('');
@@ -60,15 +61,20 @@ export default function WarcraftLogsApp() {
       const payload = {
         ...config,
         authorFilters: config.authorFilters.split(',').map(s => s.trim()).filter(Boolean),
-        characterGroups
-      ,
+        characterGroups,
         includeCheatEvents
       };
+
+      // Abort + idle-timeout setup
+      const controller = new AbortController();
+      const signal = controller.signal;
+      setCancelCtrl(controller);
 
       const response = await fetch('https://deathwarcraftlogs-api.onrender.com/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        signal
       });
 
       if (!response.ok) {
@@ -79,32 +85,52 @@ export default function WarcraftLogsApp() {
       const decoder = new TextDecoder();
       let buffer = '';
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      let lastChunkAt = Date.now();
+      const IDLE_LIMIT_MS = 45000; // 45 seconds idle => abort
+      const idleWatch = setInterval(() => {
+        if (Date.now() - lastChunkAt > IDLE_LIMIT_MS) {
+          controller.abort();
+          clearInterval(idleWatch);
+          setError('No data received for 45s. Request canceled (likely throttling or very large page). Try again.');
+          setLoading(false);
+          setLoadingStage('');
+        }
+      }, 5000);
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n\n');
-        buffer = lines.pop() || '';
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = JSON.parse(line.slice(6));
-            
-            if (data.error) {
-              throw new Error(data.error);
-            } else if (data.message) {
-              setLoadingStage(data.message);
-            } else if (data.result) {
-              setData(data.result);
+          lastChunkAt = Date.now();
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\\n\\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const chunk = JSON.parse(line.slice(6));
+
+            if (chunk.error) {
+              throw new Error(chunk.error);
+            } else if (chunk.message) {
+              setLoadingStage(chunk.message);
+            } else if (chunk.result) {
+              setData(chunk.result);
               setLoadingStage('');
               setLoading(false);
             }
           }
         }
+      } finally {
+        clearInterval(idleWatch);
       }
     } catch (err) {
-      setError(err.message);
+      if (err.name === 'AbortError') {
+        // user-initiated or idle timeout
+      } else {
+        setError(err.message);
+      }
       setLoadingStage('');
       setLoading(false);
     }
@@ -112,21 +138,15 @@ export default function WarcraftLogsApp() {
 
   const toggleBoss = (boss) => {
     const newSelected = new Set(selectedBosses);
-    if (newSelected.has(boss)) {
-      newSelected.delete(boss);
-    } else {
-      newSelected.add(boss);
-    }
+    if (newSelected.has(boss)) newSelected.delete(boss);
+    else newSelected.add(boss);
     setSelectedBosses(newSelected);
   };
 
   const togglePlayer = (player) => {
     const newExpanded = new Set(expandedPlayers);
-    if (newExpanded.has(player)) {
-      newExpanded.delete(player);
-    } else {
-      newExpanded.add(player);
-    }
+    if (newExpanded.has(player)) newExpanded.delete(player);
+    else newExpanded.add(player);
     setExpandedPlayers(newExpanded);
   };
 
@@ -385,6 +405,12 @@ export default function WarcraftLogsApp() {
                 Processing data from WarcraftLogs...<br />
                 This may take a while
               </p>
+              <button
+                onClick={() => { cancelCtrl?.abort(); setLoading(false); setLoadingStage(''); }}
+                style={{ marginTop: 16, padding: '10px 16px', background: '#2d3238', border: '1px solid #3d424a', color: '#e2e8f0', borderRadius: 6, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8 }}
+              >
+                <X size={16} /> Cancel
+              </button>
             </div>
           </div>
         )}
@@ -587,6 +613,20 @@ export default function WarcraftLogsApp() {
                 </div>
               </div>
 
+              {/* NEW: cheat-death toggle */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '6px' }}>
+                <input
+                  type="checkbox"
+                  id="includeCheatEvents"
+                  checked={includeCheatEvents}
+                  onChange={(e) => setIncludeCheatEvents(e.target.checked)}
+                  style={{ width: 16, height: 16 }}
+                />
+                <label htmlFor="includeCheatEvents" style={{ fontSize: '13px', color: '#cbd5e1' }}>
+                  Include “Cheat Death” events (Cheat Death, Purgatory, Ardent Defender, Cauterize, Guardian Spirit, Spirit of Redemption, Reincarnation)
+                </label>
+              </div>
+
               <div>
                 <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
                   Author Filters <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '400' }}>(optional, comma-separated)</span>
@@ -603,19 +643,6 @@ export default function WarcraftLogsApp() {
                   Only analyze reports uploaded by these players
                 </p>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '4px' }}>
-                <input
-                  type="checkbox"
-                  id="includeCheatEvents"
-                  checked={includeCheatEvents}
-                  onChange={(e) => setIncludeCheatEvents(e.target.checked)}
-                  style={{ width: '16px', height: '16px' }}
-                />
-                <label htmlFor="includeCheatEvents" style={{ fontSize: '13px', color: '#cbd5e1' }}>
-                  Include “Cheat Death” events (Cheat Death, Purgatory, Ardent Defender, Cauterize, Guardian Spirit, Spirit of Redemption, Reincarnation)
-                </label>
-              </div>
-
 
               <div>
                 <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
@@ -627,7 +654,7 @@ export default function WarcraftLogsApp() {
                   onChange={handleInputChange}
                   placeholder='{"MainCharacter": ["AltName1", "AltName2"], "AnotherMain": ["TheirAlt"]}'
                   rows="3"
-                  style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', fontFamily: 'monospace', resize: 'vertical', boxSizing: 'border-box' }}
+                  style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontFamily: 'monospace', resize: 'vertical', boxSizing: 'border-box' }}
                 />
                 <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
                   Merge alt characters with their mains for combined statistics
@@ -875,6 +902,11 @@ export default function WarcraftLogsApp() {
                                       <span style={{ color: '#64748b', minWidth: '55px' }}>Pull #{death.pullNo}</span>
                                       <span style={{ color: '#8b92a0', minWidth: '110px' }}>{formatTimestamp(death.absTs)}</span>
                                       <span style={{ color: '#e2e8f0' }}>{death.abilityName}</span>
+                                      {death.isCheat && (
+                                        <span style={{ marginLeft: 8, padding: '2px 6px', fontSize: 11, background: '#0e7490', color: 'white', borderRadius: 6 }}>
+                                          Saved
+                                        </span>
+                                      )}
                                     </div>
                                     <a 
                                       href={getWCLLink(death.reportId, death.fightId)} 
@@ -894,6 +926,30 @@ export default function WarcraftLogsApp() {
                                   </div>
                                 ))}
                               </div>
+
+                              {/* If backend provided cheatEvents separately, show a compact panel */}
+                              {data.cheatEvents && data.cheatEvents[player] && data.cheatEvents[player].some(ev => ev.boss === boss) && (
+                                <div style={{ marginTop: 8, padding: '8px 10px', background: '#1f2937', borderRadius: 6 }}>
+                                  <div style={{ fontSize: 12, color: '#93c5fd', marginBottom: 6 }}>
+                                    Cheat-Death Triggers:
+                                  </div>
+                                  {data.cheatEvents[player].filter(ev => ev.boss === boss).map((cev, i) => (
+                                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '4px 0' }}>
+                                      <div>
+                                        <span style={{ color: '#e2e8f0' }}>{cev.abilityName}</span>
+                                        <span style={{ color: '#94a3b8' }}> @ {formatTimestamp(cev.absTs)}</span>
+                                      </div>
+                                      <a 
+                                        href={getWCLLink(cev.reportId, cev.fightId)} 
+                                        target="_blank" rel="noopener noreferrer"
+                                        style={{ color: '#60a5fa', textDecoration: 'none', fontSize: 11 }}
+                                      >
+                                        View
+                                      </a>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
                             </div>
                             );
                           })}
