@@ -2,7 +2,7 @@
 """
 Flask API for WarcraftLogs Death Tracker - V2 GraphQL API
 Optimized for Render.com deployment
-Version 2.3 - Real-time progress updates via SSE
+Version 2.4 - Added shareable results functionality
 """
 
 from flask import Flask, request, jsonify, Response
@@ -13,6 +13,8 @@ from datetime import datetime
 import time
 import os
 import json
+import hashlib
+import uuid
 
 app = Flask(__name__)
 
@@ -29,6 +31,10 @@ OAUTH_TOKEN_URL = "https://wcl-proxy.catcam-fun.workers.dev/oauth/token"
 
 # OAuth2 token cache
 _token_cache = {"token": None, "expires_at": 0}
+
+# Shared results storage directory
+SHARED_RESULTS_DIR = os.path.join(os.path.dirname(__file__), 'shared_results')
+os.makedirs(SHARED_RESULTS_DIR, exist_ok=True)
 
 
 def get_access_token(client_id, client_secret):
@@ -205,37 +211,22 @@ def get_fights(token, report_code):
                 "boss": fight.get("encounterID"),
                 "difficulty": fight.get("difficulty"),
                 "kill": fight.get("kill"),
-                "zoneID": fight.get("gameZone", {}).get("id") if fight.get("gameZone") else None,
-                "friendlyPlayers": fight.get("friendlyPlayers", [])  # IDs of players in THIS fight
+                "zoneID": fight.get("gameZone", {}).get("id"),
+                "friendlyPlayers": fight.get("friendlyPlayers", [])
             })
-        
-        # Format friendlies
-        formatted_friendlies = []
-        for actor in actors:
-            if actor.get("type") == "Player":
-                formatted_friendlies.append({
-                    "id": actor.get("id"),
-                    "name": actor.get("name"),
-                    "type": actor.get("subType")  # Class name
-                })
-        
-        print(f"Formatted {len(formatted_friendlies)} friendly players")
-        if len(formatted_friendlies) > 0:
-            print(f"Sample player: {formatted_friendlies[0]}")
         
         return {
             "report_start": report_start,
             "fights": formatted_fights,
-            "friendlies": formatted_friendlies
+            "friendlies": actors
         }
     except Exception as e:
-        print(f"Error fetching fights for {report_code}: {e}")
-        return {"report_start": 0, "fights": [], "friendlies": []}
+        raise Exception(f"Failed to get fights for report {report_code}: {str(e)}")
 
 
-def get_abilities_map(token, report_code):
-    """Get ability ID to name mapping for a report - ONCE per report"""
-    abilities_query = """
+def get_ability_name_map(token, report_code):
+    """Get ability ID to name mapping for a report"""
+    query = """
     query($code: String!) {
       reportData {
         report(code: $code) {
@@ -250,48 +241,36 @@ def get_abilities_map(token, report_code):
     }
     """
     
-    ability_id_to_name = {}
-    try:
-        abilities_data = graphql_query(token, abilities_query, {"code": report_code})
-        abilities = abilities_data.get("reportData", {}).get("report", {}).get("masterData", {}).get("abilities", [])
-        for ability in abilities:
-            ability_id = ability.get("gameID")
-            ability_name = ability.get("name")
-            if ability_id and ability_name:
-                ability_id_to_name[ability_id] = ability_name
-        print(f"Loaded {len(ability_id_to_name)} abilities for report {report_code}")
-    except Exception as e:
-        print(f"Warning: Could not fetch ability names: {e}")
+    variables = {"code": report_code}
     
-    return ability_id_to_name
+    try:
+        data = graphql_query(token, query, variables)
+        abilities = data.get("reportData", {}).get("report", {}).get("masterData", {}).get("abilities", [])
+        
+        ability_map = {}
+        for ability in abilities:
+            ability_map[ability.get("gameID")] = ability.get("name", "Unknown")
+        
+        return ability_map
+    except Exception as e:
+        print(f"Warning: Failed to get ability map for report {report_code}: {str(e)}")
+        return {}
 
 
 def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map):
-    """Get ALL player deaths for an entire report at once - MUCH faster than per-fight queries"""
-    
+    """Fetch deaths for multiple fights in a report using bulk query"""
     if not fights:
         return {}
     
-    # Build actor ID -> name lookup from friendlies
-    actor_id_to_name = {}
-    for friendly in friendlies:
-        actor_id = friendly.get('id')
-        name = friendly.get('name')
-        if actor_id and name:
-            actor_id_to_name[actor_id] = name
-    
-    # Get the time range for ALL fights we care about
-    start_time = min(f['start_time'] for f in fights)
-    end_time = max(f['end_time'] for f in fights)
+    fight_ids = [f['id'] for f in fights]
     
     query = """
-    query($code: String!, $startTime: Float!, $endTime: Float!) {
+    query($code: String!, $fightIDs: [Int]!) {
       reportData {
         report(code: $code) {
           events(
-            startTime: $startTime
-            endTime: $endTime
-            dataType: Deaths
+            fightIDs: $fightIDs,
+            dataType: Deaths,
             limit: 10000
           ) {
             data
@@ -303,214 +282,151 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map):
     
     variables = {
         "code": report_code,
-        "startTime": start_time,
-        "endTime": end_time
+        "fightIDs": fight_ids
     }
     
     try:
         data = graphql_query(token, query, variables)
-        events_data = data.get("reportData", {}).get("report", {}).get("events", {}).get("data", [])
+        events = data.get("reportData", {}).get("report", {}).get("events", {}).get("data", [])
         
-        # Build a map of fightId -> list of deaths
-        deaths_by_fight = {f['id']: [] for f in fights}
+        deaths_by_fight = defaultdict(list)
+        friendly_ids = {f.get('id') for f in friendlies}
+        friendly_names = {f.get('id'): f.get('name') for f in friendlies}
         
-        for event in events_data:
-            if event.get("type") != "death":
-                continue
-            
-            event_timestamp = event.get("timestamp", 0)
-            fight_id = event.get("fight")
-            
-            # Find which fight this death belongs to
-            if fight_id not in deaths_by_fight:
-                continue
-            
-            # V2 API returns targetID, not target.name
+        for event in events:
             target_id = event.get("targetID")
-            target_name = actor_id_to_name.get(target_id, "Unknown")
+            if target_id not in friendly_ids:
+                continue
             
-            # Get ability name from killingAbilityGameID using the pre-loaded map
-            killing_ability_id = event.get("killingAbilityGameID")
-            ability_name = ability_map.get(killing_ability_id, "Unknown")
-            
-            # Find the fight object to get its name
-            fight_obj = next((f for f in fights if f['id'] == fight_id), None)
+            fight_id = event.get("fight")
+            ability_id = event.get("abilityGameID")
+            ability_name = ability_map.get(ability_id, "Unknown")
             
             deaths_by_fight[fight_id].append({
-                "timestamp": event_timestamp,
-                "targetName": target_name,
+                "timestamp": event.get("timestamp", 0),
                 "targetID": target_id,
-                "phase": 1,
-                "fightId": fight_id,
-                "bossName": fight_obj.get('name', 'Unknown') if fight_obj else 'Unknown',
+                "targetName": friendly_names.get(target_id, "Unknown"),
+                "abilityGameID": ability_id,
                 "abilityName": ability_name,
+                "phase": event.get("fightPercentage", {}).get("phase", 1)
             })
         
-        # Filter mass deaths for each fight
-        for fid in deaths_by_fight:
-            deaths_by_fight[fid] = filter_mass_deaths(deaths_by_fight[fid])
-        
-        return deaths_by_fight
-    
+        return dict(deaths_by_fight)
     except Exception as e:
-        print(f"Error fetching deaths for report: {e}")
-        return {f['id']: [] for f in fights}
+        print(f"Warning: Failed to get deaths for report {report_code}: {str(e)}")
+        return {}
 
 
-def analyze_fights(fights, fight_zone, difficulty):
+def analyze_fights(fights, filter_zone, filter_difficulty):
     """Filter fights by zone and difficulty"""
     out = []
-    
     for f in fights:
-        if (f.get("boss") or 0) <= 0:
+        zone_id = f.get('zoneID')
+        difficulty = f.get('difficulty')
+        
+        if filter_zone and zone_id != int(filter_zone):
             continue
-        if f.get("zoneID") != int(fight_zone):
+        if filter_difficulty and difficulty != int(filter_difficulty):
             continue
-        if f.get("difficulty") != int(difficulty):
-            continue
+        
         out.append(f)
     
     return out
 
 
-def filter_mass_deaths(deaths):
-    """Filter out mass death events (wipes)"""
-    if len(deaths) < MASS_DEATH_THRESHOLD:
-        return deaths
+def is_duplicate_pull(seen_pulls_by_boss, boss_id, abs_start, abs_end, is_kill):
+    """Check if a pull is a duplicate based on timing"""
+    if boss_id not in seen_pulls_by_boss:
+        seen_pulls_by_boss[boss_id] = []
+        return False
     
-    sd = sorted(deaths, key=lambda d: d['timestamp'])
-    for i in range(len(sd) - MASS_DEATH_THRESHOLD + 1):
-        win_start = sd[i]['timestamp']
-        win_end = win_start + MASS_DEATH_WINDOW
-        cnt = sum(1 for j in range(i, len(sd)) if sd[j]['timestamp'] <= win_end)
+    for existing in seen_pulls_by_boss[boss_id]:
+        existing_start = existing['start']
+        existing_end = existing['end']
+        existing_kill = existing['kill']
         
-        if cnt >= MASS_DEATH_THRESHOLD:
-            return sd[:i]
-    
-    return sd
-
-
-def get_raid_participants(friendlies):
-    """Extract player participants from friendlies list"""
-    parts = {}
-    classes = ['Paladin', 'Warrior', 'DeathKnight', 'Hunter', 'Priest', 
-               'Rogue', 'Shaman', 'Mage', 'Warlock', 'Monk', 'Druid', 
-               'DemonHunter', 'Evoker']
-    
-    for fr in friendlies:
-        if fr.get('type') in classes:
-            parts[fr.get('id')] = fr.get('name', 'Unknown')
-    
-    return parts
-
-
-def interval_overlap(a_start, a_end, b_start, b_end):
-    """Calculate overlap between two intervals"""
-    inter = max(0, min(a_end, b_end) - max(a_start, b_start))
-    if inter == 0:
-        return 0, 0.0
-    union = (a_end - a_start) + (b_end - b_start) - inter
-    return inter, (inter / union if union > 0 else 0.0)
-
-
-def is_duplicate_pull(seen_by_boss, boss_id, abs_start, abs_end, is_kill=None):
-    """Check if a pull is a duplicate based on time overlap"""
-    MIN_ABS_OVERLAP_MS = 15000
-    MIN_IOU_FOR_DUP = 0.50
-    
-    lst = seen_by_boss.setdefault(boss_id, [])
-    for s_start, s_end, s_kill in lst:
-        inter, iou = interval_overlap(abs_start, abs_end, s_start, s_end)
-        if inter >= MIN_ABS_OVERLAP_MS or iou >= MIN_IOU_FOR_DUP:
+        overlap_start = max(abs_start, existing_start)
+        overlap_end = min(abs_end, existing_end)
+        overlap = max(0, overlap_end - overlap_start)
+        
+        this_duration = abs_end - abs_start
+        existing_duration = existing_end - existing_start
+        
+        if this_duration > 0:
+            this_overlap_pct = (overlap / this_duration) * 100
+        else:
+            this_overlap_pct = 0
+        
+        if existing_duration > 0:
+            existing_overlap_pct = (overlap / existing_duration) * 100
+        else:
+            existing_overlap_pct = 0
+        
+        if this_overlap_pct > 80 or existing_overlap_pct > 80:
+            if is_kill and not existing_kill:
+                seen_pulls_by_boss[boss_id].remove(existing)
+                seen_pulls_by_boss[boss_id].append({'start': abs_start, 'end': abs_end, 'kill': is_kill})
+                return False
             return True
     
-    lst.append((abs_start, abs_end, is_kill))
+    seen_pulls_by_boss[boss_id].append({'start': abs_start, 'end': abs_end, 'kill': is_kill})
     return False
 
 
-@app.route('/api/analyze', methods=['POST', 'OPTIONS'])
+@app.route('/api/analyze', methods=['POST'])
 def analyze():
-    """Main API endpoint for analyzing WarcraftLogs data using V2 API with SSE progress"""
-    
-    # Handle preflight CORS
-    if request.method == 'OPTIONS':
-        response = jsonify({'status': 'ok'})
-        response.headers.add('Access-Control-Allow-Origin', '*')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
-        response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
-        return response, 200
-    
-    # Extract config BEFORE the generator to avoid request context issues
-    try:
-        config = request.json
-    except Exception as e:
-        resp = jsonify({"error": f"Invalid request: {str(e)}"})
-        resp.headers.add('Access-Control-Allow-Origin', '*')
-        return resp, 400
+    """Analyze deaths with real-time progress updates via SSE"""
     
     def generate():
         try:
+            payload = request.get_json()
             
-            # Extract configuration
-            client_id = config.get('clientId')
-            client_secret = config.get('clientSecret')
-            guild_name = config.get('guildName')
-            server = config.get('server')
-            region = config.get('region')
-            report_zone = config.get('reportZone')
-            fight_zone = config.get('fightZone')
-            difficulty = config.get('difficulty')
-            max_cutoff = int(config.get('maxCutoff', 5))
-            cutoff_date = config.get('cutoffDate')
-            author_filters = config.get('authorFilters', [])
-            character_groups = config.get('characterGroups', {})
+            # Extract parameters
+            client_id = payload.get('clientId')
+            client_secret = payload.get('clientSecret')
+            guild_name = payload.get('guildName')
+            server = payload.get('server')
+            region = payload.get('region', 'us')
+            report_zone = payload.get('reportZone')
+            fight_zone = payload.get('fightZone')
+            difficulty = payload.get('difficulty')
+            max_cutoff = int(payload.get('maxCutoff', 5))
+            cutoff_date = payload.get('cutoffDate', '2025-10-10')
+            author_filters = payload.get('authorFilters', [])
+            character_groups = payload.get('characterGroups', {})
             
-            # Validate required fields
-            if not all([client_id, client_secret, guild_name, server, region]):
-                yield f"data: {json.dumps({'error': 'Missing required fields'})}\n\n"
-                return
-            
-            # Get OAuth2 token
             yield f"data: {json.dumps({'stage': 'auth', 'message': 'Authenticating with WarcraftLogs...'})}\n\n"
-            try:
-                token = get_access_token(client_id, client_secret)
-            except Exception as e:
-                yield f"data: {json.dumps({'error': f'Authentication failed: {str(e)}'})}\n\n"
-                return
+            token = get_access_token(client_id, client_secret)
             
-            # Get guild reports
             yield f"data: {json.dumps({'stage': 'reports', 'message': 'Fetching guild reports...'})}\n\n"
             reports = get_guild_reports(token, guild_name, server, region, report_zone, cutoff_date)
-            yield f"data: {json.dumps({'stage': 'reports', 'message': f'Found {len(reports)} reports'})}\n\n"
             
-            # Filter by author
             if author_filters:
                 reports = [r for r in reports if r.get('owner') in author_filters]
-                yield f"data: {json.dumps({'stage': 'reports', 'message': f'After author filter: {len(reports)} reports'})}\n\n"
+            
+            yield f"data: {json.dumps({'stage': 'reports', 'message': f'Found {len(reports)} reports to analyze'})}\n\n"
             
             if not reports:
-                yield f"data: {json.dumps({'error': 'No reports found matching criteria'})}\n\n"
+                yield f"data: {json.dumps({'error': 'No reports found matching the criteria'})}\n\n"
                 return
             
-            # Collect all fights
-            yield f"data: {json.dumps({'stage': 'fights', 'message': 'Collecting fights from reports...'})}\n\n"
+            # Fetch fights and abilities
+            yield f"data: {json.dumps({'stage': 'fights', 'message': 'Fetching fight data...'})}\n\n"
             all_fights_raw = []
             report_ability_maps = {}
             
-            for i, rep in enumerate(reports, 1):
-                rid = rep["id"]
-                yield f"data: {json.dumps({'stage': 'fights', 'message': f'Processing report {i}/{len(reports)}: {rid}'})}\n\n"
+            for idx, rep in enumerate(reports, 1):
+                rid = rep['id']
+                report_abs_start = rep['start']
                 
-                if rid not in report_ability_maps:
-                    report_ability_maps[rid] = get_abilities_map(token, rid)
+                yield f"data: {json.dumps({'stage': 'fights', 'message': f'Processing report {idx}/{len(reports)}'})}\n\n"
                 
-                fights_data = get_fights(token, rid)
-                fights = fights_data.get("fights", [])
-                report_abs_start = fights_data.get("report_start", rep["start"])
-                friendlies = fights_data.get("friendlies", [])
+                fight_info = get_fights(token, rid)
+                fights = fight_info['fights']
+                friendlies = fight_info['friendlies']
                 
-                if not fights:
-                    continue
+                ability_map = get_ability_name_map(token, rid)
+                report_ability_maps[rid] = ability_map
                 
                 matching = analyze_fights(fights, fight_zone, difficulty)
                 
@@ -670,6 +586,9 @@ def analyze():
                     "generatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "characterGroups": character_groups,
                     "reportCount": len(reports),
+                    "guildName": guild_name,
+                    "server": server,
+                    "region": region
                 },
                 "events": counted_death_events,
                 "pullParticipation": pull_participation_json,
@@ -692,6 +611,63 @@ def analyze():
     })
 
 
+@app.route('/api/share', methods=['POST'])
+def share_results():
+    """Save analysis results and return a shareable ID"""
+    try:
+        payload = request.get_json()
+        
+        # Generate a unique ID
+        share_id = str(uuid.uuid4())[:8]
+        
+        # Save the results
+        filepath = os.path.join(SHARED_RESULTS_DIR, f"{share_id}.json")
+        with open(filepath, 'w') as f:
+            json.dump({
+                'data': payload.get('data'),
+                'config': payload.get('config'),
+                'timestamp': datetime.now().isoformat()
+            }, f)
+        
+        return jsonify({
+            'success': True,
+            'shareId': share_id
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/shared/<share_id>', methods=['GET'])
+def get_shared_results(share_id):
+    """Retrieve shared results by ID"""
+    try:
+        filepath = os.path.join(SHARED_RESULTS_DIR, f"{share_id}.json")
+        
+        if not os.path.exists(filepath):
+            return jsonify({
+                'success': False,
+                'error': 'Shared results not found'
+            }), 404
+        
+        with open(filepath, 'r') as f:
+            shared_data = json.load(f)
+        
+        return jsonify({
+            'success': True,
+            'data': shared_data.get('data'),
+            'config': shared_data.get('config'),
+            'timestamp': shared_data.get('timestamp')
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 @app.route('/api/health', methods=['GET'])
 def health():
     """Health check endpoint"""
@@ -703,16 +679,18 @@ def root():
     """Root endpoint"""
     return jsonify({
         "service": "WarcraftLogs Death Tracker API",
-        "version": "2.3",
+        "version": "2.4",
         "status": "running",
         "endpoints": {
             "health": "/api/health",
-            "analyze": "/api/analyze (POST with SSE)"
+            "analyze": "/api/analyze (POST with SSE)",
+            "share": "/api/share (POST)",
+            "shared": "/api/shared/<share_id> (GET)"
         }
     })
 
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    print(f"Starting WarcraftLogs Death Tracker API v2.3 on port {port}...")
+    print(f"Starting WarcraftLogs Death Tracker API v2.4 on port {port}...")
     app.run(debug=False, host='0.0.0.0', port=port)
