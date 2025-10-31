@@ -771,7 +771,7 @@ def root():
         "status": "running",
         "endpoints": {
             "health": "/api/health",
-            "analyze": "/api/analyze (POST with SSE)"
+            "analyze": "/api/analyze (POST with SSE)",
             "share": "/api/share (POST)",
             "shared": "/api/shared/<share_id> (GET)"
         }
