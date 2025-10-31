@@ -13,7 +13,6 @@ from datetime import datetime
 import time
 import os
 import json
-import hashlib
 import uuid
 
 app = Flask(__name__)
@@ -34,7 +33,11 @@ _token_cache = {"token": None, "expires_at": 0}
 
 # Shared results storage directory
 SHARED_RESULTS_DIR = os.path.join(os.path.dirname(__file__), 'shared_results')
-os.makedirs(SHARED_RESULTS_DIR, exist_ok=True)
+
+
+def ensure_shared_results_dir():
+    """Ensure the shared results directory exists"""
+    os.makedirs(SHARED_RESULTS_DIR, exist_ok=True)
 
 
 def get_access_token(client_id, client_secret):
@@ -615,6 +618,7 @@ def analyze():
 def share_results():
     """Save analysis results and return a shareable ID"""
     try:
+        ensure_shared_results_dir()
         payload = request.get_json()
         
         # Generate a unique ID
@@ -644,6 +648,7 @@ def share_results():
 def get_shared_results(share_id):
     """Retrieve shared results by ID"""
     try:
+        ensure_shared_results_dir()
         filepath = os.path.join(SHARED_RESULTS_DIR, f"{share_id}.json")
         
         if not os.path.exists(filepath):
