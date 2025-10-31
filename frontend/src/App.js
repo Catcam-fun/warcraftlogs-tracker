@@ -28,6 +28,64 @@ export default function WarcraftLogsApp() {
   const [expandedPlayers, setExpandedPlayers] = useState(new Set());
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
 
+  // NEW: read-only mode when viewing/importing a snapshot
+  const [readOnly, setReadOnly] = useState(false);
+
+  // ==== Helpers for sharing snapshots ====
+  const downloadJson = (obj, filename = 'death_report.json') => {
+    const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importJsonFile = (file) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(reader.result);
+        setData(parsed);
+        setView('overview');
+        setCutoff(Math.min(parsed?.meta?.maxCutoff ?? 2, 10) || 2);
+        setReadOnly(true);
+        setError('');
+      } catch (e) {
+        setError('Invalid report JSON.');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // Auto-load from ?json=<URL> so you can share a permalink that renders read-only
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const jsonUrl = url.searchParams.get('json');
+    if (!jsonUrl) return;
+
+    setLoading(true);
+    setLoadingStage('Loading shared report...');
+    fetch(jsonUrl, { cache: 'no-store' })
+      .then((r) => {
+        if (!r.ok) throw new Error('Failed to fetch shared report JSON');
+        return r.json();
+      })
+      .then((shared) => {
+        setData(shared);
+        setView('overview');
+        setCutoff(Math.min(shared?.meta?.maxCutoff ?? 2, 10) || 2);
+        setReadOnly(true);
+        setError('');
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => {
+        setLoading(false);
+        setLoadingStage('');
+      });
+  }, []);
+
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setConfig(prev => ({ ...prev, [name]: value }));
@@ -43,6 +101,7 @@ export default function WarcraftLogsApp() {
     setLoadingStage('Initializing...');
     setError('');
     setData(null);
+    setReadOnly(false);
 
     try {
       let characterGroups = {};
@@ -60,7 +119,7 @@ export default function WarcraftLogsApp() {
         characterGroups
       };
 
-      const response = await fetch('https://deathwarcraftlogs-api.onrender.com/api/analyze', {
+      const response = await fetch('https://deathwarcraftlogs-api.onrender.com/api/analyze', { // your existing API
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -70,6 +129,7 @@ export default function WarcraftLogsApp() {
         throw new Error('Failed to connect to server');
       }
 
+      // Server-Sent Events stream handling (backend already streams result) :contentReference[oaicite:2]{index=2}
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
@@ -84,14 +144,15 @@ export default function WarcraftLogsApp() {
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
-            const data = JSON.parse(line.slice(6));
-            
-            if (data.error) {
-              throw new Error(data.error);
-            } else if (data.message) {
-              setLoadingStage(data.message);
-            } else if (data.result) {
-              setData(data.result);
+            const chunk = JSON.parse(line.slice(6));
+            if (chunk.error) {
+              throw new Error(chunk.error);
+            } else if (chunk.message) {
+              setLoadingStage(chunk.message);
+            } else if (chunk.result) {
+              // Your frontend stores the finished analysis in `data` already :contentReference[oaicite:3]{index=3}
+              setData(chunk.result);
+              setCutoff(Math.min(chunk.result?.meta?.maxCutoff ?? 2, 10) || 2);
               setLoadingStage('');
               setLoading(false);
             }
@@ -107,21 +168,15 @@ export default function WarcraftLogsApp() {
 
   const toggleBoss = (boss) => {
     const newSelected = new Set(selectedBosses);
-    if (newSelected.has(boss)) {
-      newSelected.delete(boss);
-    } else {
-      newSelected.add(boss);
-    }
+    if (newSelected.has(boss)) newSelected.delete(boss);
+    else newSelected.add(boss);
     setSelectedBosses(newSelected);
   };
 
   const togglePlayer = (player) => {
     const newExpanded = new Set(expandedPlayers);
-    if (newExpanded.has(player)) {
-      newExpanded.delete(player);
-    } else {
-      newExpanded.add(player);
-    }
+    if (newExpanded.has(player)) newExpanded.delete(player);
+    else newExpanded.add(player);
     setExpandedPlayers(newExpanded);
   };
 
@@ -135,11 +190,11 @@ export default function WarcraftLogsApp() {
 
     for (const player of Object.keys(eventsAll)) {
       const evs = eventsAll[player].filter(
-        ev => ev.rankWithinPull <= cutoff && 
+        ev => ev.rankWithinPull <= cutoff &&
         (selectedBosses.size === 0 || selectedBosses.has(ev.boss)) &&
         ev.abilityName && ev.abilityName !== 'Unknown'
       );
-      
+
       if (!evs.length) continue;
 
       let pulls = 0;
@@ -147,23 +202,19 @@ export default function WarcraftLogsApp() {
         pulls = pullsMap[player]?.length || 0;
       } else {
         for (const boss of selectedBosses) {
-          if (bossPart[boss]?.[player]) {
-            pulls += bossPart[boss][player].length;
-          }
+          if (bossPart[boss]?.[player]) pulls += bossPart[boss][player].length;
         }
       }
 
       const rate = pulls > 0 ? (evs.length / pulls * 100) : 0;
-      
+
       if (searchQuery && !player.toLowerCase().includes(searchQuery.toLowerCase())) {
         continue;
       }
 
       const deathsByBoss = {};
       evs.forEach(ev => {
-        if (!deathsByBoss[ev.boss]) {
-          deathsByBoss[ev.boss] = [];
-        }
+        if (!deathsByBoss[ev.boss]) deathsByBoss[ev.boss] = [];
         deathsByBoss[ev.boss].push(ev);
       });
 
@@ -172,19 +223,17 @@ export default function WarcraftLogsApp() {
         const abilityCounts = {};
         deathsByBoss[boss].forEach(death => {
           const ability = death.abilityName || 'Unknown';
-          if (ability !== 'Unknown') {
-            abilityCounts[ability] = (abilityCounts[ability] || 0) + 1;
-          }
+          if (ability !== 'Unknown') abilityCounts[ability] = (abilityCounts[ability] || 0) + 1;
         });
         topAbilitiesByBoss[boss] = Object.entries(abilityCounts)
           .sort((a, b) => b[1] - a[1])
           .slice(0, 5);
       });
 
-      stats.push({ 
-        player, 
-        deaths: evs.length, 
-        pulls, 
+      stats.push({
+        player,
+        deaths: evs.length,
+        pulls,
         rate,
         deathsByBoss,
         topAbilitiesByBoss
@@ -231,8 +280,8 @@ export default function WarcraftLogsApp() {
       let aVal, bVal;
 
       if (key === 'player') {
-        return sortConfig.direction === 'asc' 
-          ? a.localeCompare(b) 
+        return sortConfig.direction === 'asc'
+          ? a.localeCompare(b)
           : b.localeCompare(a);
       } else if (key === 'overall') {
         aVal = grid[a].overall.rate ?? -1;
@@ -242,11 +291,8 @@ export default function WarcraftLogsApp() {
         bVal = grid[b][key]?.rate ?? -1;
       }
 
-      if (sortConfig.direction === 'asc') {
-        return aVal - bVal;
-      } else {
-        return bVal - aVal;
-      }
+      if (sortConfig.direction === 'asc') return aVal - bVal;
+      return bVal - aVal;
     });
 
     return sorted;
@@ -266,11 +312,11 @@ export default function WarcraftLogsApp() {
 
   const formatTimestamp = (absTs) => {
     const date = new Date(absTs);
-    return date.toLocaleString('en-US', { 
-      month: 'short', 
-      day: 'numeric', 
-      hour: '2-digit', 
-      minute: '2-digit' 
+    return date.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
     });
   };
 
@@ -290,7 +336,7 @@ export default function WarcraftLogsApp() {
           <circle cx="100" cy="100" r="20" stroke="#fff" strokeWidth="1" fill="none"/>
         </svg>
       </div>
-      
+
       <div style={{ position: 'fixed', top: 0, right: 0, width: '200px', height: '200px', opacity: 0.15, pointerEvents: 'none', zIndex: 1, transform: 'scaleX(-1)' }}>
         <svg viewBox="0 0 200 200" style={{ width: '100%', height: '100%' }}>
           <path d="M0,0 L100,100 M0,20 L100,100 M0,40 L100,100 M0,60 L100,100 M0,80 L100,100" stroke="#fff" strokeWidth="1" fill="none"/>
@@ -329,24 +375,24 @@ export default function WarcraftLogsApp() {
         </div>
 
         {loading && (
-          <div style={{ 
-            position: 'fixed', 
-            top: 0, 
-            left: 0, 
-            right: 0, 
-            bottom: 0, 
-            background: 'rgba(13, 17, 23, 0.98)', 
-            display: 'flex', 
-            alignItems: 'center', 
-            justifyContent: 'center', 
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(13, 17, 23, 0.98)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
             zIndex: 9999,
             backdropFilter: 'blur(8px)'
           }}>
             <div style={{ textAlign: 'center', maxWidth: '500px', padding: '40px' }}>
-              <div style={{ 
-                width: '80px', 
-                height: '80px', 
-                border: '4px solid #2d3238', 
+              <div style={{
+                width: '80px',
+                height: '80px',
+                border: '4px solid #2d3238',
                 borderTop: '4px solid #f97316',
                 borderRadius: '50%',
                 animation: 'spin 1s linear infinite',
@@ -355,9 +401,9 @@ export default function WarcraftLogsApp() {
               <h2 style={{ margin: '0 0 16px', fontSize: '22px', fontWeight: '600', color: '#ffffff' }}>
                 Analyzing Reports
               </h2>
-              <div style={{ 
-                padding: '14px 18px', 
-                background: '#1a1d23', 
+              <div style={{
+                padding: '14px 18px',
+                background: '#1a1d23',
                 borderRadius: '8px',
                 border: '1px solid #2d3238',
                 marginBottom: '16px',
@@ -366,10 +412,10 @@ export default function WarcraftLogsApp() {
                 alignItems: 'center',
                 justifyContent: 'center'
               }}>
-                <p style={{ 
-                  margin: 0, 
-                  fontSize: '14px', 
-                  color: '#f97316', 
+                <p style={{
+                  margin: 0,
+                  fontSize: '14px',
+                  color: '#f97316',
                   fontWeight: '500',
                   lineHeight: '1.6'
                 }}>
@@ -384,10 +430,11 @@ export default function WarcraftLogsApp() {
           </div>
         )}
 
-        {!data && (
+        {/* Hide configuration if we are in read-only viewer mode */}
+        {!data && !readOnly && (
           <div style={{ background: '#1a1d23', borderRadius: '12px', padding: '24px', marginBottom: '20px', border: '1px solid #2d3238' }}>
             <h2 style={{ margin: '0 0 24px', fontSize: '18px', fontWeight: '600', color: '#ffffff' }}>Configuration</h2>
-            
+
             <div style={{ marginBottom: '24px', padding: '14px 16px', background: 'rgba(249, 115, 22, 0.1)', border: '1px solid rgba(249, 115, 22, 0.3)', borderRadius: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'start', gap: '10px' }}>
                 <div style={{ fontSize: '18px' }}>🎃</div>
@@ -409,7 +456,7 @@ export default function WarcraftLogsApp() {
                 </div>
               </div>
             </div>
-            
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px' }}>
                 <div>
@@ -482,7 +529,7 @@ export default function WarcraftLogsApp() {
                     name="region"
                     value={config.region}
                     onChange={handleInputChange}
-                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
+                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid '#3d424a'", borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
                   >
                     <option value="us">US</option>
                     <option value="eu">EU</option>
@@ -592,7 +639,7 @@ export default function WarcraftLogsApp() {
                   value={config.authorFilters}
                   onChange={handleInputChange}
                   placeholder="PlayerName1, PlayerName2, PlayerName3"
-                  style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
+                  style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid '#3d424a'", borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
                 />
                 <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
                   Only analyze reports uploaded by these players
@@ -609,7 +656,7 @@ export default function WarcraftLogsApp() {
                   onChange={handleInputChange}
                   placeholder='{"MainCharacter": ["AltName1", "AltName2"], "AnotherMain": ["TheirAlt"]}'
                   rows="3"
-                  style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', fontFamily: 'monospace', resize: 'vertical', boxSizing: 'border-box' }}
+                  style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontFamily: 'monospace', resize: 'vertical', boxSizing: 'border-box' }}
                 />
                 <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
                   Merge alt characters with their mains for combined statistics
@@ -660,12 +707,56 @@ export default function WarcraftLogsApp() {
                 >
                   Players
                 </button>
+
+                {/* NEW: Download snapshot */}
                 <button
-                  onClick={() => { setData(null); setError(''); setExpandedPlayers(new Set()); setSortConfig({ key: null, direction: 'asc' }); }}
-                  style={{ padding: '8px 16px', background: '#2d3238', border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: '600', marginLeft: 'auto' }}
+                  onClick={() => downloadJson(data)}
+                  style={{ padding: '8px 16px', background: '#2d3238', border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}
                 >
-                  New Analysis
+                  Download Report (.json)
                 </button>
+
+                {/* NEW: Import snapshot (file) */}
+                <label style={{ padding: '8px 16px', background: '#2d3238', borderRadius: '6px', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}>
+                  Import Report
+                  <input
+                    type="file"
+                    accept="application/json"
+                    onChange={(e) => e.target.files?.[0] && importJsonFile(e.target.files[0])}
+                    style={{ display: 'none' }}
+                  />
+                </label>
+
+                {/* NEW: Quick share instructions */}
+                <details style={{ marginLeft: 'auto' }}>
+                  <summary style={{ padding: '8px 16px', background: '#2d3238', borderRadius: '6px', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}>
+                    Share…
+                  </summary>
+                  <div style={{ marginTop: '10px', padding: '10px', background: '#1a1d23', border: '1px solid #2d3238', borderRadius: '8px', width: 'min(520px, 90vw)' }}>
+                    <ol style={{ margin: 0, paddingLeft: '18px', color: '#cbd5e1', fontSize: '12px', lineHeight: 1.7 }}>
+                      <li>Click <strong>Download Report (.json)</strong>.</li>
+                      <li>Upload that JSON to a public URL (e.g., GitHub Gist → copy the <em>Raw</em> URL).</li>
+                      <li>Share this link format:<br/>
+                        <code style={{ background: '#252930', padding: '2px 6px', borderRadius: '4px' }}>
+                          {`${window.location.origin}${window.location.pathname}?json=`}<em>RAW_JSON_URL</em>
+                        </code>
+                      </li>
+                    </ol>
+                    <p style={{ marginTop: '8px', color: '#8b92a0', fontSize: '12px' }}>
+                      Viewers see a read-only snapshot. No credentials required.
+                    </p>
+                  </div>
+                </details>
+
+                {/* Hide New Analysis for read-only viewer */}
+                {!readOnly && (
+                  <button
+                    onClick={() => { setData(null); setError(''); setExpandedPlayers(new Set()); setSortConfig({ key: null, direction: 'asc' }); }}
+                    style={{ padding: '8px 16px', background: '#2d3238', border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}
+                  >
+                    New Analysis
+                  </button>
+                )}
               </div>
 
               <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -713,14 +804,14 @@ export default function WarcraftLogsApp() {
             {view === 'overview' && (() => {
               const { bosses, players, grid } = getOverviewData();
               const sortedPlayers = sortConfig.key ? sortOverviewData(bosses, players, grid, sortConfig.key) : players;
-              
+
               return (
                 <div style={{ background: '#1a1d23', borderRadius: '12px', padding: '16px', border: '1px solid #2d3238', overflowX: 'auto' }}>
                   <h2 style={{ margin: '0 0 14px', fontSize: '16px', fontWeight: '600', color: '#ffffff' }}>Death Rate Overview</h2>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
                     <thead>
                       <tr style={{ background: '#252930' }}>
-                        <th 
+                        <th
                           onClick={() => handleSort('player')}
                           style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #3d424a', position: 'sticky', left: 0, background: '#252930', zIndex: 2, cursor: 'pointer', userSelect: 'none', color: '#ffffff' }}
                         >
@@ -729,8 +820,8 @@ export default function WarcraftLogsApp() {
                           </div>
                         </th>
                         {bosses.map(boss => (
-                          <th 
-                            key={boss} 
+                          <th
+                            key={boss}
                             onClick={() => handleSort(boss)}
                             style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #3d424a', minWidth: '80px', cursor: 'pointer', userSelect: 'none', color: '#ffffff' }}
                           >
@@ -739,9 +830,9 @@ export default function WarcraftLogsApp() {
                             </div>
                           </th>
                         ))}
-                        <th 
+                        <th
                           onClick={() => handleSort('overall')}
-                          style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #3d424a', fontWeight: '700', minWidth: '80px', cursor: 'pointer', userSelect: 'none', color: '#ffffff' }}
+                          style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid '#3d424a'", fontWeight: '700', minWidth: '80px', cursor: 'pointer', userSelect: 'none', color: '#ffffff' }}
                         >
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
                             Overall {getSortIcon('overall')}
@@ -790,13 +881,13 @@ export default function WarcraftLogsApp() {
                   const isExpanded = expandedPlayers.has(player);
                   return (
                     <div key={player} style={{ background: '#1a1d23', borderRadius: '8px', border: '1px solid #2d3238', overflow: 'hidden' }}>
-                      <div 
+                      <div
                         onClick={() => togglePlayer(player)}
-                        style={{ 
-                          padding: '12px 16px', 
-                          display: 'flex', 
-                          justifyContent: 'space-between', 
-                          alignItems: 'center', 
+                        style={{
+                          padding: '12px 16px',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
                           cursor: 'pointer',
                           background: isExpanded ? '#252930' : '#1a1d23',
                           transition: 'background 0.2s'
@@ -822,61 +913,61 @@ export default function WarcraftLogsApp() {
                             const bossPulls = data.bossParticipation[boss]?.[player]?.length || 0;
                             const bossRate = bossPulls > 0 ? (bossDeaths.length / bossPulls * 100) : 0;
                             return (
-                            <div key={boss} style={{ marginTop: '12px' }}>
-                              <h4 style={{ margin: '0 0 10px', fontSize: '14px', fontWeight: '600', color: '#f97316' }}>
-                                {boss} ({bossDeaths.length} deaths / {bossPulls} pulls - {bossRate.toFixed(1)}%)
-                              </h4>
-                              
-                              {topAbilitiesByBoss[boss] && topAbilitiesByBoss[boss].length > 0 && (
-                                <div style={{ marginBottom: '10px', padding: '8px 10px', background: '#252930', borderRadius: '4px' }}>
-                                  <div style={{ fontSize: '11px', color: '#8b92a0', marginBottom: '4px' }}>Top Abilities:</div>
-                                  <div style={{ fontSize: '12px', color: '#cbd5e1' }}>
-                                    {topAbilitiesByBoss[boss].map(([ability, count], idx) => (
-                                      <span key={ability}>
-                                        {idx + 1}. {ability} ({count}){idx < topAbilitiesByBoss[boss].length - 1 ? ' • ' : ''}
-                                      </span>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
+                              <div key={boss} style={{ marginTop: '12px' }}>
+                                <h4 style={{ margin: '0 0 10px', fontSize: '14px', fontWeight: '600', color: '#f97316' }}>
+                                  {boss} ({bossDeaths.length} deaths / {bossPulls} pulls - {bossRate.toFixed(1)}%)
+                                </h4>
 
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                {bossDeaths
-                                  .filter(death => death.abilityName && death.abilityName !== 'Unknown')
-                                  .map((death, idx) => (
-                                  <div key={idx} style={{ 
-                                    display: 'flex', 
-                                    justifyContent: 'space-between', 
-                                    alignItems: 'center',
-                                    padding: '8px 10px',
-                                    background: '#252930',
-                                    borderRadius: '4px',
-                                    fontSize: '12px'
-                                  }}>
-                                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flex: 1 }}>
-                                      <span style={{ color: '#64748b', minWidth: '55px' }}>Pull #{death.pullNo}</span>
-                                      <span style={{ color: '#8b92a0', minWidth: '110px' }}>{formatTimestamp(death.absTs)}</span>
-                                      <span style={{ color: '#e2e8f0' }}>{death.abilityName}</span>
+                                {topAbilitiesByBoss[boss] && topAbilitiesByBoss[boss].length > 0 && (
+                                  <div style={{ marginBottom: '10px', padding: '8px 10px', background: '#252930', borderRadius: '4px' }}>
+                                    <div style={{ fontSize: '11px', color: '#8b92a0', marginBottom: '4px' }}>Top Abilities:</div>
+                                    <div style={{ fontSize: '12px', color: '#cbd5e1' }}>
+                                      {topAbilitiesByBoss[boss].map(([ability, count], idx) => (
+                                        <span key={ability}>
+                                          {idx + 1}. {ability} ({count}){idx < topAbilitiesByBoss[boss].length - 1 ? ' • ' : ''}
+                                        </span>
+                                      ))}
                                     </div>
-                                    <a 
-                                      href={getWCLLink(death.reportId, death.fightId)} 
-                                      target="_blank" 
-                                      rel="noopener noreferrer"
-                                      style={{ 
-                                        display: 'flex', 
-                                        alignItems: 'center', 
-                                        gap: '4px', 
-                                        color: '#f97316', 
-                                        textDecoration: 'none',
-                                        fontSize: '11px'
-                                      }}
-                                    >
-                                      View Log <ExternalLink size={12} />
-                                    </a>
                                   </div>
-                                ))}
+                                )}
+
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                  {bossDeaths
+                                    .filter(death => death.abilityName && death.abilityName !== 'Unknown')
+                                    .map((death, idx) => (
+                                      <div key={idx} style={{
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        alignItems: 'center',
+                                        padding: '8px 10px',
+                                        background: '#252930',
+                                        borderRadius: '4px',
+                                        fontSize: '12px'
+                                      }}>
+                                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flex: 1 }}>
+                                          <span style={{ color: '#64748b', minWidth: '55px' }}>Pull #{death.pullNo}</span>
+                                          <span style={{ color: '#8b92a0', minWidth: '110px' }}>{formatTimestamp(death.absTs)}</span>
+                                          <span style={{ color: '#e2e8f0' }}>{death.abilityName}</span>
+                                        </div>
+                                        <a
+                                          href={getWCLLink(death.reportId, death.fightId)}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '4px',
+                                            color: '#f97316',
+                                            textDecoration: 'none',
+                                            fontSize: '11px'
+                                          }}
+                                        >
+                                          View Log <ExternalLink size={12} />
+                                        </a>
+                                      </div>
+                                    ))}
+                                </div>
                               </div>
-                            </div>
                             );
                           })}
                         </div>
@@ -889,39 +980,6 @@ export default function WarcraftLogsApp() {
           </div>
         )}
       </div>
-
-      <div style={{ 
-        position: 'fixed', 
-        bottom: 0, 
-        left: 0, 
-        right: 0, 
-        height: '80px', 
-        display: 'flex', 
-        justifyContent: 'space-around', 
-        alignItems: 'flex-end',
-        padding: '0 40px',
-        pointerEvents: 'none',
-        zIndex: 1,
-        opacity: 0.4
-      }}>
-        <div style={{ fontSize: '64px' }}>🪦</div>
-        <div style={{ fontSize: '56px' }}>🪦</div>
-        <div style={{ fontSize: '60px' }}>🪦</div>
-        <div style={{ fontSize: '52px' }}>🪦</div>
-        <div style={{ fontSize: '58px' }}>🪦</div>
-        <div style={{ fontSize: '54px' }}>🪦</div>
-      </div>
-
-      <style>{`
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-        @keyframes float {
-          0%, 100% { transform: translateY(0px); }
-          50% { transform: translateY(-20px); }
-        }
-      `}</style>
     </div>
   );
 }
