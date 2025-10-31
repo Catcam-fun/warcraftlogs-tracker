@@ -270,8 +270,78 @@ export default function WarcraftLogsApp() {
     return stats.sort((a, b) => b.rate - a.rate || b.deaths - a.deaths);
   };
 
-  const formatTimestamp = (ts) => {
-    const date = new Date(ts);
+  const getOverviewData = () => {
+    if (!data) return { bosses: [], players: [], grid: {} };
+
+    const bosses = Object.keys(data.bossParticipation).sort();
+    const players = Object.keys(data.events).sort();
+    const grid = {};
+
+    players.forEach(player => {
+      grid[player] = {};
+      bosses.forEach(boss => {
+        const bossPulls = data.bossParticipation[boss]?.[player]?.length || 0;
+        const bossDeaths = data.events[player]?.filter(
+          ev => ev.boss === boss && ev.rankWithinPull <= cutoff
+        ).length || 0;
+        const rate = bossPulls > 0 ? (bossDeaths / bossPulls * 100) : null;
+        grid[player][boss] = { deaths: bossDeaths, pulls: bossPulls, rate };
+      });
+
+      const totalPulls = data.pullParticipation[player]?.length || 0;
+      const totalDeaths = data.events[player]?.filter(
+        ev => ev.rankWithinPull <= cutoff
+      ).length || 0;
+      grid[player].overall = {
+        deaths: totalDeaths,
+        pulls: totalPulls,
+        rate: totalPulls > 0 ? (totalDeaths / totalPulls * 100) : null
+      };
+    });
+
+    return { bosses, players, grid };
+  };
+
+  const sortOverviewData = (bosses, players, grid, key) => {
+    const sorted = [...players].sort((a, b) => {
+      let aVal, bVal;
+
+      if (key === 'player') {
+        return sortConfig.direction === 'asc' 
+          ? a.localeCompare(b) 
+          : b.localeCompare(a);
+      } else if (key === 'overall') {
+        aVal = grid[a].overall.rate ?? -1;
+        bVal = grid[b].overall.rate ?? -1;
+      } else {
+        aVal = grid[a][key]?.rate ?? -1;
+        bVal = grid[b][key]?.rate ?? -1;
+      }
+
+      if (sortConfig.direction === 'asc') {
+        return aVal - bVal;
+      } else {
+        return bVal - aVal;
+      }
+    });
+
+    return sorted;
+  };
+
+  const handleSort = (key) => {
+    setSortConfig(prev => ({
+      key,
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  };
+
+  const getSortIcon = (key) => {
+    if (sortConfig.key !== key) return <ArrowUpDown size={14} />;
+    return sortConfig.direction === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />;
+  };
+
+  const formatTimestamp = (absTs) => {
+    const date = new Date(absTs);
     return date.toLocaleString('en-US', { 
       month: 'short', 
       day: 'numeric', 
@@ -284,62 +354,8 @@ export default function WarcraftLogsApp() {
     return `https://www.warcraftlogs.com/reports/${reportId}#fight=${fightId}&type=deaths`;
   };
 
-  const getAvailableBosses = () => {
-    if (!data) return [];
-    const bosses = new Set();
-    Object.values(data.events).forEach(events => {
-      events.forEach(ev => {
-        if (ev.boss) bosses.add(ev.boss);
-      });
-    });
-    return Array.from(bosses).sort();
-  };
-
-  const handleSort = (key) => {
-    let direction = 'desc';
-    if (sortConfig.key === key && sortConfig.direction === 'desc') {
-      direction = 'asc';
-    }
-    setSortConfig({ key, direction });
-  };
-
-  const getSortIcon = (key) => {
-    if (sortConfig.key !== key) {
-      return <ArrowUpDown size={14} style={{ opacity: 0.3 }} />;
-    }
-    return sortConfig.direction === 'asc' 
-      ? <ArrowUp size={14} /> 
-      : <ArrowDown size={14} />;
-  };
-
   return (
-    <div style={{ 
-      fontFamily: 'system-ui, -apple-system, sans-serif', 
-      padding: '20px 20px 100px', 
-      maxWidth: '1600px', 
-      margin: '0 auto', 
-      minHeight: '100vh', 
-      background: 'linear-gradient(135deg, #0f0c1d 0%, #1a1425 50%, #0d0b15 100%)',
-      position: 'relative'
-    }}>
-      {/* Header */}
-      <div style={{ textAlign: 'center', marginBottom: '40px' }}>
-        <h1 style={{ 
-          fontSize: '48px', 
-          fontWeight: '900', 
-          background: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)', 
-          WebkitBackgroundClip: 'text', 
-          WebkitTextFillColor: 'transparent',
-          margin: '0 0 10px',
-          textShadow: '0 0 30px rgba(249, 115, 22, 0.3)'
-        }}>
-          ⚔️ WarcraftLogs Death Tracker ⚔️
-        </h1>
-        <p style={{ color: '#8b92a0', fontSize: '16px', margin: 0 }}>
-          Track and analyze raid deaths from WarcraftLogs
-        </p>
-      </div>
-
+    <div style={{ minHeight: '100vh', background: '#0d1117', color: '#e2e8f0', fontFamily: 'system-ui, -apple-system, sans-serif', position: 'relative', overflow: 'hidden' }}>
       {/* Share Modal */}
       {showShareModal && (
         <div style={{
@@ -352,7 +368,7 @@ export default function WarcraftLogsApp() {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          zIndex: 1000
+          zIndex: 10000
         }}>
           <div style={{
             background: '#1a1d23',
@@ -450,693 +466,474 @@ export default function WarcraftLogsApp() {
         </div>
       )}
 
-      {/* Configuration Form */}
-      <div style={{ 
-        background: '#1a1d23', 
-        padding: '30px', 
-        borderRadius: '12px', 
-        marginBottom: '30px',
-        border: '1px solid #2d3238'
-      }}>
-        <h2 style={{ 
-          fontSize: '22px', 
-          fontWeight: '700', 
-          color: '#ffffff', 
-          marginTop: 0, 
-          marginBottom: '20px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px'
-        }}>
-          <Filter size={22} style={{ color: '#f97316' }} />
-          Configuration
-        </h2>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '15px' }}>
-          <div>
-            <label style={{ display: 'block', color: '#8b92a0', fontSize: '13px', marginBottom: '5px', fontWeight: '600' }}>
-              Client ID *
-            </label>
-            <input
-              type="text"
-              name="clientId"
-              value={config.clientId}
-              onChange={handleInputChange}
-              placeholder="Your WarcraftLogs Client ID"
-              style={{
-                width: '100%',
-                padding: '10px',
-                background: '#252930',
-                border: '1px solid #2d3238',
-                borderRadius: '6px',
-                color: '#ffffff',
-                fontSize: '14px',
-                boxSizing: 'border-box'
-              }}
-            />
-          </div>
-
-          <div>
-            <label style={{ display: 'block', color: '#8b92a0', fontSize: '13px', marginBottom: '5px', fontWeight: '600' }}>
-              Client Secret *
-            </label>
-            <input
-              type="password"
-              name="clientSecret"
-              value={config.clientSecret}
-              onChange={handleInputChange}
-              placeholder="Your WarcraftLogs Client Secret"
-              style={{
-                width: '100%',
-                padding: '10px',
-                background: '#252930',
-                border: '1px solid #2d3238',
-                borderRadius: '6px',
-                color: '#ffffff',
-                fontSize: '14px',
-                boxSizing: 'border-box'
-              }}
-            />
-          </div>
-
-          <div>
-            <label style={{ display: 'block', color: '#8b92a0', fontSize: '13px', marginBottom: '5px', fontWeight: '600' }}>
-              Guild Name *
-            </label>
-            <input
-              type="text"
-              name="guildName"
-              value={config.guildName}
-              onChange={handleInputChange}
-              placeholder="Guild Name"
-              style={{
-                width: '100%',
-                padding: '10px',
-                background: '#252930',
-                border: '1px solid #2d3238',
-                borderRadius: '6px',
-                color: '#ffffff',
-                fontSize: '14px',
-                boxSizing: 'border-box'
-              }}
-            />
-          </div>
-
-          <div>
-            <label style={{ display: 'block', color: '#8b92a0', fontSize: '13px', marginBottom: '5px', fontWeight: '600' }}>
-              Server *
-            </label>
-            <input
-              type="text"
-              name="server"
-              value={config.server}
-              onChange={handleInputChange}
-              placeholder="Server Name"
-              style={{
-                width: '100%',
-                padding: '10px',
-                background: '#252930',
-                border: '1px solid #2d3238',
-                borderRadius: '6px',
-                color: '#ffffff',
-                fontSize: '14px',
-                boxSizing: 'border-box'
-              }}
-            />
-          </div>
-
-          <div>
-            <label style={{ display: 'block', color: '#8b92a0', fontSize: '13px', marginBottom: '5px', fontWeight: '600' }}>
-              Region
-            </label>
-            <select
-              name="region"
-              value={config.region}
-              onChange={handleInputChange}
-              style={{
-                width: '100%',
-                padding: '10px',
-                background: '#252930',
-                border: '1px solid #2d3238',
-                borderRadius: '6px',
-                color: '#ffffff',
-                fontSize: '14px',
-                boxSizing: 'border-box'
-              }}
-            >
-              <option value="us">US</option>
-              <option value="eu">EU</option>
-              <option value="kr">KR</option>
-              <option value="tw">TW</option>
-              <option value="cn">CN</option>
-            </select>
-          </div>
-
-          <div>
-            <label style={{ display: 'block', color: '#8b92a0', fontSize: '13px', marginBottom: '5px', fontWeight: '600' }}>
-              Report Zone ID
-            </label>
-            <input
-              type="text"
-              name="reportZone"
-              value={config.reportZone}
-              onChange={handleInputChange}
-              placeholder="Zone ID (e.g., 44)"
-              style={{
-                width: '100%',
-                padding: '10px',
-                background: '#252930',
-                border: '1px solid #2d3238',
-                borderRadius: '6px',
-                color: '#ffffff',
-                fontSize: '14px',
-                boxSizing: 'border-box'
-              }}
-            />
-          </div>
-
-          <div>
-            <label style={{ display: 'block', color: '#8b92a0', fontSize: '13px', marginBottom: '5px', fontWeight: '600' }}>
-              Fight Zone ID
-            </label>
-            <input
-              type="text"
-              name="fightZone"
-              value={config.fightZone}
-              onChange={handleInputChange}
-              placeholder="Fight Zone ID (e.g., 2810)"
-              style={{
-                width: '100%',
-                padding: '10px',
-                background: '#252930',
-                border: '1px solid #2d3238',
-                borderRadius: '6px',
-                color: '#ffffff',
-                fontSize: '14px',
-                boxSizing: 'border-box'
-              }}
-            />
-          </div>
-
-          <div>
-            <label style={{ display: 'block', color: '#8b92a0', fontSize: '13px', marginBottom: '5px', fontWeight: '600' }}>
-              Difficulty
-            </label>
-            <select
-              name="difficulty"
-              value={config.difficulty}
-              onChange={handleInputChange}
-              style={{
-                width: '100%',
-                padding: '10px',
-                background: '#252930',
-                border: '1px solid #2d3238',
-                borderRadius: '6px',
-                color: '#ffffff',
-                fontSize: '14px',
-                boxSizing: 'border-box'
-              }}
-            >
-              <option value="3">Normal</option>
-              <option value="4">Heroic</option>
-              <option value="5">Mythic</option>
-            </select>
-          </div>
-
-          <div>
-            <label style={{ display: 'block', color: '#8b92a0', fontSize: '13px', marginBottom: '5px', fontWeight: '600' }}>
-              Max Deaths Per Pull
-            </label>
-            <input
-              type="number"
-              name="maxCutoff"
-              value={config.maxCutoff}
-              onChange={handleInputChange}
-              min="1"
-              max="10"
-              style={{
-                width: '100%',
-                padding: '10px',
-                background: '#252930',
-                border: '1px solid #2d3238',
-                borderRadius: '6px',
-                color: '#ffffff',
-                fontSize: '14px',
-                boxSizing: 'border-box'
-              }}
-            />
-          </div>
-
-          <div>
-            <label style={{ display: 'block', color: '#8b92a0', fontSize: '13px', marginBottom: '5px', fontWeight: '600' }}>
-              Cutoff Date
-            </label>
-            <input
-              type="date"
-              name="cutoffDate"
-              value={config.cutoffDate}
-              onChange={handleInputChange}
-              style={{
-                width: '100%',
-                padding: '10px',
-                background: '#252930',
-                border: '1px solid #2d3238',
-                borderRadius: '6px',
-                color: '#ffffff',
-                fontSize: '14px',
-                boxSizing: 'border-box'
-              }}
-            />
-          </div>
-
-          <div style={{ gridColumn: '1 / -1' }}>
-            <label style={{ display: 'block', color: '#8b92a0', fontSize: '13px', marginBottom: '5px', fontWeight: '600' }}>
-              Author Filters (comma-separated)
-            </label>
-            <input
-              type="text"
-              name="authorFilters"
-              value={config.authorFilters}
-              onChange={handleInputChange}
-              placeholder="Player1, Player2, Player3"
-              style={{
-                width: '100%',
-                padding: '10px',
-                background: '#252930',
-                border: '1px solid #2d3238',
-                borderRadius: '6px',
-                color: '#ffffff',
-                fontSize: '14px',
-                boxSizing: 'border-box'
-              }}
-            />
-          </div>
-
-          <div style={{ gridColumn: '1 / -1' }}>
-            <label style={{ display: 'block', color: '#8b92a0', fontSize: '13px', marginBottom: '5px', fontWeight: '600' }}>
-              Character Groups (JSON format)
-            </label>
-            <textarea
-              name="characterGroups"
-              value={config.characterGroups}
-              onChange={handleInputChange}
-              placeholder='{"MainChar": ["Alt1", "Alt2"]}'
-              rows="3"
-              style={{
-                width: '100%',
-                padding: '10px',
-                background: '#252930',
-                border: '1px solid #2d3238',
-                borderRadius: '6px',
-                color: '#ffffff',
-                fontSize: '14px',
-                fontFamily: 'monospace',
-                boxSizing: 'border-box',
-                resize: 'vertical'
-              }}
-            />
-          </div>
-        </div>
-
-        <button
-          onClick={handleSubmit}
-          disabled={loading}
-          style={{
-            marginTop: '20px',
-            padding: '12px 30px',
-            background: loading ? '#475569' : 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)',
-            color: '#ffffff',
-            border: 'none',
-            borderRadius: '8px',
-            fontSize: '16px',
-            fontWeight: '700',
-            cursor: loading ? 'not-allowed' : 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '10px',
-            transition: 'all 0.2s',
-            boxShadow: loading ? 'none' : '0 4px 12px rgba(249, 115, 22, 0.3)'
-          }}
-        >
-          {loading ? (
-            <>
-              <Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} />
-              Analyzing...
-            </>
-          ) : (
-            <>
-              <Search size={18} />
-              Analyze Deaths
-            </>
-          )}
-        </button>
+      {/* Halloween Decorations */}
+      <div style={{ position: 'fixed', top: 0, left: 0, width: '200px', height: '200px', opacity: 0.15, pointerEvents: 'none', zIndex: 1 }}>
+        <svg viewBox="0 0 200 200" style={{ width: '100%', height: '100%' }}>
+          <path d="M0,0 L100,100 M0,20 L100,100 M0,40 L100,100 M0,60 L100,100 M0,80 L100,100" stroke="#fff" strokeWidth="1" fill="none"/>
+          <path d="M0,0 L100,100 M20,0 L100,100 M40,0 L100,100 M60,0 L100,100 M80,0 L100,100" stroke="#fff" strokeWidth="1" fill="none"/>
+          <circle cx="100" cy="100" r="60" stroke="#fff" strokeWidth="1" fill="none"/>
+          <circle cx="100" cy="100" r="40" stroke="#fff" strokeWidth="1" fill="none"/>
+          <circle cx="100" cy="100" r="20" stroke="#fff" strokeWidth="1" fill="none"/>
+        </svg>
+      </div>
+      
+      <div style={{ position: 'fixed', top: 0, right: 0, width: '200px', height: '200px', opacity: 0.15, pointerEvents: 'none', zIndex: 1, transform: 'scaleX(-1)' }}>
+        <svg viewBox="0 0 200 200" style={{ width: '100%', height: '100%' }}>
+          <path d="M0,0 L100,100 M0,20 L100,100 M0,40 L100,100 M0,60 L100,100 M0,80 L100,100" stroke="#fff" strokeWidth="1" fill="none"/>
+          <path d="M0,0 L100,100 M20,0 L100,100 M40,0 L100,100 M60,0 L100,100 M80,0 L100,100" stroke="#fff" strokeWidth="1" fill="none"/>
+          <circle cx="100" cy="100" r="60" stroke="#fff" strokeWidth="1" fill="none"/>
+          <circle cx="100" cy="100" r="40" stroke="#fff" strokeWidth="1" fill="none"/>
+          <circle cx="100" cy="100" r="20" stroke="#fff" strokeWidth="1" fill="none"/>
+        </svg>
       </div>
 
-      {/* Loading State */}
-      {loading && (
-        <div style={{
-          background: '#1a1d23',
-          padding: '30px',
-          borderRadius: '12px',
-          marginBottom: '30px',
-          border: '1px solid #2d3238',
-          textAlign: 'center'
-        }}>
-          <Loader2 size={48} style={{ color: '#f97316', animation: 'spin 1s linear infinite', marginBottom: '15px' }} />
-          <p style={{ color: '#ffffff', fontSize: '16px', fontWeight: '600', margin: 0 }}>
-            {loadingStage}
-          </p>
-        </div>
-      )}
+      <div style={{ position: 'fixed', top: '15%', right: '20%', fontSize: '32px', opacity: 0.4, animation: 'float 6s ease-in-out infinite', pointerEvents: 'none', zIndex: 1 }}>
+        🦇
+      </div>
+      <div style={{ position: 'fixed', top: '25%', left: '15%', fontSize: '28px', opacity: 0.3, animation: 'float 8s ease-in-out infinite 2s', pointerEvents: 'none', zIndex: 1 }}>
+        🦇
+      </div>
+      <div style={{ position: 'fixed', top: '40%', right: '10%', fontSize: '24px', opacity: 0.25, animation: 'float 7s ease-in-out infinite 4s', pointerEvents: 'none', zIndex: 1 }}>
+        🦇
+      </div>
 
-      {/* Error State */}
-      {error && (
-        <div style={{
-          background: '#7f1d1d',
-          padding: '20px',
-          borderRadius: '8px',
-          marginBottom: '30px',
-          border: '1px solid #991b1b',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '12px'
-        }}>
-          <AlertCircle size={24} style={{ color: '#fca5a5', flexShrink: 0 }} />
-          <p style={{ color: '#fef2f2', margin: 0, fontSize: '14px' }}>
-            {error}
-          </p>
-        </div>
-      )}
+      <div style={{ position: 'fixed', top: '20px', left: '20px', fontSize: '48px', opacity: 0.5, pointerEvents: 'none', zIndex: 1 }}>
+        🎃
+      </div>
+      <div style={{ position: 'fixed', top: '20px', right: '20px', fontSize: '48px', opacity: 0.5, pointerEvents: 'none', zIndex: 1 }}>
+        🎃
+      </div>
 
-      {/* Results */}
-      {data && (
-        <div>
-          {/* Results Header with Share Button */}
-          <div style={{
-            background: '#1a1d23',
-            padding: '20px',
-            borderRadius: '12px',
-            marginBottom: '20px',
-            border: '1px solid #2d3238',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: '15px'
+      <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '24px', position: 'relative', zIndex: 2 }}>
+        <div style={{ background: '#1a1d23', borderRadius: '12px', padding: '24px', marginBottom: '20px', border: '1px solid #2d3238' }}>
+          <h1 style={{ margin: '0 0 6px', fontSize: '28px', fontWeight: '700', color: '#ffffff', display: 'flex', alignItems: 'center', gap: '10px', justifyContent: 'center' }}>
+            <span>🎃</span>
+            WarcraftLogs Death Tracker
+            <span>💀</span>
+          </h1>
+          <p style={{ color: '#8b92a0', margin: 0, textAlign: 'center', fontSize: '14px' }}>Analyze raid deaths and performance metrics 👻</p>
+        </div>
+
+        {loading && (
+          <div style={{ 
+            position: 'fixed', 
+            top: 0, 
+            left: 0, 
+            right: 0, 
+            bottom: 0, 
+            background: 'rgba(13, 17, 23, 0.98)', 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center', 
+            zIndex: 9999,
+            backdropFilter: 'blur(8px)'
           }}>
-            <div>
-              <h2 style={{ 
-                fontSize: '20px', 
-                fontWeight: '700', 
-                color: '#ffffff', 
-                margin: '0 0 5px',
-              }}>
-                Analysis Results
+            <div style={{ textAlign: 'center', maxWidth: '500px', padding: '40px' }}>
+              <div style={{ 
+                width: '80px', 
+                height: '80px', 
+                border: '4px solid #2d3238', 
+                borderTop: '4px solid #f97316',
+                borderRadius: '50%',
+                animation: 'spin 1s linear infinite',
+                margin: '0 auto 24px'
+              }} />
+              <h2 style={{ margin: '0 0 16px', fontSize: '22px', fontWeight: '600', color: '#ffffff' }}>
+                Analyzing Reports
               </h2>
-              <p style={{ color: '#8b92a0', fontSize: '13px', margin: 0 }}>
-                {data.meta?.guildName && `${data.meta.guildName} - `}
-                {data.meta?.reportCount || 0} reports analyzed
-                {data.meta?.generatedAt && ` • Generated ${data.meta.generatedAt}`}
-              </p>
-            </div>
-            <button
-              onClick={handleShare}
-              disabled={sharingData}
-              style={{
-                padding: '10px 20px',
-                background: sharingData ? '#475569' : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                color: '#ffffff',
-                border: 'none',
+              <div style={{ 
+                padding: '14px 18px', 
+                background: '#1a1d23', 
                 borderRadius: '8px',
-                fontSize: '14px',
-                fontWeight: '600',
-                cursor: sharingData ? 'not-allowed' : 'pointer',
+                border: '1px solid #2d3238',
+                marginBottom: '16px',
+                minHeight: '60px',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '8px',
-                transition: 'all 0.2s',
-                boxShadow: sharingData ? 'none' : '0 2px 8px rgba(16, 185, 129, 0.3)'
-              }}
+                justifyContent: 'center'
+              }}>
+                <p style={{ 
+                  margin: 0, 
+                  fontSize: '14px', 
+                  color: '#f97316', 
+                  fontWeight: '500',
+                  lineHeight: '1.6'
+                }}>
+                  {loadingStage || 'Starting analysis...'}
+                </p>
+              </div>
+              <p style={{ color: '#8b92a0', fontSize: '13px', margin: '0', lineHeight: '1.6' }}>
+                Processing data from WarcraftLogs...<br />
+                This may take a while
+              </p>
+            </div>
+          </div>
+        )}
+
+        {!data && (
+          <div style={{ background: '#1a1d23', borderRadius: '12px', padding: '24px', marginBottom: '20px', border: '1px solid #2d3238' }}>
+            <h2 style={{ margin: '0 0 24px', fontSize: '18px', fontWeight: '600', color: '#ffffff' }}>Configuration</h2>
+            
+            <div style={{ marginBottom: '24px', padding: '14px 16px', background: 'rgba(249, 115, 22, 0.1)', border: '1px solid rgba(249, 115, 22, 0.3)', borderRadius: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'start', gap: '10px' }}>
+                <div style={{ fontSize: '18px' }}>🎃</div>
+                <div>
+                  <h3 style={{ margin: '0 0 6px', fontSize: '14px', fontWeight: '600', color: '#f97316' }}>
+                    Need API Credentials?
+                  </h3>
+                  <p style={{ margin: '0 0 6px', fontSize: '12px', color: '#cbd5e1', lineHeight: '1.6' }}>
+                    You need a WarcraftLogs V2 API Client ID and Secret to use this tool.
+                  </p>
+                  <ol style={{ margin: '6px 0 0 16px', padding: 0, fontSize: '12px', color: '#cbd5e1', lineHeight: '1.7' }}>
+                    <li>Go to <a href="https://www.warcraftlogs.com/api/clients/" target="_blank" rel="noopener noreferrer" style={{ color: '#f97316', textDecoration: 'underline' }}>WarcraftLogs API Clients</a></li>
+                    <li>Click "Create a Client"</li>
+                    <li>Enter a name (e.g., "Death Tracker")</li>
+                    <li>For redirect URL, enter the website URL or just use: <code style={{ background: '#252930', padding: '2px 6px', borderRadius: '3px', fontSize: '11px' }}>http://localhost</code></li>
+                    <li><strong>Do NOT check</strong> the "Public Client" box</li>
+                    <li>Click "Create" and copy your Client ID and Client Secret</li>
+                  </ol>
+                </div>
+              </div>
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px' }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
+                    Client ID (V2 API) *
+                  </label>
+                  <input
+                    type="text"
+                    name="clientId"
+                    value={config.clientId}
+                    onChange={handleInputChange}
+                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
+                    Client Secret (V2 API) *
+                  </label>
+                  <input
+                    type="password"
+                    name="clientSecret"
+                    value={config.clientSecret}
+                    onChange={handleInputChange}
+                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px' }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
+                    Guild Name *
+                  </label>
+                  <input
+                    type="text"
+                    name="guildName"
+                    value={config.guildName}
+                    onChange={handleInputChange}
+                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
+                  />
+                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
+                    Examples: Do Over, Complexity Limit, Method
+                  </p>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
+                    Server *
+                  </label>
+                  <input
+                    type="text"
+                    name="server"
+                    value={config.server}
+                    onChange={handleInputChange}
+                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
+                  />
+                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
+                    Remove spaces/apostrophes - Examples: Thrall, Area52, TwistingNether
+                  </p>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px' }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
+                    Region *
+                  </label>
+                  <select
+                    name="region"
+                    value={config.region}
+                    onChange={handleInputChange}
+                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
+                  >
+                    <option value="us">US</option>
+                    <option value="eu">EU</option>
+                    <option value="kr">KR</option>
+                    <option value="tw">TW</option>
+                    <option value="cn">CN</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
+                    Difficulty *
+                  </label>
+                  <select
+                    name="difficulty"
+                    value={config.difficulty}
+                    onChange={handleInputChange}
+                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
+                  >
+                    <option value="3">Normal</option>
+                    <option value="4">Heroic</option>
+                    <option value="5">Mythic</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px' }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
+                    Report Zone ID
+                  </label>
+                  <input
+                    type="text"
+                    name="reportZone"
+                    value={config.reportZone}
+                    onChange={handleInputChange}
+                    placeholder="44"
+                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
+                  />
+                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
+                    The raid zone ID (e.g., 44 for Manaforge Omega) - find in WarcraftLogs URLs
+                  </p>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
+                    Fight Zone ID
+                  </label>
+                  <input
+                    type="text"
+                    name="fightZone"
+                    value={config.fightZone}
+                    onChange={handleInputChange}
+                    placeholder="2810"
+                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
+                  />
+                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
+                    Same for entire raid (e.g., 2810 for Manaforge Omega) - matches Report Zone
+                  </p>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px' }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
+                    Cutoff Date
+                  </label>
+                  <input
+                    type="date"
+                    name="cutoffDate"
+                    value={config.cutoffDate}
+                    onChange={handleInputChange}
+                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
+                  />
+                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
+                    Only analyze reports before this date
+                  </p>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
+                    Max Deaths to Track
+                  </label>
+                  <input
+                    type="number"
+                    name="maxCutoff"
+                    value={config.maxCutoff}
+                    onChange={handleInputChange}
+                    min="1"
+                    max="10"
+                    placeholder="5"
+                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
+                  />
+                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
+                    Track only the first X deaths per pull (1-10)
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
+                  Author Filters <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '400' }}>(optional, comma-separated)</span>
+                </label>
+                <input
+                  type="text"
+                  name="authorFilters"
+                  value={config.authorFilters}
+                  onChange={handleInputChange}
+                  placeholder="PlayerName1, PlayerName2, PlayerName3"
+                  style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
+                />
+                <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
+                  Only analyze reports uploaded by these players
+                </p>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
+                  Character Groups <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '400' }}>(optional, JSON format)</span>
+                </label>
+                <textarea
+                  name="characterGroups"
+                  value={config.characterGroups}
+                  onChange={handleInputChange}
+                  placeholder='{"MainCharacter": ["AltName1", "AltName2"], "AnotherMain": ["TheirAlt"]}'
+                  rows="3"
+                  style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', fontFamily: 'monospace', resize: 'vertical', boxSizing: 'border-box' }}
+                />
+                <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
+                  Merge alt characters with their mains for combined statistics
+                </p>
+              </div>
+            </div>
+
+            {error && (
+              <div style={{ marginTop: '20px', padding: '10px 14px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
+                <AlertCircle size={18} />
+                <span>{error}</span>
+              </div>
+            )}
+
+            <button
+              onClick={handleSubmit}
+              disabled={loading}
+              style={{ marginTop: '24px', padding: '12px 24px', background: loading ? '#3d424a' : '#f97316', border: 'none', borderRadius: '6px', color: 'white', fontSize: '14px', fontWeight: '600', cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.6 : 1, display: 'flex', alignItems: 'center', gap: '8px' }}
             >
-              {sharingData ? (
+              {loading ? (
                 <>
-                  <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
-                  Creating Link...
+                  <Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} />
+                  Analyzing...
                 </>
               ) : (
                 <>
-                  <Share2 size={16} />
-                  Share Results
+                  <Search size={18} />
+                  Analyze Reports
                 </>
               )}
             </button>
           </div>
+        )}
 
-          {/* Filters */}
-          <div style={{
-            background: '#1a1d23',
-            padding: '20px',
-            borderRadius: '12px',
-            marginBottom: '20px',
-            border: '1px solid #2d3238'
-          }}>
-            <div style={{ marginBottom: '15px' }}>
-              <label style={{ display: 'block', color: '#8b92a0', fontSize: '13px', marginBottom: '8px', fontWeight: '600' }}>
-                Death Rank Cutoff (showing deaths ranked 1-{cutoff})
-              </label>
-              <input
-                type="range"
-                min="1"
-                max="10"
-                value={cutoff}
-                onChange={(e) => setCutoff(parseInt(e.target.value))}
-                style={{ width: '100%', accentColor: '#f97316' }}
-              />
-              <div style={{ color: '#ffffff', fontSize: '14px', marginTop: '5px', fontWeight: '600' }}>
-                Rank 1 to {cutoff}
+        {data && (
+          <div>
+            <div style={{ background: '#1a1d23', borderRadius: '12px', padding: '16px', marginBottom: '20px', border: '1px solid #2d3238' }}>
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '14px' }}>
+                <button
+                  onClick={() => setView('overview')}
+                  style={{ padding: '8px 16px', background: view === 'overview' ? '#f97316' : '#2d3238', border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}
+                >
+                  Overview
+                </button>
+                <button
+                  onClick={() => setView('players')}
+                  style={{ padding: '8px 16px', background: view === 'players' ? '#f97316' : '#2d3238', border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}
+                >
+                  Players
+                </button>
+                <button
+                  onClick={() => { setData(null); setError(''); setExpandedPlayers(new Set()); setSortConfig({ key: null, direction: 'asc' }); }}
+                  style={{ padding: '8px 16px', background: '#2d3238', border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: '600', marginLeft: 'auto' }}
+                >
+                  New Analysis
+                </button>
+                <button
+                  onClick={handleShare}
+                  disabled={sharingData}
+                  style={{ padding: '8px 16px', background: sharingData ? '#475569' : '#10b981', border: 'none', borderRadius: '6px', color: 'white', cursor: sharingData ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}
+                >
+                  {sharingData ? (
+                    <>
+                      <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} />
+                      Sharing...
+                    </>
+                  ) : (
+                    <>
+                      <Share2 size={14} />
+                      Share
+                    </>
+                  )}
+                </button>
               </div>
-            </div>
 
-            <div style={{ marginBottom: '15px' }}>
-              <label style={{ display: 'block', color: '#8b92a0', fontSize: '13px', marginBottom: '8px', fontWeight: '600' }}>
-                Search Players
-              </label>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search by player name..."
-                style={{
-                  width: '100%',
-                  padding: '10px',
-                  background: '#252930',
-                  border: '1px solid #2d3238',
-                  borderRadius: '6px',
-                  color: '#ffffff',
-                  fontSize: '14px',
-                  boxSizing: 'border-box'
-                }}
-              />
-            </div>
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <label style={{ fontSize: '13px', color: '#cbd5e1' }}>Deaths to count:</label>
+                <select
+                  value={cutoff}
+                  onChange={(e) => setCutoff(parseInt(e.target.value))}
+                  style={{ padding: '6px 10px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px' }}
+                >
+                  {[...Array(data.meta.maxCutoff)].map((_, i) => (
+                    <option key={i + 1} value={i + 1}>
+                      {i + 1} {i === 0 ? 'Death' : 'Deaths'}
+                    </option>
+                  ))}
+                </select>
 
-            <div>
-              <label style={{ display: 'block', color: '#8b92a0', fontSize: '13px', marginBottom: '8px', fontWeight: '600' }}>
-                Filter by Boss
-              </label>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {getAvailableBosses().map(boss => (
+                <div style={{ marginLeft: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Filter size={14} />
+                  <span style={{ fontSize: '13px', color: '#cbd5e1' }}>Boss filters:</span>
+                </div>
+                {Object.keys(data.bossParticipation).sort().map(boss => (
                   <button
                     key={boss}
                     onClick={() => toggleBoss(boss)}
-                    style={{
-                      padding: '6px 12px',
-                      background: selectedBosses.has(boss) ? '#f97316' : '#252930',
-                      color: '#ffffff',
-                      border: '1px solid',
-                      borderColor: selectedBosses.has(boss) ? '#f97316' : '#2d3238',
-                      borderRadius: '6px',
-                      fontSize: '12px',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s',
-                      fontWeight: '600'
-                    }}
+                    style={{ padding: '5px 10px', background: selectedBosses.has(boss) ? '#f97316' : '#2d3238', border: '1px solid ' + (selectedBosses.has(boss) ? '#f97316' : '#3d424a'), borderRadius: '14px', color: 'white', cursor: 'pointer', fontSize: '12px' }}
                   >
                     {boss}
                   </button>
                 ))}
               </div>
+
+              {view === 'players' && (
+                <div style={{ marginTop: '14px' }}>
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search players..."
+                    style={{ width: '100%', maxWidth: '300px', padding: '8px 12px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px' }}
+                  />
+                </div>
+              )}
             </div>
-          </div>
 
-          {/* View Tabs */}
-          <div style={{
-            display: 'flex',
-            gap: '10px',
-            marginBottom: '20px',
-            background: '#1a1d23',
-            padding: '10px',
-            borderRadius: '12px',
-            border: '1px solid #2d3238'
-          }}>
-            <button
-              onClick={() => setView('overview')}
-              style={{
-                flex: 1,
-                padding: '12px',
-                background: view === 'overview' ? 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)' : 'transparent',
-                color: '#ffffff',
-                border: 'none',
-                borderRadius: '8px',
-                fontSize: '14px',
-                fontWeight: '600',
-                cursor: 'pointer',
-                transition: 'all 0.2s'
-              }}
-            >
-              Overview
-            </button>
-            <button
-              onClick={() => setView('grid')}
-              style={{
-                flex: 1,
-                padding: '12px',
-                background: view === 'grid' ? 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)' : 'transparent',
-                color: '#ffffff',
-                border: 'none',
-                borderRadius: '8px',
-                fontSize: '14px',
-                fontWeight: '600',
-                cursor: 'pointer',
-                transition: 'all 0.2s'
-              }}
-            >
-              Boss Grid
-            </button>
-            <button
-              onClick={() => setView('players')}
-              style={{
-                flex: 1,
-                padding: '12px',
-                background: view === 'players' ? 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)' : 'transparent',
-                color: '#ffffff',
-                border: 'none',
-                borderRadius: '8px',
-                fontSize: '14px',
-                fontWeight: '600',
-                cursor: 'pointer',
-                transition: 'all 0.2s'
-              }}
-            >
-              Player Details
-            </button>
-          </div>
-
-          {/* Content Views */}
-          <div style={{ marginBottom: '30px' }}>
-            {view === 'overview' && (
-              <div style={{ background: '#1a1d23', borderRadius: '12px', border: '1px solid #2d3238', overflow: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr style={{ background: '#252930' }}>
-                      <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #3d424a', fontWeight: '700', color: '#ffffff' }}>Rank</th>
-                      <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #3d424a', fontWeight: '700', color: '#ffffff' }}>Player</th>
-                      <th style={{ padding: '12px', textAlign: 'center', borderBottom: '2px solid #3d424a', fontWeight: '700', color: '#ffffff' }}>Deaths</th>
-                      <th style={{ padding: '12px', textAlign: 'center', borderBottom: '2px solid #3d424a', fontWeight: '700', color: '#ffffff' }}>Pulls</th>
-                      <th style={{ padding: '12px', textAlign: 'center', borderBottom: '2px solid #3d424a', fontWeight: '700', color: '#ffffff' }}>Death Rate</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {getFilteredStats().map((stat, idx) => (
-                      <tr key={stat.player} style={{ borderBottom: '1px solid #2d3238' }}>
-                        <td style={{ padding: '12px', color: idx < 3 ? '#f97316' : '#8b92a0', fontWeight: idx < 3 ? '700' : '400' }}>
-                          {idx + 1}
-                        </td>
-                        <td style={{ padding: '12px', fontWeight: '600', color: '#ffffff' }}>{stat.player}</td>
-                        <td style={{ padding: '12px', textAlign: 'center', color: '#e2e8f0' }}>{stat.deaths}</td>
-                        <td style={{ padding: '12px', textAlign: 'center', color: '#e2e8f0' }}>{stat.pulls}</td>
-                        <td style={{ padding: '12px', textAlign: 'center' }}>
-                          <span style={{ 
-                            color: stat.rate > 50 ? '#f87171' : stat.rate > 25 ? '#fbbf24' : '#34d399',
-                            fontWeight: '700',
-                            fontSize: '16px'
-                          }}>
-                            {stat.rate.toFixed(1)}%
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {view === 'grid' && (() => {
-              const stats = getFilteredStats();
-              const bosses = getAvailableBosses().filter(b => selectedBosses.size === 0 || selectedBosses.has(b));
+            {view === 'overview' && (() => {
+              const { bosses, players, grid } = getOverviewData();
+              const sortedPlayers = sortConfig.key ? sortOverviewData(bosses, players, grid, sortConfig.key) : players;
               
-              const grid = {};
-              stats.forEach(({ player }) => {
-                grid[player] = {};
-                let totalDeaths = 0;
-                let totalPulls = 0;
-                
-                bosses.forEach(boss => {
-                  const bossDeaths = data.events[player]?.filter(
-                    ev => ev.boss === boss && ev.rankWithinPull <= cutoff && ev.abilityName && ev.abilityName !== 'Unknown'
-                  ) || [];
-                  const bossPulls = data.bossParticipation[boss]?.[player]?.length || 0;
-                  const bossRate = bossPulls > 0 ? (bossDeaths.length / bossPulls * 100) : null;
-                  
-                  grid[player][boss] = {
-                    deaths: bossDeaths.length,
-                    pulls: bossPulls,
-                    rate: bossRate
-                  };
-                  
-                  totalDeaths += bossDeaths.length;
-                  totalPulls += bossPulls;
-                });
-                
-                grid[player].overall = {
-                  deaths: totalDeaths,
-                  pulls: totalPulls,
-                  rate: totalPulls > 0 ? (totalDeaths / totalPulls * 100) : null
-                };
-              });
-
-              let sortedPlayers = stats.map(s => s.player);
-              if (sortConfig.key) {
-                sortedPlayers.sort((a, b) => {
-                  const key = sortConfig.key;
-                  let aVal, bVal;
-                  
-                  if (key === 'overall') {
-                    aVal = grid[a].overall.rate ?? -1;
-                    bVal = grid[b].overall.rate ?? -1;
-                  } else {
-                    aVal = grid[a][key]?.rate ?? -1;
-                    bVal = grid[b][key]?.rate ?? -1;
-                  }
-                  
-                  if (sortConfig.direction === 'asc') {
-                    return aVal - bVal;
-                  } else {
-                    return bVal - aVal;
-                  }
-                });
-              }
-
               return (
-                <div style={{ background: '#1a1d23', borderRadius: '12px', border: '1px solid #2d3238', overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '800px' }}>
+                <div style={{ background: '#1a1d23', borderRadius: '12px', padding: '16px', border: '1px solid #2d3238', overflowX: 'auto' }}>
+                  <h2 style={{ margin: '0 0 14px', fontSize: '16px', fontWeight: '600', color: '#ffffff' }}>Death Rate Overview</h2>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
                     <thead>
                       <tr style={{ background: '#252930' }}>
-                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #3d424a', fontWeight: '700', position: 'sticky', left: 0, background: '#252930', zIndex: 2, color: '#ffffff' }}>
-                          Player
+                        <th 
+                          onClick={() => handleSort('player')}
+                          style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #3d424a', position: 'sticky', left: 0, background: '#252930', zIndex: 2, cursor: 'pointer', userSelect: 'none', color: '#ffffff' }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            Player {getSortIcon('player')}
+                          </div>
                         </th>
                         {bosses.map(boss => (
                           <th 
-                            key={boss}
+                            key={boss} 
                             onClick={() => handleSort(boss)}
                             style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #3d424a', minWidth: '80px', cursor: 'pointer', userSelect: 'none', color: '#ffffff' }}
                           >
@@ -1293,8 +1090,8 @@ export default function WarcraftLogsApp() {
               </div>
             )}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       <div style={{ 
         position: 'fixed', 
