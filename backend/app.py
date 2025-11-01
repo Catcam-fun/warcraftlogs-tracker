@@ -147,46 +147,68 @@ def get_guild_reports(token, guild_name, server, region, zone_id, cutoff_date):
 
 
 def get_guild_roster(token, guild_name, server, region):
-    """Fetch guild roster to identify guild members"""
+    """Fetch guild roster to identify guild members using pagination"""
     
     query = """
-    query($guildName: String!, $serverSlug: String!, $serverRegion: String!) {
+    query($guildName: String!, $serverSlug: String!, $serverRegion: String!, $page: Int!) {
       guildData {
         guild(name: $guildName, serverSlug: $serverSlug, serverRegion: $serverRegion) {
-          members(limit: 999) {
+          members(limit: 100, page: $page) {
             data {
               name
             }
+            has_more_pages
           }
         }
       }
     }
     """
     
-    variables = {
-        "guildName": guild_name,
-        "serverSlug": server.lower().replace(" ", "-").replace("'", ""),
-        "serverRegion": region.upper()
-    }
+    all_members = set()
+    page = 1
+    max_pages = 10  # Max 10 pages = 1000 members (safety limit)
     
     try:
-        data = graphql_query(token, query, variables)
-        guild = data.get("guildData", {}).get("guild", {})
+        while page <= max_pages:
+            variables = {
+                "guildName": guild_name,
+                "serverSlug": server.lower().replace(" ", "-").replace("'", ""),
+                "serverRegion": region.upper(),
+                "page": page
+            }
+            
+            data = graphql_query(token, query, variables)
+            guild = data.get("guildData", {}).get("guild", {})
+            
+            if not guild:
+                if page == 1:
+                    print(f"Warning: Could not fetch guild roster for {guild_name}")
+                break
+            
+            members_response = guild.get("members", {})
+            members = members_response.get("data", [])
+            has_more = members_response.get("has_more_pages", False)
+            
+            # Add members from this page
+            for member in members:
+                name = member.get("name")
+                if name:
+                    all_members.add(name.lower())
+            
+            print(f"Fetched page {page}: {len(members)} members (total so far: {len(all_members)})")
+            
+            # Stop if no more pages
+            if not has_more:
+                break
+            
+            page += 1
         
-        if not guild:
-            print(f"Warning: Could not fetch guild roster for {guild_name}")
-            return set()
-        
-        members_data = guild.get("members", {}).get("data", [])
-        
-        if not members_data:
+        if not all_members:
             print(f"Warning: Guild {guild_name} has no members or roster not available")
             return set()
         
-        # Return set of lowercase names for case-insensitive matching
-        guild_roster = {m.get("name", "").lower() for m in members_data if m.get("name")}
-        print(f"Successfully fetched {len(guild_roster)} guild members")
-        return guild_roster
+        print(f"Successfully fetched {len(all_members)} guild members across {page} page(s)")
+        return all_members
         
     except Exception as e:
         print(f"Warning: Failed to fetch guild roster: {str(e)}")
