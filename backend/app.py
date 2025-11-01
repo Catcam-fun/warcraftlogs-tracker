@@ -576,8 +576,14 @@ def analyze():
                 if guild_roster:
                     friendly_names = {f.get("name", "").lower() for f in friendlies if f.get("name")}
                     guild_members_in_report = len(friendly_names & guild_roster)
+                    
                     if guild_members_in_report < 15:
+                        msg = f'Report {rid}: Only {guild_members_in_report} guild members - SKIPPED'
+                        yield f"data: {json.dumps({'stage': 'fights', 'message': msg})}\n\n"
                         continue
+                    else:
+                        msg = f'Report {rid}: {guild_members_in_report} guild members - processing'
+                        yield f"data: {json.dumps({'stage': 'fights', 'message': msg})}\n\n"
                 
                 if not fights:
                     continue
