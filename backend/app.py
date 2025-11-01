@@ -346,8 +346,11 @@ def get_abilities_map(token, report_code):
     return ability_id_to_name
 
 
-def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map):
-    """Get ALL player deaths for an entire report at once - MUCH faster than per-fight queries"""
+def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, enable_cheat_death=False):
+    """
+    Get ALL player deaths for an entire report at once - MUCH faster than per-fight queries
+    Optionally detect cheat deaths by querying buff events (adds 1 API call per report)
+    """
     
     if not fights:
         return {}
@@ -364,7 +367,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map):
     start_time = min(f['start_time'] for f in fights)
     end_time = max(f['end_time'] for f in fights)
     
-    # STEP 1: Get all death events
+    # STEP 1: Get all death events (ALWAYS REQUIRED)
     deaths_query = """
     query($code: String!, $startTime: Float!, $endTime: Float!) {
       reportData {
@@ -373,24 +376,6 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map):
             startTime: $startTime
             endTime: $endTime
             dataType: Deaths
-            limit: 10000
-          ) {
-            data
-          }
-        }
-      }
-    }
-    """
-    
-    # STEP 2: Get all buff applications/removals for cheat death abilities
-    buffs_query = """
-    query($code: String!, $startTime: Float!, $endTime: Float!) {
-      reportData {
-        report(code: $code) {
-          events(
-            startTime: $startTime
-            endTime: $endTime
-            dataType: Buffs
             limit: 10000
           ) {
             data
@@ -411,62 +396,97 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map):
         deaths_data = graphql_query(token, deaths_query, variables)
         events_data = deaths_data.get("reportData", {}).get("report", {}).get("events", {}).get("data", [])
         
-        # Small delay to avoid rate limits
-        time.sleep(0.2)
-        
-        # Get buff events
-        print(f"Fetching buff events for cheat death detection...")
-        buffs_data = graphql_query(token, buffs_query, variables)
-        buff_events = buffs_data.get("reportData", {}).get("report", {}).get("events", {}).get("data", [])
-        
-        # Debug: Log ALL unique ability IDs we see in buffs
-        unique_buff_abilities = set()
-        buff_event_types = set()
-        for event in buff_events:
-            unique_buff_abilities.add(event.get("abilityGameID"))
-            buff_event_types.add(event.get("type"))
-        
-        print(f"DEBUG: Found {len(buff_events)} total buff events")
-        print(f"DEBUG: Unique buff abilities seen: {len(unique_buff_abilities)}")
-        print(f"DEBUG: Event types seen: {buff_event_types}")
-        print(f"DEBUG: Looking for these cheat death IDs: {CHEAT_DEATH_ABILITY_IDS}")
-        
-        # Check if we see any of our target abilities AT ALL
-        found_target_abilities = unique_buff_abilities & CHEAT_DEATH_ABILITY_IDS
-        if found_target_abilities:
-            print(f"DEBUG: Found target abilities in logs: {found_target_abilities}")
-        else:
-            print(f"DEBUG: None of the cheat death abilities found in buff events")
-        
-        # Build a map of cheat death buff procs: (targetID, timestamp) -> ability
-        # Look for removebuff events (when the buff is consumed)
-        cheat_death_procs = {}
-        for event in buff_events:
-            ability_id = event.get("abilityGameID")
-            if ability_id not in CHEAT_DEATH_ABILITY_IDS:
-                continue
-            
-            event_type = event.get("type")
-            target_id = event.get("targetID")
-            timestamp = event.get("timestamp")
-            fight_id = event.get("fight")
-            
-            # Log when we find a match for debugging
-            print(f"DEBUG: Found {event_type} for ability {ability_id} at {timestamp}ms")
-            
-            # Look for removebuff (buff consumed) or applybuff (buff applied/refreshed)
-            # Some cheat deaths might show as applybuff when they proc
-            if event_type in ["removebuff", "refreshbuff", "applybuff"]:
-                if target_id and timestamp:
-                    # Store with a key that includes fight, player, and time window
-                    # Cheat death proc and actual death should be within ~100ms
-                    key = (fight_id, target_id, timestamp // 100)  # 100ms buckets
-                    cheat_death_procs[key] = ability_id
-        
-        print(f"Found {len(cheat_death_procs)} potential cheat death procs")
-        
         # Build a map of fightId -> list of deaths
         deaths_by_fight = {f['id']: [] for f in fights}
+        
+        # STEP 2: Optionally detect cheat deaths (only if enabled)
+        cheat_death_procs = {}
+        
+        if enable_cheat_death:
+            print(f"⚡ Cheat death detection ENABLED - querying debuff events...")
+            
+            # Small delay to avoid rate limits
+            time.sleep(0.2)
+            
+            # Query DEBUFF events (cheat deaths appear as debuffs, not buffs!)
+            # Spirit of Redemption, for example, shows in the Debuffs tab on WCL
+            debuffs_query = """
+            query($code: String!, $startTime: Float!, $endTime: Float!) {
+              reportData {
+                report(code: $code) {
+                  events(
+                    startTime: $startTime
+                    endTime: $endTime
+                    dataType: Debuffs
+                    limit: 10000
+                  ) {
+                    data
+                  }
+                }
+              }
+            }
+            """
+            
+            debuffs_data = graphql_query(token, debuffs_query, variables)
+            debuff_events = debuffs_data.get("reportData", {}).get("report", {}).get("events", {}).get("data", [])
+            
+            print(f"  Found {len(debuff_events)} debuff events (10k limit)")
+            
+            # DEBUG: Analyze what ability IDs are actually in the debuff events
+            unique_debuff_abilities = {}
+            event_types_seen = set()
+            
+            for event in debuff_events:
+                ability_id = event.get("abilityGameID")
+                event_type = event.get("type")
+                event_types_seen.add(event_type)
+                
+                if ability_id not in unique_debuff_abilities:
+                    unique_debuff_abilities[ability_id] = 0
+                unique_debuff_abilities[ability_id] += 1
+            
+            print(f"  DEBUG: Found {len(unique_debuff_abilities)} unique debuff ability IDs")
+            print(f"  DEBUG: Event types seen: {event_types_seen}")
+            print(f"  DEBUG: Looking for these cheat death IDs: {CHEAT_DEATH_ABILITY_IDS}")
+            
+            # Show which of our target IDs actually appear
+            found_targets = set(unique_debuff_abilities.keys()) & CHEAT_DEATH_ABILITY_IDS
+            if found_targets:
+                print(f"  DEBUG: ✓ Found target ability IDs: {found_targets}")
+                for ability_id in found_targets:
+                    print(f"    - Ability {ability_id}: {unique_debuff_abilities[ability_id]} occurrences")
+            else:
+                print(f"  DEBUG: ✗ None of our target ability IDs found in debuffs")
+                # Show top 20 most common debuff ability IDs to help identify cheat deaths
+                top_debuffs = sorted(unique_debuff_abilities.items(), key=lambda x: x[1], reverse=True)[:20]
+                print(f"  DEBUG: Top 20 most common debuff ability IDs:")
+                for ability_id, count in top_debuffs:
+                    print(f"    - {ability_id}: {count} times")
+            
+            # Process debuff events to find cheat death procs
+            for event in debuff_events:
+                ability_id = event.get("abilityGameID")
+                if ability_id not in CHEAT_DEATH_ABILITY_IDS:
+                    continue
+                
+                event_type = event.get("type")
+                # Look for applydebuff (applied), removedebuff (removed), or refreshdebuff (refreshed)
+                # Cheat deaths like "Cheated Death" appear as debuffs when they proc
+                if event_type in ["applydebuff", "removedebuff", "refreshdebuff"]:
+                    target_id = event.get("targetID")
+                    timestamp = event.get("timestamp")
+                    fight_id = event.get("fight")
+                    
+                    if target_id and timestamp:
+                        # Store with 100ms time buckets for matching
+                        key = (fight_id, target_id, timestamp // 100)
+                        cheat_death_procs[key] = ability_id
+            
+            print(f"  Found {len(cheat_death_procs)} potential cheat death procs")
+        else:
+            print(f"💨 Cheat death detection DISABLED - skipping debuff queries (faster)")
+        
+        # STEP 3: Process death events
         cheat_deaths_detected = 0
         
         for event in events_data:
@@ -488,15 +508,16 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map):
             killing_ability_id = event.get("killingAbilityGameID")
             ability_name = ability_map.get(killing_ability_id, "Unknown")
             
-            # Check if this death corresponds to a cheat death proc
-            # Look in a small time window (within ~200ms)
+            # Check if this death corresponds to a cheat death proc (only if enabled)
             is_cheat_death = False
-            for time_bucket in range(-2, 3):  # Check +/- 200ms
-                check_key = (fight_id, target_id, (event_timestamp // 100) + time_bucket)
-                if check_key in cheat_death_procs:
-                    is_cheat_death = True
-                    cheat_deaths_detected += 1
-                    break
+            if enable_cheat_death and cheat_death_procs:
+                # Look in a small time window (within ±200ms)
+                for time_bucket in range(-2, 3):
+                    check_key = (fight_id, target_id, (event_timestamp // 100) + time_bucket)
+                    if check_key in cheat_death_procs:
+                        is_cheat_death = True
+                        cheat_deaths_detected += 1
+                        break
             
             # Find the fight object to get its name
             fight_obj = next((f for f in fights if f['id'] == fight_id), None)
@@ -512,7 +533,8 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map):
                 "isCheatDeath": is_cheat_death,
             })
         
-        print(f"Marked {cheat_deaths_detected} deaths as cheat deaths")
+        if enable_cheat_death:
+            print(f"  Marked {cheat_deaths_detected} deaths as cheat deaths")
         
         # Filter mass deaths for each fight
         for fid in deaths_by_fight:
@@ -632,6 +654,7 @@ def analyze():
             cutoff_date = config.get('cutoffDate')
             author_filters = config.get('authorFilters', [])
             character_groups = config.get('characterGroups', {})
+            enable_cheat_death = config.get('enableCheatDeath', False)  # Optional cheat death detection
             
             # Validate required fields
             if not all([client_id, client_secret, guild_name, server, region]):
@@ -774,7 +797,7 @@ def analyze():
                 ability_map = sample_fight_data['ability_map']
                 fights_list = [fd['fight'] for fd in report_fights]
                 
-                report_deaths_cache[rid] = get_report_deaths_bulk(token, rid, fights_list, friendlies, ability_map)
+                report_deaths_cache[rid] = get_report_deaths_bulk(token, rid, fights_list, friendlies, ability_map, enable_cheat_death)
             
             yield f"data: {json.dumps({'stage': 'processing', 'message': f'Processing {len(all_fights_deduped)} fights...'})}\n\n"
             
