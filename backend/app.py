@@ -419,6 +419,25 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map):
         buffs_data = graphql_query(token, buffs_query, variables)
         buff_events = buffs_data.get("reportData", {}).get("report", {}).get("events", {}).get("data", [])
         
+        # Debug: Log ALL unique ability IDs we see in buffs
+        unique_buff_abilities = set()
+        buff_event_types = set()
+        for event in buff_events:
+            unique_buff_abilities.add(event.get("abilityGameID"))
+            buff_event_types.add(event.get("type"))
+        
+        print(f"DEBUG: Found {len(buff_events)} total buff events")
+        print(f"DEBUG: Unique buff abilities seen: {len(unique_buff_abilities)}")
+        print(f"DEBUG: Event types seen: {buff_event_types}")
+        print(f"DEBUG: Looking for these cheat death IDs: {CHEAT_DEATH_ABILITY_IDS}")
+        
+        # Check if we see any of our target abilities AT ALL
+        found_target_abilities = unique_buff_abilities & CHEAT_DEATH_ABILITY_IDS
+        if found_target_abilities:
+            print(f"DEBUG: Found target abilities in logs: {found_target_abilities}")
+        else:
+            print(f"DEBUG: None of the cheat death abilities found in buff events")
+        
         # Build a map of cheat death buff procs: (targetID, timestamp) -> ability
         # Look for removebuff events (when the buff is consumed)
         cheat_death_procs = {}
@@ -428,12 +447,16 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map):
                 continue
             
             event_type = event.get("type")
-            # removebuff means the buff was consumed (cheat death procced)
-            if event_type in ["removebuff", "refreshbuff"]:
-                target_id = event.get("targetID")
-                timestamp = event.get("timestamp")
-                fight_id = event.get("fight")
-                
+            target_id = event.get("targetID")
+            timestamp = event.get("timestamp")
+            fight_id = event.get("fight")
+            
+            # Log when we find a match for debugging
+            print(f"DEBUG: Found {event_type} for ability {ability_id} at {timestamp}ms")
+            
+            # Look for removebuff (buff consumed) or applybuff (buff applied/refreshed)
+            # Some cheat deaths might show as applybuff when they proc
+            if event_type in ["removebuff", "refreshbuff", "applybuff"]:
                 if target_id and timestamp:
                     # Store with a key that includes fight, player, and time window
                     # Cheat death proc and actual death should be within ~100ms
