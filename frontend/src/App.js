@@ -31,6 +31,7 @@ export default function WarcraftLogsApp() {
   const [shareLink, setShareLink] = useState('');
   const [copied, setCopied] = useState(false);
   const [sharingData, setSharingData] = useState(false);
+  const [abortController, setAbortController] = useState(null);
 
   // Check for shared results on component mount
   useEffect(() => {
@@ -104,6 +105,13 @@ export default function WarcraftLogsApp() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleCancel = () => {
+    if (abortController) {
+      abortController.abort();
+      setAbortController(null);
+    }
+  };
+
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setConfig(prev => ({ ...prev, [name]: value }));
@@ -119,6 +127,10 @@ export default function WarcraftLogsApp() {
     setLoadingStage('Initializing...');
     setError('');
     setData(null);
+
+    // Create abort controller for cancellation
+    const controller = new AbortController();
+    setAbortController(controller);
 
     try {
       let characterGroups = {};
@@ -139,7 +151,8 @@ export default function WarcraftLogsApp() {
       const response = await fetch('https://deathwarcraftlogs-api.onrender.com/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        signal: controller.signal
       });
 
       if (!response.ok) {
@@ -170,14 +183,20 @@ export default function WarcraftLogsApp() {
               setData(data.result);
               setLoadingStage('');
               setLoading(false);
+              setAbortController(null);
             }
           }
         }
       }
     } catch (err) {
-      setError(err.message);
+      if (err.name === 'AbortError') {
+        setError('Analysis cancelled');
+      } else {
+        setError(err.message);
+      }
       setLoadingStage('');
       setLoading(false);
+      setAbortController(null);
     }
   };
 
@@ -273,7 +292,12 @@ export default function WarcraftLogsApp() {
   const getOverviewData = () => {
     if (!data) return { bosses: [], players: [], grid: {} };
 
-    const bosses = Object.keys(data.bossParticipation).sort();
+    // Filter bosses based on selection
+    const allBosses = Object.keys(data.bossParticipation).sort();
+    const bosses = selectedBosses.size === 0 
+      ? allBosses 
+      : allBosses.filter(boss => selectedBosses.has(boss));
+    
     const players = Object.keys(data.events).sort();
     const grid = {};
 
@@ -288,10 +312,24 @@ export default function WarcraftLogsApp() {
         grid[player][boss] = { deaths: bossDeaths, pulls: bossPulls, rate };
       });
 
-      const totalPulls = data.pullParticipation[player]?.length || 0;
-      const totalDeaths = data.events[player]?.filter(
-        ev => ev.rankWithinPull <= cutoff
-      ).length || 0;
+      // Calculate overall only for selected bosses
+      let totalPulls = 0;
+      let totalDeaths = 0;
+      
+      if (selectedBosses.size === 0) {
+        totalPulls = data.pullParticipation[player]?.length || 0;
+        totalDeaths = data.events[player]?.filter(
+          ev => ev.rankWithinPull <= cutoff
+        ).length || 0;
+      } else {
+        bosses.forEach(boss => {
+          totalPulls += data.bossParticipation[boss]?.[player]?.length || 0;
+          totalDeaths += data.events[player]?.filter(
+            ev => ev.boss === boss && ev.rankWithinPull <= cutoff
+          ).length || 0;
+        });
+      }
+      
       grid[player].overall = {
         deaths: totalDeaths,
         pulls: totalPulls,
@@ -562,10 +600,28 @@ export default function WarcraftLogsApp() {
                   {loadingStage || 'Starting analysis...'}
                 </p>
               </div>
-              <p style={{ color: '#8b92a0', fontSize: '13px', margin: '0', lineHeight: '1.6' }}>
+              <p style={{ color: '#8b92a0', fontSize: '13px', margin: '0 0 16px', lineHeight: '1.6' }}>
                 Processing data from WarcraftLogs...<br />
                 This may take a while
               </p>
+              <button
+                onClick={handleCancel}
+                style={{
+                  padding: '10px 24px',
+                  background: '#ef4444',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+                onMouseOver={(e) => e.target.style.background = '#dc2626'}
+                onMouseOut={(e) => e.target.style.background = '#ef4444'}
+              >
+                Cancel Analysis
+              </button>
             </div>
           </div>
         )}
