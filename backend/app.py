@@ -24,6 +24,15 @@ CORS(app)
 MASS_DEATH_THRESHOLD = 7
 MASS_DEATH_WINDOW = 10000  # ms
 
+# Cheat Death Abilities - abilities that prevent actual death
+CHEAT_DEATH_ABILITY_IDS = {
+    45182,   # Cauterize (Mage - Fire)
+    116888,  # Shroud of Purgatory (Death Knight)
+    31230,   # Cheat Death (Rogue)
+    209261,  # Last Resort (Demon Hunter - Vengeance)
+    27827,   # Spirit of Redemption (Holy Priest)
+}
+
 # WarcraftLogs V2 API endpoints (through Cloudflare Worker proxy)
 GRAPHQL_ENDPOINT = "https://wcl-proxy.catcam-fun.workers.dev/api/v2/client"
 OAUTH_TOKEN_URL = "https://wcl-proxy.catcam-fun.workers.dev/oauth/token"
@@ -404,6 +413,9 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map):
             killing_ability_id = event.get("killingAbilityGameID")
             ability_name = ability_map.get(killing_ability_id, "Unknown")
             
+            # Check if this is a cheat death ability
+            is_cheat_death = killing_ability_id in CHEAT_DEATH_ABILITY_IDS
+            
             # Find the fight object to get its name
             fight_obj = next((f for f in fights if f['id'] == fight_id), None)
             
@@ -415,6 +427,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map):
                 "fightId": fight_id,
                 "bossName": fight_obj.get('name', 'Unknown') if fight_obj else 'Unknown',
                 "abilityName": ability_name,
+                "isCheatDeath": is_cheat_death,
             })
         
         # Filter mass deaths for each fight
