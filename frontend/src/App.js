@@ -14,7 +14,8 @@ export default function WarcraftLogsApp() {
     maxCutoff: '5',
     cutoffDate: '2025-10-10',
     authorFilters: '',
-    characterGroups: ''
+    characterGroups: '',
+    enableCheatDeath: false  // Optional cheat death detection (slower)
   });
 
   const [loading, setLoading] = useState(false);
@@ -901,6 +902,22 @@ export default function WarcraftLogsApp() {
                 />
                 <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
                   Merge alt characters with their mains for combined statistics
+                </p>
+              </div>
+
+              <div style={{ marginTop: '8px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={config.enableCheatDeath}
+                    onChange={(e) => setConfig({...config, enableCheatDeath: e.target.checked})}
+                    style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                  />
+                  <span>Enable cheat death detection</span>
+                  <span style={{ fontSize: '11px', color: '#f59e0b', fontWeight: '400' }}>(+20-30s slower)</span>
+                </label>
+                <p style={{ margin: '4px 0 0 24px', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
+                  Detects deaths prevented by Cauterize, Spirit of Redemption, Cheat Death, etc. Adds 1 API query per report.
                 </p>
               </div>
             </div>
