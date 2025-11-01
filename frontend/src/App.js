@@ -229,6 +229,10 @@ export default function WarcraftLogsApp() {
     const pullsMap = data.pullParticipation;
     const bossPart = data.bossParticipation;
 
+    // Debug: Check if ANY deaths have isCheatDeath flag
+    let totalDeathsChecked = 0;
+    let totalCheatDeathsFound = 0;
+    
     for (const player of Object.keys(eventsAll)) {
       const evs = eventsAll[player].filter(
         ev => ev.rankWithinPull <= cutoff && 
@@ -252,6 +256,10 @@ export default function WarcraftLogsApp() {
       // Separate cheat deaths from real deaths
       const realDeaths = evs.filter(ev => !ev.isCheatDeath);
       const cheatDeaths = evs.filter(ev => ev.isCheatDeath);
+      
+      // Debug logging
+      totalDeathsChecked += evs.length;
+      totalCheatDeathsFound += cheatDeaths.length;
       
       // Calculate rates based on showCheatDeaths setting
       const totalDeaths = evs.length;
@@ -315,6 +323,14 @@ export default function WarcraftLogsApp() {
         topAbilitiesByBoss
       });
     }
+
+    // Debug logging
+    console.log('=== CHEAT DEATH DEBUG ===');
+    console.log('showCheatDeaths:', showCheatDeaths);
+    console.log('Total deaths checked:', totalDeathsChecked);
+    console.log('Cheat deaths found:', totalCheatDeathsFound);
+    console.log('Sample death object:', eventsAll[Object.keys(eventsAll)[0]]?.[0]);
+    console.log('========================');
 
     return stats.sort((a, b) => b.rate - a.rate || b.deaths - a.deaths);
   };
@@ -982,6 +998,30 @@ export default function WarcraftLogsApp() {
                   <label htmlFor="cheatDeathFilter" style={{ fontSize: '13px', color: '#cbd5e1', cursor: 'pointer' }}>
                     Show cheat death breakdown
                   </label>
+                  {(() => {
+                    // Count total cheat deaths in current view
+                    let cheatDeathCount = 0;
+                    if (data && data.events) {
+                      Object.values(data.events).forEach(playerEvents => {
+                        playerEvents.forEach(ev => {
+                          if (ev.rankWithinPull <= cutoff && 
+                              (selectedBosses.size === 0 || selectedBosses.has(ev.boss)) &&
+                              ev.isCheatDeath) {
+                            cheatDeathCount++;
+                          }
+                        });
+                      });
+                    }
+                    return cheatDeathCount > 0 ? (
+                      <span style={{ fontSize: '11px', color: '#10b981', background: '#1a2e1a', padding: '2px 6px', borderRadius: '4px' }}>
+                        {cheatDeathCount} detected
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: '11px', color: '#f59e0b', background: '#2d2416', padding: '2px 6px', borderRadius: '4px' }}>
+                        No cheat deaths found
+                      </span>
+                    );
+                  })()}
                 </div>
 
                 <div style={{ marginLeft: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
