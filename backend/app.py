@@ -153,8 +153,10 @@ def get_guild_roster(token, guild_name, server, region):
     query($guildName: String!, $serverSlug: String!, $serverRegion: String!) {
       guildData {
         guild(name: $guildName, serverSlug: $serverSlug, serverRegion: $serverRegion) {
-          members {
-            name
+          members(limit: 999) {
+            data {
+              name
+            }
           }
         }
       }
@@ -175,9 +177,17 @@ def get_guild_roster(token, guild_name, server, region):
             print(f"Warning: Could not fetch guild roster for {guild_name}")
             return set()
         
-        members = guild.get("members", [])
+        members_data = guild.get("members", {}).get("data", [])
+        
+        if not members_data:
+            print(f"Warning: Guild {guild_name} has no members or roster not available")
+            return set()
+        
         # Return set of lowercase names for case-insensitive matching
-        return {m.get("name", "").lower() for m in members if m.get("name")}
+        guild_roster = {m.get("name", "").lower() for m in members_data if m.get("name")}
+        print(f"Successfully fetched {len(guild_roster)} guild members")
+        return guild_roster
+        
     except Exception as e:
         print(f"Warning: Failed to fetch guild roster: {str(e)}")
         return set()
@@ -518,10 +528,19 @@ def analyze():
                 return
             
             
+            
             # Get guild roster for filtering
-            yield f"data: {json.dumps({'stage': 'roster', 'message': 'Fetching guild roster...'})}\n\n"
-            guild_roster = get_guild_roster(token, guild_name, server, region)
-            yield f"data: {json.dumps({'stage': 'roster', 'message': f'Found {len(guild_roster)} guild members'})}\n\n"
+            guild_roster = set()
+            try:
+                yield f"data: {json.dumps({'stage': 'roster', 'message': 'Fetching guild roster...'})}\n\n"
+                guild_roster = get_guild_roster(token, guild_name, server, region)
+                if guild_roster:
+                    yield f"data: {json.dumps({'stage': 'roster', 'message': f'Found {len(guild_roster)} guild members'})}\n\n"
+                else:
+                    yield f"data: {json.dumps({'stage': 'roster', 'message': 'Guild roster unavailable - processing all reports'})}\n\n"
+            except Exception as e:
+                print(f"Guild roster fetch error: {str(e)}")
+                yield f"data: {json.dumps({'stage': 'roster', 'message': 'Could not fetch guild roster - processing all reports'})}\n\n"
             # Get guild reports
             yield f"data: {json.dumps({'stage': 'reports', 'message': 'Fetching guild reports...'})}\n\n"
             reports = get_guild_reports(token, guild_name, server, region, report_zone, cutoff_date)
