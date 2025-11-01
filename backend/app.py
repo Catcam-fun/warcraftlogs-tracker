@@ -364,7 +364,8 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map):
     start_time = min(f['start_time'] for f in fights)
     end_time = max(f['end_time'] for f in fights)
     
-    query = """
+    # STEP 1: Get all death events
+    deaths_query = """
     query($code: String!, $startTime: Float!, $endTime: Float!) {
       reportData {
         report(code: $code) {
@@ -381,6 +382,24 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map):
     }
     """
     
+    # STEP 2: Get all buff applications/removals for cheat death abilities
+    buffs_query = """
+    query($code: String!, $startTime: Float!, $endTime: Float!) {
+      reportData {
+        report(code: $code) {
+          events(
+            startTime: $startTime
+            endTime: $endTime
+            dataType: Buffs
+            limit: 10000
+          ) {
+            data
+          }
+        }
+      }
+    }
+    """
+    
     variables = {
         "code": report_code,
         "startTime": start_time,
@@ -388,11 +407,44 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map):
     }
     
     try:
-        data = graphql_query(token, query, variables)
-        events_data = data.get("reportData", {}).get("report", {}).get("events", {}).get("data", [])
+        # Get death events
+        deaths_data = graphql_query(token, deaths_query, variables)
+        events_data = deaths_data.get("reportData", {}).get("report", {}).get("events", {}).get("data", [])
+        
+        # Small delay to avoid rate limits
+        time.sleep(0.2)
+        
+        # Get buff events
+        print(f"Fetching buff events for cheat death detection...")
+        buffs_data = graphql_query(token, buffs_query, variables)
+        buff_events = buffs_data.get("reportData", {}).get("report", {}).get("events", {}).get("data", [])
+        
+        # Build a map of cheat death buff procs: (targetID, timestamp) -> ability
+        # Look for removebuff events (when the buff is consumed)
+        cheat_death_procs = {}
+        for event in buff_events:
+            ability_id = event.get("abilityGameID")
+            if ability_id not in CHEAT_DEATH_ABILITY_IDS:
+                continue
+            
+            event_type = event.get("type")
+            # removebuff means the buff was consumed (cheat death procced)
+            if event_type in ["removebuff", "refreshbuff"]:
+                target_id = event.get("targetID")
+                timestamp = event.get("timestamp")
+                fight_id = event.get("fight")
+                
+                if target_id and timestamp:
+                    # Store with a key that includes fight, player, and time window
+                    # Cheat death proc and actual death should be within ~100ms
+                    key = (fight_id, target_id, timestamp // 100)  # 100ms buckets
+                    cheat_death_procs[key] = ability_id
+        
+        print(f"Found {len(cheat_death_procs)} potential cheat death procs")
         
         # Build a map of fightId -> list of deaths
         deaths_by_fight = {f['id']: [] for f in fights}
+        cheat_deaths_detected = 0
         
         for event in events_data:
             if event.get("type") != "death":
@@ -413,8 +465,15 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map):
             killing_ability_id = event.get("killingAbilityGameID")
             ability_name = ability_map.get(killing_ability_id, "Unknown")
             
-            # Check if this is a cheat death ability
-            is_cheat_death = killing_ability_id in CHEAT_DEATH_ABILITY_IDS
+            # Check if this death corresponds to a cheat death proc
+            # Look in a small time window (within ~200ms)
+            is_cheat_death = False
+            for time_bucket in range(-2, 3):  # Check +/- 200ms
+                check_key = (fight_id, target_id, (event_timestamp // 100) + time_bucket)
+                if check_key in cheat_death_procs:
+                    is_cheat_death = True
+                    cheat_deaths_detected += 1
+                    break
             
             # Find the fight object to get its name
             fight_obj = next((f for f in fights if f['id'] == fight_id), None)
@@ -429,6 +488,8 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map):
                 "abilityName": ability_name,
                 "isCheatDeath": is_cheat_death,
             })
+        
+        print(f"Marked {cheat_deaths_detected} deaths as cheat deaths")
         
         # Filter mass deaths for each fight
         for fid in deaths_by_fight:
