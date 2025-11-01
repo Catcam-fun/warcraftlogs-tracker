@@ -146,6 +146,44 @@ def get_guild_reports(token, guild_name, server, region, zone_id, cutoff_date):
         raise Exception(f"Failed to fetch guild reports: {str(e)}")
 
 
+def get_guild_roster(token, guild_name, server, region):
+    """Fetch guild roster to identify guild members"""
+    
+    query = """
+    query($guildName: String!, $serverSlug: String!, $serverRegion: String!) {
+      guildData {
+        guild(name: $guildName, serverSlug: $serverSlug, serverRegion: $serverRegion) {
+          members {
+            name
+          }
+        }
+      }
+    }
+    """
+    
+    variables = {
+        "guildName": guild_name,
+        "serverSlug": server.lower().replace(" ", "-").replace("'", ""),
+        "serverRegion": region.upper()
+    }
+    
+    try:
+        data = graphql_query(token, query, variables)
+        guild = data.get("guildData", {}).get("guild", {})
+        
+        if not guild:
+            print(f"Warning: Could not fetch guild roster for {guild_name}")
+            return set()
+        
+        members = guild.get("members", [])
+        # Return set of lowercase names for case-insensitive matching
+        return {m.get("name", "").lower() for m in members if m.get("name")}
+    except Exception as e:
+        print(f"Warning: Failed to fetch guild roster: {str(e)}")
+        return set()
+
+
+
 def get_fights(token, report_code):
     """Fetch fights for a report using V2 GraphQL API"""
     
@@ -479,6 +517,11 @@ def analyze():
                 yield f"data: {json.dumps({'error': f'Authentication failed: {str(e)}'})}\n\n"
                 return
             
+            
+            # Get guild roster for filtering
+            yield f"data: {json.dumps({'stage': 'roster', 'message': 'Fetching guild roster...'})}\n\n"
+            guild_roster = get_guild_roster(token, guild_name, server, region)
+            yield f"data: {json.dumps({'stage': 'roster', 'message': f'Found {len(guild_roster)} guild members'})}\n\n"
             # Get guild reports
             yield f"data: {json.dumps({'stage': 'reports', 'message': 'Fetching guild reports...'})}\n\n"
             reports = get_guild_reports(token, guild_name, server, region, report_zone, cutoff_date)
@@ -509,6 +552,13 @@ def analyze():
                 fights = fights_data.get("fights", [])
                 report_abs_start = fights_data.get("report_start", rep["start"])
                 friendlies = fights_data.get("friendlies", [])
+                
+                # Check if report has enough guild members (15+)
+                if guild_roster:
+                    friendly_names = {f.get("name", "").lower() for f in friendlies if f.get("name")}
+                    guild_members_in_report = len(friendly_names & guild_roster)
+                    if guild_members_in_report < 15:
+                        continue
                 
                 if not fights:
                     continue
