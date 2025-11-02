@@ -32,6 +32,8 @@ CHEAT_DEATH_ABILITY_IDS = {
     200261,  # Uncontained Fel / Last Resort (Demon Hunter - Vengeance)
     27827,   # Spirit of Redemption (Holy Priest)
     211319,  # Restitution (Holy Priest - Spirit of Redemption debuff)
+    404569,  # Empty Hourglass (Evoker - Augmentation)
+    1236962, # Void Reconstitution (Trinket - Void Reaper's Contract)
 }
 
 # WarcraftLogs V2 API endpoints (through Cloudflare Worker proxy)
