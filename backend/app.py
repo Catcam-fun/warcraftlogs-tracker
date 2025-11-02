@@ -410,15 +410,20 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
             time.sleep(0.2)
             
             # Query DEBUFF events (cheat deaths appear as debuffs, not buffs!)
-            # Spirit of Redemption, for example, shows in the Debuffs tab on WCL
+            # Use filterExpression to ONLY get the cheat death ability IDs we care about
+            # This prevents hitting the 10k limit from querying all debuffs
+            cheat_death_ids = ", ".join(str(id) for id in CHEAT_DEATH_ABILITY_IDS)
+            filter_expr = f"ability.id in ({cheat_death_ids})"
+            
             debuffs_query = """
-            query($code: String!, $startTime: Float!, $endTime: Float!) {
+            query($code: String!, $startTime: Float!, $endTime: Float!, $filterExpression: String) {
               reportData {
                 report(code: $code) {
                   events(
                     startTime: $startTime
                     endTime: $endTime
                     dataType: Debuffs
+                    filterExpression: $filterExpression
                     limit: 10000
                   ) {
                     data
@@ -428,51 +433,42 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
             }
             """
             
-            debuffs_data = graphql_query(token, debuffs_query, variables)
+            debuffs_variables = {
+                "code": report_code,
+                "startTime": start_time,
+                "endTime": end_time,
+                "filterExpression": filter_expr
+            }
+            
+            debuffs_data = graphql_query(token, debuffs_query, debuffs_variables)
             debuff_events = debuffs_data.get("reportData", {}).get("report", {}).get("events", {}).get("data", [])
             
-            print(f"  Found {len(debuff_events)} debuff events (10k limit)")
+            print(f"  Found {len(debuff_events)} cheat death debuff events (filtered query)")
             
-            # DEBUG: Analyze what ability IDs are actually in the debuff events
+            # DEBUG: Show which cheat death IDs were found
             unique_debuff_abilities = {}
-            event_types_seen = set()
-            
             for event in debuff_events:
                 ability_id = event.get("abilityGameID")
-                event_type = event.get("type")
-                event_types_seen.add(event_type)
-                
                 if ability_id not in unique_debuff_abilities:
                     unique_debuff_abilities[ability_id] = 0
                 unique_debuff_abilities[ability_id] += 1
             
-            print(f"  DEBUG: Found {len(unique_debuff_abilities)} unique debuff ability IDs")
-            print(f"  DEBUG: Event types seen: {event_types_seen}")
-            print(f"  DEBUG: Looking for these cheat death IDs: {CHEAT_DEATH_ABILITY_IDS}")
-            
-            # Show which of our target IDs actually appear
-            found_targets = set(unique_debuff_abilities.keys()) & CHEAT_DEATH_ABILITY_IDS
-            if found_targets:
-                print(f"  DEBUG: ✓ Found target ability IDs: {found_targets}")
-                for ability_id in found_targets:
-                    print(f"    - Ability {ability_id}: {unique_debuff_abilities[ability_id]} occurrences")
+            if unique_debuff_abilities:
+                print(f"  DEBUG: Found cheat death ability IDs:")
+                for ability_id, count in sorted(unique_debuff_abilities.items()):
+                    ability_name = ability_map.get(ability_id, "Unknown")
+                    print(f"    - {ability_id} ({ability_name}): {count} occurrences")
             else:
-                print(f"  DEBUG: ✗ None of our target ability IDs found in debuffs")
-                # Show top 20 most common debuff ability IDs to help identify cheat deaths
-                top_debuffs = sorted(unique_debuff_abilities.items(), key=lambda x: x[1], reverse=True)[:20]
-                print(f"  DEBUG: Top 20 most common debuff ability IDs:")
-                for ability_id, count in top_debuffs:
-                    print(f"    - {ability_id}: {count} times")
+                print(f"  DEBUG: No cheat death debuffs found in this report")
             
             # Process debuff events to find cheat death procs
+            # Since we filtered at query time, all events should be cheat deaths
             for event in debuff_events:
                 ability_id = event.get("abilityGameID")
-                if ability_id not in CHEAT_DEATH_ABILITY_IDS:
-                    continue
-                
                 event_type = event.get("type")
+                
                 # Look for applydebuff (applied), removedebuff (removed), or refreshdebuff (refreshed)
-                # Cheat deaths like "Cheated Death" appear as debuffs when they proc
+                # Cheat deaths appear as debuffs when they proc
                 if event_type in ["applydebuff", "removedebuff", "refreshdebuff"]:
                     target_id = event.get("targetID")
                     timestamp = event.get("timestamp")
