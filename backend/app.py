@@ -29,11 +29,11 @@ CHEAT_DEATH_ABILITY_IDS = {
     87024,   # Cauterized (Mage - Fire)
     123981,  # Perdition / Purgatory (Death Knight)
     45181,   # Cheated Death (Rogue)
-    200261,  # Uncontained Fel / Last Resort (Demon Hunter - Vengeance)
+    209261,  # Uncontained Fel / Last Resort (Demon Hunter - Vengeance)
     27827,   # Spirit of Redemption (Holy Priest)
     211319,  # Restitution (Holy Priest - Spirit of Redemption debuff)
     404569,  # Empty Hourglass (Evoker - Augmentation)
-    1236962, # Void Reconstitution (Trinket - Void Reaper's Contract)
+    1236692, # Void Reconstitution (Trinket - Void Reaper's Contract)
 }
 
 # WarcraftLogs V2 API endpoints (through Cloudflare Worker proxy)
@@ -865,9 +865,25 @@ def analyze():
                 
                 # Get all deaths for this fight (real + cheat if enabled)
                 deaths = report_deaths_cache[rid].get(fid, [])
-                # Send up to 3x maxCutoff to give frontend flexibility
                 deaths_sorted_all = sorted(deaths, key=lambda e: e["timestamp"])
-                deaths_sorted = deaths_sorted_all[:max_cutoff * 3]
+                
+                # CRITICAL FIX: Don't let cheat deaths steal slots from real deaths
+                # Find the timestamp of the (max_cutoff * 3)th REAL death
+                real_death_count = 0
+                cutoff_timestamp = None
+                for ev in deaths_sorted_all:
+                    if not ev.get("isCheatDeath", False):
+                        real_death_count += 1
+                        if real_death_count >= max_cutoff * 3:
+                            cutoff_timestamp = ev["timestamp"]
+                            break
+                
+                # Include all events (real + cheat) up to that timestamp
+                if cutoff_timestamp is not None:
+                    deaths_sorted = [ev for ev in deaths_sorted_all if ev["timestamp"] <= cutoff_timestamp]
+                else:
+                    # Fewer than max_cutoff * 3 real deaths, take everything
+                    deaths_sorted = deaths_sorted_all
                 
                 # Assign TWO ranks to each death event:
                 # 1. rankWithinPull - rank among REAL deaths only (ignoring cheat deaths)
