@@ -262,13 +262,13 @@ export default function WarcraftLogsApp() {
       });
       
       // Calculate REAL deaths (first X real per pull + cheat deaths in window)
-      const realDeaths = [];
+      const realDeathsWithCheat = [];
       Object.values(pullGroups).forEach(pullEvents => {
         const sortedPullEvents = pullEvents.sort((a, b) => a.absTs - b.absTs);
         let realCount = 0;
         for (const ev of sortedPullEvents) {
           if (realCount < cutoff) {
-            realDeaths.push(ev);
+            realDeathsWithCheat.push(ev);
             if (!ev.isCheatDeath) {
               realCount++;
             }
@@ -278,54 +278,35 @@ export default function WarcraftLogsApp() {
         }
       });
       
-      // Calculate TOTAL deaths (first X total per pull)
-      const totalDeaths = [];
-      Object.values(pullGroups).forEach(pullEvents => {
-        const sortedPullEvents = pullEvents.sort((a, b) => a.absTs - b.absTs);
-        totalDeaths.push(...sortedPullEvents.slice(0, cutoff));
-      });
-      
-      // Separate by type
-      const realDeathsOnly = realDeaths.filter(ev => !ev.isCheatDeath);
-      const cheatDeathsInWindow = realDeaths.filter(ev => ev.isCheatDeath);
+      // Separate by type from the SAME array
+      const realDeathsOnly = realDeathsWithCheat.filter(ev => !ev.isCheatDeath);
+      const cheatDeathsInWindow = realDeathsWithCheat.filter(ev => ev.isCheatDeath);
       
       const realDeathCount = realDeathsOnly.length;
       const cheatDeathCount = cheatDeathsInWindow.length;
-      const totalDeathCount = totalDeaths.length;
-      const totalRealInTotal = totalDeaths.filter(ev => !ev.isCheatDeath).length;
-      const totalCheatInTotal = totalDeaths.filter(ev => ev.isCheatDeath).length;
       
       // Calculate both rates
       const realRate = pulls > 0 ? (realDeathCount / pulls * 100) : 0;
-      const totalRate = pulls > 0 ? (totalDeathCount / pulls * 100) : 0;
       
       if (searchQuery && !player.toLowerCase().includes(searchQuery.toLowerCase())) {
         continue;
       }
 
-      // Group deaths by boss for both views
-      const deathsByBossReal = {};
-      const deathsByBossTotal = {};
+      // Group deaths by boss - use realDeathsWithCheat
+      const deathsByBoss = {};
       
-      realDeaths.forEach(ev => {
-        if (!deathsByBossReal[ev.boss]) {
-          deathsByBossReal[ev.boss] = [];
+      realDeathsWithCheat.forEach(ev => {
+        if (!deathsByBoss[ev.boss]) {
+          deathsByBoss[ev.boss] = [];
         }
-        deathsByBossReal[ev.boss].push(ev);
-      });
-      
-      totalDeaths.forEach(ev => {
-        if (!deathsByBossTotal[ev.boss]) {
-          deathsByBossTotal[ev.boss] = [];
-        }
-        deathsByBossTotal[ev.boss].push(ev);
+        deathsByBoss[ev.boss].push(ev);
       });
 
       // Top abilities for real deaths only (what's actually killing them)
       const topAbilitiesByBoss = {};
-      Object.keys(deathsByBossReal).forEach(boss => {
+      Object.keys(deathsByBoss).forEach(boss => {
         const abilityCounts = {};
-        deathsByBossReal[boss]
+        deathsByBoss[boss]
           .filter(d => !d.isCheatDeath)
           .forEach(death => {
             const ability = death.abilityName || 'Unknown';
@@ -342,15 +323,11 @@ export default function WarcraftLogsApp() {
         player, 
         realDeaths: realDeathCount,
         cheatDeaths: cheatDeathCount,
-        totalDeaths: totalDeathCount,
-        totalRealInTotal: totalRealInTotal,
-        totalCheatInTotal: totalCheatInTotal,
+        totalInWindow: realDeathCount + cheatDeathCount,
         pulls, 
         realRate,
-        totalRate,
         hasCheatDeaths,
-        deathsByBossReal,
-        deathsByBossTotal,
+        deathsByBoss,
         topAbilitiesByBoss
       });
     }
@@ -1203,9 +1180,9 @@ export default function WarcraftLogsApp() {
 
             {view === 'players' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {getFilteredStats().map(({ player, realDeaths, cheatDeaths, totalDeaths, totalRealInTotal, totalCheatInTotal, pulls, realRate, totalRate, hasCheatDeaths, deathsByBossReal, deathsByBossTotal, topAbilitiesByBoss }) => {
+                {getFilteredStats().map(({ player, realDeaths, cheatDeaths, totalInWindow, pulls, realRate, hasCheatDeaths, deathsByBoss, topAbilitiesByBoss }) => {
                   const isExpanded = expandedPlayers.has(player);
-                  const showBothStats = hasCheatDeaths && (cheatDeaths > 0 || totalCheatInTotal > 0);
+                  const showBothStats = hasCheatDeaths && cheatDeaths > 0;
                   
                   return (
                     <div key={player} style={{ background: '#1a1d23', borderRadius: '8px', border: '1px solid #2d3238', overflow: 'hidden' }}>
@@ -1227,20 +1204,13 @@ export default function WarcraftLogsApp() {
                             <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '600', color: '#ffffff' }}>{player}</h3>
                             
                             {showBothStats ? (
-                              // Show both stats when cheat death detection is on
-                              <div style={{ marginTop: '4px' }}>
-                                <p style={{ margin: '0', fontSize: '12px', color: '#e2e8f0', fontWeight: '500' }}>
-                                  Real deaths: {realDeaths} / {pulls} pulls
-                                  {cheatDeaths > 0 && (
-                                    <span style={{ color: '#34d399', marginLeft: '8px' }}>
-                                      (+{cheatDeaths} cheat prevented)
-                                    </span>
-                                  )}
-                                </p>
-                                <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#94a3b8' }}>
-                                  Total lethal damage: {totalDeaths} events ({totalRealInTotal} real • {totalCheatInTotal} cheat)
-                                </p>
-                              </div>
+                              // Show detailed stats when cheat death detection is on
+                              <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#e2e8f0' }}>
+                                {realDeaths} real deaths / {pulls} pulls
+                                <span style={{ color: '#34d399', marginLeft: '8px' }}>
+                                  (+{cheatDeaths} cheat prevented)
+                                </span>
+                              </p>
                             ) : (
                               // Show simple stats when no cheat deaths
                               <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#8b92a0' }}>
@@ -1250,29 +1220,18 @@ export default function WarcraftLogsApp() {
                           </div>
                         </div>
                         
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-                          <div style={{ fontSize: '18px', fontWeight: '700', color: realRate > 50 ? '#f87171' : realRate > 25 ? '#fbbf24' : '#34d399' }}>
-                            {realRate.toFixed(1)}%
-                          </div>
-                          {showBothStats && totalRate !== realRate && (
-                            <div style={{ fontSize: '11px', color: '#64748b' }}>
-                              ({totalRate.toFixed(1)}% total)
-                            </div>
-                          )}
+                        <div style={{ fontSize: '18px', fontWeight: '700', color: realRate > 50 ? '#f87171' : realRate > 25 ? '#fbbf24' : '#34d399' }}>
+                          {realRate.toFixed(1)}%
                         </div>
                       </div>
 
                       {isExpanded && (
                         <div style={{ padding: '0 16px 16px', borderTop: '1px solid #2d3238' }}>
-                          {Object.entries(deathsByBossReal).map(([boss, bossDeathsReal]) => {
+                          {Object.entries(deathsByBoss).map(([boss, bossDeaths]) => {
                             const bossPulls = data.bossParticipation[boss]?.[player]?.length || 0;
-                            const realDeathCount = bossDeathsReal.filter(d => !d.isCheatDeath).length;
-                            const cheatDeathCount = bossDeathsReal.filter(d => d.isCheatDeath).length;
+                            const realDeathCount = bossDeaths.filter(d => !d.isCheatDeath).length;
+                            const cheatDeathCount = bossDeaths.filter(d => d.isCheatDeath).length;
                             const bossRate = bossPulls > 0 ? (realDeathCount / bossPulls * 100) : 0;
-                            
-                            const bossDeathsTotal = deathsByBossTotal[boss] || [];
-                            const totalRealCount = bossDeathsTotal.filter(d => !d.isCheatDeath).length;
-                            const totalCheatCount = bossDeathsTotal.filter(d => d.isCheatDeath).length;
                             
                             return (
                             <div key={boss} style={{ marginTop: '12px' }}>
@@ -1299,7 +1258,7 @@ export default function WarcraftLogsApp() {
                               )}
 
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                {bossDeathsReal
+                                {bossDeaths
                                   .filter(death => death.abilityName && death.abilityName !== 'Unknown')
                                   .map((death, idx) => (
                                   <div key={idx} style={{ 
