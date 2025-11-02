@@ -267,9 +267,9 @@ export default function WarcraftLogsApp() {
       const realDeathCount = realDeaths.length;
       const cheatDeathCount = cheatDeaths.length;
       
-      // When showCheatDeaths is enabled, show rate based on real deaths only
-      // Otherwise show rate based on all deaths
-      const displayDeaths = showCheatDeaths ? realDeathCount : totalDeaths;
+      // When showCheatDeaths is checked, count cheat deaths as real deaths (show total)
+      // When unchecked, only count real deaths (exclude cheat deaths)
+      const displayDeaths = showCheatDeaths ? totalDeaths : realDeathCount;
       const rate = pulls > 0 ? (displayDeaths / pulls * 100) : 0;
       
       if (searchQuery && !player.toLowerCase().includes(searchQuery.toLowerCase())) {
@@ -297,7 +297,9 @@ export default function WarcraftLogsApp() {
       const topAbilitiesByBoss = {};
       Object.keys(deathsByBoss).forEach(boss => {
         const abilityCounts = {};
-        const deathsToCount = showCheatDeaths ? realDeathsByBoss[boss] : deathsByBoss[boss];
+        // When showCheatDeaths is checked, count all deaths
+        // When unchecked, only count real deaths
+        const deathsToCount = showCheatDeaths ? deathsByBoss[boss] : realDeathsByBoss[boss];
         
         deathsToCount.forEach(death => {
           const ability = death.abilityName || 'Unknown';
@@ -318,7 +320,7 @@ export default function WarcraftLogsApp() {
         cheatDeaths: cheatDeathCount,
         pulls, 
         rate,
-        deathsByBoss: showCheatDeaths ? realDeathsByBoss : deathsByBoss,
+        deathsByBoss: showCheatDeaths ? deathsByBoss : realDeathsByBoss,
         allDeathsByBoss: deathsByBoss,
         cheatDeathsByBoss,
         topAbilitiesByBoss
@@ -352,8 +354,11 @@ export default function WarcraftLogsApp() {
       grid[player] = {};
       bosses.forEach(boss => {
         const bossPulls = data.bossParticipation[boss]?.[player]?.length || 0;
+        // Filter deaths based on toggle: exclude cheat deaths unless showCheatDeaths is checked
         const bossDeaths = data.events[player]?.filter(
-          ev => ev.boss === boss && ev.rankWithinPull <= cutoff
+          ev => ev.boss === boss && 
+                ev.rankWithinPull <= cutoff &&
+                (showCheatDeaths || !ev.isCheatDeath)
         ).length || 0;
         const rate = bossPulls > 0 ? (bossDeaths / bossPulls * 100) : null;
         grid[player][boss] = { deaths: bossDeaths, pulls: bossPulls, rate };
@@ -366,13 +371,16 @@ export default function WarcraftLogsApp() {
       if (selectedBosses.size === 0) {
         totalPulls = data.pullParticipation[player]?.length || 0;
         totalDeaths = data.events[player]?.filter(
-          ev => ev.rankWithinPull <= cutoff
+          ev => ev.rankWithinPull <= cutoff &&
+               (showCheatDeaths || !ev.isCheatDeath)
         ).length || 0;
       } else {
         bosses.forEach(boss => {
           totalPulls += data.bossParticipation[boss]?.[player]?.length || 0;
           totalDeaths += data.events[player]?.filter(
-            ev => ev.boss === boss && ev.rankWithinPull <= cutoff
+            ev => ev.boss === boss && 
+                  ev.rankWithinPull <= cutoff &&
+                  (showCheatDeaths || !ev.isCheatDeath)
           ).length || 0;
         });
       }
@@ -1013,7 +1021,7 @@ export default function WarcraftLogsApp() {
                     style={{ cursor: 'pointer' }}
                   />
                   <label htmlFor="cheatDeathFilter" style={{ fontSize: '13px', color: '#cbd5e1', cursor: 'pointer' }}>
-                    Show cheat death breakdown
+                    Count cheat deaths as real deaths
                   </label>
                   {(() => {
                     // Count total cheat deaths in current view
@@ -1221,13 +1229,27 @@ export default function WarcraftLogsApp() {
                                     justifyContent: 'space-between', 
                                     alignItems: 'center',
                                     padding: '8px 10px',
-                                    background: '#252930',
+                                    background: death.isCheatDeath ? '#2d3a2d' : '#252930',
+                                    borderLeft: death.isCheatDeath ? '3px solid #34d399' : 'none',
                                     borderRadius: '4px',
                                     fontSize: '12px'
                                   }}>
                                     <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flex: 1 }}>
                                       <span style={{ color: '#64748b', minWidth: '55px' }}>Pull #{death.pullNo}</span>
                                       <span style={{ color: '#8b92a0', minWidth: '110px' }}>{formatTimestamp(death.absTs)}</span>
+                                      {death.isCheatDeath && (
+                                        <span style={{ 
+                                          color: '#34d399', 
+                                          fontSize: '10px', 
+                                          fontWeight: '600',
+                                          padding: '2px 6px',
+                                          background: '#1a2e1a',
+                                          borderRadius: '3px',
+                                          marginRight: '8px'
+                                        }}>
+                                          CHEAT
+                                        </span>
+                                      )}
                                       <span style={{ color: '#e2e8f0' }}>{death.abilityName}</span>
                                     </div>
                                     <a 
