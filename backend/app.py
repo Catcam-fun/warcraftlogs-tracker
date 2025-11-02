@@ -26,11 +26,12 @@ MASS_DEATH_WINDOW = 10000  # ms
 
 # Cheat Death Abilities - abilities that prevent actual death
 CHEAT_DEATH_ABILITY_IDS = {
-    45182,   # Cauterize (Mage - Fire)
-    116888,  # Shroud of Purgatory (Death Knight)
-    31230,   # Cheat Death (Rogue)
-    209261,  # Last Resort (Demon Hunter - Vengeance)
+    87024,   # Cauterized (Mage - Fire)
+    123981,  # Perdition / Purgatory (Death Knight)
+    45181,   # Cheated Death (Rogue)
+    200261,  # Uncontained Fel / Last Resort (Demon Hunter - Vengeance)
     27827,   # Spirit of Redemption (Holy Priest)
+    211319,  # Restitution (Holy Priest - Spirit of Redemption debuff)
 }
 
 # WarcraftLogs V2 API endpoints (through Cloudflare Worker proxy)
