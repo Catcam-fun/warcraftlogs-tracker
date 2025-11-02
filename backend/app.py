@@ -409,7 +409,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
         deaths_by_fight = {f['id']: [] for f in fights}
         
         # STEP 2: Optionally detect cheat deaths (only if enabled)
-        cheat_death_procs = {}
+        cheat_death_events = []
         
         if enable_cheat_death:
             print(f"⚡ Cheat death detection ENABLED - querying debuff events...")
@@ -469,31 +469,35 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
             else:
                 print(f"  DEBUG: No cheat death debuffs found in this report")
             
-            # Process debuff events to find cheat death procs
-            # Since we filtered at query time, all events should be cheat deaths
+            # Process debuff events - each applydebuff is a cheat death
+            # Only track when the debuff is APPLIED (when cheat death procs)
             for event in debuff_events:
                 ability_id = event.get("abilityGameID")
                 event_type = event.get("type")
                 
-                # Look for applydebuff (applied), removedebuff (removed), or refreshdebuff (refreshed)
-                # Cheat deaths appear as debuffs when they proc
-                if event_type in ["applydebuff", "removedebuff", "refreshdebuff"]:
+                if event_type == "applydebuff":
                     target_id = event.get("targetID")
                     timestamp = event.get("timestamp")
                     fight_id = event.get("fight")
+                    target_name = actor_id_to_name.get(target_id, "Unknown")
+                    ability_name = ability_map.get(ability_id, "Unknown")
                     
-                    if target_id and timestamp:
-                        # Store with 100ms time buckets for matching
-                        key = (fight_id, target_id, timestamp // 100)
-                        cheat_death_procs[key] = ability_id
+                    if target_id and timestamp and fight_id in deaths_by_fight:
+                        cheat_death_events.append({
+                            "timestamp": timestamp,
+                            "targetName": target_name,
+                            "targetID": target_id,
+                            "fightId": fight_id,
+                            "abilityGameID": ability_id,
+                            "abilityName": ability_name,
+                            "isCheatDeath": True
+                        })
             
-            print(f"  Found {len(cheat_death_procs)} potential cheat death procs")
+            print(f"  Found {len(cheat_death_events)} cheat death events to add")
         else:
             print(f"💨 Cheat death detection DISABLED - skipping debuff queries (faster)")
         
-        # STEP 3: Process death events
-        cheat_deaths_detected = 0
-        
+        # STEP 3: Process regular death events
         for event in events_data:
             if event.get("type") != "death":
                 continue
@@ -513,17 +517,6 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
             killing_ability_id = event.get("killingAbilityGameID")
             ability_name = ability_map.get(killing_ability_id, "Unknown")
             
-            # Check if this death corresponds to a cheat death proc (only if enabled)
-            is_cheat_death = False
-            if enable_cheat_death and cheat_death_procs:
-                # Look in a small time window (within ±200ms)
-                for time_bucket in range(-2, 3):
-                    check_key = (fight_id, target_id, (event_timestamp // 100) + time_bucket)
-                    if check_key in cheat_death_procs:
-                        is_cheat_death = True
-                        cheat_deaths_detected += 1
-                        break
-            
             # Find the fight object to get its name
             fight_obj = next((f for f in fights if f['id'] == fight_id), None)
             
@@ -535,11 +528,35 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
                 "fightId": fight_id,
                 "bossName": fight_obj.get('name', 'Unknown') if fight_obj else 'Unknown',
                 "abilityName": ability_name,
-                "isCheatDeath": is_cheat_death,
+                "isCheatDeath": False,
             })
         
+        # STEP 4: Add cheat death events to the appropriate fights
+        for cheat_event in cheat_death_events:
+            fight_id = cheat_event["fightId"]
+            if fight_id in deaths_by_fight:
+                # Find the fight object to get its name
+                fight_obj = next((f for f in fights if f['id'] == fight_id), None)
+                
+                deaths_by_fight[fight_id].append({
+                    "timestamp": cheat_event["timestamp"],
+                    "targetName": cheat_event["targetName"],
+                    "targetID": cheat_event["targetID"],
+                    "phase": 1,
+                    "fightId": fight_id,
+                    "bossName": fight_obj.get('name', 'Unknown') if fight_obj else 'Unknown',
+                    "abilityName": cheat_event["abilityName"],
+                    "isCheatDeath": True,
+                })
+        
         if enable_cheat_death:
-            print(f"  Marked {cheat_deaths_detected} deaths as cheat deaths")
+            total_deaths = sum(len(deaths) for deaths in deaths_by_fight.values())
+            real_deaths = sum(1 for fight_deaths in deaths_by_fight.values() for d in fight_deaths if not d.get("isCheatDeath", False))
+            cheat_deaths = total_deaths - real_deaths
+            print(f"  Death Summary:")
+            print(f"    - Total death events: {total_deaths}")
+            print(f"    - Real deaths: {real_deaths}")
+            print(f"    - Cheat deaths: {cheat_deaths}")
         
         # Filter mass deaths for each fight
         for fid in deaths_by_fight:
