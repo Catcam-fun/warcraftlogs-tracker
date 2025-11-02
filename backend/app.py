@@ -351,6 +351,14 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
     """
     Get ALL player deaths for an entire report at once - MUCH faster than per-fight queries
     Optionally detect cheat deaths by querying buff events (adds 1 API call per report)
+    
+    OPTIMIZATION STRATEGY:
+    - 1 API call for deaths (all fights in report)
+    - 1 API call for debuffs if cheat death enabled (filtered to only cheat death ability IDs)
+    - Uses filterExpression to avoid hitting 10k event limit
+    - This is ~100x faster than querying each fight individually
+    
+    For 35 reports with cheat death enabled: ~70 API calls total (2 per report)
     """
     
     if not fights:
@@ -406,8 +414,8 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
         if enable_cheat_death:
             print(f"⚡ Cheat death detection ENABLED - querying debuff events...")
             
-            # Small delay to avoid rate limits
-            time.sleep(0.2)
+            # Small delay to avoid rate limits (0.1s = 10 calls/sec max)
+            time.sleep(0.1)
             
             # Query DEBUFF events (cheat deaths appear as debuffs, not buffs!)
             # Use filterExpression to ONLY get the cheat death ability IDs we care about
@@ -795,6 +803,9 @@ def analyze():
                 fights_list = [fd['fight'] for fd in report_fights]
                 
                 report_deaths_cache[rid] = get_report_deaths_bulk(token, rid, fights_list, friendlies, ability_map, enable_cheat_death)
+                
+                # Send heartbeat after each report to keep connection alive
+                yield f"data: {json.dumps({'stage': 'deaths', 'message': f'Completed report {report_idx}/{len(fights_by_report)}'})}\n\n"
             
             yield f"data: {json.dumps({'stage': 'processing', 'message': f'Processing {len(all_fights_deduped)} fights...'})}\n\n"
             
@@ -837,7 +848,25 @@ def analyze():
                     boss_participation[boss_name][main_char].add(pull_key)
                 
                 deaths = report_deaths_cache[rid].get(fid, [])
-                deaths_sorted = sorted(deaths, key=lambda e: e["timestamp"])[:max_cutoff]
+                deaths_sorted_all = sorted(deaths, key=lambda e: e["timestamp"])
+                
+                # Filter: Take first X REAL deaths, but include any cheat deaths that occur within that window
+                real_death_count = 0
+                deaths_sorted = []
+                
+                for death in deaths_sorted_all:
+                    is_cheat = death.get("isCheatDeath", False)
+                    
+                    # Always include the death if we haven't hit the cutoff yet
+                    if real_death_count < max_cutoff:
+                        deaths_sorted.append(death)
+                        
+                        # Only increment counter for real deaths
+                        if not is_cheat:
+                            real_death_count += 1
+                    else:
+                        # Stop once we've included maxCutoff real deaths
+                        break
                 
                 for rank, ev in enumerate(deaths_sorted, start=1):
                     original_char = ev["targetName"]
@@ -855,7 +884,8 @@ def analyze():
                         "pullNo": seq_no,
                         "rankWithinPull": rank,
                         "absTs": report_abs_start + ev["timestamp"],
-                        "abilityName": ev.get("abilityName", "Unknown")
+                        "abilityName": ev.get("abilityName", "Unknown"),
+                        "isCheatDeath": ev.get("isCheatDeath", False)
                     }
                     counted_death_events[main_char].append(death_event)
                     character_breakdown[main_char][original_char].append(death_event)
@@ -903,6 +933,7 @@ def analyze():
     return Response(generate(), mimetype='text/event-stream', headers={
         'Access-Control-Allow-Origin': '*',
         'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
         'X-Accel-Buffering': 'no'
     })
 
