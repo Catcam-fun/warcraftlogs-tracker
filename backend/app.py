@@ -350,7 +350,7 @@ def get_abilities_map(token, report_code):
 def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, enable_cheat_death=False):
     """
     Get ALL player deaths for an entire report at once - MUCH faster than per-fight queries
-    Optionally detect cheat deaths by querying buff events (adds 1 API call per report)
+    Optionally detect cheat deaths by querying debuff events (adds 1 API call per report)
     
     OPTIMIZATION STRATEGY:
     - 1 API call for deaths (all fights in report)
@@ -820,9 +820,6 @@ def analyze():
                 fights_list = [fd['fight'] for fd in report_fights]
                 
                 report_deaths_cache[rid] = get_report_deaths_bulk(token, rid, fights_list, friendlies, ability_map, enable_cheat_death)
-                
-                # Send heartbeat after each report to keep connection alive
-                yield f"data: {json.dumps({'stage': 'deaths', 'message': f'Completed report {report_idx}/{len(fights_by_report)}'})}\n\n"
             
             yield f"data: {json.dumps({'stage': 'processing', 'message': f'Processing {len(all_fights_deduped)} fights...'})}\n\n"
             
@@ -864,14 +861,25 @@ def analyze():
                     pull_participation[main_char].add(pull_key)
                     boss_participation[boss_name][main_char].add(pull_key)
                 
+                # Get all deaths for this fight (real + cheat if enabled)
                 deaths = report_deaths_cache[rid].get(fid, [])
+                # Send up to 3x maxCutoff to give frontend flexibility
                 deaths_sorted_all = sorted(deaths, key=lambda e: e["timestamp"])
-                
-                # Send up to 3x maxCutoff deaths to give frontend flexibility
-                # Frontend will do the actual filtering based on toggle state
                 deaths_sorted = deaths_sorted_all[:max_cutoff * 3]
                 
-                for rank, ev in enumerate(deaths_sorted, start=1):
+                # Assign TWO ranks to each death event:
+                # 1. rankWithinPull - rank among REAL deaths only (ignoring cheat deaths)
+                # 2. rankWithinPullTotal - rank among ALL deaths (including cheat deaths)
+                real_death_rank = 0
+                total_death_rank = 0
+                
+                for ev in deaths_sorted:
+                    total_death_rank += 1
+                    is_cheat = ev.get("isCheatDeath", False)
+                    
+                    if not is_cheat:
+                        real_death_rank += 1
+                    
                     original_char = ev["targetName"]
                     main_char = get_main_character(original_char, character_groups)
                     
@@ -885,10 +893,11 @@ def analyze():
                         "fightId": fid,
                         "isKill": is_kill,
                         "pullNo": seq_no,
-                        "rankWithinPull": rank,
+                        "rankWithinPull": real_death_rank,  # Rank among real deaths only
+                        "rankWithinPullTotal": total_death_rank,  # Rank among all deaths
                         "absTs": report_abs_start + ev["timestamp"],
                         "abilityName": ev.get("abilityName", "Unknown"),
-                        "isCheatDeath": ev.get("isCheatDeath", False)
+                        "isCheatDeath": is_cheat
                     }
                     counted_death_events[main_char].append(death_event)
                     character_breakdown[main_char][original_char].append(death_event)
@@ -936,7 +945,6 @@ def analyze():
     return Response(generate(), mimetype='text/event-stream', headers={
         'Access-Control-Allow-Origin': '*',
         'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
         'X-Accel-Buffering': 'no'
     })
 
