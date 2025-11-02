@@ -441,6 +441,43 @@ export default function WarcraftLogsApp() {
     return sortConfig.direction === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />;
   };
 
+  const getPercentageColor = (rate, allRates) => {
+    // Filter out null values and outliers (below 1st percentile and above 99th percentile)
+    const validRates = allRates.filter(r => r !== null && r !== undefined && r >= 0);
+    if (validRates.length === 0 || rate === null) return '#475569'; // gray for no data
+    
+    // Sort for percentile calculation
+    const sorted = [...validRates].sort((a, b) => a - b);
+    const p1 = sorted[Math.floor(sorted.length * 0.01)] || 0;
+    const p99 = sorted[Math.floor(sorted.length * 0.99)] || sorted[sorted.length - 1];
+    
+    // Filter outliers for average calculation
+    const filteredRates = validRates.filter(r => r >= p1 && r <= p99);
+    const average = filteredRates.reduce((sum, r) => sum + r, 0) / filteredRates.length;
+    
+    // Calculate deviation from average
+    const deviation = rate - average;
+    const absDeviation = Math.abs(deviation);
+    
+    // Color scheme based on deviation from average
+    if (absDeviation <= 1.5) {
+      // ±1.5%: light green
+      return '#6ee7b7'; // light green
+    } else if (absDeviation <= 3) {
+      // 1.5% - 3%: darker green (better) or light yellow (worse)
+      return deviation < 0 ? '#34d399' : '#fde68a'; // darker green or light yellow
+    } else if (absDeviation <= 5) {
+      // 3% - 5%: even darker green (better) or darker yellow (worse)
+      return deviation < 0 ? '#10b981' : '#fbbf24'; // even darker green or darker yellow
+    } else if (absDeviation <= 8) {
+      // 5% - 8%: darkest green (better) or orange (worse)
+      return deviation < 0 ? '#059669' : '#f97316'; // darkest green or orange
+    } else {
+      // > 8%: keep darkest green (better) or red (worse)
+      return deviation < 0 ? '#047857' : '#ef4444'; // very dark green or red
+    }
+  };
+
   const formatTimestamp = (absTs) => {
     const date = new Date(absTs);
     return date.toLocaleString('en-US', { 
@@ -1021,12 +1058,13 @@ export default function WarcraftLogsApp() {
                 </select>
 
                 {config.enableCheatDeath && (() => {
-                  // Count total cheat deaths detected
+                  // Count ONLY cheat deaths within the cutoff window (using rankWithinPullTotal)
                   let cheatDeathCount = 0;
                   if (data && data.events) {
                     Object.values(data.events).forEach(playerEvents => {
                       playerEvents.forEach(ev => {
-                        if (ev.isCheatDeath) {
+                        // Only count cheat deaths that are within the cutoff window
+                        if (ev.isCheatDeath && ev.rankWithinPullTotal != null && ev.rankWithinPullTotal <= cutoff) {
                           cheatDeathCount++;
                         }
                       });
@@ -1078,6 +1116,17 @@ export default function WarcraftLogsApp() {
               const { bosses, players, grid } = getOverviewData();
               const sortedPlayers = sortConfig.key ? sortOverviewData(bosses, players, grid, sortConfig.key) : players;
               
+              // Collect all rates for color calculation (excluding nulls)
+              const allRates = [];
+              sortedPlayers.forEach(player => {
+                bosses.forEach(boss => {
+                  const rate = grid[player][boss]?.rate;
+                  if (rate !== null && rate !== undefined) allRates.push(rate);
+                });
+                const overallRate = grid[player].overall?.rate;
+                if (overallRate !== null && overallRate !== undefined) allRates.push(overallRate);
+              });
+              
               return (
                 <div style={{ background: '#1a1d23', borderRadius: '12px', padding: '16px', border: '1px solid #2d3238', overflowX: 'auto' }}>
                   <h2 style={{ margin: '0 0 14px', fontSize: '16px', fontWeight: '600', color: '#ffffff' }}>Death Rate Overview</h2>
@@ -1126,7 +1175,7 @@ export default function WarcraftLogsApp() {
                                 {cellData.rate !== null ? (
                                   showBothStats ? (
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                      <span style={{ color: cellData.rate > 50 ? '#f87171' : cellData.rate > 25 ? '#fbbf24' : '#34d399', fontWeight: '600', fontSize: '11px' }}>
+                                      <span style={{ color: getPercentageColor(cellData.rate, allRates), fontWeight: '600', fontSize: '11px' }}>
                                         {cellData.rate.toFixed(1)}%
                                       </span>
                                       <span style={{ color: '#34d399', fontSize: '10px', fontWeight: '500' }}>
@@ -1134,7 +1183,7 @@ export default function WarcraftLogsApp() {
                                       </span>
                                     </div>
                                   ) : (
-                                    <span style={{ color: cellData.rate > 50 ? '#f87171' : cellData.rate > 25 ? '#fbbf24' : '#34d399', fontWeight: '600' }}>
+                                    <span style={{ color: getPercentageColor(cellData.rate, allRates), fontWeight: '600' }}>
                                       {cellData.rate.toFixed(1)}%
                                     </span>
                                   )
@@ -1150,7 +1199,7 @@ export default function WarcraftLogsApp() {
                                 const showBothStats = grid[player].overall.hasCheatDeaths && grid[player].overall.totalDeaths > grid[player].overall.deaths;
                                 return showBothStats ? (
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'center' }}>
-                                    <span style={{ color: grid[player].overall.rate > 50 ? '#f87171' : grid[player].overall.rate > 25 ? '#fbbf24' : '#34d399', fontSize: '11px' }}>
+                                    <span style={{ color: getPercentageColor(grid[player].overall.rate, allRates), fontSize: '11px' }}>
                                       {grid[player].overall.rate.toFixed(1)}%
                                     </span>
                                     <span style={{ color: '#34d399', fontSize: '10px', fontWeight: '500' }}>
@@ -1158,7 +1207,7 @@ export default function WarcraftLogsApp() {
                                     </span>
                                   </div>
                                 ) : (
-                                  <span style={{ color: grid[player].overall.rate > 50 ? '#f87171' : grid[player].overall.rate > 25 ? '#fbbf24' : '#34d399' }}>
+                                  <span style={{ color: getPercentageColor(grid[player].overall.rate, allRates) }}>
                                     {grid[player].overall.rate.toFixed(1)}%
                                   </span>
                                 );
@@ -1175,9 +1224,15 @@ export default function WarcraftLogsApp() {
               );
             })()}
 
-            {view === 'players' && (
+            {view === 'players' && (() => {
+              const stats = getFilteredStats();
+              
+              // Collect all rates for color calculation
+              const allRates = stats.map(s => s.realRate).filter(r => r !== null && r !== undefined);
+              
+              return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {getFilteredStats().map(({ player, realDeaths, totalDeaths, cheatDeaths, pulls, realRate, totalRate, hasCheatDeaths, deathsByBoss, totalDeathsByBoss, topAbilitiesByBoss }) => {
+                {stats.map(({ player, realDeaths, totalDeaths, cheatDeaths, pulls, realRate, totalRate, hasCheatDeaths, deathsByBoss, totalDeathsByBoss, topAbilitiesByBoss }) => {
                   const isExpanded = expandedPlayers.has(player);
                   const showBothStats = hasCheatDeaths && cheatDeaths > 0;
                   
@@ -1207,7 +1262,7 @@ export default function WarcraftLogsApp() {
                                   <span style={{ color: '#8b92a0' }}>Real only:</span> {realDeaths} deaths / {pulls} pulls
                                   <span style={{ 
                                     marginLeft: '8px',
-                                    color: realRate > 50 ? '#f87171' : realRate > 25 ? '#fbbf24' : '#34d399',
+                                    color: getPercentageColor(realRate, allRates),
                                     fontWeight: '600'
                                   }}>
                                     ({realRate.toFixed(1)}%)
@@ -1217,7 +1272,7 @@ export default function WarcraftLogsApp() {
                                   <span style={{ color: '#8b92a0' }}>With cheat:</span> {totalDeaths} deaths / {pulls} pulls
                                   <span style={{ 
                                     marginLeft: '8px',
-                                    color: totalRate > 50 ? '#f87171' : totalRate > 25 ? '#fbbf24' : '#34d399',
+                                    color: getPercentageColor(totalRate, allRates),
                                     fontWeight: '600'
                                   }}>
                                     ({totalRate.toFixed(1)}%)
@@ -1233,7 +1288,7 @@ export default function WarcraftLogsApp() {
                           </div>
                         </div>
                         
-                        <div style={{ fontSize: '18px', fontWeight: '700', color: realRate > 50 ? '#f87171' : realRate > 25 ? '#fbbf24' : '#34d399' }}>
+                        <div style={{ fontSize: '18px', fontWeight: '700', color: getPercentageColor(realRate, allRates) }}>
                           {realRate.toFixed(1)}%
                         </div>
                       </div>
@@ -1341,7 +1396,8 @@ export default function WarcraftLogsApp() {
                   );
                 })}
               </div>
-            )}
+              );
+            })()}
           </div>
         )}
       </div>
