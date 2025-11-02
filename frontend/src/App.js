@@ -235,11 +235,48 @@ export default function WarcraftLogsApp() {
     let totalCheatDeathsFound = 0;
     
     for (const player of Object.keys(eventsAll)) {
-      const evs = eventsAll[player].filter(
-        ev => ev.rankWithinPull <= cutoff && 
-        (selectedBosses.size === 0 || selectedBosses.has(ev.boss)) &&
+      // Get all events for this player (backend sends up to 3x cutoff)
+      const allPlayerEvents = eventsAll[player].filter(
+        ev => (selectedBosses.size === 0 || selectedBosses.has(ev.boss)) &&
         ev.abilityName && ev.abilityName !== 'Unknown'
       );
+      
+      // Now filter per pull based on toggle state
+      const evs = [];
+      const pullGroups = {};
+      
+      // Group events by pull
+      allPlayerEvents.forEach(ev => {
+        const pullKey = `${ev.reportId}_${ev.fightId}`;
+        if (!pullGroups[pullKey]) {
+          pullGroups[pullKey] = [];
+        }
+        pullGroups[pullKey].push(ev);
+      });
+      
+      // Filter each pull's deaths based on toggle
+      Object.values(pullGroups).forEach(pullEvents => {
+        // Sort by timestamp within pull
+        const sortedPullEvents = pullEvents.sort((a, b) => a.absTs - b.absTs);
+        
+        if (showCheatDeaths) {
+          // CHECKED: Take first X TOTAL deaths (real + cheat)
+          evs.push(...sortedPullEvents.slice(0, cutoff));
+        } else {
+          // UNCHECKED: Take first X REAL deaths + any cheat deaths in that window
+          let realCount = 0;
+          for (const ev of sortedPullEvents) {
+            if (realCount < cutoff) {
+              evs.push(ev);
+              if (!ev.isCheatDeath) {
+                realCount++;
+              }
+            } else {
+              break;
+            }
+          }
+        }
+      });
       
       if (!evs.length) continue;
 
@@ -352,16 +389,52 @@ export default function WarcraftLogsApp() {
 
     players.forEach(player => {
       grid[player] = {};
+      
+      // Get all player events for filtering
+      const allPlayerEvents = data.events[player] || [];
+      
       bosses.forEach(boss => {
         const bossPulls = data.bossParticipation[boss]?.[player]?.length || 0;
-        // Filter deaths based on toggle: exclude cheat deaths unless showCheatDeaths is checked
-        const bossDeaths = data.events[player]?.filter(
-          ev => ev.boss === boss && 
-                ev.rankWithinPull <= cutoff &&
-                (showCheatDeaths || !ev.isCheatDeath)
-        ).length || 0;
-        const rate = bossPulls > 0 ? (bossDeaths / bossPulls * 100) : null;
-        grid[player][boss] = { deaths: bossDeaths, pulls: bossPulls, rate };
+        
+        // Get all events for this boss
+        const bossEvents = allPlayerEvents.filter(ev => ev.boss === boss);
+        
+        // Group by pull and filter
+        const pullGroups = {};
+        bossEvents.forEach(ev => {
+          const pullKey = `${ev.reportId}_${ev.fightId}`;
+          if (!pullGroups[pullKey]) {
+            pullGroups[pullKey] = [];
+          }
+          pullGroups[pullKey].push(ev);
+        });
+        
+        // Count deaths based on toggle
+        let bossDeathCount = 0;
+        Object.values(pullGroups).forEach(pullEvents => {
+          const sortedPullEvents = pullEvents.sort((a, b) => a.absTs - b.absTs);
+          
+          if (showCheatDeaths) {
+            // CHECKED: Count first X TOTAL deaths
+            bossDeathCount += Math.min(sortedPullEvents.length, cutoff);
+          } else {
+            // UNCHECKED: Count first X REAL deaths (+ cheat deaths in that window)
+            let realCount = 0;
+            for (const ev of sortedPullEvents) {
+              if (realCount < cutoff) {
+                bossDeathCount++;
+                if (!ev.isCheatDeath) {
+                  realCount++;
+                }
+              } else {
+                break;
+              }
+            }
+          }
+        });
+        
+        const rate = bossPulls > 0 ? (bossDeathCount / bossPulls * 100) : null;
+        grid[player][boss] = { deaths: bossDeathCount, pulls: bossPulls, rate };
       });
 
       // Calculate overall only for selected bosses
@@ -370,18 +443,41 @@ export default function WarcraftLogsApp() {
       
       if (selectedBosses.size === 0) {
         totalPulls = data.pullParticipation[player]?.length || 0;
-        totalDeaths = data.events[player]?.filter(
-          ev => ev.rankWithinPull <= cutoff &&
-               (showCheatDeaths || !ev.isCheatDeath)
-        ).length || 0;
+        
+        // Group ALL events by pull
+        const pullGroups = {};
+        allPlayerEvents.forEach(ev => {
+          const pullKey = `${ev.reportId}_${ev.fightId}`;
+          if (!pullGroups[pullKey]) {
+            pullGroups[pullKey] = [];
+          }
+          pullGroups[pullKey].push(ev);
+        });
+        
+        // Count deaths based on toggle
+        Object.values(pullGroups).forEach(pullEvents => {
+          const sortedPullEvents = pullEvents.sort((a, b) => a.absTs - b.absTs);
+          
+          if (showCheatDeaths) {
+            totalDeaths += Math.min(sortedPullEvents.length, cutoff);
+          } else {
+            let realCount = 0;
+            for (const ev of sortedPullEvents) {
+              if (realCount < cutoff) {
+                totalDeaths++;
+                if (!ev.isCheatDeath) {
+                  realCount++;
+                }
+              } else {
+                break;
+              }
+            }
+          }
+        });
       } else {
         bosses.forEach(boss => {
           totalPulls += data.bossParticipation[boss]?.[player]?.length || 0;
-          totalDeaths += data.events[player]?.filter(
-            ev => ev.boss === boss && 
-                  ev.rankWithinPull <= cutoff &&
-                  (showCheatDeaths || !ev.isCheatDeath)
-          ).length || 0;
+          totalDeaths += grid[player][boss].deaths;
         });
       }
       

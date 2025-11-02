@@ -867,23 +867,9 @@ def analyze():
                 deaths = report_deaths_cache[rid].get(fid, [])
                 deaths_sorted_all = sorted(deaths, key=lambda e: e["timestamp"])
                 
-                # Filter: Take first X REAL deaths, but include any cheat deaths that occur within that window
-                real_death_count = 0
-                deaths_sorted = []
-                
-                for death in deaths_sorted_all:
-                    is_cheat = death.get("isCheatDeath", False)
-                    
-                    # Always include the death if we haven't hit the cutoff yet
-                    if real_death_count < max_cutoff:
-                        deaths_sorted.append(death)
-                        
-                        # Only increment counter for real deaths
-                        if not is_cheat:
-                            real_death_count += 1
-                    else:
-                        # Stop once we've included maxCutoff real deaths
-                        break
+                # Send up to 3x maxCutoff deaths to give frontend flexibility
+                # Frontend will do the actual filtering based on toggle state
+                deaths_sorted = deaths_sorted_all[:max_cutoff * 3]
                 
                 for rank, ev in enumerate(deaths_sorted, start=1):
                     original_char = ev["targetName"]
