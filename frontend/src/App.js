@@ -252,13 +252,14 @@ export default function WarcraftLogsApp() {
 
       // SIMPLE FILTERING using backend-provided ranks:
       // Real deaths only: filter by rankWithinPull <= cutoff AND !isCheatDeath
+      // Note: Cheat deaths have rankWithinPull = null/undefined, so they're automatically excluded
       const realDeaths = allPlayerEvents.filter(
-        ev => ev.rankWithinPull <= cutoff && !ev.isCheatDeath
+        ev => ev.rankWithinPull != null && ev.rankWithinPull <= cutoff && !ev.isCheatDeath
       );
       
       // Total deaths (including cheat): filter by rankWithinPullTotal <= cutoff
       const totalDeaths = allPlayerEvents.filter(
-        ev => ev.rankWithinPullTotal <= cutoff
+        ev => ev.rankWithinPullTotal != null && ev.rankWithinPullTotal <= cutoff
       );
       
       const realDeathCount = realDeaths.length;
@@ -345,13 +346,14 @@ export default function WarcraftLogsApp() {
         const bossPulls = data.bossParticipation[boss]?.[player]?.length || 0;
         
         // Real deaths: rankWithinPull <= cutoff AND !isCheatDeath AND boss matches
+        // Note: Cheat deaths have rankWithinPull = null, so they're automatically excluded
         const bossRealDeaths = allPlayerEvents.filter(
-          ev => ev.boss === boss && ev.rankWithinPull <= cutoff && !ev.isCheatDeath
+          ev => ev.boss === boss && ev.rankWithinPull != null && ev.rankWithinPull <= cutoff && !ev.isCheatDeath
         ).length;
         
         // Total deaths: rankWithinPullTotal <= cutoff AND boss matches
         const bossTotalDeaths = allPlayerEvents.filter(
-          ev => ev.boss === boss && ev.rankWithinPullTotal <= cutoff
+          ev => ev.boss === boss && ev.rankWithinPullTotal != null && ev.rankWithinPullTotal <= cutoff
         ).length;
         
         const realRate = bossPulls > 0 ? (bossRealDeaths / bossPulls * 100) : null;
@@ -375,10 +377,10 @@ export default function WarcraftLogsApp() {
       if (selectedBosses.size === 0) {
         totalPulls = data.pullParticipation[player]?.length || 0;
         totalRealDeaths = allPlayerEvents.filter(
-          ev => ev.rankWithinPull <= cutoff && !ev.isCheatDeath
+          ev => ev.rankWithinPull != null && ev.rankWithinPull <= cutoff && !ev.isCheatDeath
         ).length;
         totalWithCheatDeaths = allPlayerEvents.filter(
-          ev => ev.rankWithinPullTotal <= cutoff
+          ev => ev.rankWithinPullTotal != null && ev.rankWithinPullTotal <= cutoff
         ).length;
       } else {
         bosses.forEach(boss => {
