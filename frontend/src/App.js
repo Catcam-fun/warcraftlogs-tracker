@@ -1100,6 +1100,7 @@ export default function WarcraftLogsApp() {
                             );
                           })}
                           <td style={{ padding: '10px', textAlign: 'center', fontWeight: '700' }}>
+                          <td style={{ padding: '10px', textAlign: 'center', fontWeight: '700' }}>
                             {grid[player].overall.rate !== null ? (
                               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
                                 <span style={{ color: grid[player].overall.rate > 50 ? '#f87171' : grid[player].overall.rate > 25 ? '#fbbf24' : '#34d399' }}>
