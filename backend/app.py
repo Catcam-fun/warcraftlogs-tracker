@@ -380,10 +380,25 @@ def is_duplicate_pull(seen_by_boss, boss_id, abs_start, abs_end, is_kill=None):
     lst.append((abs_start, abs_end, is_kill))
     return False
 
-@app.route('/analyze', methods=['POST'])
+@app.route('/api/analyze', methods=['POST', 'OPTIONS'])
 def analyze():
     """Stream analysis progress using SSE"""
-    config_data = request.json
+    
+    # Handle preflight CORS
+    if request.method == 'OPTIONS':
+        response = jsonify({'status': 'ok'})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        return response, 200
+    
+    # Extract config BEFORE the generator to avoid request context issues
+    try:
+        config_data = request.json
+    except Exception as e:
+        resp = jsonify({"error": f"Invalid request: {str(e)}"})
+        resp.headers.add('Access-Control-Allow-Origin', '*')
+        return resp, 400
     
     # Parse configuration
     client_id = config_data.get('clientId')
@@ -662,14 +677,33 @@ def analyze():
             print(f"Error in analysis: {error_msg}")
             yield f"data: {json.dumps({'stage': 'error', 'message': error_msg})}\n\n"
     
-    return Response(generate(), mimetype='text/event-stream')
+    return Response(generate(), mimetype='text/event-stream', headers={
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no'
+    })
 
-@app.route('/health', methods=['GET'])
+@app.route('/api/health', methods=['GET'])
 def health():
     """Health check endpoint"""
     return jsonify({"status": "healthy", "version": "2.4-fixed"})
 
-@app.route('/share', methods=['POST'])
+@app.route('/', methods=['GET'])
+def root():
+    """Root endpoint"""
+    return jsonify({
+        "service": "WarcraftLogs Death Tracker API",
+        "version": "2.4-fixed",
+        "status": "running",
+        "endpoints": {
+            "health": "/api/health",
+            "analyze": "/api/analyze (POST with SSE)",
+            "share": "/api/share (POST)",
+            "shared": "/api/shared/<share_id> (GET)"
+        }
+    })
+
+@app.route('/api/share', methods=['POST'])
 def share_results():
     """Save results for sharing"""
     try:
@@ -679,7 +713,7 @@ def share_results():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/share/<share_id>', methods=['GET'])
+@app.route('/api/shared/<share_id>', methods=['GET'])
 def get_shared_results(share_id):
     """Retrieve shared results"""
     try:
