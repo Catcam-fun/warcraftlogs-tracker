@@ -29,12 +29,15 @@ OAUTH_TOKEN_URL = "https://wcl-proxy.catcam-fun.workers.dev/oauth/token"
 _token_cache = {"token": None, "expires_at": 0}
 
 # Cheat Death Ability IDs - these appear as DEBUFFS in WarcraftLogs
+# These IDs are confirmed from actual WarcraftLogs events
 CHEAT_DEATH_ABILITY_IDS = {
-    45181,   # Cheated Death (Rogue) - CONFIRMED
-    86949,   # Cauterize (Mage - Fire)
-    114556,  # Purgatory (Death Knight)
-    209261,  # Last Resort (Demon Hunter)
-    215769,  # Spirit of Redemption (Holy Priest)
+    45181,    # Cheated Death (Rogue) - CONFIRMED
+    87024,    # Cauterize (Mage - Fire) - CONFIRMED
+    123981,   # Purgatory (Death Knight) - CONFIRMED  
+    211319,   # Spirit of Redemption/Restitution (Holy Priest) - CONFIRMED
+    404369,   # Empty Hourglass - CONFIRMED
+    1236692,  # Void Reconstitution - CONFIRMED
+    209261,   # Last Resort (Demon Hunter - Vengeance) - may need verification
 }
 
 def get_access_token(client_id, client_secret):
