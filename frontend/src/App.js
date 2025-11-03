@@ -225,6 +225,59 @@ export default function WarcraftLogsApp() {
     setExpandedPlayers(newExpanded);
   };
 
+  // Helper function to filter cheat deaths based on the death window cutoff
+  // Only includes cheat deaths that occurred within the time window of the first N real deaths per pull
+  const filterCheatDeathsByWindow = (allEvents, player, cutoff, bossFilter = null) => {
+    if (!allEvents[player]) return [];
+    
+    const playerEvents = allEvents[player];
+    
+    // Group events by pull
+    const eventsByPull = {};
+    playerEvents.forEach(ev => {
+      const pullKey = `${ev.reportId}_${ev.fightId}`;
+      if (!eventsByPull[pullKey]) {
+        eventsByPull[pullKey] = { realDeaths: [], cheatDeaths: [], boss: ev.boss };
+      }
+      
+      if (ev.isCheatDeath) {
+        eventsByPull[pullKey].cheatDeaths.push(ev);
+      } else if (ev.rankWithinPull <= cutoff) {
+        eventsByPull[pullKey].realDeaths.push(ev);
+      }
+    });
+    
+    // Filter cheat deaths based on the cutoff window per pull
+    const filteredCheatDeaths = [];
+    Object.values(eventsByPull).forEach(pullData => {
+      // Apply boss filter if specified
+      if (bossFilter && pullData.boss !== bossFilter) {
+        return;
+      }
+      
+      // Sort real deaths by timestamp to find the cutoff time
+      const sortedRealDeaths = pullData.realDeaths.sort((a, b) => a.absTs - b.absTs);
+      
+      if (sortedRealDeaths.length === 0) {
+        // No real deaths in this pull - include all cheat deaths (they saved people from being the first deaths)
+        filteredCheatDeaths.push(...pullData.cheatDeaths);
+      } else {
+        // Find the timestamp of the Nth death (or last death if fewer than N)
+        const cutoffIndex = Math.min(cutoff, sortedRealDeaths.length) - 1;
+        const cutoffTimestamp = sortedRealDeaths[cutoffIndex].absTs;
+        
+        // Only include cheat deaths that occurred at or before this timestamp
+        pullData.cheatDeaths.forEach(cd => {
+          if (cd.absTs <= cutoffTimestamp) {
+            filteredCheatDeaths.push(cd);
+          }
+        });
+      }
+    });
+    
+    return filteredCheatDeaths;
+  };
+
   const getFilteredStats = () => {
     if (!data) return [];
 
@@ -243,11 +296,18 @@ export default function WarcraftLogsApp() {
               ev.abilityName && ev.abilityName !== 'Unknown'
       );
       
-      // Filter cheat deaths (if tracking enabled)
-      const cheatDeaths = trackCheatDeaths ? eventsAll[player].filter(
-        ev => ev.isCheatDeath && 
-              (selectedBosses.size === 0 || selectedBosses.has(ev.boss))
-      ) : [];
+      // Filter cheat deaths (if tracking enabled) - only within death window
+      let cheatDeaths = [];
+      if (trackCheatDeaths) {
+        if (selectedBosses.size === 0) {
+          cheatDeaths = filterCheatDeathsByWindow(eventsAll, player, cutoff);
+        } else {
+          // Combine cheat deaths from all selected bosses
+          selectedBosses.forEach(boss => {
+            cheatDeaths.push(...filterCheatDeathsByWindow(eventsAll, player, cutoff, boss));
+          });
+        }
+      }
       
       if (!realDeaths.length && !cheatDeaths.length) continue;
 
@@ -345,10 +405,9 @@ export default function WarcraftLogsApp() {
           ev => !ev.isCheatDeath && ev.boss === boss && ev.rankWithinPull <= cutoff
         ).length || 0;
         
-        // Cheat deaths
-        const bossCheatDeaths = trackCheatDeaths ? data.events[player]?.filter(
-          ev => ev.isCheatDeath && ev.boss === boss
-        ).length || 0 : 0;
+        // Cheat deaths (within cutoff window)
+        const bossCheatDeaths = trackCheatDeaths ? 
+          filterCheatDeathsByWindow(data.events, player, cutoff, boss).length : 0;
         
         const rate = bossPulls > 0 ? (bossRealDeaths / bossPulls * 100) : null;
         const cheatDeathRate = (trackCheatDeaths && bossCheatDeaths > 0 && bossPulls > 0) 
@@ -374,18 +433,16 @@ export default function WarcraftLogsApp() {
         totalRealDeaths = data.events[player]?.filter(
           ev => !ev.isCheatDeath && ev.rankWithinPull <= cutoff
         ).length || 0;
-        totalCheatDeaths = trackCheatDeaths ? data.events[player]?.filter(
-          ev => ev.isCheatDeath
-        ).length || 0 : 0;
+        totalCheatDeaths = trackCheatDeaths ? 
+          filterCheatDeathsByWindow(data.events, player, cutoff).length : 0;
       } else {
         bosses.forEach(boss => {
           totalPulls += data.bossParticipation[boss]?.[player]?.length || 0;
           totalRealDeaths += data.events[player]?.filter(
             ev => !ev.isCheatDeath && ev.boss === boss && ev.rankWithinPull <= cutoff
           ).length || 0;
-          totalCheatDeaths += trackCheatDeaths ? data.events[player]?.filter(
-            ev => ev.isCheatDeath && ev.boss === boss
-          ).length || 0 : 0;
+          totalCheatDeaths += trackCheatDeaths ? 
+            filterCheatDeathsByWindow(data.events, player, cutoff, boss).length : 0;
         });
       }
       
