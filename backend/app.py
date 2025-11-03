@@ -889,29 +889,7 @@ def analyze():
                     # Fewer than max_cutoff * 3 real deaths, take everything
                     deaths_sorted = deaths_sorted_all
                 
-                # Assign ranks - cheat deaths get associated with the next real death
-                real_death_rank = 0
-                
-                # First pass: assign ranks to real deaths
-                for ev in deaths_sorted:
-                    if not ev.get("isCheatDeath", False):
-                        real_death_rank += 1
-                        ev["realRank"] = real_death_rank
-                    else:
-                        ev["realRank"] = None
-                
-                # Second pass: for cheat deaths, find which real death they precede
-                for i, ev in enumerate(deaths_sorted):
-                    if ev.get("isCheatDeath", False):
-                        # Find the next real death after this cheat death
-                        next_real_rank = real_death_rank + 1  # Default: after all tracked deaths
-                        for j in range(i + 1, len(deaths_sorted)):
-                            if deaths_sorted[j].get("realRank") is not None:
-                                next_real_rank = deaths_sorted[j]["realRank"]
-                                break
-                        ev["nextRealRank"] = next_real_rank
-                
-                # Third pass: create death events
+                # Create death events with just timestamps - frontend will filter by timestamp
                 for ev in deaths_sorted:
                     is_cheat = ev.get("isCheatDeath", False)
                     original_char = ev["targetName"]
@@ -927,8 +905,7 @@ def analyze():
                         "fightId": fid,
                         "isKill": is_kill,
                         "pullNo": seq_no,
-                        "rankWithinPull": ev.get("realRank"),  # Real death rank (or None for cheat)
-                        "nextRealDeathRank": ev.get("nextRealRank"),  # For cheat deaths: which real death they precede
+                        "timestamp": ev["timestamp"],  # Relative timestamp within the fight
                         "absTs": report_abs_start + ev["timestamp"],
                         "abilityName": ev.get("abilityName", "Unknown"),
                         "isCheatDeath": is_cheat
