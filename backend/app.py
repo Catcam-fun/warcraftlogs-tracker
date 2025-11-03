@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Flask API for WarcraftLogs Death Tracker - V2 GraphQL API
-Fixed Version 2.4 - Proper death calculations with cheat death tracking
+Optimized for Render.com deployment
+Version 2.4 - Added Cheat Death Tracking
 """
 
 from flask import Flask, request, jsonify, Response
@@ -15,38 +16,42 @@ import json
 import uuid
 
 app = Flask(__name__)
+
+# Configure CORS - simplest approach, allow everything
 CORS(app)
 
 # Constants
 MASS_DEATH_THRESHOLD = 7
 MASS_DEATH_WINDOW = 10000  # ms
 
-# WarcraftLogs V2 API endpoints
+# Cheat Death ability IDs
+CHEAT_DEATH_ABILITIES = {
+    45181,    # Cheated Death (Rogue)
+    87024,    # Cauterize (Mage - Fire)
+    123981,   # Purgatory (Death Knight)
+    211319,   # Spirit of Redemption/Restitution (Holy Priest)
+    404369,   # Empty Hourglass
+    1236692,  # Void Reconstitution
+    209261,   # Last Resort (Demon Hunter - Vengeance)
+}
+
+# WarcraftLogs V2 API endpoints (through Cloudflare Worker proxy)
 GRAPHQL_ENDPOINT = "https://wcl-proxy.catcam-fun.workers.dev/api/v2/client"
 OAUTH_TOKEN_URL = "https://wcl-proxy.catcam-fun.workers.dev/oauth/token"
 
 # OAuth2 token cache
 _token_cache = {"token": None, "expires_at": 0}
 
-# Cheat Death Ability IDs - these appear as DEBUFFS in WarcraftLogs
-# These IDs are confirmed from actual WarcraftLogs events
-CHEAT_DEATH_ABILITY_IDS = {
-    45181,    # Cheated Death (Rogue) - CONFIRMED
-    87024,    # Cauterize (Mage - Fire) - CONFIRMED
-    123981,   # Purgatory (Death Knight) - CONFIRMED  
-    211319,   # Spirit of Redemption/Restitution (Holy Priest) - CONFIRMED
-    404369,   # Empty Hourglass - CONFIRMED
-    1236692,  # Void Reconstitution - CONFIRMED
-    209261,   # Last Resort (Demon Hunter - Vengeance) - may need verification
-}
 
 def get_access_token(client_id, client_secret):
     """Get OAuth2 access token for V2 API"""
     global _token_cache
     
+    # Check if we have a valid cached token
     if _token_cache["token"] and time.time() < _token_cache["expires_at"]:
         return _token_cache["token"]
     
+    # Request new token
     data = {
         "grant_type": "client_credentials",
         "client_id": client_id,
@@ -59,11 +64,13 @@ def get_access_token(client_id, client_secret):
         token_data = response.json()
         
         _token_cache["token"] = token_data["access_token"]
+        # Cache expires 60 seconds before actual expiry for safety
         _token_cache["expires_at"] = time.time() + token_data.get("expires_in", 3600) - 60
         
         return _token_cache["token"]
     except Exception as e:
         raise Exception(f"Failed to get access token: {str(e)}")
+
 
 def graphql_query(token, query, variables=None):
     """Execute a GraphQL query against WarcraftLogs V2 API"""
@@ -88,86 +95,165 @@ def graphql_query(token, query, variables=None):
     except Exception as e:
         raise Exception(f"GraphQL query failed: {str(e)}")
 
+
 def get_main_character(player_name, character_groups):
-    """Return the main character name for a player"""
+    """Return the main character name for a player, or the player name if not grouped."""
     for main, alts in character_groups.items():
         if player_name in alts:
             return main
     return player_name
 
+
 def get_guild_reports(token, guild_name, server, region, zone_id, cutoff_date):
     """Fetch guild reports using V2 GraphQL API"""
+    
+    # Convert cutoff date to timestamp
     cutoff_ts = int(datetime.strptime(cutoff_date, "%Y-%m-%d").timestamp() * 1000) + 86400000 - 1
     
     query = """
-    query($name: String!, $serverSlug: String!, $serverRegion: String!, $zoneID: Int!, $limit: Int!, $page: Int!) {
+    query($guildName: String!, $serverSlug: String!, $serverRegion: String!, $zoneID: Int!) {
       reportData {
-        reports(
-          guildName: $name
-          guildServerSlug: $serverSlug
-          guildServerRegion: $serverRegion
-          zoneID: $zoneID
-          limit: $limit
-          page: $page
-        ) {
+        reports(guildName: $guildName, guildServerSlug: $serverSlug, guildServerRegion: $serverRegion, zoneID: $zoneID, limit: 100) {
           data {
             code
-            title
-            owner { name }
             startTime
             endTime
-            zone { id name }
+            zone {
+              id
+            }
+            owner {
+              name
+            }
           }
-          has_more_pages
         }
       }
     }
     """
     
-    all_reports = []
-    page = 1
-    limit = 100
+    variables = {
+        "guildName": guild_name,
+        "serverSlug": server.lower().replace(" ", "-").replace("'", ""),
+        "serverRegion": region.upper(),
+        "zoneID": int(zone_id)
+    }
     
-    while True:
-        variables = {
-            "name": guild_name,
-            "serverSlug": server,
-            "serverRegion": region,
-            "zoneID": int(zone_id),
-            "limit": limit,
-            "page": page
-        }
-        
+    try:
         data = graphql_query(token, query, variables)
-        reports_response = data.get("reportData", {}).get("reports", {})
-        reports_data = reports_response.get("data", [])
+        reports_data = data.get("reportData", {}).get("reports", {}).get("data", [])
         
-        for report in reports_data:
-            if report["startTime"] <= cutoff_ts:
-                all_reports.append(report)
+        out = []
+        for rep in reports_data:
+            if rep.get("startTime", 0) > cutoff_ts:
+                continue
+            out.append({
+                "id": rep["code"],
+                "start": rep.get("startTime", 0),
+                "end": rep.get("endTime", 0),
+                "owner": rep.get("owner", {}).get("name", "")
+            })
         
-        if not reports_response.get("has_more_pages", False) or page > 20:
-            break
-        
-        page += 1
-    
-    return all_reports
+        return out
+    except Exception as e:
+        raise Exception(f"Failed to fetch guild reports: {str(e)}")
 
-def get_report_details_bulk(token, report_code):
-    """Fetch fights, friendlies, and abilities for a report"""
+
+def get_guild_roster(token, guild_name, server, region):
+    """Fetch guild roster to identify guild members using pagination"""
+    
+    query = """
+    query($guildName: String!, $serverSlug: String!, $serverRegion: String!, $page: Int!) {
+      guildData {
+        guild(name: $guildName, serverSlug: $serverSlug, serverRegion: $serverRegion) {
+          members(limit: 100, page: $page) {
+            data {
+              name
+            }
+            has_more_pages
+          }
+        }
+      }
+    }
+    """
+    
+    all_members = set()
+    page = 1
+    max_pages = 10  # Max 10 pages = 1000 members (safety limit)
+    
+    try:
+        while page <= max_pages:
+            variables = {
+                "guildName": guild_name,
+                "serverSlug": server.lower().replace(" ", "-").replace("'", ""),
+                "serverRegion": region.upper(),
+                "page": page
+            }
+            
+            data = graphql_query(token, query, variables)
+            guild = data.get("guildData", {}).get("guild", {})
+            
+            if not guild:
+                if page == 1:
+                    print(f"Warning: Could not fetch guild roster for {guild_name}")
+                break
+            
+            members_response = guild.get("members", {})
+            members = members_response.get("data", [])
+            has_more = members_response.get("has_more_pages", False)
+            
+            # Add members from this page
+            for member in members:
+                name = member.get("name")
+                if name:
+                    all_members.add(name.lower())
+            
+            print(f"Fetched page {page}: {len(members)} members (total so far: {len(all_members)})")
+            
+            # Stop if no more pages
+            if not has_more:
+                break
+            
+            page += 1
+        
+        if not all_members:
+            print(f"Warning: Guild {guild_name} has no members or roster not available")
+            return set()
+        
+        print(f"Successfully fetched {len(all_members)} guild members across {page} page(s)")
+        return all_members
+        
+    except Exception as e:
+        print(f"Warning: Failed to fetch guild roster: {str(e)}")
+        return set()
+
+
+def get_fights(token, report_code):
+    """Fetch fights for a report using V2 GraphQL API"""
+    
     query = """
     query($code: String!) {
       reportData {
         report(code: $code) {
-          code
           startTime
-          endTime
           fights {
-            id boss name difficulty startTime endTime kill encounterID zoneID
+            id
+            startTime
+            endTime
+            name
+            encounterID
+            difficulty
+            kill
+            gameZone {
+              id
+            }
+            friendlyPlayers
           }
           masterData {
-            actors(type: "Player") { id name type }
-            abilities { gameID name }
+            actors(type: "Player") {
+              id
+              name
+              type
+              subType
+            }
           }
         }
       }
@@ -178,35 +264,118 @@ def get_report_details_bulk(token, report_code):
     
     try:
         data = graphql_query(token, query, variables)
-        report_data = data.get("reportData", {}).get("report", {})
+        report = data.get("reportData", {}).get("report", {})
+        
+        if not report:
+            return {"report_start": 0, "fights": [], "friendlies": []}
+        
+        fights = report.get("fights", [])
+        actors = report.get("masterData", {}).get("actors", [])
+        report_start = report.get("startTime", 0)
+        
+        print(f"Report {report_code}: Found {len(fights)} fights, {len(actors)} actors")
+        
+        # Convert to format compatible with existing code
+        formatted_fights = []
+        for fight in fights:
+            formatted_fights.append({
+                "id": fight.get("id"),
+                "start_time": fight.get("startTime"),
+                "end_time": fight.get("endTime"),
+                "name": fight.get("name"),
+                "boss": fight.get("encounterID"),
+                "difficulty": fight.get("difficulty"),
+                "kill": fight.get("kill"),
+                "zoneID": fight.get("gameZone", {}).get("id") if fight.get("gameZone") else None,
+                "friendlyPlayers": fight.get("friendlyPlayers", [])  # IDs of players in THIS fight
+            })
+        
+        # Format friendlies
+        formatted_friendlies = []
+        for actor in actors:
+            if actor.get("type") == "Player":
+                formatted_friendlies.append({
+                    "id": actor.get("id"),
+                    "name": actor.get("name"),
+                    "type": actor.get("subType")  # Class name
+                })
+        
+        print(f"Formatted {len(formatted_friendlies)} friendly players")
+        if len(formatted_friendlies) > 0:
+            print(f"Sample player: {formatted_friendlies[0]}")
         
         return {
-            "code": report_data.get("code", report_code),
-            "startTime": report_data.get("startTime"),
-            "endTime": report_data.get("endTime"),
-            "fights": report_data.get("fights", []),
-            "friendlies": report_data.get("masterData", {}).get("actors", []),
-            "abilities": report_data.get("masterData", {}).get("abilities", [])
+            "report_start": report_start,
+            "fights": formatted_fights,
+            "friendlies": formatted_friendlies
         }
     except Exception as e:
-        print(f"Error fetching report details: {e}")
-        return None
+        print(f"Error fetching fights for {report_code}: {e}")
+        return {"report_start": 0, "fights": [], "friendlies": []}
 
-def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map):
-    """Get death events for an entire report"""
+
+def get_abilities_map(token, report_code):
+    """Get ability ID to name mapping for a report - ONCE per report"""
+    abilities_query = """
+    query($code: String!) {
+      reportData {
+        report(code: $code) {
+          masterData {
+            abilities {
+              gameID
+              name
+            }
+          }
+        }
+      }
+    }
+    """
+    
+    ability_id_to_name = {}
+    try:
+        abilities_data = graphql_query(token, abilities_query, {"code": report_code})
+        abilities = abilities_data.get("reportData", {}).get("report", {}).get("masterData", {}).get("abilities", [])
+        for ability in abilities:
+            ability_id = ability.get("gameID")
+            ability_name = ability.get("name")
+            if ability_id and ability_name:
+                ability_id_to_name[ability_id] = ability_name
+        print(f"Loaded {len(ability_id_to_name)} abilities for report {report_code}")
+    except Exception as e:
+        print(f"Warning: Could not fetch ability names: {e}")
+    
+    return ability_id_to_name
+
+
+def get_report_cheat_deaths(token, report_code, fights, friendlies):
+    """Get cheat death events (aura applications) for a report"""
+    
     if not fights:
         return {}
     
-    actor_id_to_name = {f.get('id'): f.get('name') for f in friendlies if f.get('id') and f.get('name')}
+    # Build actor ID -> name lookup from friendlies
+    actor_id_to_name = {}
+    for friendly in friendlies:
+        actor_id = friendly.get('id')
+        name = friendly.get('name')
+        if actor_id and name:
+            actor_id_to_name[actor_id] = name
     
-    start_time = min(f['startTime'] for f in fights)
-    end_time = max(f['endTime'] for f in fights)
+    # Get the time range for ALL fights we care about
+    start_time = min(f['start_time'] for f in fights)
+    end_time = max(f['end_time'] for f in fights)
     
+    # Query for debuff applications of cheat death abilities
     query = """
     query($code: String!, $startTime: Float!, $endTime: Float!) {
       reportData {
         report(code: $code) {
-          events(startTime: $startTime endTime: $endTime dataType: Deaths limit: 10000) {
+          events(
+            startTime: $startTime
+            endTime: $endTime
+            dataType: Debuffs
+            limit: 10000
+          ) {
             data
           }
         }
@@ -214,31 +383,127 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map):
     }
     """
     
-    variables = {"code": report_code, "startTime": start_time, "endTime": end_time}
+    variables = {
+        "code": report_code,
+        "startTime": start_time,
+        "endTime": end_time
+    }
     
     try:
         data = graphql_query(token, query, variables)
         events_data = data.get("reportData", {}).get("report", {}).get("events", {}).get("data", [])
         
+        # Build a map of fightId -> list of cheat death events
+        cheat_deaths_by_fight = {f['id']: [] for f in fights}
+        
+        for event in events_data:
+            # We're looking for applydebuff events for cheat death abilities
+            if event.get("type") != "applydebuff":
+                continue
+            
+            ability_id = event.get("abilityGameID")
+            if ability_id not in CHEAT_DEATH_ABILITIES:
+                continue
+            
+            event_timestamp = event.get("timestamp", 0)
+            fight_id = event.get("fight")
+            
+            # Find which fight this cheat death belongs to
+            if fight_id not in cheat_deaths_by_fight:
+                continue
+            
+            # V2 API returns targetID
+            target_id = event.get("targetID")
+            target_name = actor_id_to_name.get(target_id, "Unknown")
+            
+            cheat_deaths_by_fight[fight_id].append({
+                "timestamp": event_timestamp,
+                "targetName": target_name,
+                "targetID": target_id,
+                "abilityID": ability_id,
+                "fightId": fight_id,
+            })
+        
+        print(f"Found {sum(len(v) for v in cheat_deaths_by_fight.values())} cheat death events in report {report_code}")
+        return cheat_deaths_by_fight
+    
+    except Exception as e:
+        print(f"Error fetching cheat deaths for report: {e}")
+        return {f['id']: [] for f in fights}
+
+
+def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, track_cheat_deaths=False):
+    """Get ALL player deaths for an entire report at once - MUCH faster than per-fight queries"""
+    
+    if not fights:
+        return {}
+    
+    # Build actor ID -> name lookup from friendlies
+    actor_id_to_name = {}
+    for friendly in friendlies:
+        actor_id = friendly.get('id')
+        name = friendly.get('name')
+        if actor_id and name:
+            actor_id_to_name[actor_id] = name
+    
+    # Get the time range for ALL fights we care about
+    start_time = min(f['start_time'] for f in fights)
+    end_time = max(f['end_time'] for f in fights)
+    
+    query = """
+    query($code: String!, $startTime: Float!, $endTime: Float!) {
+      reportData {
+        report(code: $code) {
+          events(
+            startTime: $startTime
+            endTime: $endTime
+            dataType: Deaths
+            limit: 10000
+          ) {
+            data
+          }
+        }
+      }
+    }
+    """
+    
+    variables = {
+        "code": report_code,
+        "startTime": start_time,
+        "endTime": end_time
+    }
+    
+    try:
+        data = graphql_query(token, query, variables)
+        events_data = data.get("reportData", {}).get("report", {}).get("events", {}).get("data", [])
+        
+        # Build a map of fightId -> list of deaths
         deaths_by_fight = {f['id']: [] for f in fights}
         
         for event in events_data:
             if event.get("type") != "death":
                 continue
             
+            event_timestamp = event.get("timestamp", 0)
             fight_id = event.get("fight")
+            
+            # Find which fight this death belongs to
             if fight_id not in deaths_by_fight:
                 continue
             
+            # V2 API returns targetID, not target.name
             target_id = event.get("targetID")
             target_name = actor_id_to_name.get(target_id, "Unknown")
+            
+            # Get ability name from killingAbilityGameID using the pre-loaded map
             killing_ability_id = event.get("killingAbilityGameID")
             ability_name = ability_map.get(killing_ability_id, "Unknown")
             
+            # Find the fight object to get its name
             fight_obj = next((f for f in fights if f['id'] == fight_id), None)
             
             deaths_by_fight[fight_id].append({
-                "timestamp": event.get("timestamp", 0),
+                "timestamp": event_timestamp,
                 "targetName": target_name,
                 "targetID": target_id,
                 "phase": 1,
@@ -247,87 +512,52 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map):
                 "abilityName": ability_name,
             })
         
-        # Filter mass deaths
+        # Get cheat death events if tracking is enabled
+        cheat_deaths_by_fight = {}
+        if track_cheat_deaths:
+            cheat_deaths_by_fight = get_report_cheat_deaths(token, report_code, fights, friendlies)
+        
+        # Filter mass deaths for each fight and merge cheat deaths
         for fid in deaths_by_fight:
             deaths_by_fight[fid] = filter_mass_deaths(deaths_by_fight[fid])
+            
+            # Add cheat death events to the deaths list if tracking
+            if track_cheat_deaths and fid in cheat_deaths_by_fight:
+                for cheat_event in cheat_deaths_by_fight[fid]:
+                    # Mark this as a cheat death
+                    deaths_by_fight[fid].append({
+                        "timestamp": cheat_event["timestamp"],
+                        "targetName": cheat_event["targetName"],
+                        "targetID": cheat_event["targetID"],
+                        "phase": 1,
+                        "fightId": fid,
+                        "bossName": next((f['name'] for f in fights if f['id'] == fid), 'Unknown'),
+                        "abilityName": f"Cheat Death (Ability {cheat_event['abilityID']})",
+                        "isCheatDeath": True,  # Mark as cheat death
+                    })
         
         return deaths_by_fight
     
     except Exception as e:
-        print(f"Error fetching deaths: {e}")
+        print(f"Error fetching deaths for report: {e}")
         return {f['id']: [] for f in fights}
 
-def get_report_cheat_deaths_bulk(token, report_code, fights, friendlies, ability_map):
-    """Get cheat death events (debuffs) for an entire report"""
-    if not fights:
-        return {}
-    
-    actor_id_to_name = {f.get('id'): f.get('name') for f in friendlies if f.get('id') and f.get('name')}
-    
-    start_time = min(f['startTime'] for f in fights)
-    end_time = max(f['endTime'] for f in fights)
-    
-    all_cheat_deaths_by_fight = {f['id']: [] for f in fights}
-    
-    # Query each cheat death ability ID
-    for ability_id in CHEAT_DEATH_ABILITY_IDS:
-        query = """
-        query($code: String!, $startTime: Float!, $endTime: Float!, $abilityID: Int!) {
-          reportData {
-            report(code: $code) {
-              events(startTime: $startTime endTime: $endTime dataType: Debuffs abilityID: $abilityID limit: 10000) {
-                data
-              }
-            }
-          }
-        }
-        """
-        
-        variables = {
-            "code": report_code,
-            "startTime": start_time,
-            "endTime": end_time,
-            "abilityID": ability_id
-        }
-        
-        try:
-            data = graphql_query(token, query, variables)
-            events_data = data.get("reportData", {}).get("report", {}).get("events", {}).get("data", [])
-            
-            for event in events_data:
-                if event.get("type") != "applydebuff":
-                    continue
-                
-                fight_id = event.get("fight")
-                if fight_id not in all_cheat_deaths_by_fight:
-                    continue
-                
-                target_id = event.get("targetID")
-                target_name = actor_id_to_name.get(target_id, "Unknown")
-                ability_name = ability_map.get(ability_id, f"Cheat Death ({ability_id})")
-                
-                fight_obj = next((f for f in fights if f['id'] == fight_id), None)
-                
-                all_cheat_deaths_by_fight[fight_id].append({
-                    "timestamp": event.get("timestamp", 0),
-                    "targetName": target_name,
-                    "targetID": target_id,
-                    "fightId": fight_id,
-                    "bossName": fight_obj.get('name', 'Unknown') if fight_obj else 'Unknown',
-                    "abilityName": ability_name,
-                })
-        
-        except Exception as e:
-            print(f"Error fetching cheat deaths for ability {ability_id}: {e}")
-    
-    return all_cheat_deaths_by_fight
 
 def analyze_fights(fights, fight_zone, difficulty):
     """Filter fights by zone and difficulty"""
-    return [f for f in fights if
-            (f.get("boss") or 0) > 0 and
-            f.get("zoneID") == int(fight_zone) and
-            f.get("difficulty") == int(difficulty)]
+    out = []
+    
+    for f in fights:
+        if (f.get("boss") or 0) <= 0:
+            continue
+        if f.get("zoneID") != int(fight_zone):
+            continue
+        if f.get("difficulty") != int(difficulty):
+            continue
+        out.append(f)
+    
+    return out
+
 
 def filter_mass_deaths(deaths):
     """Filter out mass death events (wipes)"""
@@ -345,6 +575,7 @@ def filter_mass_deaths(deaths):
     
     return sd
 
+
 def get_raid_participants(friendlies):
     """Extract player participants from friendlies list"""
     parts = {}
@@ -358,6 +589,7 @@ def get_raid_participants(friendlies):
     
     return parts
 
+
 def interval_overlap(a_start, a_end, b_start, b_end):
     """Calculate overlap between two intervals"""
     inter = max(0, min(a_end, b_end) - max(a_start, b_start))
@@ -365,6 +597,7 @@ def interval_overlap(a_start, a_end, b_start, b_end):
         return 0, 0.0
     union = (a_end - a_start) + (b_end - b_start) - inter
     return inter, (inter / union if union > 0 else 0.0)
+
 
 def is_duplicate_pull(seen_by_boss, boss_id, abs_start, abs_end, is_kill=None):
     """Check if a pull is a duplicate based on time overlap"""
@@ -380,9 +613,10 @@ def is_duplicate_pull(seen_by_boss, boss_id, abs_start, abs_end, is_kill=None):
     lst.append((abs_start, abs_end, is_kill))
     return False
 
+
 @app.route('/api/analyze', methods=['POST', 'OPTIONS'])
 def analyze():
-    """Stream analysis progress using SSE"""
+    """Main API endpoint for analyzing WarcraftLogs data using V2 API with SSE progress"""
     
     # Handle preflight CORS
     if request.method == 'OPTIONS':
@@ -394,249 +628,233 @@ def analyze():
     
     # Extract config BEFORE the generator to avoid request context issues
     try:
-        config_data = request.json
+        config = request.json
     except Exception as e:
         resp = jsonify({"error": f"Invalid request: {str(e)}"})
         resp.headers.add('Access-Control-Allow-Origin', '*')
         return resp, 400
     
-    # Parse configuration
-    client_id = config_data.get('clientId')
-    client_secret = config_data.get('clientSecret')
-    guild_name = config_data.get('guildName')
-    server = config_data.get('server')
-    region = config_data.get('region', 'us')
-    report_zone = config_data.get('reportZone', '44')
-    fight_zone = config_data.get('fightZone', '2810')
-    difficulty = config_data.get('difficulty', '5')
-    max_cutoff = int(config_data.get('maxCutoff', 3))
-    cutoff_date = config_data.get('cutoffDate', '2025-01-01')
-    author_filters = config_data.get('authorFilters', '').split(',') if config_data.get('authorFilters') else []
-    character_groups = {}
-    track_cheat_deaths = config_data.get('trackCheatDeaths', False)
-    
-    # Parse character groups from JSON string
-    try:
-        if config_data.get('characterGroups'):
-            character_groups = json.loads(config_data.get('characterGroups'))
-    except:
-        pass
-    
     def generate():
         try:
+            
+            # Extract configuration
+            client_id = config.get('clientId')
+            client_secret = config.get('clientSecret')
+            guild_name = config.get('guildName')
+            server = config.get('server')
+            region = config.get('region')
+            report_zone = config.get('reportZone')
+            fight_zone = config.get('fightZone')
+            difficulty = config.get('difficulty')
+            max_cutoff = int(config.get('maxCutoff', 5))
+            cutoff_date = config.get('cutoffDate')
+            author_filters = config.get('authorFilters', [])
+            character_groups = config.get('characterGroups', {})
+            track_cheat_deaths = config.get('trackCheatDeaths', False)  # NEW
+            
+            # Validate required fields
+            if not all([client_id, client_secret, guild_name, server, region]):
+                yield f"data: {json.dumps({'error': 'Missing required fields'})}\n\n"
+                return
+            
             # Get OAuth2 token
             yield f"data: {json.dumps({'stage': 'auth', 'message': 'Authenticating with WarcraftLogs...'})}\n\n"
-            token = get_access_token(client_id, client_secret)
+            try:
+                token = get_access_token(client_id, client_secret)
+            except Exception as e:
+                yield f"data: {json.dumps({'error': f'Authentication failed: {str(e)}'})}\n\n"
+                return
             
-            # Fetch guild reports
-            yield f"data: {json.dumps({'stage': 'reports', 'message': f'Fetching reports for {guild_name}-{server}...'})}\n\n"
+            # Fetch guild roster
+            yield f"data: {json.dumps({'stage': 'roster', 'message': 'Fetching guild roster...'})}\n\n"
+            guild_members = get_guild_roster(token, guild_name, server, region)
+            
+            # Fetch reports
+            yield f"data: {json.dumps({'stage': 'reports', 'message': 'Fetching guild reports...'})}\n\n"
             reports = get_guild_reports(token, guild_name, server, region, report_zone, cutoff_date)
             
-            # Filter by author if needed
-            if author_filters and author_filters[0]:
-                reports = [r for r in reports if r.get('owner', {}).get('name') in author_filters]
+            if not reports:
+                yield f"data: {json.dumps({'error': 'No reports found for this guild/zone/date range'})}\n\n"
+                return
+            
+            # Filter by author if specified
+            if author_filters:
+                filtered = [r for r in reports if r.get('owner') in author_filters]
+                yield f"data: {json.dumps({'stage': 'reports', 'message': f'Filtered to {len(filtered)} reports by authors: {author_filters}'})}\n\n"
+                reports = filtered
             
             yield f"data: {json.dumps({'stage': 'reports', 'message': f'Found {len(reports)} reports to analyze'})}\n\n"
             
-            # Storage for all data
-            all_fights_deduped = []
-            seen_by_boss = {}
+            # Data structures
             counted_death_events = defaultdict(list)
-            counted_cheat_death_events = defaultdict(list)
-            character_breakdown = defaultdict(lambda: defaultdict(list))
             pull_participation = defaultdict(set)
             boss_participation = defaultdict(lambda: defaultdict(set))
-            boss_order = {}
+            character_breakdown = defaultdict(lambda: defaultdict(list))
+            pull_counter_by_boss = defaultdict(int)
             
-            # Cache for report data
-            report_deaths_cache = {}
-            report_cheat_deaths_cache = {}
+            # Collect all fights from all reports
+            all_fights_deduped = []
+            seen_by_boss = {}
+            fights_by_report = defaultdict(list)
             
-            # Process reports
-            for idx, report in enumerate(reports, 1):
-                rid = report.get("code")
+            yield f"data: {json.dumps({'stage': 'fights', 'message': f'Collecting fights from {len(reports)} reports...'})}\n\n"
+            for report_idx, rep in enumerate(reports, 1):
+                rid = rep['id']
                 
-                if not rid:
-                    continue
+                if report_idx % 5 == 0:
+                    yield f"data: {json.dumps({'stage': 'fights', 'message': f'Processing report {report_idx}/{len(reports)}'})}\n\n"
                 
-                yield f"data: {json.dumps({'stage': 'processing', 'message': f'Processing report {idx}/{len(reports)}: {rid}'})}\n\n"
+                fights_data = get_fights(token, rid)
+                report_abs_start = fights_data['report_start']
+                friendlies = fights_data['friendlies']
+                fights = fights_data['fights']
                 
-                # Fetch report details
-                report_details = get_report_details_bulk(token, rid)
+                # Get ability map for this report (fetch once per report)
+                ability_map = get_abilities_map(token, rid)
                 
-                if not report_details:
-                    continue
+                relevant_fights = analyze_fights(fights, fight_zone, difficulty)
                 
-                fights = report_details.get("fights", [])
-                friendlies = report_details.get("friendlies", [])
-                abilities = report_details.get("abilities", [])
-                report_abs_start = report_details.get("startTime", 0)
-                
-                # Build ability map
-                ability_map = {a.get("gameID"): a.get("name") for a in abilities if a.get("gameID")}
-                
-                # Filter fights
-                valid_fights = analyze_fights(fights, fight_zone, difficulty)
-                
-                if not valid_fights:
-                    continue
-                
-                # Fetch deaths for all valid fights
-                deaths_by_fight = get_report_deaths_bulk(token, rid, valid_fights, friendlies, ability_map)
-                report_deaths_cache[rid] = deaths_by_fight
-                
-                # Fetch cheat deaths if tracking is enabled
-                if track_cheat_deaths:
-                    cheat_deaths_by_fight = get_report_cheat_deaths_bulk(token, rid, valid_fights, friendlies, ability_map)
-                    report_cheat_deaths_cache[rid] = cheat_deaths_by_fight
-                
-                # Process each fight
-                for fight in valid_fights:
+                for fight in relevant_fights:
                     fid = fight['id']
-                    fight_abs_start = report_abs_start + fight['startTime']
-                    fight_abs_end = report_abs_start + fight['endTime']
+                    boss_name = fight['name']
                     boss_id = fight.get('boss', 0)
-                    boss_name = fight.get('name', 'Unknown')
                     is_kill = fight.get('kill', False)
                     
-                    if boss_id not in boss_order:
-                        boss_order[boss_id] = boss_name
+                    abs_start = report_abs_start + fight['start_time']
+                    abs_end = report_abs_start + fight['end_time']
                     
-                    # Check for duplicate
-                    if is_duplicate_pull(seen_by_boss, boss_id, fight_abs_start, fight_abs_end, is_kill):
+                    if is_duplicate_pull(seen_by_boss, boss_id, abs_start, abs_end, is_kill):
                         continue
                     
-                    # Add to deduplicated list
                     all_fights_deduped.append({
-                        "reportId": rid,
-                        "fightId": fid,
-                        "bossId": boss_id,
-                        "bossName": boss_name,
-                        "isKill": is_kill,
-                        "absStart": fight_abs_start,
-                        "absEnd": fight_abs_end
+                        'reportId': rid,
+                        'fight': fight,
+                        'boss_name': boss_name,
+                        'boss_id': boss_id,
+                        'is_kill': is_kill,
+                        'report_abs_start': report_abs_start,
+                        'friendlies': friendlies,
+                        'ability_map': ability_map
                     })
             
-            # Sort fights by timestamp
-            all_fights_deduped.sort(key=lambda x: x["absStart"])
+            yield f"data: {json.dumps({'stage': 'fights', 'message': f'Found {len(all_fights_deduped)} unique fights after deduplication'})}\n\n"
             
-            # Assign pull numbers
-            pull_nums_by_boss = defaultdict(int)
-            for fight in all_fights_deduped:
-                boss_id = fight["bossId"]
-                pull_nums_by_boss[boss_id] += 1
-                fight["pullNo"] = pull_nums_by_boss[boss_id]
+            # Group fights by report for bulk death fetching
+            for fight_data in all_fights_deduped:
+                fights_by_report[fight_data['reportId']].append(fight_data)
             
-            # Process each deduplicated fight
+            # Fetch deaths in bulk
+            yield f"data: {json.dumps({'stage': 'deaths', 'message': f'Fetching deaths for {len(fights_by_report)} reports...'})}\n\n"
+            report_deaths_cache = {}
+            for report_idx, (rid, report_fights) in enumerate(fights_by_report.items(), 1):
+                yield f"data: {json.dumps({'stage': 'deaths', 'message': f'Fetching deaths from report {report_idx}/{len(fights_by_report)}'})}\n\n"
+                sample_fight_data = report_fights[0]
+                friendlies = sample_fight_data['friendlies']
+                ability_map = sample_fight_data['ability_map']
+                fights_list = [fd['fight'] for fd in report_fights]
+                
+                report_deaths_cache[rid] = get_report_deaths_bulk(
+                    token, rid, fights_list, friendlies, ability_map, track_cheat_deaths
+                )
+            
+            yield f"data: {json.dumps({'stage': 'processing', 'message': f'Processing {len(all_fights_deduped)} fights...'})}\n\n"
+            
             total_deaths = 0
-            
-            for idx, fight in enumerate(all_fights_deduped, 1):
+            total_cheat_deaths = 0
+            for idx, fight_data in enumerate(all_fights_deduped, 1):
                 if idx % 10 == 0:
-                    yield f"data: {json.dumps({'stage': 'processing', 'message': f'Processing fight {idx}/{len(all_fights_deduped)} - {total_deaths} deaths found'})}\n\n"
+                    yield f"data: {json.dumps({'stage': 'processing', 'message': f'Processing fight {idx}/{len(all_fights_deduped)} - {total_deaths} deaths, {total_cheat_deaths} cheat deaths'})}\n\n"
                 
-                rid = fight["reportId"]
-                fid = fight["fightId"]
-                boss_id = fight["bossId"]
-                boss_name = fight["bossName"]
-                is_kill = fight["isKill"]
-                seq_no = fight["pullNo"]
+                rid = fight_data['reportId']
+                fight = fight_data['fight']
+                boss_name = fight_data['boss_name']
+                boss_id = fight_data['boss_id']
+                is_kill = fight_data['is_kill']
+                report_abs_start = fight_data['report_abs_start']
+                friendlies = fight_data['friendlies']
                 
-                # Get participants for this fight
-                report_details = get_report_details_bulk(token, rid)
-                if not report_details:
-                    continue
+                pull_counter_by_boss[boss_id] += 1
+                seq_no = pull_counter_by_boss[boss_id]
+                fid = fight['id']
                 
-                # Get raid participants
-                participants = get_raid_participants(report_details.get("friendlies", []))
-                fight_parts = set(participants.values())
+                fight_parts = set()
+                friendly_player_ids = set(fight.get('friendlyPlayers', []))
                 
-                # Track participation
+                if friendly_player_ids:
+                    for friendly in friendlies:
+                        if friendly.get('id') in friendly_player_ids:
+                            name = friendly.get('name')
+                            if name:
+                                fight_parts.add(name)
+                else:
+                    for friendly in friendlies:
+                        name = friendly.get('name')
+                        if name:
+                            fight_parts.add(name)
+                
                 for p in fight_parts:
                     main_char = get_main_character(p, character_groups)
-                    pull_id = f"{boss_id}-{seq_no}"
-                    pull_participation[main_char].add(pull_id)
-                    boss_participation[boss_id][main_char].add(seq_no)
+                    pull_key = f"{rid}_{fid}"
+                    pull_participation[main_char].add(pull_key)
+                    boss_participation[boss_name][main_char].add(pull_key)
                 
-                # Process deaths for this fight
-                deaths = report_deaths_cache.get(rid, {}).get(fid, [])
-                deaths_sorted = sorted(deaths, key=lambda e: e["timestamp"])
+                # Get all deaths (including cheat deaths) and sort by timestamp
+                all_deaths = report_deaths_cache[rid].get(fid, [])
+                deaths_sorted = sorted(all_deaths, key=lambda e: e["timestamp"])
                 
-                # CRITICAL: Store the cutoff timestamp for this fight
-                cutoff_timestamp = float('inf')
-                if len(deaths_sorted) > 0 and max_cutoff > 0:
-                    cutoff_index = min(max_cutoff - 1, len(deaths_sorted) - 1)
-                    if cutoff_index >= 0:
-                        cutoff_timestamp = deaths_sorted[cutoff_index]["timestamp"]
+                # Split into real deaths and cheat deaths for proper ranking
+                real_deaths = [d for d in deaths_sorted if not d.get('isCheatDeath', False)]
+                cheat_deaths = [d for d in deaths_sorted if d.get('isCheatDeath', False)]
                 
-                # Assign rank within pull (death order)
-                for rank, death_ev in enumerate(deaths_sorted, 1):
-                    original_char = death_ev["targetName"]
+                # Process real deaths with proper ranking (limited by max_cutoff)
+                for rank, ev in enumerate(real_deaths[:max_cutoff], start=1):
+                    original_char = ev["targetName"]
                     main_char = get_main_character(original_char, character_groups)
-                    
-                    # Skip if this character wasn't in this fight
-                    if main_char not in fight_parts and original_char not in fight_parts:
-                        continue
                     
                     death_event = {
                         "player": main_char,
                         "originalCharacter": original_char,
                         "boss": boss_name,
                         "bossId": boss_id,
-                        "phase": death_ev.get("phase", 1),
+                        "phase": ev.get("phase", 1),
                         "reportId": rid,
                         "fightId": fid,
                         "isKill": is_kill,
                         "pullNo": seq_no,
                         "rankWithinPull": rank,
-                        "absTs": fight_abs_start + death_ev["timestamp"],
-                        "abilityName": death_ev.get("abilityName", "Unknown")
+                        "absTs": report_abs_start + ev["timestamp"],
+                        "abilityName": ev.get("abilityName", "Unknown"),
+                        "isCheatDeath": False
                     }
                     counted_death_events[main_char].append(death_event)
                     character_breakdown[main_char][original_char].append(death_event)
                     total_deaths += 1
                 
-                # Process cheat deaths WITHIN THE DEATH WINDOW
-                if track_cheat_deaths and rid in report_cheat_deaths_cache:
-                    cheat_deaths = report_cheat_deaths_cache[rid].get(fid, [])
-                    cheat_deaths_sorted = sorted(cheat_deaths, key=lambda e: e["timestamp"])
+                # Process cheat deaths separately (they don't get ranks)
+                for ev in cheat_deaths:
+                    original_char = ev["targetName"]
+                    main_char = get_main_character(original_char, character_groups)
                     
-                    for cheat_ev in cheat_deaths_sorted:
-                        # Only count cheat deaths within the death window
-                        if cheat_ev["timestamp"] > cutoff_timestamp:
-                            break  # Since they're sorted, we can stop here
-                        
-                        original_char = cheat_ev["targetName"]
-                        main_char = get_main_character(original_char, character_groups)
-                        
-                        # Skip if this character wasn't in this fight
-                        if main_char not in fight_parts and original_char not in fight_parts:
-                            continue
-                        
-                        # Calculate pseudo-rank for cheat death (where it would have been)
-                        pseudo_rank = 1
-                        for death in deaths_sorted:
-                            if death["timestamp"] < cheat_ev["timestamp"]:
-                                pseudo_rank += 1
-                            else:
-                                break
-                        
-                        cheat_death_event = {
-                            "player": main_char,
-                            "originalCharacter": original_char,
-                            "boss": boss_name,
-                            "bossId": boss_id,
-                            "reportId": rid,
-                            "fightId": fid,
-                            "isKill": is_kill,
-                            "pullNo": seq_no,
-                            "absTs": fight_abs_start + cheat_ev["timestamp"],
-                            "abilityName": cheat_ev.get("abilityName", "Cheated Death"),
-                            "rankWithinPull": pseudo_rank,  # Add pseudo rank for proper filtering
-                            "isCheatDeath": True  # Flag to identify cheat deaths
-                        }
-                        counted_cheat_death_events[main_char].append(cheat_death_event)
+                    cheat_death_event = {
+                        "player": main_char,
+                        "originalCharacter": original_char,
+                        "boss": boss_name,
+                        "bossId": boss_id,
+                        "phase": ev.get("phase", 1),
+                        "reportId": rid,
+                        "fightId": fid,
+                        "isKill": is_kill,
+                        "pullNo": seq_no,
+                        "rankWithinPull": 999,  # Special rank for cheat deaths
+                        "absTs": report_abs_start + ev["timestamp"],
+                        "abilityName": ev.get("abilityName", "Cheat Death"),
+                        "isCheatDeath": True
+                    }
+                    counted_death_events[main_char].append(cheat_death_event)
+                    character_breakdown[main_char][original_char].append(cheat_death_event)
+                    total_cheat_deaths += 1
             
-            yield f"data: {json.dumps({'stage': 'complete', 'message': f'Analysis complete! Tracked {total_deaths} deaths across {len(counted_death_events)} players'})}\n\n"
+            yield f"data: {json.dumps({'stage': 'complete', 'message': f'Analysis complete! Tracked {total_deaths} real deaths and {total_cheat_deaths} cheat deaths across {len(counted_death_events)} players'})}\n\n"
             
             # Convert sets to lists
             pull_participation_json = {p: list(s) for p, s in pull_participation.items()}
@@ -660,22 +878,21 @@ def analyze():
                     "generatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "characterGroups": character_groups,
                     "reportCount": len(reports),
-                    "trackCheatDeaths": track_cheat_deaths,
+                    "trackCheatDeaths": track_cheat_deaths,  # NEW
                 },
                 "events": counted_death_events,
-                "cheatDeathEvents": counted_cheat_death_events if track_cheat_deaths else {},
                 "pullParticipation": pull_participation_json,
                 "bossParticipation": boss_participation_json,
                 "characterBreakdown": character_breakdown_json,
-                "bossOrder": boss_order
             }
             
-            yield f"data: {json.dumps({'stage': 'done', 'data': response})}\n\n"
-            
+            yield f"data: {json.dumps({'result': response})}\n\n"
+        
         except Exception as e:
-            error_msg = str(e)
-            print(f"Error in analysis: {error_msg}")
-            yield f"data: {json.dumps({'stage': 'error', 'message': error_msg})}\n\n"
+            print(f"Error in analyze: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
     
     return Response(generate(), mimetype='text/event-stream', headers={
         'Access-Control-Allow-Origin': '*',
@@ -683,17 +900,82 @@ def analyze():
         'X-Accel-Buffering': 'no'
     })
 
+
+
+@app.route('/api/share', methods=['POST'])
+def share_results():
+    """Save analysis results and return a shareable ID"""
+    try:
+        payload = request.get_json()
+        
+        # Generate a unique ID
+        share_id = str(uuid.uuid4())[:8]
+        
+        # Create shared_results directory if it doesn't exist
+        shared_dir = os.path.join(os.path.dirname(__file__), 'shared_results')
+        os.makedirs(shared_dir, exist_ok=True)
+        
+        # Save the results
+        filepath = os.path.join(shared_dir, f"{share_id}.json")
+        with open(filepath, 'w') as f:
+            json.dump({
+                'data': payload.get('data'),
+                'config': payload.get('config'),
+                'timestamp': datetime.now().isoformat()
+            }, f)
+        
+        return jsonify({
+            'success': True,
+            'shareId': share_id
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/shared/<share_id>', methods=['GET'])
+def get_shared_results(share_id):
+    """Retrieve shared results by ID"""
+    try:
+        shared_dir = os.path.join(os.path.dirname(__file__), 'shared_results')
+        filepath = os.path.join(shared_dir, f"{share_id}.json")
+        
+        if not os.path.exists(filepath):
+            return jsonify({
+                'success': False,
+                'error': 'Shared results not found'
+            }), 404
+        
+        with open(filepath, 'r') as f:
+            shared_data = json.load(f)
+        
+        return jsonify({
+            'success': True,
+            'data': shared_data.get('data'),
+            'config': shared_data.get('config'),
+            'timestamp': shared_data.get('timestamp')
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 @app.route('/api/health', methods=['GET'])
 def health():
     """Health check endpoint"""
-    return jsonify({"status": "healthy", "version": "2.4-fixed"})
+    return jsonify({"status": "ok", "message": "WarcraftLogs API is running"})
+
 
 @app.route('/', methods=['GET'])
 def root():
     """Root endpoint"""
     return jsonify({
         "service": "WarcraftLogs Death Tracker API",
-        "version": "2.4-fixed",
+        "version": "2.4",
         "status": "running",
         "endpoints": {
             "health": "/api/health",
@@ -703,24 +985,8 @@ def root():
         }
     })
 
-@app.route('/api/share', methods=['POST'])
-def share_results():
-    """Save results for sharing"""
-    try:
-        data = request.json
-        share_id = str(uuid.uuid4())[:8]
-        return jsonify({"shareId": share_id, "success": True})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/shared/<share_id>', methods=['GET'])
-def get_shared_results(share_id):
-    """Retrieve shared results"""
-    try:
-        return jsonify({"error": "Share functionality not yet implemented"}), 404
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    port = int(os.environ.get('PORT', 5000))
+    print(f"Starting WarcraftLogs Death Tracker API v2.4 on port {port}...")
+    app.run(debug=False, host='0.0.0.0', port=port)
