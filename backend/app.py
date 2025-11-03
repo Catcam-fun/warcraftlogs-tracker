@@ -30,9 +30,8 @@ CHEAT_DEATH_ABILITY_IDS = {
     123981,  # Perdition / Purgatory (Death Knight)
     45181,   # Cheated Death (Rogue)
     209261,  # Uncontained Fel / Last Resort (Demon Hunter - Vengeance)
-    27827,   # Spirit of Redemption (Holy Priest)
     211319,  # Restitution (Holy Priest - Spirit of Redemption debuff)
-    404569,  # Empty Hourglass (Evoker - Augmentation)
+    404369,  # Empty Hourglass (Evoker - Augmentation)
     1236692, # Void Reconstitution (Trinket - Void Reaper's Contract)
 }
 
@@ -414,34 +413,25 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
         cheat_death_events = []
         
         if enable_cheat_death:
-            print(f"⚡ Cheat death detection ENABLED - querying buff/debuff events...")
+            print(f"⚡ Cheat death detection ENABLED - querying debuff events...")
             
             # Small delay to avoid rate limits (0.1s = 10 calls/sec max)
             time.sleep(0.1)
             
-            # Query BOTH BUFFS AND DEBUFFS (some cheat deaths are buffs like Empty Hourglass)
+            # Query DEBUFF events (all cheat deaths apply debuffs)
             # Use filterExpression to ONLY get the cheat death ability IDs we care about
-            # This prevents hitting the 10k limit from querying all buffs/debuffs
+            # This prevents hitting the 10k limit from querying all debuffs
             cheat_death_ids = ", ".join(str(id) for id in CHEAT_DEATH_ABILITY_IDS)
             filter_expr = f"ability.id in ({cheat_death_ids})"
             
-            events_query = """
+            debuffs_query = """
             query($code: String!, $startTime: Float!, $endTime: Float!, $filterExpression: String) {
               reportData {
                 report(code: $code) {
-                  debuffs: events(
+                  events(
                     startTime: $startTime
                     endTime: $endTime
                     dataType: Debuffs
-                    filterExpression: $filterExpression
-                    limit: 10000
-                  ) {
-                    data
-                  }
-                  buffs: events(
-                    startTime: $startTime
-                    endTime: $endTime
-                    dataType: Buffs
                     filterExpression: $filterExpression
                     limit: 10000
                   ) {
@@ -452,43 +442,46 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
             }
             """
             
-            events_variables = {
+            debuffs_variables = {
                 "code": report_code,
                 "startTime": start_time,
                 "endTime": end_time,
                 "filterExpression": filter_expr
             }
             
-            events_data = graphql_query(token, events_query, events_variables)
-            debuff_events = events_data.get("reportData", {}).get("report", {}).get("debuffs", {}).get("data", [])
-            buff_events = events_data.get("reportData", {}).get("report", {}).get("buffs", {}).get("data", [])
-            all_cheat_events = debuff_events + buff_events
+            debuffs_data = graphql_query(token, debuffs_query, debuffs_variables)
             
-            print(f"  Found {len(debuff_events)} debuff events + {len(buff_events)} buff events = {len(all_cheat_events)} total")
+            # Safely extract debuff events with proper defaults
+            report_data = debuffs_data.get("reportData") or {}
+            report = report_data.get("report") if isinstance(report_data, dict) else {}
+            events_obj = report.get("events") if isinstance(report, dict) else None
+            debuff_events = events_obj.get("data", []) if isinstance(events_obj, dict) else []
+            
+            print(f"  Found {len(debuff_events)} cheat death debuff events (filtered query)")
             
             # DEBUG: Show which cheat death IDs were found
-            unique_abilities = {}
-            for event in all_cheat_events:
+            unique_debuff_abilities = {}
+            for event in debuff_events:
                 ability_id = event.get("abilityGameID")
-                if ability_id not in unique_abilities:
-                    unique_abilities[ability_id] = 0
-                unique_abilities[ability_id] += 1
+                if ability_id not in unique_debuff_abilities:
+                    unique_debuff_abilities[ability_id] = 0
+                unique_debuff_abilities[ability_id] += 1
             
-            if unique_abilities:
+            if unique_debuff_abilities:
                 print(f"  DEBUG: Found cheat death ability IDs:")
-                for ability_id, count in sorted(unique_abilities.items()):
+                for ability_id, count in sorted(unique_debuff_abilities.items()):
                     ability_name = ability_map.get(ability_id, "Unknown")
                     print(f"    - {ability_id} ({ability_name}): {count} occurrences")
             else:
-                print(f"  DEBUG: No cheat death abilities found in this report")
+                print(f"  DEBUG: No cheat death debuffs found in this report")
             
-            # Process events - each applydebuff or applybuff is a cheat death
-            # Only track when the ability is APPLIED (when cheat death procs)
-            for event in all_cheat_events:
+            # Process debuff events - each applydebuff is a cheat death
+            # Only track when the debuff is APPLIED (when cheat death procs)
+            for event in debuff_events:
                 ability_id = event.get("abilityGameID")
                 event_type = event.get("type")
                 
-                if event_type in ("applydebuff", "applybuff"):
+                if event_type == "applydebuff":
                     target_id = event.get("targetID")
                     timestamp = event.get("timestamp")
                     fight_id = event.get("fight")
@@ -508,7 +501,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
             
             print(f"  Found {len(cheat_death_events)} cheat death events to add")
         else:
-            print(f"💨 Cheat death detection DISABLED - skipping buff/debuff queries (faster)")
+            print(f"💨 Cheat death detection DISABLED - skipping debuff queries (faster)")
         
         # STEP 3: Process regular death events
         for event in events_data:
