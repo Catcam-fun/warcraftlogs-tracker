@@ -14,7 +14,7 @@ export default function WarcraftLogsApp() {
     maxCutoff: '5',
     cutoffDate: '2025-10-10',
     authorFilters: '',
-    characterGroups: ''
+    characterGroups: '',
     trackCheatDeaths: false
   });
 
@@ -242,9 +242,10 @@ export default function WarcraftLogsApp() {
         ev.abilityName && ev.abilityName !== 'Unknown'
       );
       
-      // Cheat deaths (no rank filtering, just boss filtering)
+      // Cheat deaths - MUST ALSO BE WITHIN THE DEATH WINDOW (rank filtering)
       const cheatEvs = trackingCheatDeaths ? ((cheatDeathEventsAll[player] || []).filter(
-        ev => (selectedBosses.size === 0 || selectedBosses.has(ev.boss))
+        ev => ev.rankWithinPull <= cutoff &&  // Apply same rank filtering as regular deaths
+        (selectedBosses.size === 0 || selectedBosses.has(ev.boss))
       )) : [];
       
       if (!evs.length && !cheatEvs.length) continue;
@@ -333,7 +334,7 @@ export default function WarcraftLogsApp() {
           ev => ev.boss === boss && ev.rankWithinPull <= cutoff
         ).length || 0;
         const bossCheatDeaths = trackingCheatDeaths ? ((cheatDeathEventsAll[player] || []).filter(
-          ev => ev.boss === boss
+          ev => ev.boss === boss && ev.rankWithinPull <= cutoff  // Apply rank filter to cheat deaths
         ).length || 0) : 0;
         const rate = bossPulls > 0 ? (bossDeaths / bossPulls * 100) : null;
         const totalRate = bossPulls > 0 ? ((bossDeaths + bossCheatDeaths) / bossPulls * 100) : null;
@@ -357,7 +358,9 @@ export default function WarcraftLogsApp() {
         totalDeaths = (data.events[player] || []).filter(
           ev => ev.rankWithinPull <= cutoff
         ).length || 0;
-        totalCheatDeaths = trackingCheatDeaths ? (cheatDeathEventsAll[player] || []).length : 0;
+        totalCheatDeaths = trackingCheatDeaths ? ((cheatDeathEventsAll[player] || []).filter(
+          ev => ev.rankWithinPull <= cutoff  // Apply rank filter to cheat deaths too
+        ).length || 0) : 0;
       } else {
         bosses.forEach(boss => {
           totalPulls += data.bossParticipation[boss]?.[player]?.length || 0;
@@ -365,7 +368,7 @@ export default function WarcraftLogsApp() {
             ev => ev.boss === boss && ev.rankWithinPull <= cutoff
           ).length || 0;
           totalCheatDeaths += trackingCheatDeaths ? ((cheatDeathEventsAll[player] || []).filter(
-            ev => ev.boss === boss
+            ev => ev.boss === boss && ev.rankWithinPull <= cutoff  // Apply rank filter to cheat deaths
           ).length || 0) : 0;
         });
       }
