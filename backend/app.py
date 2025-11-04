@@ -893,8 +893,8 @@ def analyze():
                         "fightId": fid,
                         "isKill": is_kill,
                         "pullNo": seq_no,
-                        "rankWithinPull": real_death_rank,  # Rank among real deaths only
-                        "rankWithinPullTotal": total_death_rank,  # Rank among all deaths
+                        "rankWithinPull": real_death_rank if not is_cheat else None,  # Only set for real deaths
+                        "rankWithinPullTotal": total_death_rank,  # Set for all deaths
                         "absTs": report_abs_start + ev["timestamp"],
                         "abilityName": ev.get("abilityName", "Unknown"),
                         "isCheatDeath": is_cheat
