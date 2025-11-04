@@ -29,11 +29,9 @@ CHEAT_DEATH_ABILITY_IDS = {
     87024,   # Cauterized (Mage - Fire)
     123981,  # Perdition / Purgatory (Death Knight)
     45181,   # Cheated Death (Rogue)
-    209261,  # Uncontained Fel / Last Resort (Demon Hunter - Vengeance)
+    200261,  # Uncontained Fel / Last Resort (Demon Hunter - Vengeance)
     27827,   # Spirit of Redemption (Holy Priest)
     211319,  # Restitution (Holy Priest - Spirit of Redemption debuff)
-    404569,  # Empty Hourglass (Evoker - Augmentation)
-    1236692, # Void Reconstitution (Trinket - Void Reaper's Contract)
 }
 
 # WarcraftLogs V2 API endpoints (through Cloudflare Worker proxy)
@@ -414,34 +412,25 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
         cheat_death_events = []
         
         if enable_cheat_death:
-            print(f"⚡ Cheat death detection ENABLED - querying buff/debuff events...")
+            print(f"⚡ Cheat death detection ENABLED - querying debuff events...")
             
             # Small delay to avoid rate limits (0.1s = 10 calls/sec max)
             time.sleep(0.1)
             
-            # Query BOTH BUFFS AND DEBUFFS (some cheat deaths are buffs like Empty Hourglass)
+            # Query DEBUFF events (cheat deaths appear as debuffs, not buffs!)
             # Use filterExpression to ONLY get the cheat death ability IDs we care about
-            # This prevents hitting the 10k limit from querying all buffs/debuffs
+            # This prevents hitting the 10k limit from querying all debuffs
             cheat_death_ids = ", ".join(str(id) for id in CHEAT_DEATH_ABILITY_IDS)
             filter_expr = f"ability.id in ({cheat_death_ids})"
             
-            events_query = """
+            debuffs_query = """
             query($code: String!, $startTime: Float!, $endTime: Float!, $filterExpression: String) {
               reportData {
                 report(code: $code) {
-                  debuffs: events(
+                  events(
                     startTime: $startTime
                     endTime: $endTime
                     dataType: Debuffs
-                    filterExpression: $filterExpression
-                    limit: 10000
-                  ) {
-                    data
-                  }
-                  buffs: events(
-                    startTime: $startTime
-                    endTime: $endTime
-                    dataType: Buffs
                     filterExpression: $filterExpression
                     limit: 10000
                   ) {
@@ -452,43 +441,41 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
             }
             """
             
-            events_variables = {
+            debuffs_variables = {
                 "code": report_code,
                 "startTime": start_time,
                 "endTime": end_time,
                 "filterExpression": filter_expr
             }
             
-            events_data = graphql_query(token, events_query, events_variables)
-            debuff_events = events_data.get("reportData", {}).get("report", {}).get("debuffs", {}).get("data", [])
-            buff_events = events_data.get("reportData", {}).get("report", {}).get("buffs", {}).get("data", [])
-            all_cheat_events = debuff_events + buff_events
+            debuffs_data = graphql_query(token, debuffs_query, debuffs_variables)
+            debuff_events = debuffs_data.get("reportData", {}).get("report", {}).get("events", {}).get("data", [])
             
-            print(f"  Found {len(debuff_events)} debuff events + {len(buff_events)} buff events = {len(all_cheat_events)} total")
+            print(f"  Found {len(debuff_events)} cheat death debuff events (filtered query)")
             
             # DEBUG: Show which cheat death IDs were found
-            unique_abilities = {}
-            for event in all_cheat_events:
+            unique_debuff_abilities = {}
+            for event in debuff_events:
                 ability_id = event.get("abilityGameID")
-                if ability_id not in unique_abilities:
-                    unique_abilities[ability_id] = 0
-                unique_abilities[ability_id] += 1
+                if ability_id not in unique_debuff_abilities:
+                    unique_debuff_abilities[ability_id] = 0
+                unique_debuff_abilities[ability_id] += 1
             
-            if unique_abilities:
+            if unique_debuff_abilities:
                 print(f"  DEBUG: Found cheat death ability IDs:")
-                for ability_id, count in sorted(unique_abilities.items()):
+                for ability_id, count in sorted(unique_debuff_abilities.items()):
                     ability_name = ability_map.get(ability_id, "Unknown")
                     print(f"    - {ability_id} ({ability_name}): {count} occurrences")
             else:
-                print(f"  DEBUG: No cheat death abilities found in this report")
+                print(f"  DEBUG: No cheat death debuffs found in this report")
             
-            # Process events - each applydebuff or applybuff is a cheat death
-            # Only track when the ability is APPLIED (when cheat death procs)
-            for event in all_cheat_events:
+            # Process debuff events - each applydebuff is a cheat death
+            # Only track when the debuff is APPLIED (when cheat death procs)
+            for event in debuff_events:
                 ability_id = event.get("abilityGameID")
                 event_type = event.get("type")
                 
-                if event_type in ("applydebuff", "applybuff"):
+                if event_type == "applydebuff":
                     target_id = event.get("targetID")
                     timestamp = event.get("timestamp")
                     fight_id = event.get("fight")
@@ -508,7 +495,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
             
             print(f"  Found {len(cheat_death_events)} cheat death events to add")
         else:
-            print(f"💨 Cheat death detection DISABLED - skipping buff/debuff queries (faster)")
+            print(f"💨 Cheat death detection DISABLED - skipping debuff queries (faster)")
         
         # STEP 3: Process regular death events
         for event in events_data:
@@ -876,51 +863,23 @@ def analyze():
                 
                 # Get all deaths for this fight (real + cheat if enabled)
                 deaths = report_deaths_cache[rid].get(fid, [])
+                # Send up to 3x maxCutoff to give frontend flexibility
                 deaths_sorted_all = sorted(deaths, key=lambda e: e["timestamp"])
+                deaths_sorted = deaths_sorted_all[:max_cutoff * 3]
                 
-                # CRITICAL FIX: Don't let cheat deaths steal slots from real deaths
-                # Find the timestamp of the (max_cutoff * 3)th REAL death
-                real_death_count = 0
-                cutoff_timestamp = None
-                for ev in deaths_sorted_all:
-                    if not ev.get("isCheatDeath", False):
-                        real_death_count += 1
-                        if real_death_count >= max_cutoff * 3:
-                            cutoff_timestamp = ev["timestamp"]
-                            break
-                
-                # Include all events (real + cheat) up to that timestamp
-                if cutoff_timestamp is not None:
-                    deaths_sorted = [ev for ev in deaths_sorted_all if ev["timestamp"] <= cutoff_timestamp]
-                else:
-                    # Fewer than max_cutoff * 3 real deaths, take everything
-                    deaths_sorted = deaths_sorted_all
-                
-                # Assign ranks - cheat deaths get associated with the next real death
+                # Assign TWO ranks to each death event:
+                # 1. rankWithinPull - rank among REAL deaths only (ignoring cheat deaths)
+                # 2. rankWithinPullTotal - rank among ALL deaths (including cheat deaths)
                 real_death_rank = 0
+                total_death_rank = 0
                 
-                # First pass: assign ranks to real deaths
                 for ev in deaths_sorted:
-                    if not ev.get("isCheatDeath", False):
-                        real_death_rank += 1
-                        ev["realRank"] = real_death_rank
-                    else:
-                        ev["realRank"] = None
-                
-                # Second pass: for cheat deaths, find which real death they precede
-                for i, ev in enumerate(deaths_sorted):
-                    if ev.get("isCheatDeath", False):
-                        # Find the next real death after this cheat death
-                        next_real_rank = real_death_rank + 1  # Default: after all tracked deaths
-                        for j in range(i + 1, len(deaths_sorted)):
-                            if deaths_sorted[j].get("realRank") is not None:
-                                next_real_rank = deaths_sorted[j]["realRank"]
-                                break
-                        ev["nextRealRank"] = next_real_rank
-                
-                # Third pass: create death events
-                for ev in deaths_sorted:
+                    total_death_rank += 1
                     is_cheat = ev.get("isCheatDeath", False)
+                    
+                    if not is_cheat:
+                        real_death_rank += 1
+                    
                     original_char = ev["targetName"]
                     main_char = get_main_character(original_char, character_groups)
                     
@@ -934,8 +893,8 @@ def analyze():
                         "fightId": fid,
                         "isKill": is_kill,
                         "pullNo": seq_no,
-                        "rankWithinPull": ev.get("realRank"),  # Real death rank (or None for cheat)
-                        "nextRealDeathRank": ev.get("nextRealRank"),  # For cheat deaths: which real death they precede
+                        "rankWithinPull": real_death_rank,  # Rank among real deaths only
+                        "rankWithinPullTotal": total_death_rank,  # Rank among all deaths
                         "absTs": report_abs_start + ev["timestamp"],
                         "abilityName": ev.get("abilityName", "Unknown"),
                         "isCheatDeath": is_cheat
