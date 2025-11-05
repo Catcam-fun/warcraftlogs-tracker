@@ -250,21 +250,58 @@ export default function WarcraftLogsApp() {
         }
       }
 
-      // SIMPLE FILTERING using backend-provided ranks:
-      // Real deaths only: filter by rankWithinPull <= cutoff AND !isCheatDeath
-      // Note: Cheat deaths have rankWithinPull = null/undefined, so they're automatically excluded
-      const realDeaths = allPlayerEvents.filter(
-        ev => ev.rankWithinPull != null && ev.rankWithinPull <= cutoff && !ev.isCheatDeath
-      );
+      // WINDOW-BASED FILTERING:
+      // 1. Get first X real deaths (by rankWithinPull)
+      // 2. Find cheat deaths that occurred before the Xth real death's timestamp
       
-      // Total deaths (including cheat): filter by rankWithinPullTotal <= cutoff
-      const totalDeaths = allPlayerEvents.filter(
-        ev => ev.rankWithinPullTotal != null && ev.rankWithinPullTotal <= cutoff
-      );
+      // Group events by pull to apply window logic per-pull
+      const eventsByPull = {};
+      allPlayerEvents.forEach(ev => {
+        const pullKey = `${ev.reportId}_${ev.fightId}`;
+        if (!eventsByPull[pullKey]) {
+          eventsByPull[pullKey] = { real: [], cheat: [], boss: ev.boss };
+        }
+        if (ev.isCheatDeath) {
+          eventsByPull[pullKey].cheat.push(ev);
+        } else {
+          eventsByPull[pullKey].real.push(ev);
+        }
+      });
+      
+      // Collect deaths that fall within the cutoff window
+      const realDeaths = [];
+      const cheatDeaths = [];
+      
+      Object.values(eventsByPull).forEach(pullData => {
+        // Get first X real deaths from this pull (sorted by rank, which is already correct from backend)
+        const pullRealDeaths = pullData.real
+          .filter(ev => ev.rankWithinPull <= cutoff)
+          .sort((a, b) => a.absTs - b.absTs);
+        
+        realDeaths.push(...pullRealDeaths);
+        
+        // Find cutoff timestamp (timestamp of last real death in the window)
+        if (pullRealDeaths.length > 0) {
+          const cutoffTimestamp = pullRealDeaths[pullRealDeaths.length - 1].absTs;
+          
+          // Include cheat deaths that occurred at or before the cutoff timestamp
+          const pullCheatDeaths = pullData.cheat.filter(
+            ev => ev.absTs <= cutoffTimestamp
+          );
+          
+          cheatDeaths.push(...pullCheatDeaths);
+        } else if (pullData.real.length === 0) {
+          // No real deaths in this pull at all - include all cheat deaths
+          // (they saved people from being the first deaths)
+          cheatDeaths.push(...pullData.cheat);
+        }
+        // If pullData.real.length > 0 but pullRealDeaths.length === 0, it means all real deaths 
+        // are beyond the cutoff, so we don't include any cheat deaths from this pull
+      });
       
       const realDeathCount = realDeaths.length;
-      const totalDeathCount = totalDeaths.length;
-      const cheatDeathCount = totalDeaths.filter(ev => ev.isCheatDeath).length;
+      const cheatDeathCount = cheatDeaths.length;
+      const totalDeathCount = realDeathCount + cheatDeathCount;
       
       const realRate = pulls > 0 ? (realDeathCount / pulls * 100) : 0;
       const totalRate = pulls > 0 ? (totalDeathCount / pulls * 100) : 0;
@@ -282,8 +319,23 @@ export default function WarcraftLogsApp() {
         deathsByBoss[ev.boss].push(ev);
       });
       
+      const cheatDeathsByBoss = {};
+      cheatDeaths.forEach(ev => {
+        if (!cheatDeathsByBoss[ev.boss]) {
+          cheatDeathsByBoss[ev.boss] = [];
+        }
+        cheatDeathsByBoss[ev.boss].push(ev);
+      });
+      
+      // Total deaths by boss = real + cheat
       const totalDeathsByBoss = {};
-      totalDeaths.forEach(ev => {
+      realDeaths.forEach(ev => {
+        if (!totalDeathsByBoss[ev.boss]) {
+          totalDeathsByBoss[ev.boss] = [];
+        }
+        totalDeathsByBoss[ev.boss].push(ev);
+      });
+      cheatDeaths.forEach(ev => {
         if (!totalDeathsByBoss[ev.boss]) {
           totalDeathsByBoss[ev.boss] = [];
         }
@@ -315,6 +367,7 @@ export default function WarcraftLogsApp() {
         totalRate,
         hasCheatDeaths,
         deathsByBoss,
+        cheatDeathsByBoss,  // NEW: separate cheat deaths by boss
         totalDeathsByBoss,
         topAbilitiesByBoss
       });
@@ -345,16 +398,36 @@ export default function WarcraftLogsApp() {
       bosses.forEach(boss => {
         const bossPulls = data.bossParticipation[boss]?.[player]?.length || 0;
         
-        // Real deaths: rankWithinPull <= cutoff AND !isCheatDeath AND boss matches
-        // Note: Cheat deaths have rankWithinPull = null, so they're automatically excluded
-        const bossRealDeaths = allPlayerEvents.filter(
-          ev => ev.boss === boss && ev.rankWithinPull != null && ev.rankWithinPull <= cutoff && !ev.isCheatDeath
-        ).length;
+        // Window-based filtering for this boss
+        const playerBossEvents = allPlayerEvents.filter(ev => ev.boss === boss);
+        const bossPullMap = {};
+        playerBossEvents.forEach(ev => {
+          const pullKey = `${ev.reportId}_${ev.fightId}`;
+          if (!bossPullMap[pullKey]) {
+            bossPullMap[pullKey] = { real: [], cheat: [] };
+          }
+          if (ev.isCheatDeath) {
+            bossPullMap[pullKey].cheat.push(ev);
+          } else {
+            bossPullMap[pullKey].real.push(ev);
+          }
+        });
         
-        // Total deaths: rankWithinPullTotal <= cutoff AND boss matches
-        const bossTotalDeaths = allPlayerEvents.filter(
-          ev => ev.boss === boss && ev.rankWithinPullTotal != null && ev.rankWithinPullTotal <= cutoff
-        ).length;
+        let bossRealDeaths = 0;
+        let bossCheatDeaths = 0;
+        Object.values(bossPullMap).forEach(pullData => {
+          const pullRealDeaths = pullData.real.filter(ev => ev.rankWithinPull <= cutoff);
+          bossRealDeaths += pullRealDeaths.length;
+          
+          if (hasCheatDeaths && pullRealDeaths.length > 0) {
+            const cutoffTimestamp = Math.max(...pullRealDeaths.map(ev => ev.absTs));
+            bossCheatDeaths += pullData.cheat.filter(ev => ev.absTs <= cutoffTimestamp).length;
+          } else if (hasCheatDeaths && pullData.real.length === 0) {
+            bossCheatDeaths += pullData.cheat.length;
+          }
+        });
+        
+        const bossTotalDeaths = bossRealDeaths + bossCheatDeaths;
         
         const realRate = bossPulls > 0 ? (bossRealDeaths / bossPulls * 100) : null;
         const totalRate = bossPulls > 0 ? (bossTotalDeaths / bossPulls * 100) : null;
@@ -375,13 +448,36 @@ export default function WarcraftLogsApp() {
       let totalWithCheatDeaths = 0;
       
       if (selectedBosses.size === 0) {
+        // Use window-based filtering for all bosses
         totalPulls = data.pullParticipation[player]?.length || 0;
-        totalRealDeaths = allPlayerEvents.filter(
-          ev => ev.rankWithinPull != null && ev.rankWithinPull <= cutoff && !ev.isCheatDeath
-        ).length;
-        totalWithCheatDeaths = allPlayerEvents.filter(
-          ev => ev.rankWithinPullTotal != null && ev.rankWithinPullTotal <= cutoff
-        ).length;
+        
+        const pullMap = {};
+        allPlayerEvents.forEach(ev => {
+          const pullKey = `${ev.reportId}_${ev.fightId}`;
+          if (!pullMap[pullKey]) {
+            pullMap[pullKey] = { real: [], cheat: [] };
+          }
+          if (ev.isCheatDeath) {
+            pullMap[pullKey].cheat.push(ev);
+          } else {
+            pullMap[pullKey].real.push(ev);
+          }
+        });
+        
+        let cheatDeathsCount = 0;
+        Object.values(pullMap).forEach(pullData => {
+          const pullRealDeaths = pullData.real.filter(ev => ev.rankWithinPull <= cutoff);
+          totalRealDeaths += pullRealDeaths.length;
+          
+          if (hasCheatDeaths && pullRealDeaths.length > 0) {
+            const cutoffTimestamp = Math.max(...pullRealDeaths.map(ev => ev.absTs));
+            cheatDeathsCount += pullData.cheat.filter(ev => ev.absTs <= cutoffTimestamp).length;
+          } else if (hasCheatDeaths && pullData.real.length === 0) {
+            cheatDeathsCount += pullData.cheat.length;
+          }
+        });
+        
+        totalWithCheatDeaths = totalRealDeaths + cheatDeathsCount;
       } else {
         bosses.forEach(boss => {
           totalPulls += data.bossParticipation[boss]?.[player]?.length || 0;
@@ -1177,7 +1273,7 @@ export default function WarcraftLogsApp() {
 
             {view === 'players' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {getFilteredStats().map(({ player, realDeaths, totalDeaths, cheatDeaths, pulls, realRate, totalRate, hasCheatDeaths, deathsByBoss, totalDeathsByBoss, topAbilitiesByBoss }) => {
+                {getFilteredStats().map(({ player, realDeaths, totalDeaths, cheatDeaths, pulls, realRate, totalRate, hasCheatDeaths, deathsByBoss, cheatDeathsByBoss, totalDeathsByBoss, topAbilitiesByBoss }) => {
                   const isExpanded = expandedPlayers.has(player);
                   const showBothStats = hasCheatDeaths && cheatDeaths > 0;
                   
