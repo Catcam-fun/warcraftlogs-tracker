@@ -560,8 +560,21 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
             print(f"    - Cheat deaths: {cheat_deaths}")
         
         # Filter mass deaths for each fight
+        # CRITICAL: Apply mass death filter to REAL DEATHS ONLY
+        # Cheat deaths should NOT count towards the mass wipe threshold
         for fid in deaths_by_fight:
-            deaths_by_fight[fid] = filter_mass_deaths(deaths_by_fight[fid])
+            all_deaths = deaths_by_fight[fid]
+            
+            # Separate real deaths and cheat deaths
+            real_deaths_list = [d for d in all_deaths if not d.get("isCheatDeath", False)]
+            cheat_deaths_list = [d for d in all_deaths if d.get("isCheatDeath", False)]
+            
+            # Apply mass death filter ONLY to real deaths
+            filtered_real_deaths = filter_mass_deaths(real_deaths_list)
+            
+            # Combine: filtered real deaths + ALL cheat deaths (unfiltered)
+            # Cheat deaths are kept separate from mass wipe detection
+            deaths_by_fight[fid] = filtered_real_deaths + cheat_deaths_list
         
         return deaths_by_fight
     
