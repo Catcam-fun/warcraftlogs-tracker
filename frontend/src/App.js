@@ -252,7 +252,7 @@ export default function WarcraftLogsApp() {
 
       // WINDOW-BASED FILTERING:
       // 1. Get first X real deaths (by rankWithinPull)
-      // 2. Find cheat deaths that occurred before the Xth real death's timestamp
+      // 2. Find cheat deaths BETWEEN 1st and Xth real death timestamps
       
       // Group events by pull to apply window logic per-pull
       const eventsByPull = {};
@@ -273,30 +273,27 @@ export default function WarcraftLogsApp() {
       const cheatDeaths = [];
       
       Object.values(eventsByPull).forEach(pullData => {
-        // Get first X real deaths from this pull (sorted by rank, which is already correct from backend)
+        // Get first X real deaths from this pull
         const pullRealDeaths = pullData.real
           .filter(ev => ev.rankWithinPull <= cutoff)
           .sort((a, b) => a.absTs - b.absTs);
         
         realDeaths.push(...pullRealDeaths);
         
-        // Find cutoff timestamp (timestamp of last real death in the window)
+        // Find cheat deaths up to Xth real death
         if (pullRealDeaths.length > 0) {
-          const cutoffTimestamp = pullRealDeaths[pullRealDeaths.length - 1].absTs;
+          const lastDeathTimestamp = pullRealDeaths[pullRealDeaths.length - 1].absTs;
           
-          // Include cheat deaths that occurred at or before the cutoff timestamp
+          // Include cheat deaths that occurred AT OR BEFORE the Xth death
+          // Can be before 1st death, between deaths, but not after Xth death
           const pullCheatDeaths = pullData.cheat.filter(
-            ev => ev.absTs <= cutoffTimestamp
+            ev => ev.absTs <= lastDeathTimestamp
           );
           
           cheatDeaths.push(...pullCheatDeaths);
-        } else if (pullData.real.length === 0) {
-          // No real deaths in this pull at all - include all cheat deaths
-          // (they saved people from being the first deaths)
-          cheatDeaths.push(...pullData.cheat);
         }
-        // If pullData.real.length > 0 but pullRealDeaths.length === 0, it means all real deaths 
-        // are beyond the cutoff, so we don't include any cheat deaths from this pull
+        // Note: If no real deaths in pull, don't include any cheat deaths
+        // (cheat deaths without context aren't useful)
       });
       
       const realDeathCount = realDeaths.length;
@@ -367,7 +364,7 @@ export default function WarcraftLogsApp() {
         totalRate,
         hasCheatDeaths,
         deathsByBoss,
-        cheatDeathsByBoss,  // NEW: separate cheat deaths by boss
+        cheatDeathsByBoss,
         totalDeathsByBoss,
         topAbilitiesByBoss
       });
@@ -420,10 +417,10 @@ export default function WarcraftLogsApp() {
           bossRealDeaths += pullRealDeaths.length;
           
           if (hasCheatDeaths && pullRealDeaths.length > 0) {
-            const cutoffTimestamp = Math.max(...pullRealDeaths.map(ev => ev.absTs));
-            bossCheatDeaths += pullData.cheat.filter(ev => ev.absTs <= cutoffTimestamp).length;
-          } else if (hasCheatDeaths && pullData.real.length === 0) {
-            bossCheatDeaths += pullData.cheat.length;
+            const lastDeathTimestamp = Math.max(...pullRealDeaths.map(ev => ev.absTs));
+            bossCheatDeaths += pullData.cheat.filter(
+              ev => ev.absTs <= lastDeathTimestamp
+            ).length;
           }
         });
         
@@ -470,10 +467,10 @@ export default function WarcraftLogsApp() {
           totalRealDeaths += pullRealDeaths.length;
           
           if (hasCheatDeaths && pullRealDeaths.length > 0) {
-            const cutoffTimestamp = Math.max(...pullRealDeaths.map(ev => ev.absTs));
-            cheatDeathsCount += pullData.cheat.filter(ev => ev.absTs <= cutoffTimestamp).length;
-          } else if (hasCheatDeaths && pullData.real.length === 0) {
-            cheatDeathsCount += pullData.cheat.length;
+            const lastDeathTimestamp = Math.max(...pullRealDeaths.map(ev => ev.absTs));
+            cheatDeathsCount += pullData.cheat.filter(
+              ev => ev.absTs <= lastDeathTimestamp
+            ).length;
           }
         });
         
