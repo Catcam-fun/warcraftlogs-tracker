@@ -502,10 +502,12 @@ def analyze():
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
         return response
     
+    # Extract payload BEFORE the generator function to avoid request context issues
+    payload = request.get_json()
+    
     def generate():
         try:
-            payload = request.get_json()
-            
+            # Use the payload from the outer scope
             client_id = payload.get("clientId", "").strip()
             client_secret = payload.get("clientSecret", "").strip()
             guild_name = payload.get("guildName", "").strip()
