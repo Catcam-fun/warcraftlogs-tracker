@@ -224,13 +224,14 @@ export default function WarcraftLogsApp() {
   const getFilteredStats = () => {
     if (!data) return [];
 
-    const stats = [];
-    const eventsAll = data.events;
-    const pullsMap = data.pullParticipation;
-    const bossPart = data.bossParticipation;
-    const pullCutoffTimestamps = data.pullCutoffTimestamps || {};
+    try {
+      const stats = [];
+      const eventsAll = data.events;
+      const pullsMap = data.pullParticipation;
+      const bossPart = data.bossParticipation;
+      const pullCutoffTimestamps = data.pullCutoffTimestamps || {};
 
-    const hasCheatDeaths = config.enableCheatDeath;
+      const hasCheatDeaths = config.enableCheatDeath;
     
     for (const player of Object.keys(eventsAll)) {
       const allPlayerEvents = eventsAll[player].filter(
@@ -383,12 +384,17 @@ export default function WarcraftLogsApp() {
     }
 
     return stats.sort((a, b) => b.realRate - a.realRate || b.realDeaths - a.realDeaths);
+    } catch (error) {
+      console.error('Error in getFilteredStats:', error);
+      return [];
+    }
   };
 
   const getOverviewData = () => {
     if (!data) return { bosses: [], players: [], grid: {} };
 
-    const pullCutoffTimestamps = data.pullCutoffTimestamps || {};
+    try {
+      const pullCutoffTimestamps = data.pullCutoffTimestamps || {};
 
     // Filter bosses based on selection
     const allBosses = Object.keys(data.bossParticipation).sort();
@@ -516,6 +522,10 @@ export default function WarcraftLogsApp() {
     });
 
     return { bosses, players, grid };
+    } catch (error) {
+      console.error('Error in getOverviewData:', error);
+      return { bosses: [], players: [], grid: {} };
+    }
   };
 
   const sortOverviewData = (bosses, players, grid, key) => {
