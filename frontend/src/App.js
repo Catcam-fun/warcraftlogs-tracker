@@ -278,22 +278,34 @@ export default function WarcraftLogsApp() {
         // Get this player's real deaths within cutoff
         const pullRealDeaths = pullData.real
           .filter(ev => ev.rankWithinPull <= cutoff)
-          .sort((a, b) => a.timestamp - b.timestamp);
+          .sort((a, b) => {
+            // Use timestamp if available, otherwise fall back to absTs
+            const aTime = a.timestamp !== undefined ? a.timestamp : a.absTs;
+            const bTime = b.timestamp !== undefined ? b.timestamp : b.absTs;
+            return aTime - bTime;
+          });
         
         realDeaths.push(...pullRealDeaths);
         
         // Get the GLOBAL cutoff timestamp for this pull (Xth death across ALL players)
         const globalCutoffTs = pullCutoffTimestamps[pullKey]?.[cutoff];
         
-        if (globalCutoffTs !== null && globalCutoffTs !== undefined) {
+        if (globalCutoffTs !== null && globalCutoffTs !== undefined && hasCheatDeaths) {
           // Include cheat deaths that occurred AT OR BEFORE the global Xth death
-          const pullCheatDeaths = pullData.cheat.filter(
-            ev => ev.timestamp <= globalCutoffTs
-          );
+          // Only use new filtering if timestamp field exists (new data format)
+          const pullCheatDeaths = pullData.cheat.filter(ev => {
+            if (ev.timestamp !== undefined) {
+              // New format: use relative timestamp
+              return ev.timestamp <= globalCutoffTs;
+            } else {
+              // Old format: skip advanced filtering, include all cheat deaths
+              return true;
+            }
+          });
           
           cheatDeaths.push(...pullCheatDeaths);
         }
-        // If no global cutoff timestamp exists, don't include cheat deaths from this pull
+        // If no global cutoff timestamp exists or cheat deaths disabled, don't include cheat deaths
       });
       
       const realDeathCount = realDeaths.length;
@@ -422,9 +434,10 @@ export default function WarcraftLogsApp() {
           if (hasCheatDeaths) {
             const globalCutoffTs = pullCutoffTimestamps[pullKey]?.[cutoff];
             if (globalCutoffTs !== null && globalCutoffTs !== undefined) {
-              bossCheatDeaths += pullData.cheat.filter(
-                ev => ev.timestamp <= globalCutoffTs
-              ).length;
+              bossCheatDeaths += pullData.cheat.filter(ev => {
+                // Only use new filtering if timestamp exists (new format)
+                return ev.timestamp !== undefined ? ev.timestamp <= globalCutoffTs : true;
+              }).length;
             }
           }
         });
@@ -475,9 +488,10 @@ export default function WarcraftLogsApp() {
           if (hasCheatDeaths) {
             const globalCutoffTs = pullCutoffTimestamps[pullKey]?.[cutoff];
             if (globalCutoffTs !== null && globalCutoffTs !== undefined) {
-              cheatDeathsCount += pullData.cheat.filter(
-                ev => ev.timestamp <= globalCutoffTs
-              ).length;
+              cheatDeathsCount += pullData.cheat.filter(ev => {
+                // Only use new filtering if timestamp exists (new format)
+                return ev.timestamp !== undefined ? ev.timestamp <= globalCutoffTs : true;
+              }).length;
             }
           }
         });
