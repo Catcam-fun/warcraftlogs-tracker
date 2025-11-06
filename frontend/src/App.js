@@ -328,6 +328,23 @@ export default function WarcraftLogsApp() {
           }
         }
         
+        // DEBUG: Show death timestamps for debugging when no deaths pass filter
+        if (pullData.real.length > 0) {
+          const wouldPass = pullData.real.filter(ev => ev.timestamp !== undefined && ev.timestamp < pullCutoffTs);
+          if (wouldPass.length === 0) {
+            console.log(`❌ Pull ${pullKey} has ${pullData.real.length} real deaths but NONE pass filter!`);
+            console.log(`   Cutoff timestamp: ${pullCutoffTs}ms`);
+            pullData.real.slice(0, 3).forEach(ev => {
+              console.log(`   Death: timestamp=${ev.timestamp}, absTs=${ev.absTs}, player=${ev.player}`);
+              if (ev.timestamp !== undefined) {
+                console.log(`   Check: ${ev.timestamp} < ${pullCutoffTs} = ${ev.timestamp < pullCutoffTs}`);
+              } else {
+                console.log(`   ERROR: timestamp is undefined!`);
+              }
+            });
+          }
+        }
+        
         // Filter REAL deaths that occurred BEFORE the cutoff timestamp
         // (mass deaths are already excluded by backend's timestamp calculation)
         const pullRealDeaths = pullData.real.filter(ev => 
