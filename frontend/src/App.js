@@ -182,6 +182,27 @@ export default function WarcraftLogsApp() {
               setLoadingStage(data.message);
             } else if (data.result) {
               setData(data.result);
+              
+              // DEBUG: Expose data globally and log summary
+              window.deathTrackerData = data.result;
+              console.log("🎯 Analysis complete! Data exposed as window.deathTrackerData");
+              console.log("📊 Summary:");
+              console.log(`  Players: ${Object.keys(data.result.events).length}`);
+              console.log(`  pullCutoffTimestamps: ${data.result.pullCutoffTimestamps ? 'Present' : 'MISSING'}`);
+              
+              if (data.result.pullCutoffTimestamps) {
+                const sampleKey = Object.keys(data.result.pullCutoffTimestamps)[0];
+                console.log(`  Sample cutoffs:`, data.result.pullCutoffTimestamps[sampleKey]);
+              }
+              
+              // Check for missing deaths by boss
+              const deathsByBoss = {};
+              Object.values(data.result.events).flat().forEach(ev => {
+                if (!deathsByBoss[ev.boss]) deathsByBoss[ev.boss] = 0;
+                deathsByBoss[ev.boss]++;
+              });
+              console.log("  Deaths by boss:", deathsByBoss);
+              
               setLoadingStage('');
               setLoading(false);
               setAbortController(null);
@@ -258,6 +279,11 @@ export default function WarcraftLogsApp() {
       // Get pullCutoffTimestamps from data (provided by backend)
       const pullCutoffTimestamps = data.pullCutoffTimestamps || {};
       
+      // DEBUG: Log if pullCutoffTimestamps is missing
+      if (Object.keys(pullCutoffTimestamps).length === 0) {
+        console.warn("⚠️ pullCutoffTimestamps is empty or missing!");
+      }
+      
       // Group events by pull to apply window logic per-pull
       const eventsByPull = {};
       allPlayerEvents.forEach(ev => {
@@ -287,15 +313,31 @@ export default function WarcraftLogsApp() {
           // Use pullCutoffTimestamps if available (handles mass deaths correctly)
           const pullCutoffTs = pullCutoffTimestamps[pullKey]?.[cutoff];
           
+          // DEBUG: Log for specific troublesome pulls
+          if (pullKey.includes("11") || pullData.cheat.length > 0) {
+            console.log(`🔍 Pull ${pullKey} (${pullData.boss}):`);
+            console.log(`  Real deaths in cutoff: ${pullRealDeaths.length}`);
+            console.log(`  Cutoff timestamp: ${pullCutoffTs}ms (${(pullCutoffTs/1000).toFixed(1)}s)`);
+            console.log(`  Cheat deaths in pull: ${pullData.cheat.length}`);
+          }
+          
           if (pullCutoffTs !== undefined) {
             // Backend provided cutoff timestamp (relative to fight start)
             // Filter cheat deaths that occurred BEFORE this timestamp
-            const pullCheatDeaths = pullData.cheat.filter(
-              ev => ev.timestamp !== undefined && ev.timestamp < pullCutoffTs
-            );
+            const pullCheatDeaths = pullData.cheat.filter(ev => {
+              const include = ev.timestamp !== undefined && ev.timestamp < pullCutoffTs;
+              
+              // DEBUG: Log each cheat death decision
+              if (pullKey.includes("11") || pullData.cheat.length > 0) {
+                console.log(`    ${include ? '✓' : '✗'} ${ev.player} cheat at ${(ev.timestamp/1000).toFixed(1)}s (${ev.timestamp} < ${pullCutoffTs} = ${ev.timestamp < pullCutoffTs})`);
+              }
+              
+              return include;
+            });
             cheatDeaths.push(...pullCheatDeaths);
           } else {
             // Fallback: use the max absTs of real deaths (old behavior)
+            console.warn(`⚠️ No pullCutoffTimestamp for ${pullKey}, using fallback`);
             const cutoffTimestamp = Math.max(...pullRealDeaths.map(ev => ev.absTs));
             const pullCheatDeaths = pullData.cheat.filter(ev => ev.absTs <= cutoffTimestamp);
             cheatDeaths.push(...pullCheatDeaths);
