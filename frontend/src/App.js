@@ -336,11 +336,23 @@ export default function WarcraftLogsApp() {
             });
             cheatDeaths.push(...pullCheatDeaths);
           } else {
-            // Fallback: use the max absTs of real deaths (old behavior)
-            console.warn(`⚠️ No pullCutoffTimestamp for ${pullKey}, using fallback`);
-            const cutoffTimestamp = Math.max(...pullRealDeaths.map(ev => ev.absTs));
-            const pullCheatDeaths = pullData.cheat.filter(ev => ev.absTs <= cutoffTimestamp);
-            cheatDeaths.push(...pullCheatDeaths);
+            // Fallback: use the highest available cutoff timestamp for this pull
+            const availableCutoffs = pullCutoffTimestamps[pullKey];
+            if (availableCutoffs && Object.keys(availableCutoffs).length > 0) {
+              // Get the highest cutoff timestamp available (handles cases where cutoff > number of deaths)
+              const maxCutoffTs = Math.max(...Object.values(availableCutoffs));
+              console.log(`ℹ️  No cutoff=${cutoff} for ${pullKey}, using highest available: ${maxCutoffTs}ms (${(maxCutoffTs/1000).toFixed(1)}s)`);
+              const pullCheatDeaths = pullData.cheat.filter(ev => 
+                ev.timestamp !== undefined && ev.timestamp < maxCutoffTs
+              );
+              cheatDeaths.push(...pullCheatDeaths);
+            } else {
+              // True fallback: no cutoff timestamps at all for this pull (shouldn't happen with new backend)
+              console.warn(`⚠️ No pullCutoffTimestamps for ${pullKey}, using old fallback`);
+              const cutoffTimestamp = Math.max(...pullRealDeaths.map(ev => ev.absTs));
+              const pullCheatDeaths = pullData.cheat.filter(ev => ev.absTs <= cutoffTimestamp);
+              cheatDeaths.push(...pullCheatDeaths);
+            }
           }
         } else if (pullData.real.length === 0) {
           // No real deaths in this pull at all - include all cheat deaths
@@ -483,9 +495,19 @@ export default function WarcraftLogsApp() {
                 ev => ev.timestamp !== undefined && ev.timestamp < pullCutoffTs
               ).length;
             } else {
-              // Fallback: use the max absTs of real deaths (old behavior)
-              const cutoffTimestamp = Math.max(...pullRealDeaths.map(ev => ev.absTs));
-              bossCheatDeaths += pullData.cheat.filter(ev => ev.absTs <= cutoffTimestamp).length;
+              // Fallback: use the highest available cutoff timestamp for this pull
+              const availableCutoffs = pullCutoffTimestamps[pullKey];
+              if (availableCutoffs && Object.keys(availableCutoffs).length > 0) {
+                // Get the highest cutoff timestamp available (handles cases where cutoff > number of deaths)
+                const maxCutoffTs = Math.max(...Object.values(availableCutoffs));
+                bossCheatDeaths += pullData.cheat.filter(
+                  ev => ev.timestamp !== undefined && ev.timestamp < maxCutoffTs
+                ).length;
+              } else {
+                // True fallback: no cutoff timestamps at all for this pull (shouldn't happen with new backend)
+                const cutoffTimestamp = Math.max(...pullRealDeaths.map(ev => ev.absTs));
+                bossCheatDeaths += pullData.cheat.filter(ev => ev.absTs <= cutoffTimestamp).length;
+              }
             }
           } else if (hasCheatDeaths && pullData.real.length === 0) {
             bossCheatDeaths += pullData.cheat.length;
@@ -544,9 +566,19 @@ export default function WarcraftLogsApp() {
                 ev => ev.timestamp !== undefined && ev.timestamp < pullCutoffTs
               ).length;
             } else {
-              // Fallback: use the max absTs of real deaths (old behavior)
-              const cutoffTimestamp = Math.max(...pullRealDeaths.map(ev => ev.absTs));
-              cheatDeathsCount += pullData.cheat.filter(ev => ev.absTs <= cutoffTimestamp).length;
+              // Fallback: use the highest available cutoff timestamp for this pull
+              const availableCutoffs = pullCutoffTimestamps[pullKey];
+              if (availableCutoffs && Object.keys(availableCutoffs).length > 0) {
+                // Get the highest cutoff timestamp available (handles cases where cutoff > number of deaths)
+                const maxCutoffTs = Math.max(...Object.values(availableCutoffs));
+                cheatDeathsCount += pullData.cheat.filter(
+                  ev => ev.timestamp !== undefined && ev.timestamp < maxCutoffTs
+                ).length;
+              } else {
+                // True fallback: no cutoff timestamps at all for this pull (shouldn't happen with new backend)
+                const cutoffTimestamp = Math.max(...pullRealDeaths.map(ev => ev.absTs));
+                cheatDeathsCount += pullData.cheat.filter(ev => ev.absTs <= cutoffTimestamp).length;
+              }
             }
           } else if (hasCheatDeaths && pullData.real.length === 0) {
             cheatDeathsCount += pullData.cheat.length;
