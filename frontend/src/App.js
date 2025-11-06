@@ -304,17 +304,28 @@ export default function WarcraftLogsApp() {
       
       Object.entries(eventsByPull).forEach(([pullKey, pullData]) => {
         // Get the cutoff timestamp for this pull (mass-death-aware from backend)
-        const pullCutoffTs = pullCutoffTimestamps[pullKey]?.[cutoff];
+        let pullCutoffTs = pullCutoffTimestamps[pullKey]?.[cutoff];
         
-        // If this pull doesn't have a cutoff timestamp for the selected cutoff,
-        // it means the pull has fewer than 'cutoff' deaths, so it contributes 0 deaths
+        // If exact cutoff doesn't exist, use the highest available cutoff
+        // (handles case where user selected cutoff=5 but pull only has 2 deaths)
         if (pullCutoffTs === undefined) {
-          // Pull still counts for participation, just no deaths
-          // DEBUG log if there are cheat deaths we're skipping
-          if (pullData.cheat.length > 0) {
-            console.log(`ℹ️  Pull ${pullKey}: No cutoff=${cutoff} timestamp (pull has < ${cutoff} real deaths), contributing 0 deaths`);
+          const availableCutoffs = pullCutoffTimestamps[pullKey];
+          if (availableCutoffs && Object.keys(availableCutoffs).length > 0) {
+            // Get the highest cutoff timestamp available
+            const maxAvailableCutoff = Math.max(...Object.keys(availableCutoffs).map(Number));
+            pullCutoffTs = availableCutoffs[maxAvailableCutoff];
+            
+            // DEBUG log
+            if (pullData.real.length > 0 || pullData.cheat.length > 0) {
+              console.log(`ℹ️  Pull ${pullKey}: Using cutoff=${maxAvailableCutoff} timestamp (${(pullCutoffTs/1000).toFixed(1)}s) instead of cutoff=${cutoff}`);
+            }
+          } else {
+            // No cutoff timestamps at all - pull contributes 0 deaths
+            if (pullData.real.length > 0 || pullData.cheat.length > 0) {
+              console.log(`⚠️  Pull ${pullKey}: No cutoff timestamps available, contributing 0 deaths`);
+            }
+            return; // Skip this pull
           }
-          return; // Skip this pull
         }
         
         // Filter REAL deaths that occurred BEFORE the cutoff timestamp
@@ -471,11 +482,17 @@ export default function WarcraftLogsApp() {
         let bossCheatDeaths = 0;
         Object.entries(bossPullMap).forEach(([pullKey, pullData]) => {
           // Get the cutoff timestamp for this pull
-          const pullCutoffTs = pullCutoffTimestamps[pullKey]?.[cutoff];
+          let pullCutoffTs = pullCutoffTimestamps[pullKey]?.[cutoff];
           
-          // If no cutoff timestamp exists, pull contributes 0 deaths
+          // If exact cutoff doesn't exist, use the highest available
           if (pullCutoffTs === undefined) {
-            return; // Skip this pull
+            const availableCutoffs = pullCutoffTimestamps[pullKey];
+            if (availableCutoffs && Object.keys(availableCutoffs).length > 0) {
+              const maxAvailableCutoff = Math.max(...Object.keys(availableCutoffs).map(Number));
+              pullCutoffTs = availableCutoffs[maxAvailableCutoff];
+            } else {
+              return; // No cutoffs, skip this pull
+            }
           }
           
           // Filter real deaths by timestamp
@@ -532,11 +549,17 @@ export default function WarcraftLogsApp() {
         let cheatDeathsCount = 0;
         Object.entries(pullMap).forEach(([pullKey, pullData]) => {
           // Get the cutoff timestamp for this pull
-          const pullCutoffTs = pullCutoffTimestamps[pullKey]?.[cutoff];
+          let pullCutoffTs = pullCutoffTimestamps[pullKey]?.[cutoff];
           
-          // If no cutoff timestamp exists, pull contributes 0 deaths
+          // If exact cutoff doesn't exist, use the highest available
           if (pullCutoffTs === undefined) {
-            return; // Skip this pull
+            const availableCutoffs = pullCutoffTimestamps[pullKey];
+            if (availableCutoffs && Object.keys(availableCutoffs).length > 0) {
+              const maxAvailableCutoff = Math.max(...Object.keys(availableCutoffs).map(Number));
+              pullCutoffTs = availableCutoffs[maxAvailableCutoff];
+            } else {
+              return; // No cutoffs, skip this pull
+            }
           }
           
           // Filter real deaths by timestamp
