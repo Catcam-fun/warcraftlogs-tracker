@@ -913,9 +913,15 @@ def analyze():
                 
                 # Get all deaths for this fight (real + cheat if enabled)
                 deaths = report_deaths_cache[rid].get(fid, [])
-                # Send up to 3x maxCutoff to give frontend flexibility
                 deaths_sorted_all = sorted(deaths, key=lambda e: e["timestamp"])
-                deaths_sorted = deaths_sorted_all[:max_cutoff * 3]
+                
+                # Don't limit deaths artificially - send all deaths
+                # The frontend will filter based on rankWithinPull and pullCutoffTimestamps
+                deaths_sorted = deaths_sorted_all
+                
+                # DEBUG: Log if fight has many deaths
+                if len(deaths_sorted_all) > 15:
+                    print(f"  ⚠️ Fight {fid} ({boss_name}) has {len(deaths_sorted_all)} deaths (sending all)")
                 
                 # Assign TWO ranks to each death event:
                 # 1. rankWithinPull - rank among REAL deaths only (ignoring cheat deaths)
@@ -966,21 +972,22 @@ def analyze():
                     if not d.get("isCheatDeath", False)
                 ]
                 
-                # Calculate cutoff timestamp for each cutoff value
-                for cutoff_val in range(1, max_cutoff + 1):
-                    if len(real_deaths_only) >= cutoff_val:
-                        # Get the index of the cutoff-th death (0-indexed)
-                        cutoff_idx = cutoff_val - 1
-                        
-                        # Check if this death is in a mass death event
-                        mass_death_start = find_mass_death_start(cutoff_idx, real_deaths_only)
-                        
-                        if mass_death_start is not None:
-                            # Use the start of the mass death window as the cutoff
-                            pullCutoffTimestamps[pull_key][cutoff_val] = mass_death_start
-                        else:
-                            # Use the timestamp of the cutoff-th death normally
-                            pullCutoffTimestamps[pull_key][cutoff_val] = real_deaths_only[cutoff_idx]["timestamp"]
+                # Calculate cutoff timestamp for ALL possible cutoff values
+                # (up to the number of real deaths in this pull)
+                # This lets the frontend use any cutoff value without re-running the analysis
+                for cutoff_val in range(1, len(real_deaths_only) + 1):
+                    # Get the index of the cutoff-th death (0-indexed)
+                    cutoff_idx = cutoff_val - 1
+                    
+                    # Check if this death is in a mass death event
+                    mass_death_start = find_mass_death_start(cutoff_idx, real_deaths_only)
+                    
+                    if mass_death_start is not None:
+                        # Use the start of the mass death window as the cutoff
+                        pullCutoffTimestamps[pull_key][cutoff_val] = mass_death_start
+                    else:
+                        # Use the timestamp of the cutoff-th death normally
+                        pullCutoffTimestamps[pull_key][cutoff_val] = real_deaths_only[cutoff_idx]["timestamp"]
             
             yield f"data: {json.dumps({'stage': 'complete', 'message': f'Analysis complete! Tracked {total_deaths} deaths across {len(counted_death_events)} players'})}\n\n"
             
