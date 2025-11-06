@@ -351,15 +351,15 @@ def get_abilities_map(token, report_code):
 def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, enable_cheat_death=False):
     """
     Get ALL player deaths for an entire report at once - MUCH faster than per-fight queries
-    Optionally detect cheat deaths by querying debuff events (adds 1 API call per report)
+    Optionally detect cheat deaths in the SAME query using GraphQL aliases
     
     OPTIMIZATION STRATEGY:
-    - 1 API call for deaths (all fights in report)
-    - 1 API call for debuffs if cheat death enabled (filtered to only cheat death ability IDs)
-    - Uses filterExpression to avoid hitting 10k event limit
+    - 1 API call per report gets both deaths AND debuffs (if cheat death enabled)
+    - Uses GraphQL aliases to fetch multiple event types simultaneously
+    - Uses filterExpression for debuffs to avoid hitting 10k event limit
     - This is ~100x faster than querying each fight individually
     
-    For 35 reports with cheat death enabled: ~70 API calls total (2 per report)
+    For 35 reports with cheat death enabled: ~35 API calls total (1 per report, down from 70!)
     """
     
     if not fights:
@@ -377,80 +377,86 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
     start_time = min(f['start_time'] for f in fights)
     end_time = max(f['end_time'] for f in fights)
     
-    # STEP 1: Get all death events (ALWAYS REQUIRED)
-    deaths_query = """
-    query($code: String!, $startTime: Float!, $endTime: Float!) {
-      reportData {
-        report(code: $code) {
-          events(
-            startTime: $startTime
-            endTime: $endTime
-            dataType: Deaths
-            limit: 10000
-          ) {
-            data
+    # Build query that gets BOTH deaths and debuffs in a single API call
+    # Use GraphQL aliases to fetch multiple event types at once
+    cheat_death_ids = ", ".join(str(id) for id in CHEAT_DEATH_ABILITY_IDS)
+    filter_expr = f"ability.id in ({cheat_death_ids})"
+    
+    if enable_cheat_death:
+        print(f"⚡ Cheat death detection ENABLED - querying deaths AND debuffs in one call...")
+        # Combined query: deaths + filtered debuffs (cheat deaths)
+        combined_query = """
+        query($code: String!, $startTime: Float!, $endTime: Float!, $filterExpression: String) {
+          reportData {
+            report(code: $code) {
+              deaths: events(
+                startTime: $startTime
+                endTime: $endTime
+                dataType: Deaths
+                limit: 10000
+              ) {
+                data
+              }
+              debuffs: events(
+                startTime: $startTime
+                endTime: $endTime
+                dataType: Debuffs
+                filterExpression: $filterExpression
+                limit: 10000
+              ) {
+                data
+              }
+            }
           }
         }
-      }
-    }
-    """
-    
-    variables = {
-        "code": report_code,
-        "startTime": start_time,
-        "endTime": end_time
-    }
+        """
+        
+        variables = {
+            "code": report_code,
+            "startTime": start_time,
+            "endTime": end_time,
+            "filterExpression": filter_expr
+        }
+    else:
+        # Just deaths (no cheat death detection)
+        combined_query = """
+        query($code: String!, $startTime: Float!, $endTime: Float!) {
+          reportData {
+            report(code: $code) {
+              deaths: events(
+                startTime: $startTime
+                endTime: $endTime
+                dataType: Deaths
+                limit: 10000
+              ) {
+                data
+              }
+            }
+          }
+        }
+        """
+        
+        variables = {
+            "code": report_code,
+            "startTime": start_time,
+            "endTime": end_time
+        }
     
     try:
-        # Get death events
-        deaths_data = graphql_query(token, deaths_query, variables)
-        events_data = deaths_data.get("reportData", {}).get("report", {}).get("events", {}).get("data", [])
+        # Single API call gets both deaths and debuffs (if enabled)
+        combined_data = graphql_query(token, combined_query, variables)
+        report_data = combined_data.get("reportData", {}).get("report", {})
+        
+        # Extract death events
+        events_data = report_data.get("deaths", {}).get("data", [])
         
         # Build a map of fightId -> list of deaths
         deaths_by_fight = {f['id']: [] for f in fights}
         
-        # STEP 2: Optionally detect cheat deaths (only if enabled)
+        # Extract debuff events (if cheat death enabled)
         cheat_death_events = []
-        
         if enable_cheat_death:
-            print(f"⚡ Cheat death detection ENABLED - querying debuff events...")
-            
-            # Small delay to avoid rate limits (0.1s = 10 calls/sec max)
-            time.sleep(0.1)
-            
-            # Query DEBUFF events (cheat deaths appear as debuffs, not buffs!)
-            # Use filterExpression to ONLY get the cheat death ability IDs we care about
-            # This prevents hitting the 10k limit from querying all debuffs
-            cheat_death_ids = ", ".join(str(id) for id in CHEAT_DEATH_ABILITY_IDS)
-            filter_expr = f"ability.id in ({cheat_death_ids})"
-            
-            debuffs_query = """
-            query($code: String!, $startTime: Float!, $endTime: Float!, $filterExpression: String) {
-              reportData {
-                report(code: $code) {
-                  events(
-                    startTime: $startTime
-                    endTime: $endTime
-                    dataType: Debuffs
-                    filterExpression: $filterExpression
-                    limit: 10000
-                  ) {
-                    data
-                  }
-                }
-              }
-            }
-            """
-            
-            debuffs_variables = {
-                "code": report_code,
-                "startTime": start_time,
-                "endTime": end_time,
-                "filterExpression": filter_expr
-            }
-            
-            debuffs_data = graphql_query(token, debuffs_query, debuffs_variables)
-            debuff_events = debuffs_data.get("reportData", {}).get("report", {}).get("events", {}).get("data", [])
+            debuff_events = report_data.get("debuffs", {}).get("data", [])
             
             print(f"  Found {len(debuff_events)} cheat death debuff events (filtered query)")
             
@@ -559,9 +565,9 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
             print(f"    - Real deaths: {real_deaths}")
             print(f"    - Cheat deaths: {cheat_deaths}")
         
-        # Filter mass deaths for each fight
-        for fid in deaths_by_fight:
-            deaths_by_fight[fid] = filter_mass_deaths(deaths_by_fight[fid])
+        # DO NOT filter mass deaths here - the new cutoff timestamp approach handles wipes correctly
+        # The old filter_mass_deaths logic was removing ALL deaths from wipes, causing missing data
+        # Now we detect mass deaths and adjust the cutoff timestamp instead
         
         return deaths_by_fight
     
