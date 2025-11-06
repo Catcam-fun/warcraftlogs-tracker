@@ -250,38 +250,68 @@ export default function WarcraftLogsApp() {
         }
       }
 
-      // Get pullCutoffTimestamps from data if available
+      // WINDOW-BASED FILTERING WITH MASS DEATH HANDLING:
+      // 1. Get first X real deaths (by rankWithinPull)
+      // 2. Use pullCutoffTimestamps to find the correct cutoff (handles mass deaths)
+      // 3. Include cheat deaths that occurred BEFORE the cutoff
+      
+      // Get pullCutoffTimestamps from data (provided by backend)
       const pullCutoffTimestamps = data.pullCutoffTimestamps || {};
       
-      // Filter deaths using window-based approach with pullCutoffTimestamps
-      // Real deaths: filter by rankWithinPull <= cutoff AND !isCheatDeath
-      const realDeaths = allPlayerEvents.filter(
-        ev => ev.rankWithinPull <= cutoff && !ev.isCheatDeath
-      );
-      
-      // Cheat deaths: filter by timestamp relative to pullCutoffTimestamps
-      const cheatDeaths = allPlayerEvents.filter(ev => {
-        if (!ev.isCheatDeath) return false;
-        
+      // Group events by pull to apply window logic per-pull
+      const eventsByPull = {};
+      allPlayerEvents.forEach(ev => {
         const pullKey = `${ev.reportId}_${ev.fightId}`;
-        const cutoffTimestamp = pullCutoffTimestamps[pullKey]?.[cutoff];
-        
-        // If no cutoff timestamp available, fall back to rankWithinPullTotal
-        if (cutoffTimestamp === undefined) {
-          return ev.rankWithinPullTotal <= cutoff;
+        if (!eventsByPull[pullKey]) {
+          eventsByPull[pullKey] = { real: [], cheat: [], boss: ev.boss };
         }
-        
-        // Compare the cheat death's timestamp to the cutoff timestamp
-        // Only include cheat deaths that happened STRICTLY BEFORE the cutoff
-        // This excludes cheat deaths during or after the mass death window
-        return ev.timestamp < cutoffTimestamp;
+        if (ev.isCheatDeath) {
+          eventsByPull[pullKey].cheat.push(ev);
+        } else {
+          eventsByPull[pullKey].real.push(ev);
+        }
       });
       
-      const totalDeaths = [...realDeaths, ...cheatDeaths];
+      // Collect deaths that fall within the cutoff window
+      const realDeaths = [];
+      const cheatDeaths = [];
+      
+      Object.entries(eventsByPull).forEach(([pullKey, pullData]) => {
+        // Get first X real deaths from this pull
+        const pullRealDeaths = pullData.real.filter(ev => ev.rankWithinPull <= cutoff);
+        
+        realDeaths.push(...pullRealDeaths);
+        
+        // Determine the cutoff timestamp for cheat deaths
+        if (pullRealDeaths.length > 0) {
+          // Use pullCutoffTimestamps if available (handles mass deaths correctly)
+          const pullCutoffTs = pullCutoffTimestamps[pullKey]?.[cutoff];
+          
+          if (pullCutoffTs !== undefined) {
+            // Backend provided cutoff timestamp (relative to fight start)
+            // Filter cheat deaths that occurred BEFORE this timestamp
+            const pullCheatDeaths = pullData.cheat.filter(
+              ev => ev.timestamp !== undefined && ev.timestamp < pullCutoffTs
+            );
+            cheatDeaths.push(...pullCheatDeaths);
+          } else {
+            // Fallback: use the max absTs of real deaths (old behavior)
+            const cutoffTimestamp = Math.max(...pullRealDeaths.map(ev => ev.absTs));
+            const pullCheatDeaths = pullData.cheat.filter(ev => ev.absTs <= cutoffTimestamp);
+            cheatDeaths.push(...pullCheatDeaths);
+          }
+        } else if (pullData.real.length === 0) {
+          // No real deaths in this pull at all - include all cheat deaths
+          // (they saved people from being the first deaths)
+          cheatDeaths.push(...pullData.cheat);
+        }
+        // If pullData.real.length > 0 but pullRealDeaths.length === 0, it means all real deaths 
+        // are beyond the cutoff, so we don't include any cheat deaths from this pull
+      });
       
       const realDeathCount = realDeaths.length;
-      const totalDeathCount = totalDeaths.length;
       const cheatDeathCount = cheatDeaths.length;
+      const totalDeathCount = realDeathCount + cheatDeathCount;
       
       const realRate = pulls > 0 ? (realDeathCount / pulls * 100) : 0;
       const totalRate = pulls > 0 ? (totalDeathCount / pulls * 100) : 0;
@@ -299,8 +329,23 @@ export default function WarcraftLogsApp() {
         deathsByBoss[ev.boss].push(ev);
       });
       
+      const cheatDeathsByBoss = {};
+      cheatDeaths.forEach(ev => {
+        if (!cheatDeathsByBoss[ev.boss]) {
+          cheatDeathsByBoss[ev.boss] = [];
+        }
+        cheatDeathsByBoss[ev.boss].push(ev);
+      });
+      
+      // Total deaths by boss = real + cheat
       const totalDeathsByBoss = {};
-      totalDeaths.forEach(ev => {
+      realDeaths.forEach(ev => {
+        if (!totalDeathsByBoss[ev.boss]) {
+          totalDeathsByBoss[ev.boss] = [];
+        }
+        totalDeathsByBoss[ev.boss].push(ev);
+      });
+      cheatDeaths.forEach(ev => {
         if (!totalDeathsByBoss[ev.boss]) {
           totalDeathsByBoss[ev.boss] = [];
         }
@@ -332,6 +377,7 @@ export default function WarcraftLogsApp() {
         totalRate,
         hasCheatDeaths,
         deathsByBoss,
+        cheatDeathsByBoss,  // NEW: separate cheat deaths by boss
         totalDeathsByBoss,
         topAbilitiesByBoss
       });
@@ -363,26 +409,46 @@ export default function WarcraftLogsApp() {
       bosses.forEach(boss => {
         const bossPulls = data.bossParticipation[boss]?.[player]?.length || 0;
         
-        // Real deaths: rankWithinPull <= cutoff AND !isCheatDeath AND boss matches
-        const bossRealDeaths = allPlayerEvents.filter(
-          ev => ev.boss === boss && ev.rankWithinPull <= cutoff && !ev.isCheatDeath
-        ).length;
-        
-        // Cheat deaths: filter by timestamp relative to pullCutoffTimestamps
-        const bossCheatDeaths = allPlayerEvents.filter(ev => {
-          if (!ev.isCheatDeath || ev.boss !== boss) return false;
-          
+        // Window-based filtering for this boss with mass death handling
+        const playerBossEvents = allPlayerEvents.filter(ev => ev.boss === boss);
+        const bossPullMap = {};
+        playerBossEvents.forEach(ev => {
           const pullKey = `${ev.reportId}_${ev.fightId}`;
-          const cutoffTimestamp = pullCutoffTimestamps[pullKey]?.[cutoff];
-          
-          // If no cutoff timestamp available, fall back to rankWithinPullTotal
-          if (cutoffTimestamp === undefined) {
-            return ev.rankWithinPullTotal <= cutoff;
+          if (!bossPullMap[pullKey]) {
+            bossPullMap[pullKey] = { real: [], cheat: [] };
           }
+          if (ev.isCheatDeath) {
+            bossPullMap[pullKey].cheat.push(ev);
+          } else {
+            bossPullMap[pullKey].real.push(ev);
+          }
+        });
+        
+        let bossRealDeaths = 0;
+        let bossCheatDeaths = 0;
+        Object.entries(bossPullMap).forEach(([pullKey, pullData]) => {
+          const pullRealDeaths = pullData.real.filter(ev => ev.rankWithinPull <= cutoff);
+          bossRealDeaths += pullRealDeaths.length;
           
-          // Only include cheat deaths that happened STRICTLY BEFORE the cutoff
-          return ev.timestamp < cutoffTimestamp;
-        }).length;
+          if (hasCheatDeaths && pullRealDeaths.length > 0) {
+            // Use pullCutoffTimestamps if available (handles mass deaths correctly)
+            const pullCutoffTs = pullCutoffTimestamps[pullKey]?.[cutoff];
+            
+            if (pullCutoffTs !== undefined) {
+              // Backend provided cutoff timestamp (relative to fight start)
+              // Filter cheat deaths that occurred BEFORE this timestamp
+              bossCheatDeaths += pullData.cheat.filter(
+                ev => ev.timestamp !== undefined && ev.timestamp < pullCutoffTs
+              ).length;
+            } else {
+              // Fallback: use the max absTs of real deaths (old behavior)
+              const cutoffTimestamp = Math.max(...pullRealDeaths.map(ev => ev.absTs));
+              bossCheatDeaths += pullData.cheat.filter(ev => ev.absTs <= cutoffTimestamp).length;
+            }
+          } else if (hasCheatDeaths && pullData.real.length === 0) {
+            bossCheatDeaths += pullData.cheat.length;
+          }
+        });
         
         const bossTotalDeaths = bossRealDeaths + bossCheatDeaths;
         
@@ -405,28 +471,47 @@ export default function WarcraftLogsApp() {
       let totalWithCheatDeaths = 0;
       
       if (selectedBosses.size === 0) {
+        // Use window-based filtering for all bosses
         totalPulls = data.pullParticipation[player]?.length || 0;
-        totalRealDeaths = allPlayerEvents.filter(
-          ev => ev.rankWithinPull <= cutoff && !ev.isCheatDeath
-        ).length;
         
-        // Cheat deaths: filter by timestamp relative to pullCutoffTimestamps
-        const cheatDeaths = allPlayerEvents.filter(ev => {
-          if (!ev.isCheatDeath) return false;
-          
+        const pullMap = {};
+        allPlayerEvents.forEach(ev => {
           const pullKey = `${ev.reportId}_${ev.fightId}`;
-          const cutoffTimestamp = pullCutoffTimestamps[pullKey]?.[cutoff];
-          
-          // If no cutoff timestamp available, fall back to rankWithinPullTotal
-          if (cutoffTimestamp === undefined) {
-            return ev.rankWithinPullTotal <= cutoff;
+          if (!pullMap[pullKey]) {
+            pullMap[pullKey] = { real: [], cheat: [] };
           }
-          
-          // Only include cheat deaths that happened STRICTLY BEFORE the cutoff
-          return ev.timestamp < cutoffTimestamp;
-        }).length;
+          if (ev.isCheatDeath) {
+            pullMap[pullKey].cheat.push(ev);
+          } else {
+            pullMap[pullKey].real.push(ev);
+          }
+        });
         
-        totalWithCheatDeaths = totalRealDeaths + cheatDeaths;
+        let cheatDeathsCount = 0;
+        Object.entries(pullMap).forEach(([pullKey, pullData]) => {
+          const pullRealDeaths = pullData.real.filter(ev => ev.rankWithinPull <= cutoff);
+          totalRealDeaths += pullRealDeaths.length;
+          
+          if (hasCheatDeaths && pullRealDeaths.length > 0) {
+            // Use pullCutoffTimestamps if available (handles mass deaths correctly)
+            const pullCutoffTs = pullCutoffTimestamps[pullKey]?.[cutoff];
+            
+            if (pullCutoffTs !== undefined) {
+              // Backend provided cutoff timestamp (relative to fight start)
+              cheatDeathsCount += pullData.cheat.filter(
+                ev => ev.timestamp !== undefined && ev.timestamp < pullCutoffTs
+              ).length;
+            } else {
+              // Fallback: use the max absTs of real deaths (old behavior)
+              const cutoffTimestamp = Math.max(...pullRealDeaths.map(ev => ev.absTs));
+              cheatDeathsCount += pullData.cheat.filter(ev => ev.absTs <= cutoffTimestamp).length;
+            }
+          } else if (hasCheatDeaths && pullData.real.length === 0) {
+            cheatDeathsCount += pullData.cheat.length;
+          }
+        });
+        
+        totalWithCheatDeaths = totalRealDeaths + cheatDeathsCount;
       } else {
         bosses.forEach(boss => {
           totalPulls += data.bossParticipation[boss]?.[player]?.length || 0;
@@ -1222,7 +1307,7 @@ export default function WarcraftLogsApp() {
 
             {view === 'players' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {getFilteredStats().map(({ player, realDeaths, totalDeaths, cheatDeaths, pulls, realRate, totalRate, hasCheatDeaths, deathsByBoss, totalDeathsByBoss, topAbilitiesByBoss }) => {
+                {getFilteredStats().map(({ player, realDeaths, totalDeaths, cheatDeaths, pulls, realRate, totalRate, hasCheatDeaths, deathsByBoss, cheatDeathsByBoss, totalDeathsByBoss, topAbilitiesByBoss }) => {
                   const isExpanded = expandedPlayers.has(player);
                   const showBothStats = hasCheatDeaths && cheatDeaths > 0;
                   
