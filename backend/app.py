@@ -648,11 +648,14 @@ def is_in_mass_death(death_index, deaths_list):
 def find_mass_death_start(cutoff_idx, deaths_list):
     """
     Find the start timestamp of the mass death window that contains the death at cutoff_idx.
-    Returns the timestamp of the first death in the mass death sequence.
+    Returns a timestamp BEFORE the first death in the mass death sequence.
+    This ensures that all deaths in the mass wipe are excluded when using <= comparison.
     """
     in_mass, start_ts = is_in_mass_death(cutoff_idx, deaths_list)
     if in_mass:
-        return start_ts
+        # Return timestamp 1ms before the first death in the wipe
+        # This ensures all wipe deaths are excluded with <= comparison
+        return max(0, start_ts - 1)
     return None
 
 
