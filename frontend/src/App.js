@@ -185,7 +185,92 @@ export default function WarcraftLogsApp() {
               
               // DEBUG: Expose data globally and log summary
               window.deathTrackerData = data.result;
+              
+              // Add export helper function
+              window.exportDeathData = function(playerName = null) {
+                const cutoff = 2; // Current cutoff value
+                const events = window.deathTrackerData.events;
+                const pullCutoffTimestamps = window.deathTrackerData.pullCutoffTimestamps;
+                
+                if (playerName) {
+                  // Export specific player's data
+                  const playerEvents = events[playerName] || [];
+                  const output = {
+                    player: playerName,
+                    totalEvents: playerEvents.length,
+                    byBoss: {},
+                    pullBreakdown: []
+                  };
+                  
+                  // Group by boss
+                  playerEvents.forEach(ev => {
+                    if (!output.byBoss[ev.boss]) {
+                      output.byBoss[ev.boss] = { real: [], cheat: [] };
+                    }
+                    if (ev.isCheatDeath) {
+                      output.byBoss[ev.boss].cheat.push(ev);
+                    } else {
+                      output.byBoss[ev.boss].real.push(ev);
+                    }
+                  });
+                  
+                  // Add pull-by-pull breakdown
+                  const pullMap = {};
+                  playerEvents.forEach(ev => {
+                    const pullKey = `${ev.reportId}_${ev.fightId}`;
+                    if (!pullMap[pullKey]) {
+                      pullMap[pullKey] = {
+                        pullKey,
+                        boss: ev.boss,
+                        real: [],
+                        cheat: [],
+                        cutoffTs: pullCutoffTimestamps[pullKey]?.[cutoff]
+                      };
+                    }
+                    if (ev.isCheatDeath) {
+                      pullMap[pullKey].cheat.push({
+                        timestamp: ev.timestamp,
+                        ability: ev.abilityName,
+                        included: pullMap[pullKey].cutoffTs !== undefined && ev.timestamp <= pullMap[pullKey].cutoffTs
+                      });
+                    } else {
+                      pullMap[pullKey].real.push({
+                        timestamp: ev.timestamp,
+                        ability: ev.abilityName,
+                        included: pullMap[pullKey].cutoffTs !== undefined && ev.timestamp <= pullMap[pullKey].cutoffTs
+                      });
+                    }
+                  });
+                  
+                  output.pullBreakdown = Object.values(pullMap);
+                  
+                  console.log(JSON.stringify(output, null, 2));
+                  return output;
+                } else {
+                  // Export summary of all players
+                  const output = {
+                    totalPlayers: Object.keys(events).length,
+                    cutoffUsed: cutoff,
+                    playerSummaries: {}
+                  };
+                  
+                  Object.keys(events).forEach(player => {
+                    const playerEvents = events[player];
+                    output.playerSummaries[player] = {
+                      totalEvents: playerEvents.length,
+                      realDeaths: playerEvents.filter(ev => !ev.isCheatDeath).length,
+                      cheatDeaths: playerEvents.filter(ev => ev.isCheatDeath).length,
+                      bosses: [...new Set(playerEvents.map(ev => ev.boss))]
+                    };
+                  });
+                  
+                  console.log(JSON.stringify(output, null, 2));
+                  return output;
+                }
+              };
+              
               console.log("🎯 Analysis complete! Data exposed as window.deathTrackerData");
+              console.log("💾 Export data: window.exportDeathData() or window.exportDeathData('PlayerName')");
               console.log("📊 Summary:");
               console.log(`  Players: ${Object.keys(data.result.events).length}`);
               console.log(`  pullCutoffTimestamps: ${data.result.pullCutoffTimestamps ? 'Present' : 'MISSING'}`);
