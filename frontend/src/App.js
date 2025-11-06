@@ -330,14 +330,14 @@ export default function WarcraftLogsApp() {
         
         // DEBUG: Show death timestamps for debugging when no deaths pass filter
         if (pullData.real.length > 0) {
-          const wouldPass = pullData.real.filter(ev => ev.timestamp !== undefined && ev.timestamp < pullCutoffTs);
+          const wouldPass = pullData.real.filter(ev => ev.timestamp !== undefined && ev.timestamp <= pullCutoffTs);
           if (wouldPass.length === 0) {
             console.log(`❌ Pull ${pullKey} has ${pullData.real.length} real deaths but NONE pass filter!`);
             console.log(`   Cutoff timestamp: ${pullCutoffTs}ms`);
             pullData.real.slice(0, 3).forEach(ev => {
               console.log(`   Death: timestamp=${ev.timestamp}, absTs=${ev.absTs}, player=${ev.player}`);
               if (ev.timestamp !== undefined) {
-                console.log(`   Check: ${ev.timestamp} < ${pullCutoffTs} = ${ev.timestamp < pullCutoffTs}`);
+                console.log(`   Check: ${ev.timestamp} <= ${pullCutoffTs} = ${ev.timestamp <= pullCutoffTs}`);
               } else {
                 console.log(`   ERROR: timestamp is undefined!`);
               }
@@ -345,17 +345,17 @@ export default function WarcraftLogsApp() {
           }
         }
         
-        // Filter REAL deaths that occurred BEFORE the cutoff timestamp
+        // Filter REAL deaths that occurred BEFORE OR AT the cutoff timestamp
         // (mass deaths are already excluded by backend's timestamp calculation)
         const pullRealDeaths = pullData.real.filter(ev => 
-          ev.timestamp !== undefined && ev.timestamp < pullCutoffTs
+          ev.timestamp !== undefined && ev.timestamp <= pullCutoffTs
         );
         
         realDeaths.push(...pullRealDeaths);
         
-        // Filter CHEAT deaths that occurred BEFORE the same cutoff timestamp
+        // Filter CHEAT deaths that occurred BEFORE OR AT the same cutoff timestamp
         const pullCheatDeaths = pullData.cheat.filter(ev => 
-          ev.timestamp !== undefined && ev.timestamp < pullCutoffTs
+          ev.timestamp !== undefined && ev.timestamp <= pullCutoffTs
         );
         cheatDeaths.push(...pullCheatDeaths);
         
@@ -368,14 +368,14 @@ export default function WarcraftLogsApp() {
           console.log(`  Cheat deaths included: ${pullCheatDeaths.length}`);
           
           pullCheatDeaths.forEach(ev => {
-            console.log(`    ✓ ${ev.player} cheat at ${(ev.timestamp/1000).toFixed(1)}s (< ${(pullCutoffTs/1000).toFixed(1)}s)`);
+            console.log(`    ✓ ${ev.player} cheat at ${(ev.timestamp/1000).toFixed(1)}s (<= ${(pullCutoffTs/1000).toFixed(1)}s)`);
           });
           
           const excluded = pullData.cheat.filter(ev => 
-            ev.timestamp === undefined || ev.timestamp >= pullCutoffTs
+            ev.timestamp === undefined || ev.timestamp > pullCutoffTs
           );
           excluded.forEach(ev => {
-            console.log(`    ✗ ${ev.player} cheat at ${(ev.timestamp/1000).toFixed(1)}s (>= ${(pullCutoffTs/1000).toFixed(1)}s)`);
+            console.log(`    ✗ ${ev.player} cheat at ${(ev.timestamp/1000).toFixed(1)}s (> ${(pullCutoffTs/1000).toFixed(1)}s)`);
           });
         }
       });
@@ -514,14 +514,14 @@ export default function WarcraftLogsApp() {
           
           // Filter real deaths by timestamp
           const pullRealDeaths = pullData.real.filter(ev => 
-            ev.timestamp !== undefined && ev.timestamp < pullCutoffTs
+            ev.timestamp !== undefined && ev.timestamp <= pullCutoffTs
           );
           bossRealDeaths += pullRealDeaths.length;
           
           // Filter cheat deaths by same timestamp
           if (hasCheatDeaths) {
             bossCheatDeaths += pullData.cheat.filter(
-              ev => ev.timestamp !== undefined && ev.timestamp < pullCutoffTs
+              ev => ev.timestamp !== undefined && ev.timestamp <= pullCutoffTs
             ).length;
           }
         });
@@ -581,14 +581,14 @@ export default function WarcraftLogsApp() {
           
           // Filter real deaths by timestamp
           const pullRealDeaths = pullData.real.filter(ev => 
-            ev.timestamp !== undefined && ev.timestamp < pullCutoffTs
+            ev.timestamp !== undefined && ev.timestamp <= pullCutoffTs
           );
           totalRealDeaths += pullRealDeaths.length;
           
           // Filter cheat deaths by same timestamp
           if (hasCheatDeaths) {
             cheatDeathsCount += pullData.cheat.filter(
-              ev => ev.timestamp !== undefined && ev.timestamp < pullCutoffTs
+              ev => ev.timestamp !== undefined && ev.timestamp <= pullCutoffTs
             ).length;
           }
         });
