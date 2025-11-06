@@ -946,7 +946,7 @@ def analyze():
                         "rankWithinPull": real_death_rank,  # Rank among real deaths only
                         "rankWithinPullTotal": total_death_rank,  # Rank among all deaths
                         "absTs": report_abs_start + ev["timestamp"],
-                        "timestamp": ev["timestamp"] - fight['startTime'],  # Make relative to fight start (for cutoff comparison)
+                        "timestamp": ev["timestamp"] - fight['start_time'],  # Make relative to fight start (for cutoff comparison)
                         "abilityName": ev.get("abilityName", "Unknown"),
                         "isCheatDeath": is_cheat
                     }
@@ -959,7 +959,7 @@ def analyze():
                 pullCutoffTimestamps[pull_key] = {}
                 
                 # Get only REAL deaths (no cheat deaths) with timestamps relative to fight start
-                fight_start = fight['startTime']
+                fight_start = fight['start_time']
                 real_deaths_only = [
                     {**d, "timestamp": d["timestamp"] - fight_start}
                     for d in deaths_sorted_all 
