@@ -272,8 +272,9 @@ export default function WarcraftLogsApp() {
         }
         
         // Compare the cheat death's timestamp to the cutoff timestamp
-        // Only include cheat deaths that happened BEFORE the cutoff
-        return ev.timestamp <= cutoffTimestamp;
+        // Only include cheat deaths that happened STRICTLY BEFORE the cutoff
+        // This excludes cheat deaths during or after the mass death window
+        return ev.timestamp < cutoffTimestamp;
       });
       
       const totalDeaths = [...realDeaths, ...cheatDeaths];
@@ -379,8 +380,8 @@ export default function WarcraftLogsApp() {
             return ev.rankWithinPullTotal <= cutoff;
           }
           
-          // Only include cheat deaths that happened BEFORE the cutoff
-          return ev.timestamp <= cutoffTimestamp;
+          // Only include cheat deaths that happened STRICTLY BEFORE the cutoff
+          return ev.timestamp < cutoffTimestamp;
         }).length;
         
         const bossTotalDeaths = bossRealDeaths + bossCheatDeaths;
@@ -421,8 +422,8 @@ export default function WarcraftLogsApp() {
             return ev.rankWithinPullTotal <= cutoff;
           }
           
-          // Only include cheat deaths that happened BEFORE the cutoff
-          return ev.timestamp <= cutoffTimestamp;
+          // Only include cheat deaths that happened STRICTLY BEFORE the cutoff
+          return ev.timestamp < cutoffTimestamp;
         }).length;
         
         totalWithCheatDeaths = totalRealDeaths + cheatDeaths;
