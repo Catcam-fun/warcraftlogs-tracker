@@ -2,7 +2,7 @@
 """
 Flask API for WarcraftLogs Death Tracker - V2 GraphQL API
 Optimized for Render.com deployment
-Version 2.4 - Fixed character name encoding issues
+Version 2.5 - Filter redundant cheat deaths
 """
 
 from flask import Flask, request, jsonify, Response
@@ -959,13 +959,43 @@ def analyze():
                 if len(deaths_sorted_all) > 15:
                     print(f"  ⚠️ Fight {fid} ({boss_name}) has {len(deaths_sorted_all)} deaths (sending all)")
                 
+                # Filter out redundant cheat deaths
+                # A cheat death is redundant if the same player has a real death afterward
+                # This prevents double-counting when someone cheat deaths then dies for real
+                redundant_cheat_death_indices = set()
+                
+                # Group deaths by player (using normalized names for grouping)
+                deaths_by_player = defaultdict(list)
+                for idx, ev in enumerate(deaths_sorted):
+                    player_name = normalize_character_name(ev["targetName"])
+                    main_char = get_main_character(player_name, character_groups)
+                    deaths_by_player[main_char].append((idx, ev))
+                
+                # For each player, mark redundant cheat deaths
+                for main_char, player_deaths in deaths_by_player.items():
+                    # Already sorted by timestamp
+                    for i, (idx, death) in enumerate(player_deaths):
+                        if death.get("isCheatDeath", False):
+                            # This is a cheat death - check if there's a real death after it
+                            # Look at remaining deaths for this player
+                            for j in range(i + 1, len(player_deaths)):
+                                next_idx, next_death = player_deaths[j]
+                                if not next_death.get("isCheatDeath", False):
+                                    # Found a real death after the cheat death
+                                    # Mark the cheat death as redundant
+                                    redundant_cheat_death_indices.add(idx)
+                                    break
+                
                 # Assign TWO ranks to each death event:
                 # 1. rankWithinPull - rank among REAL deaths only (ignoring cheat deaths)
                 # 2. rankWithinPullTotal - rank among ALL deaths (including cheat deaths)
                 real_death_rank = 0
                 total_death_rank = 0
                 
-                for ev in deaths_sorted:
+                for idx, ev in enumerate(deaths_sorted):
+                    # Skip redundant cheat deaths
+                    if idx in redundant_cheat_death_indices:
+                        continue
                     total_death_rank += 1
                     is_cheat = ev.get("isCheatDeath", False)
                     
