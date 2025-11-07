@@ -2,7 +2,7 @@
 """
 Flask API for WarcraftLogs Death Tracker - V2 GraphQL API
 Optimized for Render.com deployment
-Version 2.5 - Filter redundant cheat deaths
+Version 2.5.1 - Filter redundant cheat deaths (within cutoff only)
 """
 
 from flask import Flask, request, jsonify, Response
@@ -959,32 +959,59 @@ def analyze():
                 if len(deaths_sorted_all) > 15:
                     print(f"  ⚠️ Fight {fid} ({boss_name}) has {len(deaths_sorted_all)} deaths (sending all)")
                 
+                # Pre-calculate cutoff timestamp for the maxCutoff value
+                # We need this to determine if a real death is "within cutoff"
+                fight_start = fight['start_time']
+                real_deaths_for_cutoff = [
+                    d for d in deaths_sorted_all 
+                    if not d.get("isCheatDeath", False)
+                ]
+                
+                # Calculate the cutoff timestamp based on maxCutoff
+                cutoff_timestamp = None
+                if len(real_deaths_for_cutoff) >= max_cutoff:
+                    # Get the timestamp of the Nth real death (relative to fight start)
+                    nth_death = real_deaths_for_cutoff[max_cutoff - 1]
+                    cutoff_timestamp = nth_death["timestamp"] - fight_start
+                elif len(real_deaths_for_cutoff) > 0:
+                    # Fewer deaths than maxCutoff, use the last death's timestamp
+                    last_death = real_deaths_for_cutoff[-1]
+                    cutoff_timestamp = last_death["timestamp"] - fight_start
+                
                 # Filter out redundant cheat deaths
-                # A cheat death is redundant if the same player has a real death afterward
-                # This prevents double-counting when someone cheat deaths then dies for real
+                # A cheat death is redundant if:
+                # 1. The same player has a real death after it
+                # 2. BOTH the cheat death AND the real death are within the cutoff window
                 redundant_cheat_death_indices = set()
                 
-                # Group deaths by player (using normalized names for grouping)
-                deaths_by_player = defaultdict(list)
-                for idx, ev in enumerate(deaths_sorted):
-                    player_name = normalize_character_name(ev["targetName"])
-                    main_char = get_main_character(player_name, character_groups)
-                    deaths_by_player[main_char].append((idx, ev))
-                
-                # For each player, mark redundant cheat deaths
-                for main_char, player_deaths in deaths_by_player.items():
-                    # Already sorted by timestamp
-                    for i, (idx, death) in enumerate(player_deaths):
-                        if death.get("isCheatDeath", False):
-                            # This is a cheat death - check if there's a real death after it
-                            # Look at remaining deaths for this player
-                            for j in range(i + 1, len(player_deaths)):
-                                next_idx, next_death = player_deaths[j]
-                                if not next_death.get("isCheatDeath", False):
-                                    # Found a real death after the cheat death
-                                    # Mark the cheat death as redundant
-                                    redundant_cheat_death_indices.add(idx)
-                                    break
+                if cutoff_timestamp is not None:
+                    # Group deaths by player (using normalized names for grouping)
+                    deaths_by_player = defaultdict(list)
+                    for idx, ev in enumerate(deaths_sorted):
+                        player_name = normalize_character_name(ev["targetName"])
+                        main_char = get_main_character(player_name, character_groups)
+                        # Store with relative timestamp for cutoff comparison
+                        relative_ts = ev["timestamp"] - fight_start
+                        deaths_by_player[main_char].append((idx, ev, relative_ts))
+                    
+                    # For each player, mark redundant cheat deaths
+                    for main_char, player_deaths in deaths_by_player.items():
+                        # Already sorted by timestamp
+                        for i, (idx, death, death_ts) in enumerate(player_deaths):
+                            if death.get("isCheatDeath", False):
+                                # This is a cheat death - check if it's within cutoff
+                                if death_ts <= cutoff_timestamp:
+                                    # Cheat death is within cutoff
+                                    # Check if there's a real death after it (also within cutoff)
+                                    for j in range(i + 1, len(player_deaths)):
+                                        next_idx, next_death, next_ts = player_deaths[j]
+                                        if not next_death.get("isCheatDeath", False):
+                                            # Found a real death after the cheat death
+                                            # Check if this real death is also within cutoff
+                                            if next_ts <= cutoff_timestamp:
+                                                # Both are within cutoff → mark cheat death as redundant
+                                                redundant_cheat_death_indices.add(idx)
+                                            break
                 
                 # Assign TWO ranks to each death event:
                 # 1. rankWithinPull - rank among REAL deaths only (ignoring cheat deaths)
