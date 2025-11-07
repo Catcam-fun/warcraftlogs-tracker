@@ -1,6 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Search, AlertCircle, Loader2, Filter, ChevronDown, ChevronRight, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown, Share2, Copy, Check } from 'lucide-react';
 
+// Automatically detect if running locally or in production
+const API_URL = window.location.hostname === 'localhost' 
+  ? 'http://localhost:5000' 
+  : 'https://deathwarcraftlogs-api.onrender.com';
+
 export default function WarcraftLogsApp() {
   const [config, setConfig] = useState({
     clientId: '',
@@ -50,7 +55,7 @@ export default function WarcraftLogsApp() {
     setError('');
 
     try {
-      const response = await fetch(`https://deathwarcraftlogs-api.onrender.com/api/shared/${shareId}`);
+      const response = await fetch(`${API_URL}/api/shared/${shareId}`);
       const result = await response.json();
 
       if (!result.success) {
@@ -75,7 +80,7 @@ export default function WarcraftLogsApp() {
 
     setSharingData(true);
     try {
-      const response = await fetch('https://deathwarcraftlogs-api.onrender.com/api/share', {
+      const response = await fetch(`${API_URL}/api/share`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -149,7 +154,7 @@ export default function WarcraftLogsApp() {
         characterGroups
       };
 
-      const response = await fetch('https://deathwarcraftlogs-api.onrender.com/api/analyze', {
+      const response = await fetch(`${API_URL}/api/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
