@@ -269,8 +269,87 @@ export default function WarcraftLogsApp() {
                 }
               };
               
+              // Character name normalization helper
+              window.normalizeCharacterName = function(name) {
+                if (!name) return name;
+                // Remove accents and diacritics (same logic as backend)
+                return name.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+              };
+              
+              // Improved export function with normalization
+              window.exportAndCopy = function() {
+                if (!window.deathTrackerData) {
+                  console.error("❌ No deathTrackerData found! Run analysis first.");
+                  return;
+                }
+
+                console.log("📊 Building export data...");
+                
+                const data = window.deathTrackerData;
+                const events = data.events;
+                const pullsMap = new Map();
+                
+                // Build pulls from events with name normalization
+                for (const [playerName, playerEvents] of Object.entries(events)) {
+                  for (const event of playerEvents) {
+                    const pullKey = `${event.reportId}_${event.fightId}`;
+                    if (!pullsMap.has(pullKey)) {
+                      pullsMap.set(pullKey, {
+                        reportId: event.reportId,
+                        fightId: event.fightId,
+                        boss: event.boss,
+                        bossId: event.bossId,
+                        pullNo: event.pullNo,
+                        isKill: event.isKill,
+                        deaths: []
+                      });
+                    }
+                    pullsMap.get(pullKey).deaths.push({
+                      name: window.normalizeCharacterName(event.player),
+                      originalCharacter: event.originalCharacter,
+                      timestamp: event.timestamp,
+                      absTs: event.absTs,
+                      abilityName: event.abilityName,
+                      isCheatDeath: event.isCheatDeath,
+                      rankWithinPull: event.rankWithinPull,
+                      phase: event.phase
+                    });
+                  }
+                }
+                
+                const rawPulls = Array.from(pullsMap.values()).sort((a, b) => a.pullNo - b.pullNo);
+                const exportData = {
+                  rawPulls: rawPulls,
+                  meta: data.meta || {},
+                  generatedAt: new Date().toISOString(),
+                  source: "death-tracker-frontend"
+                };
+                
+                // Show summary
+                const totalDeaths = rawPulls.reduce((sum, p) => sum + p.deaths.length, 0);
+                console.log(`\n✅ Export ready!`);
+                console.log(`   ${rawPulls.length} pulls, ${totalDeaths} deaths`);
+                console.log(`   ${JSON.stringify(exportData).length.toLocaleString()} characters`);
+                
+                // Use copy() to avoid truncation
+                try {
+                  copy(exportData);
+                  console.log(`\n🎉 DATA COPIED TO CLIPBOARD!`);
+                  console.log(`   Paste into a file called: death_data.json`);
+                  return exportData;
+                } catch (e) {
+                  console.error("❌ copy() failed:", e);
+                  console.log("\n📋 Manual copy:");
+                  console.log(JSON.stringify(exportData, null, 2));
+                  return exportData;
+                }
+              };
+              
               console.log("🎯 Analysis complete! Data exposed as window.deathTrackerData");
-              console.log("💾 Export data: window.exportDeathData() or window.exportDeathData('PlayerName')");
+              console.log("💾 Export options:");
+              console.log("  - window.exportAndCopy() - Copy full audit data (RECOMMENDED)");
+              console.log("  - window.exportDeathData() - Export all deaths");
+              console.log("  - window.exportDeathData('PlayerName') - Export specific player");
               console.log("📊 Summary:");
               console.log(`  Players: ${Object.keys(data.result.events).length}`);
               console.log(`  pullCutoffTimestamps: ${data.result.pullCutoffTimestamps ? 'Present' : 'MISSING'}`);

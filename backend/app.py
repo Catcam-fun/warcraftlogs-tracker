@@ -2,7 +2,7 @@
 """
 Flask API for WarcraftLogs Death Tracker - V2 GraphQL API
 Optimized for Render.com deployment
-Version 2.3 - Real-time progress updates via SSE
+Version 2.4 - Fixed character name encoding issues
 """
 
 from flask import Flask, request, jsonify, Response
@@ -14,6 +14,7 @@ import time
 import os
 import json
 import uuid
+import unicodedata
 
 app = Flask(__name__)
 
@@ -41,6 +42,32 @@ OAUTH_TOKEN_URL = "https://wcl-proxy.catcam-fun.workers.dev/oauth/token"
 
 # OAuth2 token cache
 _token_cache = {"token": None, "expires_at": 0}
+
+
+def normalize_character_name(name):
+    """
+    Normalize character names to handle UTF-8 encoding issues.
+    Removes accents and diacritics to ensure consistent character matching.
+    
+    Examples:
+        "Fîshy" → "Fishy"
+        "Tîtus" → "Titus"
+        "Gawrguirâ" → "Gawrguira"
+        "Sarenaí" → "Sarenai"
+    """
+    if not name:
+        return name
+    
+    # Normalize to NFD (Canonical Decomposition)
+    nfd = unicodedata.normalize('NFD', name)
+    
+    # Remove combining marks (accents, diacritics)
+    ascii_name = ''.join(
+        char for char in nfd 
+        if unicodedata.category(char) != 'Mn'
+    )
+    
+    return ascii_name if ascii_name else name
 
 
 def get_access_token(client_id, client_secret):
@@ -202,7 +229,7 @@ def get_guild_roster(token, guild_name, server, region):
             
             # Add members from this page
             for member in members:
-                name = member.get("name")
+                name = normalize_character_name(member.get("name"))
                 if name:
                     all_members.add(name.lower())
             
@@ -297,7 +324,7 @@ def get_fights(token, report_code):
             if actor.get("type") == "Player":
                 formatted_friendlies.append({
                     "id": actor.get("id"),
-                    "name": actor.get("name"),
+                    "name": normalize_character_name(actor.get("name")),
                     "type": actor.get("subType")  # Class name
                 })
         
@@ -371,7 +398,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
         actor_id = friendly.get('id')
         name = friendly.get('name')
         if actor_id and name:
-            actor_id_to_name[actor_id] = name
+            actor_id_to_name[actor_id] = normalize_character_name(name)
     
     # Get the time range for ALL fights we care about
     start_time = min(f['start_time'] for f in fights)
