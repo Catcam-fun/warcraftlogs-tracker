@@ -857,6 +857,70 @@ export default function WarcraftLogsApp() {
     return `https://www.warcraftlogs.com/reports/${reportId}#fight=${fightId}&type=deaths`;
   };
 
+  // Calculate median-based color with outlier handling
+  const getPercentageColor = (percentage, allPercentages) => {
+    if (!allPercentages || allPercentages.length === 0) {
+      return '#34d399'; // default light green
+    }
+
+    // Calculate quartiles and IQR for outlier detection
+    const sorted = [...allPercentages].sort((a, b) => a - b);
+    const q1Index = Math.floor(sorted.length * 0.25);
+    const q3Index = Math.floor(sorted.length * 0.75);
+    const medianIndex = Math.floor(sorted.length * 0.5);
+    
+    const q1 = sorted[q1Index];
+    const q3 = sorted[q3Index];
+    const median = sorted[medianIndex];
+    const iqr = q3 - q1;
+    
+    // Define outlier boundaries
+    const lowerBound = q1 - 1.5 * iqr;
+    const upperBound = q3 + 1.5 * iqr;
+    
+    // Filter out outliers for color scaling
+    const filteredValues = sorted.filter(v => v >= lowerBound && v <= upperBound);
+    const minVal = Math.min(...filteredValues);
+    const maxVal = Math.max(...filteredValues);
+    
+    // Assign extreme colors to outliers
+    if (percentage < lowerBound) {
+      return '#166534'; // dark green for low outliers
+    }
+    if (percentage > upperBound) {
+      return '#dc2626'; // dark red for high outliers
+    }
+    
+    // Color scale for non-outliers
+    if (percentage <= median) {
+      // Below median: light green (#86efac) to darker green (#166534)
+      const ratio = (median - percentage) / (median - minVal);
+      const r = Math.round(134 + (22 - 134) * ratio);
+      const g = Math.round(239 + (101 - 239) * ratio);
+      const b = Math.round(172 + (52 - 172) * ratio);
+      return `rgb(${r}, ${g}, ${b})`;
+    } else {
+      // Above median: light green to light yellow to red
+      const ratio = (percentage - median) / (maxVal - median);
+      
+      if (ratio < 0.5) {
+        // Light green (#86efac) to light yellow (#fef08a)
+        const localRatio = ratio * 2;
+        const r = Math.round(134 + (254 - 134) * localRatio);
+        const g = Math.round(239 + (240 - 239) * localRatio);
+        const b = Math.round(172 + (138 - 172) * localRatio);
+        return `rgb(${r}, ${g}, ${b})`;
+      } else {
+        // Light yellow (#fef08a) to red (#dc2626)
+        const localRatio = (ratio - 0.5) * 2;
+        const r = Math.round(254 + (220 - 254) * localRatio);
+        const g = Math.round(240 + (38 - 240) * localRatio);
+        const b = Math.round(138 + (38 - 138) * localRatio);
+        return `rgb(${r}, ${g}, ${b})`;
+      }
+    }
+  };
+
   return (
     <div style={{ minHeight: '100vh', background: '#0d1117', color: '#e2e8f0', fontFamily: 'system-ui, -apple-system, sans-serif', position: 'relative', overflow: 'hidden' }}>
       {/* Share Modal */}
@@ -1480,6 +1544,38 @@ export default function WarcraftLogsApp() {
               const { bosses, players, grid } = getOverviewData();
               const sortedPlayers = sortConfig.key ? sortOverviewData(bosses, players, grid, sortConfig.key) : players;
               
+              // Calculate all percentage values for color scaling
+              const allRealRates = [];
+              const allTotalRates = [];
+              const allBossRealRates = {};
+              const allBossTotalRates = {};
+              
+              bosses.forEach(boss => {
+                allBossRealRates[boss] = [];
+                allBossTotalRates[boss] = [];
+              });
+              
+              players.forEach(player => {
+                // Collect overall rates
+                if (grid[player].overall.rate !== null) {
+                  allRealRates.push(grid[player].overall.rate);
+                }
+                if (grid[player].overall.totalRate !== null) {
+                  allTotalRates.push(grid[player].overall.totalRate);
+                }
+                
+                // Collect per-boss rates
+                bosses.forEach(boss => {
+                  const cellData = grid[player][boss];
+                  if (cellData.rate !== null) {
+                    allBossRealRates[boss].push(cellData.rate);
+                  }
+                  if (cellData.totalRate !== null) {
+                    allBossTotalRates[boss].push(cellData.totalRate);
+                  }
+                });
+              });
+              
               return (
                 <div style={{ background: '#1a1d23', borderRadius: '12px', padding: '16px', border: '1px solid #2d3238', overflowX: 'auto' }}>
                   <h2 style={{ margin: '0 0 14px', fontSize: '16px', fontWeight: '600', color: '#ffffff' }}>Death Rate Overview</h2>
@@ -1528,15 +1624,15 @@ export default function WarcraftLogsApp() {
                                 {cellData.rate !== null ? (
                                   showBothStats ? (
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                      <span style={{ color: cellData.rate > 50 ? '#f87171' : cellData.rate > 25 ? '#fbbf24' : '#34d399', fontWeight: '600', fontSize: '11px' }}>
+                                      <span style={{ color: getPercentageColor(cellData.rate, allBossRealRates[boss]), fontWeight: '600', fontSize: '11px' }}>
                                         {cellData.rate.toFixed(1)}%
                                       </span>
-                                      <span style={{ color: '#34d399', fontSize: '10px', fontWeight: '500' }}>
+                                      <span style={{ color: getPercentageColor(cellData.totalRate, allBossTotalRates[boss]), fontSize: '10px', fontWeight: '500' }}>
                                         ({cellData.totalRate.toFixed(1)}%)
                                       </span>
                                     </div>
                                   ) : (
-                                    <span style={{ color: cellData.rate > 50 ? '#f87171' : cellData.rate > 25 ? '#fbbf24' : '#34d399', fontWeight: '600' }}>
+                                    <span style={{ color: getPercentageColor(cellData.rate, allBossRealRates[boss]), fontWeight: '600' }}>
                                       {cellData.rate.toFixed(1)}%
                                     </span>
                                   )
@@ -1552,15 +1648,15 @@ export default function WarcraftLogsApp() {
                                 const showBothStats = grid[player].overall.hasCheatDeaths && grid[player].overall.totalDeaths > grid[player].overall.deaths;
                                 return showBothStats ? (
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'center' }}>
-                                    <span style={{ color: grid[player].overall.rate > 50 ? '#f87171' : grid[player].overall.rate > 25 ? '#fbbf24' : '#34d399', fontSize: '11px' }}>
+                                    <span style={{ color: getPercentageColor(grid[player].overall.rate, allRealRates), fontSize: '11px' }}>
                                       {grid[player].overall.rate.toFixed(1)}%
                                     </span>
-                                    <span style={{ color: '#34d399', fontSize: '10px', fontWeight: '500' }}>
+                                    <span style={{ color: getPercentageColor(grid[player].overall.totalRate, allTotalRates), fontSize: '10px', fontWeight: '500' }}>
                                       ({grid[player].overall.totalRate.toFixed(1)}%)
                                     </span>
                                   </div>
                                 ) : (
-                                  <span style={{ color: grid[player].overall.rate > 50 ? '#f87171' : grid[player].overall.rate > 25 ? '#fbbf24' : '#34d399' }}>
+                                  <span style={{ color: getPercentageColor(grid[player].overall.rate, allRealRates) }}>
                                     {grid[player].overall.rate.toFixed(1)}%
                                   </span>
                                 );
@@ -1577,9 +1673,15 @@ export default function WarcraftLogsApp() {
               );
             })()}
 
-            {view === 'players' && (
+            {view === 'players' && (() => {
+              const filteredStats = getFilteredStats();
+              // Calculate all percentage values for color scaling
+              const allRealRates = filteredStats.map(s => s.realRate);
+              const allTotalRates = filteredStats.map(s => s.totalRate);
+              
+              return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {getFilteredStats().map(({ player, realDeaths, totalDeaths, cheatDeaths, pulls, realRate, totalRate, hasCheatDeaths, deathsByBoss, cheatDeathsByBoss, totalDeathsByBoss, topAbilitiesByBoss }) => {
+                {filteredStats.map(({ player, realDeaths, totalDeaths, cheatDeaths, pulls, realRate, totalRate, hasCheatDeaths, deathsByBoss, cheatDeathsByBoss, totalDeathsByBoss, topAbilitiesByBoss }) => {
                   const isExpanded = expandedPlayers.has(player);
                   const showBothStats = hasCheatDeaths && cheatDeaths > 0;
                   
@@ -1609,7 +1711,7 @@ export default function WarcraftLogsApp() {
                                   <span style={{ color: '#8b92a0' }}>Real only:</span> {realDeaths} deaths / {pulls} pulls
                                   <span style={{ 
                                     marginLeft: '8px',
-                                    color: realRate > 50 ? '#f87171' : realRate > 25 ? '#fbbf24' : '#34d399',
+                                    color: getPercentageColor(realRate, allRealRates),
                                     fontWeight: '600'
                                   }}>
                                     ({realRate.toFixed(1)}%)
@@ -1619,7 +1721,7 @@ export default function WarcraftLogsApp() {
                                   <span style={{ color: '#8b92a0' }}>With cheat:</span> {totalDeaths} deaths / {pulls} pulls
                                   <span style={{ 
                                     marginLeft: '8px',
-                                    color: totalRate > 50 ? '#f87171' : totalRate > 25 ? '#fbbf24' : '#34d399',
+                                    color: getPercentageColor(totalRate, allTotalRates),
                                     fontWeight: '600'
                                   }}>
                                     ({totalRate.toFixed(1)}%)
@@ -1635,7 +1737,7 @@ export default function WarcraftLogsApp() {
                           </div>
                         </div>
                         
-                        <div style={{ fontSize: '18px', fontWeight: '700', color: realRate > 50 ? '#f87171' : realRate > 25 ? '#fbbf24' : '#34d399' }}>
+                        <div style={{ fontSize: '18px', fontWeight: '700', color: getPercentageColor(realRate, allRealRates) }}>
                           {realRate.toFixed(1)}%
                         </div>
                       </div>
@@ -1743,7 +1845,8 @@ export default function WarcraftLogsApp() {
                   );
                 })}
               </div>
-            )}
+              );
+            })()}
           </div>
         )}
       </div>
