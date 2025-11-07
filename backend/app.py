@@ -1046,6 +1046,13 @@ def analyze():
                     total_death_rank += 1
                     is_cheat = ev.get("isCheatDeath", False)
                     
+                    # Skip cheat deaths that are outside the cutoff window
+                    if is_cheat and cutoff_timestamp is not None:
+                        death_relative_ts = ev["timestamp"] - fight_start
+                        if death_relative_ts > cutoff_timestamp:
+                            continue  # Don't send cheat deaths outside cutoff to frontend
+                    
+                    
                     if not is_cheat:
                         real_death_rank += 1
                     
