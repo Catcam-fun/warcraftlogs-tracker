@@ -398,9 +398,11 @@ def find_mass_death_start(cutoff_idx, deaths):
 @app.route('/api/analyze', methods=['POST'])
 def analyze():
     """Analyze death data using OPTIMIZED bulk fetching"""
+    # Extract payload BEFORE entering generator to avoid request context issues
+    payload = request.get_json()
+    
     def generate():
         try:
-            payload = request.get_json()
             
             # Extract parameters
             client_id = payload.get('clientId')
