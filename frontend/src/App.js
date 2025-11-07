@@ -331,18 +331,44 @@ export default function WarcraftLogsApp() {
                 console.log(`   ${rawPulls.length} pulls, ${totalDeaths} deaths`);
                 console.log(`   ${JSON.stringify(exportData).length.toLocaleString()} characters`);
                 
-                // Use copy() to avoid truncation
-                try {
-                  copy(exportData);
-                  console.log(`\n🎉 DATA COPIED TO CLIPBOARD!`);
-                  console.log(`   Paste into a file called: death_data.json`);
-                  return exportData;
-                } catch (e) {
-                  console.error("❌ copy() failed:", e);
-                  console.log("\n📋 Manual copy:");
-                  console.log(JSON.stringify(exportData, null, 2));
-                  return exportData;
+                // Try Clipboard API first, then fall back to copy() utility
+                const jsonString = JSON.stringify(exportData, null, 2);
+                
+                // Method 1: Try Clipboard API (works in browser console)
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                  navigator.clipboard.writeText(jsonString)
+                    .then(() => {
+                      console.log(`\n🎉 DATA COPIED TO CLIPBOARD!`);
+                      console.log(`   Paste into a file called: death_data.json`);
+                    })
+                    .catch(() => {
+                      // Method 2: Try Chrome DevTools copy() utility
+                      try {
+                        // eslint-disable-next-line no-undef
+                        copy(exportData);
+                        console.log(`\n🎉 DATA COPIED TO CLIPBOARD!`);
+                        console.log(`   Paste into a file called: death_data.json`);
+                      } catch (e) {
+                        console.error("❌ Clipboard methods failed");
+                        console.log("\n📋 Copy this manually:");
+                        console.log(jsonString);
+                      }
+                    });
+                } else {
+                  // Method 2: Try Chrome DevTools copy() utility
+                  try {
+                    // eslint-disable-next-line no-undef
+                    copy(exportData);
+                    console.log(`\n🎉 DATA COPIED TO CLIPBOARD!`);
+                    console.log(`   Paste into a file called: death_data.json`);
+                  } catch (e) {
+                    console.error("❌ Clipboard not available");
+                    console.log("\n📋 Copy this manually:");
+                    console.log(jsonString);
+                  }
                 }
+                
+                return exportData;
               };
               
               console.log("🎯 Analysis complete! Data exposed as window.deathTrackerData");
