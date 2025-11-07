@@ -806,10 +806,14 @@ def analyze():
             # Collect all fights
             yield f"data: {json.dumps({'stage': 'fights', 'message': 'Collecting fights from reports...'})}\n\n"
             all_fights_raw = []
+            report_ability_maps = {}
             
             for i, rep in enumerate(reports, 1):
                 rid = rep["id"]
                 yield f"data: {json.dumps({'stage': 'fights', 'message': f'Processing report {i}/{len(reports)}: {rid}'})}\n\n"
+                
+                if rid not in report_ability_maps:
+                    report_ability_maps[rid] = get_abilities_map(token, rid)
                 
                 fights_data = get_fights(token, rid)
                 fights = fights_data.get("fights", [])
@@ -852,7 +856,7 @@ def analyze():
                         'abs_end': abs_end,
                         'report_abs_start': report_abs_start,
                         'friendlies': friendlies,
-                        'ability_map': None  # Will fetch after dedup
+                        'ability_map': report_ability_maps[rid]
                     })
             
             all_fights_raw.sort(key=lambda x: x['abs_start'])
@@ -875,20 +879,6 @@ def analyze():
                 all_fights_deduped.append(fight_data)
             
             yield f"data: {json.dumps({'stage': 'dedup', 'message': f'After deduplication: {len(all_fights_deduped)} unique fights'})}\n\n"
-            
-            # Fetch ability maps only for unique reports (after deduplication)
-            yield f"data: {json.dumps({'stage': 'abilities', 'message': 'Fetching ability names for unique reports...'})}\n\n"
-            unique_reports = set(fd['reportId'] for fd in all_fights_deduped)
-            report_ability_maps = {}
-            
-            for idx, rid in enumerate(sorted(unique_reports), 1):
-                yield f"data: {json.dumps({'stage': 'abilities', 'message': f'Fetching abilities {idx}/{len(unique_reports)}: {rid}'})}\n\n"
-                report_ability_maps[rid] = get_abilities_map(token, rid)
-            
-            # Update deduplicated fights with ability maps
-            for fight_data in all_fights_deduped:
-                fight_data['ability_map'] = report_ability_maps[fight_data['reportId']]
-            
             
             # Process deaths
             yield f"data: {json.dumps({'stage': 'deaths', 'message': 'Processing death events...'})}\n\n"
@@ -1012,16 +1002,24 @@ def analyze():
                                 # This is a cheat death - check if it's within cutoff
                                 if death_ts <= cutoff_timestamp:
                                     # Cheat death is within cutoff
-                                    # Check if there's a real death after it (also within cutoff)
-                                    for j in range(i + 1, len(player_deaths)):
-                                        next_idx, next_death, next_ts = player_deaths[j]
-                                        if not next_death.get("isCheatDeath", False):
-                                            # Found a real death after the cheat death
-                                            # Check if this real death is also within cutoff
-                                            if next_ts <= cutoff_timestamp:
-                                                # Both are within cutoff → mark cheat death as redundant
-                                                redundant_cheat_death_indices.add(idx)
+                                    # Check if this player has ANY real death within cutoff
+                                    # (handles both normal failures and boss mechanic edge cases)
+                                    has_real_death_in_cutoff = False
+                                    
+                                    for j in range(len(player_deaths)):
+                                        if j == i:
+                                            continue  # Skip self
+                                        
+                                        other_idx, other_death, other_ts = player_deaths[j]
+                                        
+                                        # Check if it's a real death within cutoff
+                                        if not other_death.get("isCheatDeath", False) and other_ts <= cutoff_timestamp:
+                                            has_real_death_in_cutoff = True
                                             break
+                                    
+                                    # If player has a real death within cutoff, filter this cheat death
+                                    if has_real_death_in_cutoff:
+                                        redundant_cheat_death_indices.add(idx)
                 
                 # Assign TWO ranks to each death event:
                 # 1. rankWithinPull - rank among REAL deaths only (ignoring cheat deaths)
