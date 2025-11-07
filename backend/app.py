@@ -1002,9 +1002,13 @@ def analyze():
                                 # This is a cheat death - check if it's within cutoff
                                 if death_ts <= cutoff_timestamp:
                                     # Cheat death is within cutoff
-                                    # Check if this player has ANY real death within cutoff
-                                    # (handles both normal failures and boss mechanic edge cases)
-                                    has_real_death_in_cutoff = False
+                                    # Check if this player has a real death CLOSE IN TIME to this cheat death
+                                    # "Close" = within 5 seconds (handles both normal failures and boss mechanics)
+                                    # This prevents filtering cheat deaths from earlier death/rez cycles
+                                    CLOSE_DEATH_WINDOW_MS = 5000  # 5 seconds
+                                    
+                                    closest_real_death = None
+                                    closest_time_diff = float('inf')
                                     
                                     for j in range(len(player_deaths)):
                                         if j == i:
@@ -1012,14 +1016,22 @@ def analyze():
                                         
                                         other_idx, other_death, other_ts = player_deaths[j]
                                         
-                                        # Check if it's a real death within cutoff
-                                        if not other_death.get("isCheatDeath", False) and other_ts <= cutoff_timestamp:
-                                            has_real_death_in_cutoff = True
-                                            break
+                                        # Check if it's a real death
+                                        if not other_death.get("isCheatDeath", False):
+                                            # Calculate time difference (absolute value)
+                                            time_diff = abs(other_ts - death_ts)
+                                            
+                                            # Keep track of the closest real death
+                                            if time_diff < closest_time_diff:
+                                                closest_time_diff = time_diff
+                                                closest_real_death = (other_idx, other_ts)
                                     
-                                    # If player has a real death within cutoff, filter this cheat death
-                                    if has_real_death_in_cutoff:
-                                        redundant_cheat_death_indices.add(idx)
+                                    # If there's a real death within 5 seconds AND within cutoff, filter the cheat death
+                                    if closest_real_death is not None and closest_time_diff <= CLOSE_DEATH_WINDOW_MS:
+                                        closest_idx, closest_ts = closest_real_death
+                                        if closest_ts <= cutoff_timestamp:
+                                            # Both are within cutoff AND close in time → mark cheat death as redundant
+                                            redundant_cheat_death_indices.add(idx)
                 
                 # Assign TWO ranks to each death event:
                 # 1. rankWithinPull - rank among REAL deaths only (ignoring cheat deaths)
