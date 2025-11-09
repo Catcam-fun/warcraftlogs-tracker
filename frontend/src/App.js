@@ -6,6 +6,24 @@ const API_URL = window.location.hostname === 'localhost'
   ? 'http://localhost:5000' 
   : 'https://deathwarcraftlogs-api.onrender.com';
 
+
+// WoW Class Colors (standard across all WoW sites/addons)
+const WOW_CLASS_COLORS = {
+  "DeathKnight": "#C41E3A",
+  "DemonHunter": "#A330C9",
+  "Druid": "#FF7C0A",
+  "Evoker": "#33937F",
+  "Hunter": "#AAD372",
+  "Mage": "#3FC7EB",
+  "Monk": "#00FF98",
+  "Paladin": "#F48CBA",
+  "Priest": "#FFFFFF",
+  "Rogue": "#FFF468",
+  "Shaman": "#0070DD",
+  "Warlock": "#8788EE",
+  "Warrior": "#C69B6D",
+};
+
 export default function WarcraftLogsApp() {
   const [config, setConfig] = useState({
     clientId: '',
@@ -188,6 +206,19 @@ export default function WarcraftLogsApp() {
             } else if (data.result) {
               setData(data.result);
               
+              // DEBUG: Log class/spec from first event to verify backend data
+              const firstPlayer = Object.keys(data.result.events)[0];
+              if (firstPlayer && data.result.events[firstPlayer].length > 0) {
+                const firstEvent = data.result.events[firstPlayer][0];
+                console.log("✅ Data received! Class/spec check:", {
+                  player: firstPlayer,
+                  class: firstEvent.class,
+                  spec: firstEvent.spec,
+                  hasClass: !!firstEvent.class,
+                  hasSpec: !!firstEvent.spec
+                });
+              }
+              
               // DEBUG: Expose data globally and log summary
               window.deathTrackerData = data.result;
               
@@ -295,7 +326,7 @@ export default function WarcraftLogsApp() {
                 const pullsMap = new Map();
                 
                 // Build pulls from events with name normalization
-                for (const [playerName, playerEvents] of Object.entries(events)) {
+                for (const [_playerName, playerEvents] of Object.entries(events)) {
                   for (const event of playerEvents) {
                     const pullKey = `${event.reportId}_${event.fightId}`;
                     if (!pullsMap.has(pullKey)) {
@@ -448,7 +479,10 @@ export default function WarcraftLogsApp() {
     const hasCheatDeaths = config.enableCheatDeath;
     
     for (const player of Object.keys(eventsAll)) {
-      const allPlayerEvents = eventsAll[player].filter(
+      // Get ALL events for class/spec lookup BEFORE applying boss/ability filters
+      const allPlayerEventsUnfiltered = eventsAll[player];
+      
+      const allPlayerEvents = allPlayerEventsUnfiltered.filter(
         ev => (selectedBosses.size === 0 || selectedBosses.has(ev.boss)) &&
         ev.abilityName && ev.abilityName !== 'Unknown'
       );
@@ -633,6 +667,16 @@ export default function WarcraftLogsApp() {
           .slice(0, 5);
       });
 
+
+      // Extract class/spec from first death event (use unfiltered to ensure we get it)
+      const playerClass = allPlayerEventsUnfiltered.length > 0 ? (allPlayerEventsUnfiltered[0].class || "Unknown") : "Unknown";
+      const playerSpec = allPlayerEventsUnfiltered.length > 0 ? (allPlayerEventsUnfiltered[0].spec || "Unknown") : "Unknown";
+      
+      // DEBUG: Log first player's class/spec to console
+      if (stats.length === 0) {
+        console.log("🎨 First player class/spec:", { player, class: playerClass, spec: playerSpec, sampleEvent: allPlayerEventsUnfiltered[0] });
+      }
+
       stats.push({ 
         player, 
         realDeaths: realDeathCount,
@@ -645,7 +689,9 @@ export default function WarcraftLogsApp() {
         deathsByBoss,
         cheatDeathsByBoss,  // NEW: separate cheat deaths by boss
         totalDeathsByBoss,
-        topAbilitiesByBoss
+        topAbilitiesByBoss,
+        class: playerClass,
+        spec: playerSpec
       });
     }
 
@@ -671,6 +717,10 @@ export default function WarcraftLogsApp() {
       grid[player] = {};
       
       const allPlayerEvents = data.events[player] || [];
+      
+      // Extract class/spec from first event (use all events to ensure we get it)
+      const playerClass = allPlayerEvents.length > 0 ? (allPlayerEvents[0].class || "Unknown") : "Unknown";
+      const playerSpec = allPlayerEvents.length > 0 ? (allPlayerEvents[0].spec || "Unknown") : "Unknown";
       
       bosses.forEach(boss => {
         const bossPulls = data.bossParticipation[boss]?.[player]?.length || 0;
@@ -732,7 +782,9 @@ export default function WarcraftLogsApp() {
           pulls: bossPulls, 
           rate: realRate,
           totalRate: totalRate,
-          hasCheatDeaths
+          hasCheatDeaths,
+          class: playerClass,
+          spec: playerSpec
         };
       });
 
@@ -803,7 +855,9 @@ export default function WarcraftLogsApp() {
         pulls: totalPulls,
         rate: totalPulls > 0 ? (totalRealDeaths / totalPulls * 100) : null,
         totalRate: totalPulls > 0 ? (totalWithCheatDeaths / totalPulls * 100) : null,
-        hasCheatDeaths
+        hasCheatDeaths,
+        class: playerClass,
+        spec: playerSpec
       };
     });
 
@@ -1619,7 +1673,16 @@ export default function WarcraftLogsApp() {
                     <tbody>
                       {sortedPlayers.map(player => (
                         <tr key={player} style={{ borderBottom: '1px solid #2d3238' }}>
-                          <td style={{ padding: '10px', fontWeight: '600', position: 'sticky', left: 0, background: '#1a1d23', zIndex: 1, color: '#ffffff' }}>{player}</td>
+                          <td style={{ padding: '10px', fontWeight: '600', position: 'sticky', left: 0, background: '#1a1d23', zIndex: 1 }}>
+                            <div style={{ color: WOW_CLASS_COLORS[grid[player].overall?.class] || '#ffffff' }}>
+                              {player}
+                            </div>
+                            {grid[player].overall?.class && grid[player].overall?.class !== 'Unknown' && (
+                              <div style={{ fontSize: '10px', color: '#8b92a0', fontWeight: '400', marginTop: '2px' }}>
+                                {grid[player].overall.class}
+                              </div>
+                            )}
+                          </td>
                           {bosses.map(boss => {
                             const cellData = grid[player][boss];
                             const showBothStats = cellData.hasCheatDeaths && cellData.totalDeaths > cellData.deaths;
@@ -1686,9 +1749,14 @@ export default function WarcraftLogsApp() {
               
               return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {filteredStats.map(({ player, realDeaths, totalDeaths, cheatDeaths, pulls, realRate, totalRate, hasCheatDeaths, deathsByBoss, cheatDeathsByBoss, totalDeathsByBoss, topAbilitiesByBoss }) => {
+                {filteredStats.map(({ player, realDeaths, totalDeaths, cheatDeaths, pulls, realRate, totalRate, hasCheatDeaths, deathsByBoss, cheatDeathsByBoss, totalDeathsByBoss, topAbilitiesByBoss, class: playerClass, spec: playerSpec }) => {
                   const isExpanded = expandedPlayers.has(player);
                   const showBothStats = hasCheatDeaths && cheatDeaths > 0;
+                  
+                  // DEBUG: Log class/spec for first player
+                  if (player === Object.keys(data.events)[0]) {
+                    console.log("🎨 Rendering player:", { player, playerClass, playerSpec, color: WOW_CLASS_COLORS[playerClass] });
+                  }
                   
                   return (
                     <div key={player} style={{ background: '#1a1d23', borderRadius: '8px', border: '1px solid #2d3238', overflow: 'hidden' }}>
@@ -1707,7 +1775,16 @@ export default function WarcraftLogsApp() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
                           {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                           <div style={{ flex: 1 }}>
-                            <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '600', color: '#ffffff' }}>{player}</h3>
+                            <div>
+                              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '600', color: WOW_CLASS_COLORS[playerClass] || '#ffffff' }}>
+                                {player}
+                              </h3>
+                              {playerClass && playerClass !== 'Unknown' && (
+                                <div style={{ fontSize: '11px', color: '#8b92a0', marginTop: '2px' }}>
+                                  {playerClass}
+                                </div>
+                              )}
+                            </div>
                             
                             {showBothStats ? (
                               // Show BOTH statistics when cheat death detection is on

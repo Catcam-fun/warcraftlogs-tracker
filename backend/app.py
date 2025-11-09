@@ -36,6 +36,23 @@ CHEAT_DEATH_ABILITY_IDS = {
     209261,   # Last Resort (Demon Hunter - Vengeance)
 }
 
+# WoW Class Colors (standard across all WoW sites/addons)
+WOW_CLASS_COLORS = {
+    "DeathKnight": "#C41E3A",
+    "DemonHunter": "#A330C9",
+    "Druid": "#FF7C0A",
+    "Evoker": "#33937F",
+    "Hunter": "#AAD372",
+    "Mage": "#3FC7EB",
+    "Monk": "#00FF98",
+    "Paladin": "#F48CBA",
+    "Priest": "#FFFFFF",
+    "Rogue": "#FFF468",
+    "Shaman": "#0070DD",
+    "Warlock": "#8788EE",
+    "Warrior": "#C69B6D",
+}
+
 # WarcraftLogs V2 API endpoints (through Cloudflare Worker proxy)
 GRAPHQL_ENDPOINT = "https://wcl-proxy.catcam-fun.workers.dev/api/v2/client"
 OAUTH_TOKEN_URL = "https://wcl-proxy.catcam-fun.workers.dev/oauth/token"
@@ -255,7 +272,7 @@ def get_guild_roster(token, guild_name, server, region):
 
 
 def get_fights(token, report_code):
-    """Fetch fights for a report using V2 GraphQL API"""
+    """Fetch fights for a report using V2 GraphQL API, including player class/spec info"""
     
     query = """
     query($code: String!) {
@@ -283,6 +300,7 @@ def get_fights(token, report_code):
               subType
             }
           }
+          playerDetails(startTime: 0, endTime: 999999999999)
         }
       }
     }
@@ -295,13 +313,27 @@ def get_fights(token, report_code):
         report = data.get("reportData", {}).get("report", {})
         
         if not report:
-            return {"report_start": 0, "fights": [], "friendlies": []}
+            return {"report_start": 0, "fights": [], "friendlies": [], "player_details": {}}
         
         fights = report.get("fights", [])
         actors = report.get("masterData", {}).get("actors", [])
         report_start = report.get("startTime", 0)
+        player_details_data = report.get("playerDetails", {})
         
+        # DEBUG: Check if playerDetails was returned and show its structure
         print(f"Report {report_code}: Found {len(fights)} fights, {len(actors)} actors")
+        print(f"  DEBUG: playerDetails type: {type(player_details_data)}")
+        if player_details_data:
+            if isinstance(player_details_data, dict):
+                print(f"  DEBUG: playerDetails keys: {list(player_details_data.keys())}")
+                # Show first few characters of the data
+                import json
+                preview = json.dumps(player_details_data)[:500]
+                print(f"  DEBUG: playerDetails preview: {preview}...")
+            else:
+                print(f"  DEBUG: playerDetails is not a dict: {player_details_data}")
+        else:
+            print(f"  [WARN] playerDetails is empty/None!")
         
         # Convert to format compatible with existing code
         formatted_fights = []
@@ -328,6 +360,57 @@ def get_fights(token, report_code):
                     "type": actor.get("subType")  # Class name
                 })
         
+        # Parse player details to get class/spec info
+        # playerDetails structure: { data: { playerDetails: { tanks: [], healers: [], dps: [] } } }
+        player_spec_map = {}  # actor_id -> {class, spec, role}
+        
+        if player_details_data and isinstance(player_details_data, dict):
+            # Navigate through the nested structure: data -> playerDetails -> roles
+            data_section = player_details_data.get("data", {})
+            player_details_section = data_section.get("playerDetails", {})
+            
+            if not player_details_section:
+                print(f"  [WARN] playerDetails.data.playerDetails is empty or missing!")
+            
+            # Combine all roles
+            all_players = []
+            tanks = player_details_section.get("tanks", [])
+            healers = player_details_section.get("healers", [])
+            dps = player_details_section.get("dps", [])
+            
+            print(f"  Player counts - Tanks: {len(tanks)}, Healers: {len(healers)}, DPS: {len(dps)}")
+            
+            all_players.extend(tanks)
+            all_players.extend(healers)
+            all_players.extend(dps)
+            
+            for player in all_players:
+                actor_id = player.get("id")
+                player_name = normalize_character_name(player.get("name", ""))
+                player_type = player.get("type", "")  # Class name like "Druid", "Mage"
+                
+                # Get the first spec (most commonly used spec)
+                specs = player.get("specs", [])
+                # specs is a list of dicts like [{"spec": "Brewmaster", "count": 31}]
+                # Extract just the spec name from the first entry
+                player_spec = specs[0].get("spec", "Unknown") if specs else "Unknown"
+                
+                if actor_id:
+                    player_spec_map[actor_id] = {
+                        "class": player_type,
+                        "spec": player_spec,
+                        "name": player_name
+                    }
+            
+            print(f"  [OK] Extracted class/spec info for {len(player_spec_map)} players")
+            if player_spec_map:
+                # Show sample
+                sample_id = next(iter(player_spec_map))
+                sample = player_spec_map[sample_id]
+                print(f"    Sample: {sample['name']} (ID: {sample_id}) - {sample['spec']} {sample['class']}")
+        else:
+            print(f"  [WARN] playerDetails is None or not a dict: {type(player_details_data)}")
+        
         print(f"Formatted {len(formatted_friendlies)} friendly players")
         if len(formatted_friendlies) > 0:
             print(f"Sample player: {formatted_friendlies[0]}")
@@ -335,11 +418,14 @@ def get_fights(token, report_code):
         return {
             "report_start": report_start,
             "fights": formatted_fights,
-            "friendlies": formatted_friendlies
+            "friendlies": formatted_friendlies,
+            "player_details": player_spec_map
         }
     except Exception as e:
         print(f"Error fetching fights for {report_code}: {e}")
-        return {"report_start": 0, "fights": [], "friendlies": []}
+        import traceback
+        traceback.print_exc()
+        return {"report_start": 0, "fights": [], "friendlies": [], "player_details": {}}
 
 
 def get_abilities_map(token, report_code):
@@ -410,7 +496,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
     filter_expr = f"ability.id in ({cheat_death_ids})"
     
     if enable_cheat_death:
-        print(f"⚡ Cheat death detection ENABLED - querying deaths AND debuffs in one call...")
+        print(f"[ENABLED] Cheat death detection ENABLED - querying deaths AND debuffs in one call...")
         # Combined query: deaths + filtered debuffs (cheat deaths)
         combined_query = """
         query($code: String!, $startTime: Float!, $endTime: Float!, $filterExpression: String) {
@@ -529,7 +615,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
             
             print(f"  Found {len(cheat_death_events)} cheat death events to add")
         else:
-            print(f"💨 Cheat death detection DISABLED - skipping debuff queries (faster)")
+            print(f"[DISABLED] Cheat death detection DISABLED - skipping debuff queries (faster)")
         
         # STEP 3: Process regular death events
         for event in events_data:
@@ -819,6 +905,7 @@ def analyze():
                 fights = fights_data.get("fights", [])
                 report_abs_start = fights_data.get("report_start", rep["start"])
                 friendlies = fights_data.get("friendlies", [])
+                player_details = fights_data.get("player_details", {})
                 
                 # Check if report has enough guild members (15+)
                 if guild_roster:
@@ -856,7 +943,8 @@ def analyze():
                         'abs_end': abs_end,
                         'report_abs_start': report_abs_start,
                         'friendlies': friendlies,
-                        'ability_map': report_ability_maps[rid]
+                        'ability_map': report_ability_maps[rid],
+                        'player_details': player_details
                     })
             
             all_fights_raw.sort(key=lambda x: x['abs_start'])
@@ -897,14 +985,23 @@ def analyze():
             yield f"data: {json.dumps({'stage': 'deaths', 'message': f'Fetching deaths for {len(fights_by_report)} reports...'})}\n\n"
             report_deaths_cache = {}
             for report_idx, (rid, report_fights) in enumerate(fights_by_report.items(), 1):
-                yield f"data: {json.dumps({'stage': 'deaths', 'message': f'Fetching deaths from report {report_idx}/{len(fights_by_report)}'})}\n\n"
-                sample_fight_data = report_fights[0]
-                friendlies = sample_fight_data['friendlies']
-                ability_map = sample_fight_data['ability_map']
-                fights_list = [fd['fight'] for fd in report_fights]
-                
-                report_deaths_cache[rid] = get_report_deaths_bulk(token, rid, fights_list, friendlies, ability_map, enable_cheat_death)
-            
+                try:
+                    print(f"[FETCH] Fetching deaths from report {report_idx}/{len(fights_by_report)}: {rid}")
+                    yield f"data: {json.dumps({'stage': 'deaths', 'message': f'Fetching deaths from report {report_idx}/{len(fights_by_report)}'})}\n\n"
+                    sample_fight_data = report_fights[0]
+                    friendlies = sample_fight_data['friendlies']
+                    ability_map = sample_fight_data['ability_map']
+                    fights_list = [fd['fight'] for fd in report_fights]
+                    
+                    report_deaths_cache[rid] = get_report_deaths_bulk(token, rid, fights_list, friendlies, ability_map, enable_cheat_death)
+                    print(f"[OK] Completed report {rid}")
+                except Exception as e:
+                    print(f"[ERROR] ERROR fetching deaths for report {rid}: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+                    # Continue with empty deaths for this report
+                    report_deaths_cache[rid] = {f['id']: [] for f in fights_list}
+
             yield f"data: {json.dumps({'stage': 'processing', 'message': f'Processing {len(all_fights_deduped)} fights...'})}\n\n"
             
             total_deaths = 0
@@ -921,6 +1018,7 @@ def analyze():
                 is_kill = fight_data['is_kill']
                 report_abs_start = fight_data['report_abs_start']
                 friendlies = fight_data['friendlies']
+                player_details = fight_data.get("player_details", {})
                 
                 pull_counter_by_boss[boss_id] += 1
                 seq_no = pull_counter_by_boss[boss_id]
@@ -957,7 +1055,7 @@ def analyze():
                 
                 # DEBUG: Log if fight has many deaths
                 if len(deaths_sorted_all) > 15:
-                    print(f"  ⚠️ Fight {fid} ({boss_name}) has {len(deaths_sorted_all)} deaths (sending all)")
+                    print(f"  [WARN] Fight {fid} ({boss_name}) has {len(deaths_sorted_all)} deaths (sending all)")
                 
                 # Pre-calculate cutoff timestamp for the maxCutoff value
                 # We need this to determine if a real death is "within cutoff"
@@ -1059,6 +1157,28 @@ def analyze():
                     original_char = ev["targetName"]
                     main_char = get_main_character(original_char, character_groups)
                     
+                    # Look up class/spec info from player_details
+                    target_id = ev.get("targetID")
+                    player_class = "Unknown"
+                    player_spec = "Unknown"
+                    
+                    # DEBUG: Log player_details availability
+                    if idx == 1 and total_death_rank == 1:  # First death of first processed fight
+                        print(f"\n[DEBUG] DEBUG player_details lookup:")
+                        print(f"  - player_details has {len(player_details)} entries")
+                        if player_details:
+                            sample_id = next(iter(player_details))
+                            print(f"  - Sample ID in player_details: {sample_id} -> {player_details[sample_id]}")
+                        print(f"  - Current death targetID: {target_id}")
+                        print(f"  - Target name: {original_char}")
+                        print(f"  - targetID in player_details? {target_id in player_details if target_id else 'targetID is None'}\n")
+                    
+                    if target_id and target_id in player_details:
+                        player_class = player_details[target_id].get("class", "Unknown")
+                        player_spec = player_details[target_id].get("spec", "Unknown")
+                    elif target_id and total_death_rank <= 3:  # Log first few misses
+                        print(f"[WARN]  Could not find class/spec for {original_char} (ID: {target_id})")
+                    
                     death_event = {
                         "player": main_char,
                         "originalCharacter": original_char,
@@ -1074,7 +1194,9 @@ def analyze():
                         "absTs": report_abs_start + ev["timestamp"],
                         "timestamp": ev["timestamp"] - fight['start_time'],  # Make relative to fight start (for cutoff comparison)
                         "abilityName": ev.get("abilityName", "Unknown"),
-                        "isCheatDeath": is_cheat
+                        "isCheatDeath": is_cheat,
+                        "class": player_class,
+                        "spec": player_spec
                     }
                     counted_death_events[main_char].append(death_event)
                     character_breakdown[main_char][original_char].append(death_event)
