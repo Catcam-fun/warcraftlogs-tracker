@@ -148,11 +148,26 @@ def get_main_character(player_name, character_groups):
     return player_name
 
 
-def get_guild_reports(token, guild_name, server, region, zone_id, cutoff_date):
-    """Fetch guild reports using V2 GraphQL API"""
+def get_guild_reports(token, guild_name, server, region, zone_id, start_date=None, end_date=None):
+    """Fetch guild reports using V2 GraphQL API with optional date range filtering"""
     
-    # Convert cutoff date to timestamp
-    cutoff_ts = int(datetime.strptime(cutoff_date, "%Y-%m-%d").timestamp() * 1000) + 86400000 - 1
+    # Convert dates to timestamps if provided (handle empty strings as None)
+    start_ts = None
+    end_ts = None
+    
+    # Convert empty strings to None
+    if start_date == "":
+        start_date = None
+    if end_date == "":
+        end_date = None
+    
+    if start_date:
+        # Start of the start_date (00:00:00)
+        start_ts = int(datetime.strptime(start_date, "%Y-%m-%d").timestamp() * 1000)
+    
+    if end_date:
+        # End of the end_date (23:59:59)
+        end_ts = int(datetime.strptime(end_date, "%Y-%m-%d").timestamp() * 1000) + 86400000 - 1
     
     query = """
     query($guildName: String!, $serverSlug: String!, $serverRegion: String!, $zoneID: Int!) {
@@ -187,11 +202,19 @@ def get_guild_reports(token, guild_name, server, region, zone_id, cutoff_date):
         
         out = []
         for rep in reports_data:
-            if rep.get("startTime", 0) > cutoff_ts:
+            report_start_time = rep.get("startTime", 0)
+            
+            # Filter by start date if provided
+            if start_ts is not None and report_start_time < start_ts:
                 continue
+            
+            # Filter by end date if provided
+            if end_ts is not None and report_start_time > end_ts:
+                continue
+            
             out.append({
                 "id": rep["code"],
-                "start": rep.get("startTime", 0),
+                "start": report_start_time,
                 "end": rep.get("endTime", 0),
                 "owner": rep.get("owner", {}).get("name", "")
             })
@@ -843,7 +866,13 @@ def analyze():
             fight_zone = config.get('fightZone')
             difficulty = config.get('difficulty')
             max_cutoff = int(config.get('maxCutoff', 5))
-            cutoff_date = config.get('cutoffDate')
+            # Convert empty strings to None for optional dates
+            start_date = config.get('startDate')
+            if start_date == "" or start_date is None:
+                start_date = None
+            end_date = config.get('endDate')
+            if end_date == "" or end_date is None:
+                end_date = None
             author_filters = config.get('authorFilters', [])
             character_groups = config.get('characterGroups', {})
             enable_cheat_death = config.get('enableCheatDeath', False)  # Optional cheat death detection
@@ -877,7 +906,7 @@ def analyze():
                 yield f"data: {json.dumps({'stage': 'roster', 'message': 'Could not fetch guild roster - processing all reports'})}\n\n"
             # Get guild reports
             yield f"data: {json.dumps({'stage': 'reports', 'message': 'Fetching guild reports...'})}\n\n"
-            reports = get_guild_reports(token, guild_name, server, region, report_zone, cutoff_date)
+            reports = get_guild_reports(token, guild_name, server, region, report_zone, start_date, end_date)
             yield f"data: {json.dumps({'stage': 'reports', 'message': f'Found {len(reports)} reports'})}\n\n"
             
             # Filter by author
@@ -1249,7 +1278,8 @@ def analyze():
                 "meta": {
                     "maxCutoff": max_cutoff,
                     "authorFilters": author_filters,
-                    "dateCutoff": cutoff_date,
+                    "startDate": start_date,  # Optional start date filter
+                    "endDate": end_date,  # Optional end date filter
                     "zone": fight_zone,
                     "difficulty": difficulty,
                     "generatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
