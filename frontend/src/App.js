@@ -35,7 +35,8 @@ export default function WarcraftLogsApp() {
     fightZone: '2810',
     difficulty: '5',
     maxCutoff: '5',
-    cutoffDate: '2025-10-10',
+    startDate: '',  // Optional: leave blank to include all reports from the beginning
+    endDate: '2025-10-10',  // Optional: leave blank to include all reports
     authorFilters: '',
     characterGroups: '',
     enableCheatDeath: false  // Optional cheat death detection (slower)
@@ -1378,20 +1379,38 @@ export default function WarcraftLogsApp() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px' }}>
                 <div>
                   <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
-                    Cutoff Date
+                    Start Date (Optional)
                   </label>
                   <input
                     type="date"
-                    name="cutoffDate"
-                    value={config.cutoffDate}
+                    name="startDate"
+                    value={config.startDate}
                     onChange={handleInputChange}
                     style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
                   />
                   <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                    Only analyze reports before this date
+                    Leave blank to include all reports from the beginning of the tier
                   </p>
                 </div>
 
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
+                    End Date (Optional)
+                  </label>
+                  <input
+                    type="date"
+                    name="endDate"
+                    value={config.endDate}
+                    onChange={handleInputChange}
+                    style={{ width: '100%', padding: '10px 14px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
+                  />
+                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
+                    Leave blank to include all reports up to today
+                  </p>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px' }}>
                 <div>
                   <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
                     Max Deaths to Track
