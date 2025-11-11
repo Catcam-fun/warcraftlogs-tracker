@@ -57,6 +57,8 @@ export default function WarcraftLogsApp() {
   const [copied, setCopied] = useState(false);
   const [sharingData, setSharingData] = useState(false);
   const [abortController, setAbortController] = useState(null);
+  const [hiddenPlayers, setHiddenPlayers] = useState(new Set());
+  const [minPulls, setMinPulls] = useState(0);
 
   // Check for shared results on component mount
   useEffect(() => {
@@ -207,19 +209,6 @@ export default function WarcraftLogsApp() {
             } else if (data.result) {
               setData(data.result);
               
-              // DEBUG: Log class/spec from first event to verify backend data
-              const firstPlayer = Object.keys(data.result.events)[0];
-              if (firstPlayer && data.result.events[firstPlayer].length > 0) {
-                const firstEvent = data.result.events[firstPlayer][0];
-                console.log("✅ Data received! Class/spec check:", {
-                  player: firstPlayer,
-                  class: firstEvent.class,
-                  spec: firstEvent.spec,
-                  hasClass: !!firstEvent.class,
-                  hasSpec: !!firstEvent.spec
-                });
-              }
-              
               // DEBUG: Expose data globally and log summary
               window.deathTrackerData = data.result;
               
@@ -281,7 +270,6 @@ export default function WarcraftLogsApp() {
                   
                   output.pullBreakdown = Object.values(pullMap);
                   
-                  console.log(JSON.stringify(output, null, 2));
                   return output;
                 } else {
                   // Export summary of all players
@@ -301,7 +289,6 @@ export default function WarcraftLogsApp() {
                     };
                   });
                   
-                  console.log(JSON.stringify(output, null, 2));
                   return output;
                 }
               };
@@ -316,11 +303,8 @@ export default function WarcraftLogsApp() {
               // Improved export function with normalization
               window.exportAndCopy = function() {
                 if (!window.deathTrackerData) {
-                  console.error("❌ No deathTrackerData found! Run analysis first.");
                   return;
                 }
-
-                console.log("📊 Building export data...");
                 
                 const data = window.deathTrackerData;
                 const events = data.events;
@@ -362,33 +346,19 @@ export default function WarcraftLogsApp() {
                   source: "death-tracker-frontend"
                 };
                 
-                // Show summary
-                const totalDeaths = rawPulls.reduce((sum, p) => sum + p.deaths.length, 0);
-                console.log(`\n✅ Export ready!`);
-                console.log(`   ${rawPulls.length} pulls, ${totalDeaths} deaths`);
-                console.log(`   ${JSON.stringify(exportData).length.toLocaleString()} characters`);
-                
                 // Try Clipboard API first, then fall back to copy() utility
                 const jsonString = JSON.stringify(exportData, null, 2);
                 
                 // Method 1: Try Clipboard API (works in browser console)
                 if (navigator.clipboard && navigator.clipboard.writeText) {
                   navigator.clipboard.writeText(jsonString)
-                    .then(() => {
-                      console.log(`\n🎉 DATA COPIED TO CLIPBOARD!`);
-                      console.log(`   Paste into a file called: death_data.json`);
-                    })
                     .catch(() => {
                       // Method 2: Try Chrome DevTools copy() utility
                       try {
                         // eslint-disable-next-line no-undef
                         copy(exportData);
-                        console.log(`\n🎉 DATA COPIED TO CLIPBOARD!`);
-                        console.log(`   Paste into a file called: death_data.json`);
                       } catch (e) {
-                        console.error("❌ Clipboard methods failed");
-                        console.log("\n📋 Copy this manually:");
-                        console.log(jsonString);
+                        // Silently fail
                       }
                     });
                 } else {
@@ -396,39 +366,13 @@ export default function WarcraftLogsApp() {
                   try {
                     // eslint-disable-next-line no-undef
                     copy(exportData);
-                    console.log(`\n🎉 DATA COPIED TO CLIPBOARD!`);
-                    console.log(`   Paste into a file called: death_data.json`);
                   } catch (e) {
-                    console.error("❌ Clipboard not available");
-                    console.log("\n📋 Copy this manually:");
-                    console.log(jsonString);
+                    // Silently fail
                   }
                 }
                 
                 return exportData;
               };
-              
-              console.log("🎯 Analysis complete! Data exposed as window.deathTrackerData");
-              console.log("💾 Export options:");
-              console.log("  - window.exportAndCopy() - Copy full audit data (RECOMMENDED)");
-              console.log("  - window.exportDeathData() - Export all deaths");
-              console.log("  - window.exportDeathData('PlayerName') - Export specific player");
-              console.log("📊 Summary:");
-              console.log(`  Players: ${Object.keys(data.result.events).length}`);
-              console.log(`  pullCutoffTimestamps: ${data.result.pullCutoffTimestamps ? 'Present' : 'MISSING'}`);
-              
-              if (data.result.pullCutoffTimestamps) {
-                const sampleKey = Object.keys(data.result.pullCutoffTimestamps)[0];
-                console.log(`  Sample cutoffs:`, data.result.pullCutoffTimestamps[sampleKey]);
-              }
-              
-              // Check for missing deaths by boss
-              const deathsByBoss = {};
-              Object.values(data.result.events).flat().forEach(ev => {
-                if (!deathsByBoss[ev.boss]) deathsByBoss[ev.boss] = 0;
-                deathsByBoss[ev.boss]++;
-              });
-              console.log("  Deaths by boss:", deathsByBoss);
               
               setLoadingStage('');
               setLoading(false);
@@ -467,6 +411,16 @@ export default function WarcraftLogsApp() {
       newExpanded.add(player);
     }
     setExpandedPlayers(newExpanded);
+  };
+
+  const togglePlayerVisibility = (player) => {
+    const newHidden = new Set(hiddenPlayers);
+    if (newHidden.has(player)) {
+      newHidden.delete(player);
+    } else {
+      newHidden.add(player);
+    }
+    setHiddenPlayers(newHidden);
   };
 
   const getFilteredStats = () => {
@@ -509,11 +463,6 @@ export default function WarcraftLogsApp() {
       // Get pullCutoffTimestamps from data (provided by backend)
       const pullCutoffTimestamps = data.pullCutoffTimestamps || {};
       
-      // DEBUG: Log if pullCutoffTimestamps is missing
-      if (Object.keys(pullCutoffTimestamps).length === 0) {
-        console.warn("⚠️ pullCutoffTimestamps is empty or missing!");
-      }
-      
       // Group events by pull to apply window logic per-pull
       const eventsByPull = {};
       allPlayerEvents.forEach(ev => {
@@ -544,34 +493,9 @@ export default function WarcraftLogsApp() {
             // Get the highest cutoff timestamp available
             const maxAvailableCutoff = Math.max(...Object.keys(availableCutoffs).map(Number));
             pullCutoffTs = availableCutoffs[maxAvailableCutoff];
-            
-            // DEBUG log
-            if (pullData.real.length > 0 || pullData.cheat.length > 0) {
-              console.log(`ℹ️  Pull ${pullKey}: Using cutoff=${maxAvailableCutoff} timestamp (${(pullCutoffTs/1000).toFixed(1)}s) instead of cutoff=${cutoff}`);
-            }
           } else {
             // No cutoff timestamps at all - pull contributes 0 deaths
-            if (pullData.real.length > 0 || pullData.cheat.length > 0) {
-              console.log(`⚠️  Pull ${pullKey}: No cutoff timestamps available, contributing 0 deaths`);
-            }
             return; // Skip this pull
-          }
-        }
-        
-        // DEBUG: Show death timestamps for debugging when no deaths pass filter
-        if (pullData.real.length > 0) {
-          const wouldPass = pullData.real.filter(ev => ev.timestamp !== undefined && ev.timestamp <= pullCutoffTs);
-          if (wouldPass.length === 0) {
-            console.log(`❌ Pull ${pullKey} has ${pullData.real.length} real deaths but NONE pass filter!`);
-            console.log(`   Cutoff timestamp: ${pullCutoffTs}ms`);
-            pullData.real.slice(0, 3).forEach(ev => {
-              console.log(`   Death: timestamp=${ev.timestamp}, absTs=${ev.absTs}, player=${ev.player}`);
-              if (ev.timestamp !== undefined) {
-                console.log(`   Check: ${ev.timestamp} <= ${pullCutoffTs} = ${ev.timestamp <= pullCutoffTs}`);
-              } else {
-                console.log(`   ERROR: timestamp is undefined!`);
-              }
-            });
           }
         }
         
@@ -588,26 +512,6 @@ export default function WarcraftLogsApp() {
           ev.timestamp !== undefined && ev.timestamp <= pullCutoffTs
         );
         cheatDeaths.push(...pullCheatDeaths);
-        
-        // DEBUG: Log for pulls with cheat deaths
-        if (pullData.cheat.length > 0 || pullKey.includes("11")) {
-          console.log(`🔍 Pull ${pullKey} (${pullData.boss}):`);
-          console.log(`  Real deaths in cutoff: ${pullRealDeaths.length}`);
-          console.log(`  Cutoff timestamp: ${pullCutoffTs}ms (${(pullCutoffTs/1000).toFixed(1)}s)`);
-          console.log(`  Cheat deaths in pull: ${pullData.cheat.length}`);
-          console.log(`  Cheat deaths included: ${pullCheatDeaths.length}`);
-          
-          pullCheatDeaths.forEach(ev => {
-            console.log(`    ✓ ${ev.player} cheat at ${(ev.timestamp/1000).toFixed(1)}s (<= ${(pullCutoffTs/1000).toFixed(1)}s)`);
-          });
-          
-          const excluded = pullData.cheat.filter(ev => 
-            ev.timestamp === undefined || ev.timestamp > pullCutoffTs
-          );
-          excluded.forEach(ev => {
-            console.log(`    ✗ ${ev.player} cheat at ${(ev.timestamp/1000).toFixed(1)}s (> ${(pullCutoffTs/1000).toFixed(1)}s)`);
-          });
-        }
       });
       
       const realDeathCount = realDeaths.length;
@@ -672,11 +576,6 @@ export default function WarcraftLogsApp() {
       // Extract class/spec from first death event (use unfiltered to ensure we get it)
       const playerClass = allPlayerEventsUnfiltered.length > 0 ? (allPlayerEventsUnfiltered[0].class || "Unknown") : "Unknown";
       const playerSpec = allPlayerEventsUnfiltered.length > 0 ? (allPlayerEventsUnfiltered[0].spec || "Unknown") : "Unknown";
-      
-      // DEBUG: Log first player's class/spec to console
-      if (stats.length === 0) {
-        console.log("🎨 First player class/spec:", { player, class: playerClass, spec: playerSpec, sampleEvent: allPlayerEventsUnfiltered[0] });
-      }
 
       stats.push({ 
         player, 
@@ -696,7 +595,12 @@ export default function WarcraftLogsApp() {
       });
     }
 
-    return stats.sort((a, b) => b.realRate - a.realRate || b.realDeaths - a.realDeaths);
+    // Filter out hidden players and players below minimum pulls
+    const filteredStats = stats.filter(stat => 
+      !hiddenPlayers.has(stat.player) && stat.pulls >= minPulls
+    );
+
+    return filteredStats.sort((a, b) => b.realRate - a.realRate || b.realDeaths - a.realDeaths);
   };
 
   const getOverviewData = () => {
@@ -862,7 +766,12 @@ export default function WarcraftLogsApp() {
       };
     });
 
-    return { bosses, players, grid };
+    // Filter out hidden players and players below minimum pulls
+    const filteredPlayers = players.filter(player => 
+      !hiddenPlayers.has(player) && grid[player].overall.pulls >= minPulls
+    );
+
+    return { bosses, players: filteredPlayers, grid };
   };
 
   const sortOverviewData = (bosses, players, grid, key) => {
@@ -1605,6 +1514,75 @@ export default function WarcraftLogsApp() {
                 ))}
               </div>
 
+              {/* Minimum Pulls Filter */}
+              <div style={{ marginTop: '14px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <label style={{ fontSize: '13px', color: '#cbd5e1' }}>Minimum pulls:</label>
+                <input
+                  type="text"
+                  value={minPulls}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === '' || /^\d+$/.test(val)) {
+                      setMinPulls(val === '' ? 0 : parseInt(val));
+                    }
+                  }}
+                  style={{ width: '80px', padding: '6px 10px', background: '#252930', border: '1px solid #3d424a', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px' }}
+                />
+                <span style={{ fontSize: '11px', color: '#8b92a0' }}>
+                  (Hide players with fewer than this many pulls)
+                </span>
+              </div>
+
+              {/* Hidden Players */}
+              {hiddenPlayers.size > 0 && (() => {
+                // Create a map of player names to their class for hidden players
+                const playerClassMap = {};
+                if (data && data.events) {
+                  Object.keys(data.events).forEach(player => {
+                    const events = data.events[player];
+                    if (events.length > 0) {
+                      playerClassMap[player] = events[0].class || 'Unknown';
+                    }
+                  });
+                }
+                
+                return (
+                <div style={{ marginTop: '14px', padding: '12px', background: '#252930', borderRadius: '8px', border: '1px solid #3d424a' }}>
+                  <div style={{ fontSize: '13px', color: '#cbd5e1', marginBottom: '8px', fontWeight: '500' }}>
+                    Hidden Players ({hiddenPlayers.size}):
+                  </div>
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    {Array.from(hiddenPlayers).map(player => {
+                      const playerClass = playerClassMap[player] || 'Unknown';
+                      const classColor = WOW_CLASS_COLORS[playerClass] || '#cbd5e1';
+                      
+                      return (
+                      <button
+                        key={player}
+                        onClick={() => togglePlayerVisibility(player)}
+                        style={{
+                          padding: '4px 10px',
+                          background: '#1a1d23',
+                          border: '1px solid #3d424a',
+                          borderRadius: '4px',
+                          color: classColor,
+                          cursor: 'pointer',
+                          fontSize: '11px',
+                          fontWeight: '500',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px'
+                        }}
+                        title={`Show ${player}`}
+                      >
+                        {player} <span style={{ color: '#8b92a0' }}>✓ Show</span>
+                      </button>
+                    )})}
+                  </div>
+                </div>
+                );
+              })()}
+
               {view === 'players' && (
                 <div style={{ marginTop: '14px' }}>
                   <input
@@ -1693,14 +1671,38 @@ export default function WarcraftLogsApp() {
                       {sortedPlayers.map(player => (
                         <tr key={player} style={{ borderBottom: '1px solid #2d3238' }}>
                           <td style={{ padding: '10px', fontWeight: '600', position: 'sticky', left: 0, background: '#1a1d23', zIndex: 1 }}>
-                            <div style={{ color: WOW_CLASS_COLORS[grid[player].overall?.class] || '#ffffff' }}>
-                              {player}
-                            </div>
-                            {grid[player].overall?.class && grid[player].overall?.class !== 'Unknown' && (
-                              <div style={{ fontSize: '10px', color: '#8b92a0', fontWeight: '400', marginTop: '2px' }}>
-                                {grid[player].overall.class}
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                              <div>
+                                <div style={{ color: WOW_CLASS_COLORS[grid[player].overall?.class] || '#ffffff' }}>
+                                  {player}
+                                </div>
+                                {grid[player].overall?.class && grid[player].overall?.class !== 'Unknown' && (
+                                  <div style={{ fontSize: '10px', color: '#8b92a0', fontWeight: '400', marginTop: '2px' }}>
+                                    {grid[player].overall.class}
+                                  </div>
+                                )}
                               </div>
-                            )}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  togglePlayerVisibility(player);
+                                }}
+                                style={{
+                                  padding: '3px 8px',
+                                  background: '#2d3238',
+                                  border: '1px solid #3d424a',
+                                  borderRadius: '4px',
+                                  color: '#cbd5e1',
+                                  cursor: 'pointer',
+                                  fontSize: '10px',
+                                  fontWeight: '500',
+                                  whiteSpace: 'nowrap'
+                                }}
+                                title="Hide this player from results"
+                              >
+                                Hide
+                              </button>
+                            </div>
                           </td>
                           {bosses.map(boss => {
                             const cellData = grid[player][boss];
@@ -1772,11 +1774,6 @@ export default function WarcraftLogsApp() {
                   const isExpanded = expandedPlayers.has(player);
                   const showBothStats = hasCheatDeaths && cheatDeaths > 0;
                   
-                  // DEBUG: Log class/spec for first player
-                  if (player === Object.keys(data.events)[0]) {
-                    console.log("🎨 Rendering player:", { player, playerClass, playerSpec, color: WOW_CLASS_COLORS[playerClass] });
-                  }
-                  
                   return (
                     <div key={player} style={{ background: '#1a1d23', borderRadius: '8px', border: '1px solid #2d3238', overflow: 'hidden' }}>
                       <div 
@@ -1838,8 +1835,29 @@ export default function WarcraftLogsApp() {
                           </div>
                         </div>
                         
-                        <div style={{ fontSize: '18px', fontWeight: '700', color: getPercentageColor(realRate, allRealRates) }}>
-                          {realRate.toFixed(1)}%
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <div style={{ fontSize: '18px', fontWeight: '700', color: getPercentageColor(realRate, allRealRates) }}>
+                            {realRate.toFixed(1)}%
+                          </div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              togglePlayerVisibility(player);
+                            }}
+                            style={{
+                              padding: '4px 10px',
+                              background: '#2d3238',
+                              border: '1px solid #3d424a',
+                              borderRadius: '4px',
+                              color: '#cbd5e1',
+                              cursor: 'pointer',
+                              fontSize: '11px',
+                              fontWeight: '500'
+                            }}
+                            title="Hide this player from results"
+                          >
+                            Hide
+                          </button>
                         </div>
                       </div>
 
