@@ -2,7 +2,7 @@
 """
 Flask API for WarcraftLogs Death Tracker - V2 GraphQL API
 Optimized for Render.com deployment
-Version 2.5.1 - Filter redundant cheat deaths (within cutoff only)
+Version 2.6.0 - Parallel death fetching (5min → 1min analysis time)
 """
 
 from flask import Flask, request, jsonify, Response
@@ -15,6 +15,7 @@ import os
 import json
 import uuid
 import unicodedata
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 app = Flask(__name__)
 
@@ -1010,26 +1011,52 @@ def analyze():
             for fight_data in all_fights_deduped:
                 fights_by_report[fight_data['reportId']].append(fight_data)
             
-            # Fetch deaths in bulk
+            # Fetch deaths in parallel - MASSIVE speedup!
             yield f"data: {json.dumps({'stage': 'deaths', 'message': f'Fetching deaths for {len(fights_by_report)} reports...'})}\n\n"
             report_deaths_cache = {}
-            for report_idx, (rid, report_fights) in enumerate(fights_by_report.items(), 1):
+            
+            def fetch_report_deaths(rid, report_fights):
+                """Fetch deaths for a single report - used in parallel execution"""
                 try:
-                    print(f"[FETCH] Fetching deaths from report {report_idx}/{len(fights_by_report)}: {rid}")
-                    yield f"data: {json.dumps({'stage': 'deaths', 'message': f'Fetching deaths from report {report_idx}/{len(fights_by_report)}'})}\n\n"
                     sample_fight_data = report_fights[0]
                     friendlies = sample_fight_data['friendlies']
                     ability_map = sample_fight_data['ability_map']
                     fights_list = [fd['fight'] for fd in report_fights]
                     
-                    report_deaths_cache[rid] = get_report_deaths_bulk(token, rid, fights_list, friendlies, ability_map, enable_cheat_death)
+                    deaths = get_report_deaths_bulk(token, rid, fights_list, friendlies, ability_map, enable_cheat_death)
                     print(f"[OK] Completed report {rid}")
+                    return rid, deaths, None
                 except Exception as e:
-                    print(f"[ERROR] ERROR fetching deaths for report {rid}: {str(e)}")
+                    print(f"[ERROR] Error fetching deaths for report {rid}: {str(e)}")
                     import traceback
                     traceback.print_exc()
-                    # Continue with empty deaths for this report
-                    report_deaths_cache[rid] = {f['id']: [] for f in fights_list}
+                    # Return empty deaths for this report
+                    fights_list = [fd['fight'] for fd in report_fights]
+                    return rid, {f['id']: [] for f in fights_list}, str(e)
+            
+            # Process reports in parallel batches of 8
+            # This stays well under Cloudflare rate limits (30 RPS) while providing massive speedup
+            total_reports = len(fights_by_report)
+            completed = 0
+            
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                # Submit all report fetching jobs
+                future_to_rid = {
+                    executor.submit(fetch_report_deaths, rid, report_fights): rid
+                    for rid, report_fights in fights_by_report.items()
+                }
+                
+                # Process results as they complete
+                for future in as_completed(future_to_rid):
+                    rid, deaths, error = future.result()
+                    report_deaths_cache[rid] = deaths
+                    completed += 1
+                    
+                    # Update progress every report
+                    if completed % 5 == 0 or completed == total_reports:
+                        yield f"data: {json.dumps({'stage': 'deaths', 'message': f'Fetching deaths from report {completed}/{total_reports}'})}\n\n"
+            
+            print(f"[PARALLEL] Completed all {total_reports} reports in parallel")
 
             yield f"data: {json.dumps({'stage': 'processing', 'message': f'Processing {len(all_fights_deduped)} fights...'})}\n\n"
             
