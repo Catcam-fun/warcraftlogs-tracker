@@ -7,6 +7,25 @@ const API_URL = window.location.hostname === 'localhost'
   : 'https://deathwarcraftlogs-api.onrender.com';
 
 
+// Raid Zone Definitions
+const RAID_ZONES = {
+  'manaforge': {
+    name: 'Manaforge Omega',
+    reportZone: '44',
+    fightZone: '2810'
+  },
+  'undermine': {
+    name: 'Liberation of Undermine',
+    reportZone: '42',
+    fightZone: '2769'
+  },
+  'nerubar': {
+    name: "Nerub'ar Palace",
+    reportZone: '38',
+    fightZone: '2657'
+  }
+};
+
 // WoW Class Colors (standard across all WoW sites/addons)
 const WOW_CLASS_COLORS = {
   "DeathKnight": "#C41E3A",
@@ -31,6 +50,7 @@ export default function WarcraftLogsApp() {
     guildName: '',
     server: '',
     region: 'us',
+    selectedRaid: 'manaforge',  // Default to Manaforge Omega
     reportZone: '44',
     fightZone: '2810',
     difficulty: '5',
@@ -59,7 +79,6 @@ export default function WarcraftLogsApp() {
   const [abortController, setAbortController] = useState(null);
   const [hiddenPlayers, setHiddenPlayers] = useState(new Set());
   const [minPulls, setMinPulls] = useState(0);
-  const [overviewExpanded, setOverviewExpanded] = useState(false);
 
   // Check for shared results on component mount
   useEffect(() => {
@@ -143,6 +162,17 @@ export default function WarcraftLogsApp() {
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setConfig(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleRaidChange = (e) => {
+    const raidKey = e.target.value;
+    const raid = RAID_ZONES[raidKey];
+    setConfig(prev => ({
+      ...prev,
+      selectedRaid: raidKey,
+      reportZone: raid.reportZone,
+      fightZone: raid.fightZone
+    }));
   };
 
   const handleSubmit = async () => {
@@ -312,7 +342,7 @@ export default function WarcraftLogsApp() {
                 const pullsMap = new Map();
                 
                 // Build pulls from events with name normalization
-                for (const [_playerName, playerEvents] of Object.entries(events)) {
+                for (const playerEvents of Object.values(events)) {
                   for (const event of playerEvents) {
                     const pullKey = `${event.reportId}_${event.fightId}`;
                     if (!pullsMap.has(pullKey)) {
@@ -439,8 +469,7 @@ export default function WarcraftLogsApp() {
       const allPlayerEventsUnfiltered = eventsAll[player];
       
       const allPlayerEvents = allPlayerEventsUnfiltered.filter(
-        ev => (selectedBosses.size === 0 || selectedBosses.has(ev.boss)) &&
-        ev.abilityName && ev.abilityName !== 'Unknown'
+        ev => (selectedBosses.size === 0 || selectedBosses.has(ev.boss))
       );
       
       if (!allPlayerEvents.length) continue;
@@ -1271,35 +1300,20 @@ export default function WarcraftLogsApp() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px' }}>
                 <div>
                   <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
-                    Report Zone ID
+                    Raid *
                   </label>
-                  <input
-                    type="text"
-                    name="reportZone"
-                    value={config.reportZone}
-                    onChange={handleInputChange}
-                    placeholder="44"
+                  <select
+                    name="selectedRaid"
+                    value={config.selectedRaid}
+                    onChange={handleRaidChange}
                     style={{ width: '100%', padding: '10px 14px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
-                  />
+                  >
+                    <option value="manaforge">Manaforge Omega</option>
+                    <option value="undermine">Liberation of Undermine</option>
+                    <option value="nerubar">Nerub'ar Palace</option>
+                  </select>
                   <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                    The raid zone ID (e.g., 44 for Manaforge Omega) - find in WarcraftLogs URLs
-                  </p>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
-                    Fight Zone ID
-                  </label>
-                  <input
-                    type="text"
-                    name="fightZone"
-                    value={config.fightZone}
-                    onChange={handleInputChange}
-                    placeholder="2810"
-                    style={{ width: '100%', padding: '10px 14px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
-                  />
-                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                    Same for entire raid (e.g., 2810 for Manaforge Omega) - matches Report Zone
+                    Select which raid to analyze
                   </p>
                 </div>
               </div>
@@ -1917,7 +1931,6 @@ export default function WarcraftLogsApp() {
 
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                 {(showBothStats ? totalBossDeaths : bossDeaths)
-                                  .filter(death => death.abilityName && death.abilityName !== 'Unknown')
                                   .map((death, idx) => (
                                   <div key={idx} style={{ 
                                     display: 'flex', 
@@ -1945,7 +1958,13 @@ export default function WarcraftLogsApp() {
                                           CHEAT
                                         </span>
                                       )}
-                                      <span style={{ color: '#e2e8f0' }}>{death.abilityName}</span>
+                                      <span style={{ color: '#e2e8f0' }}>
+                                        {death.abilityName === 'Unknown' ? (
+                                          <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>
+                                            Unknown ability
+                                          </span>
+                                        ) : death.abilityName}
+                                      </span>
                                     </div>
                                     <a 
                                       href={getWCLLink(death.reportId, death.fightId)} 
