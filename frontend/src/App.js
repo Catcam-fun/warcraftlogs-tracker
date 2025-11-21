@@ -1,5 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Search, AlertCircle, Loader2, Filter, ChevronDown, ChevronRight, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown, Share2, Copy, Check } from 'lucide-react';
+import { Search, AlertCircle, Loader2, Filter, ChevronDown, ChevronRight, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown, Share2, Copy, Check, LogOut, Settings as SettingsIcon } from 'lucide-react';
+import { supabase } from './supabaseClient';
+import Auth from './Auth';
+import Settings from './Settings';
+import LandingPage from './LandingPage';
 
 // Automatically detect if running locally or in production
 const API_URL = window.location.hostname === 'localhost' 
@@ -44,6 +48,12 @@ const WOW_CLASS_COLORS = {
 };
 
 export default function WarcraftLogsApp() {
+  // Authentication state
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+
   const [config, setConfig] = useState({
     clientId: '',
     clientSecret: '',
@@ -79,6 +89,98 @@ export default function WarcraftLogsApp() {
   const [abortController, setAbortController] = useState(null);
   const [hiddenPlayers, setHiddenPlayers] = useState(new Set());
   const [minPulls, setMinPulls] = useState(0);
+  const [showLanding, setShowLanding] = useState(true);
+
+  // Check authentication status on mount
+  useEffect(() => {
+    // Get initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      setAuthLoading(false);
+    });
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // Load API credentials when user logs in
+  useEffect(() => {
+    if (user) {
+      loadAPICredentials();
+    }
+  }, [user]);
+
+  const loadAPICredentials = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('api_credentials')
+        .select('client_id, client_secret')
+        .eq('user_id', user.id)
+        .single();
+
+      if (error) {
+        // No credentials saved yet, that's okay
+        if (error.code !== 'PGRST116') {
+          console.error('Error loading credentials:', error);
+        }
+        return;
+      }
+
+      if (data) {
+        setConfig(prev => ({
+          ...prev,
+          clientId: data.client_id || '',
+          clientSecret: data.client_secret || ''
+        }));
+      }
+    } catch (err) {
+      console.error('Error loading API credentials:', err);
+    }
+  };
+
+  const saveAPICredentials = async (clientId, clientSecret) => {
+    if (!user) return;
+
+    try {
+      // Check if credentials already exist
+      const { data: existing } = await supabase
+        .from('api_credentials')
+        .select('id')
+        .eq('user_id', user.id)
+        .single();
+
+      if (existing) {
+        // Update existing credentials
+        const { error } = await supabase
+          .from('api_credentials')
+          .update({
+            client_id: clientId,
+            client_secret: clientSecret,
+            last_used: new Date().toISOString()
+          })
+          .eq('user_id', user.id);
+
+        if (error) throw error;
+      } else {
+        // Insert new credentials
+        const { error } = await supabase
+          .from('api_credentials')
+          .insert({
+            user_id: user.id,
+            client_id: clientId,
+            client_secret: clientSecret
+          });
+
+        if (error) throw error;
+      }
+    } catch (err) {
+      console.error('Error saving API credentials:', err);
+    }
+  };
 
   // Check for shared results on component mount
   useEffect(() => {
@@ -94,6 +196,7 @@ export default function WarcraftLogsApp() {
     setLoading(true);
     setLoadingStage('Loading shared results...');
     setError('');
+    setShowLanding(false);
 
     try {
       const response = await fetch(`${API_URL}/api/shared/${shareId}`);
@@ -114,6 +217,12 @@ export default function WarcraftLogsApp() {
       setLoading(false);
       setLoadingStage('');
     }
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+    setData(null); // Clear any loaded data
   };
 
   const handleShare = async () => {
@@ -181,10 +290,16 @@ export default function WarcraftLogsApp() {
       return;
     }
 
+    // Save API credentials if user is logged in
+    if (user) {
+      await saveAPICredentials(config.clientId, config.clientSecret);
+    }
+
     setLoading(true);
     setLoadingStage('Initializing...');
     setError('');
     setData(null);
+    setShowLanding(false);
 
     // Create abort controller for cancellation
     const controller = new AbortController();
@@ -920,6 +1035,16 @@ export default function WarcraftLogsApp() {
     }
   };
 
+  // Show loading while checking auth
+  if (authLoading) {
+    return (
+      <div style={{ minHeight: '100vh', background: '#0a0e1a', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Loader2 size={48} style={{ color: '#3b82f6', animation: 'spin 1s linear infinite' }} />
+      </div>
+    );
+  }
+
+  // Main app (works for both logged in and anonymous users)
   return (
     <div style={{ minHeight: '100vh', background: '#0a0e1a', color: '#e2e8f0', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
       {/* Sticky Header */}
@@ -932,7 +1057,24 @@ export default function WarcraftLogsApp() {
         boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)'
       }}>
         <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '16px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div 
+            onClick={() => {
+              setData(null);
+              setError('');
+              setExpandedPlayers(new Set());
+              setSortConfig({ key: null, direction: 'asc' });
+              setShowLanding(true);
+            }}
+            style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '12px',
+              cursor: 'pointer',
+              transition: 'opacity 0.2s'
+            }}
+            onMouseOver={(e) => { e.currentTarget.style.opacity = '0.8'; }}
+            onMouseOut={(e) => { e.currentTarget.style.opacity = '1'; }}
+          >
             <div style={{
               width: '40px',
               height: '40px',
@@ -951,13 +1093,98 @@ export default function WarcraftLogsApp() {
               <h1 style={{ margin: 0, fontSize: '20px', fontWeight: '700', color: '#ffffff' }}>
                 Floor Pov
               </h1>
-              <p style={{ margin: 0, fontSize: '11px', color: '#64748b' }}>Death Analytics for WarcraftLogs</p>
+              <p style={{ margin: 0, fontSize: '11px', color: '#64748b' }}>Death Analytics for World of Warcraft</p>
             </div>
           </div>
-          {data && (
-            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+            {user ? (
+              <div style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '12px',
+                padding: '8px 12px',
+                background: '#1e293b',
+                borderRadius: '6px',
+                fontSize: '13px'
+              }}>
+                <span style={{ color: '#94a3b8' }}>{user.email}</span>
+                <button
+                  onClick={() => setShowSettings(true)}
+                  style={{ 
+                    padding: '6px 12px', 
+                    background: '#334155', 
+                    border: '1px solid #475569', 
+                    borderRadius: '4px', 
+                    color: '#e2e8f0', 
+                    cursor: 'pointer', 
+                    fontSize: '12px', 
+                    fontWeight: '600',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseOver={(e) => { e.target.style.background = '#475569'; }}
+                  onMouseOut={(e) => { e.target.style.background = '#334155'; }}
+                >
+                  <SettingsIcon size={14} />
+                  Settings
+                </button>
+                <button
+                  onClick={handleLogout}
+                  style={{ 
+                    padding: '6px 12px', 
+                    background: '#334155', 
+                    border: '1px solid #475569', 
+                    borderRadius: '4px', 
+                    color: '#e2e8f0', 
+                    cursor: 'pointer', 
+                    fontSize: '12px', 
+                    fontWeight: '600',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseOver={(e) => { e.target.style.background = '#475569'; }}
+                  onMouseOut={(e) => { e.target.style.background = '#334155'; }}
+                >
+                  <LogOut size={14} />
+                  Logout
+                </button>
+              </div>
+            ) : (
               <button
-                onClick={() => { setData(null); setError(''); setExpandedPlayers(new Set()); setSortConfig({ key: null, direction: 'asc' }); }}
+                onClick={() => setShowAuthModal(true)}
+                style={{ 
+                  padding: '8px 16px', 
+                  background: '#3b82f6', 
+                  border: 'none', 
+                  borderRadius: '6px', 
+                  color: '#fff', 
+                  cursor: 'pointer', 
+                  fontSize: '13px', 
+                  fontWeight: '600',
+                  transition: 'all 0.2s'
+                }}
+                onMouseOver={(e) => { e.target.style.background = '#2563eb'; }}
+                onMouseOut={(e) => { e.target.style.background = '#3b82f6'; }}
+              >
+                Sign In
+              </button>
+            )}
+          </div>
+        </div>
+        {data && (
+          <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '0 24px 12px', display: 'flex', gap: '12px', alignItems: 'center' }}>
+            <button
+                onClick={() => { 
+                  setData(null); 
+                  setError(''); 
+                  setExpandedPlayers(new Set()); 
+                  setSortConfig({ key: null, direction: 'asc' }); 
+                  setShowLanding(true);
+                }}
                 style={{ padding: '8px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', cursor: 'pointer', fontSize: '13px', fontWeight: '600', transition: 'all 0.2s' }}
                 onMouseOver={(e) => { e.target.style.background = '#334155'; }}
                 onMouseOut={(e) => { e.target.style.background = '#1e293b'; }}
@@ -983,9 +1210,8 @@ export default function WarcraftLogsApp() {
                   </>
                 )}
               </button>
-            </div>
-          )}
-        </div>
+          </div>
+        )}
       </header>
       {/* Share Modal */}
       {showShareModal && (
@@ -1172,7 +1398,17 @@ export default function WarcraftLogsApp() {
           </div>
         )}
 
-        {!data && (
+        {!data && showLanding && (
+          <LandingPage 
+            onRunAnalysis={() => setShowLanding(false)}
+            onSavedReports={() => {
+              // Placeholder for future saved reports feature
+              alert('Saved Reports feature coming soon!');
+            }}
+          />
+        )}
+
+        {!data && !showLanding && (
           <div style={{ background: '#1a1f2e', borderRadius: '12px', padding: '24px', marginBottom: '20px', border: '1px solid #2d3748' }}>
             <h2 style={{ margin: '0 0 24px', fontSize: '18px', fontWeight: '600', color: '#ffffff' }}>Configuration</h2>
             
@@ -1224,6 +1460,21 @@ export default function WarcraftLogsApp() {
                     onChange={handleInputChange}
                     style={{ width: '100%', padding: '10px 14px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
                   />
+                  {user && (
+                    <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#10b981', lineHeight: '1.4' }}>
+                      ✓ Auto-fills from your account settings
+                    </p>
+                  )}
+                  {!user && (
+                    <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
+                      <a 
+                        onClick={() => setShowAuthModal(true)}
+                        style={{ color: '#3b82f6', cursor: 'pointer', textDecoration: 'underline' }}
+                      >
+                        Sign in
+                      </a> to save your credentials
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -1999,6 +2250,153 @@ export default function WarcraftLogsApp() {
           </div>
         )}
       </div>
+
+      {/* Auth Modal */}
+      {showAuthModal && (
+        <Auth onClose={() => setShowAuthModal(false)} />
+      )}
+
+      {/* Settings Modal */}
+      {showSettings && user && (
+        <Settings 
+          user={user} 
+          onClose={() => setShowSettings(false)}
+          onCredentialsUpdate={loadAPICredentials}
+        />
+      )}
+
+      {/* Footer */}
+      <footer style={{
+        background: '#0f1419',
+        borderTop: '1px solid #1e293b',
+        marginTop: '60px',
+        padding: '40px 24px',
+        color: '#94a3b8'
+      }}>
+        <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
+          {/* Site Updates Section */}
+          <div style={{ marginBottom: '40px' }}>
+            <h3 style={{
+              color: '#e2e8f0',
+              fontSize: '16px',
+              fontWeight: '600',
+              marginBottom: '16px',
+              marginTop: 0,
+              letterSpacing: '0.05em'
+            }}>
+              SITE UPDATES
+            </h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{
+                background: '#1a1f2e',
+                padding: '12px 16px',
+                borderRadius: '6px',
+                border: '1px solid #2d3748'
+              }}>
+                <span style={{ color: '#3b82f6', fontSize: '13px', fontWeight: '600' }}>Nov 20th, 2025</span>
+                <span style={{ color: '#cbd5e1', fontSize: '13px', marginLeft: '12px' }}>
+                  Added user authentication and saved credentials
+                </span>
+              </div>
+              <div style={{
+                background: '#1a1f2e',
+                padding: '12px 16px',
+                borderRadius: '6px',
+                border: '1px solid #2d3748'
+              }}>
+                <span style={{ color: '#3b82f6', fontSize: '13px', fontWeight: '600' }}>Nov 11th, 2025</span>
+                <span style={{ color: '#cbd5e1', fontSize: '13px', marginLeft: '12px' }}>
+                  Parallel processing - 5-10x faster analysis
+                </span>
+              </div>
+              <div style={{
+                background: '#1a1f2e',
+                padding: '12px 16px',
+                borderRadius: '6px',
+                border: '1px solid #2d3748'
+              }}>
+                <span style={{ color: '#3b82f6', fontSize: '13px', fontWeight: '600' }}>Nov 9th, 2025</span>
+                <span style={{ color: '#cbd5e1', fontSize: '13px', marginLeft: '12px' }}>
+                  Added Liberation of Undermine support
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Links Section */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+            gap: '32px',
+            paddingTop: '32px',
+            borderTop: '1px solid #2d3748'
+          }}>
+            <div>
+              <h4 style={{
+                color: '#e2e8f0',
+                fontSize: '12px',
+                fontWeight: '600',
+                marginBottom: '12px',
+                marginTop: 0,
+                letterSpacing: '0.05em'
+              }}>
+                RESOURCES
+              </h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <a 
+                  href="https://www.warcraftlogs.com/api/clients" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  style={{ color: '#94a3b8', fontSize: '13px', textDecoration: 'none', transition: 'color 0.2s' }}
+                  onMouseOver={(e) => e.target.style.color = '#3b82f6'}
+                  onMouseOut={(e) => e.target.style.color = '#94a3b8'}
+                >
+                  WarcraftLogs API
+                </a>
+                <a 
+                  href="https://www.warcraftlogs.com/" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  style={{ color: '#94a3b8', fontSize: '13px', textDecoration: 'none', transition: 'color 0.2s' }}
+                  onMouseOver={(e) => e.target.style.color = '#3b82f6'}
+                  onMouseOut={(e) => e.target.style.color = '#94a3b8'}
+                >
+                  WarcraftLogs
+                </a>
+              </div>
+            </div>
+
+            <div>
+              <h4 style={{
+                color: '#e2e8f0',
+                fontSize: '12px',
+                fontWeight: '600',
+                marginBottom: '12px',
+                marginTop: 0,
+                letterSpacing: '0.05em'
+              }}>
+                ABOUT
+              </h4>
+              <p style={{ color: '#64748b', fontSize: '12px', lineHeight: '1.6', margin: 0 }}>
+                Floor Pov is a death analytics tool for World of Warcraft guilds using WarcraftLogs data.
+              </p>
+            </div>
+
+            <div>
+              <h4 style={{
+                color: '#e2e8f0',
+                fontSize: '12px',
+                fontWeight: '600',
+                marginBottom: '12px',
+                marginTop: 0,
+                letterSpacing: '0.05em'
+              }}>
+                CONTACT
+              </h4>
+            </div>
+          </div>
+        </div>
+      </footer>
 
       <style>{`
         @keyframes spin {
