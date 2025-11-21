@@ -203,9 +203,9 @@ export default function Auth({ onClose }) {
           <p style={{
             marginTop: '16px',
             padding: '12px',
-            backgroundColor: message.includes('Success') ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-            border: `1px solid ${message.includes('Success') ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
-            color: message.includes('Success') ? '#10b981' : '#ef4444',
+            backgroundColor: (message.includes('Success') || message.includes('successfully')) ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+            border: `1px solid ${(message.includes('Success') || message.includes('successfully')) ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+            color: (message.includes('Success') || message.includes('successfully')) ? '#10b981' : '#ef4444',
             borderRadius: '6px',
             textAlign: 'center',
             fontSize: '13px'
