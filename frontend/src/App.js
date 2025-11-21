@@ -30,6 +30,40 @@ const RAID_ZONES = {
   }
 };
 
+// Boss Ordering (Adventure Guide order)
+const BOSS_ORDER = {
+  'manaforge': [
+    'Plexus Sentinel',
+    "Loom'ithar",
+    'Soulbinder Naazindhri',
+    'Forgeweaver Araz',
+    'The Soul Hunters',
+    'Fractillus',
+    'Nexus-King Salhadaar',
+    'Dimensius, the All-Devouring'
+  ],
+  'undermine': [
+    'Vexie and the Geargrinders',
+    'Cauldron of Carnage',
+    'Rik Reverb',
+    'Stix Bunkjunker',
+    'Sprocketmonger Lockenstock',
+    'One-Armed Bandit',
+    "Mug'Zee, Heads of Security",
+    'Chrome King Gallywix'
+  ],
+  'nerubar': [
+    'Ulgrax the Devourer',
+    'The Bloodbound Horror',
+    'Sikran, Captain of the Sureki',
+    "Rasha'nan",
+    "Broodtwister Ovi'nax",
+    'Nexus-Princess Ky\'veza',
+    'The Silken Court',
+    'Queen Ansurek'
+  ]
+};
+
 // WoW Class Colors (standard across all WoW sites/addons)
 const WOW_CLASS_COLORS = {
   "DeathKnight": "#C41E3A",
@@ -45,6 +79,30 @@ const WOW_CLASS_COLORS = {
   "Shaman": "#0070DD",
   "Warlock": "#8788EE",
   "Warrior": "#C69B6D",
+};
+
+// Helper function to sort bosses by Adventure Guide order
+const sortBossesByOrder = (bosses, raidZone) => {
+  const order = BOSS_ORDER[raidZone] || [];
+  if (order.length === 0) {
+    // Fallback to alphabetical if no ordering defined
+    return [...bosses].sort();
+  }
+  
+  return [...bosses].sort((a, b) => {
+    const aIndex = order.indexOf(a);
+    const bIndex = order.indexOf(b);
+    
+    // If both bosses are in the order, sort by their position
+    if (aIndex !== -1 && bIndex !== -1) {
+      return aIndex - bIndex;
+    }
+    // If only one is in the order, prioritize it
+    if (aIndex !== -1) return -1;
+    if (bIndex !== -1) return 1;
+    // If neither is in the order, sort alphabetically
+    return a.localeCompare(b);
+  });
 };
 
 export default function WarcraftLogsApp() {
@@ -66,7 +124,7 @@ export default function WarcraftLogsApp() {
     difficulty: '5',
     maxCutoff: '5',
     startDate: '',  // Optional: leave blank to include all reports from the beginning
-    endDate: '2025-10-10',  // Optional: leave blank to include all reports
+    endDate: '',  // Optional: leave blank to include all reports
     authorFilters: '',
     characterGroups: '',
     enableCheatDeath: false  // Optional cheat death detection (slower)
@@ -90,6 +148,9 @@ export default function WarcraftLogsApp() {
   const [hiddenPlayers, setHiddenPlayers] = useState(new Set());
   const [minPulls, setMinPulls] = useState(0);
   const [showLanding, setShowLanding] = useState(true);
+  const [characterGroups, setCharacterGroups] = useState({}); // { "MainName": ["Alt1", "Alt2"] }
+  const [showGroupingUI, setShowGroupingUI] = useState(false);
+  const [selectedForGrouping, setSelectedForGrouping] = useState(new Set());
 
   // Check authentication status on mount
   useEffect(() => {
@@ -223,6 +284,7 @@ export default function WarcraftLogsApp() {
     await supabase.auth.signOut();
     setUser(null);
     setData(null); // Clear any loaded data
+    setConfig(prev => ({ ...prev, enableCheatDeath: false })); // Disable cheat death for non-logged-in users
   };
 
   const handleShare = async () => {
@@ -579,9 +641,26 @@ export default function WarcraftLogsApp() {
 
     const hasCheatDeaths = config.enableCheatDeath;
     
-    for (const player of Object.keys(eventsAll)) {
-      // Get ALL events for class/spec lookup BEFORE applying boss/ability filters
-      const allPlayerEventsUnfiltered = eventsAll[player];
+    // Build a map of all characters to their main (for grouped alts)
+    const charToMain = {};
+    Object.entries(characterGroups).forEach(([main, alts]) => {
+      alts.forEach(alt => {
+        charToMain[alt] = main;
+      });
+    });
+    
+    // Get unique players (mains + ungrouped characters) - exclude grouped alts
+    const groupedAlts = new Set(Object.keys(charToMain));
+    const basePlayers = Object.keys(eventsAll);
+    const players = basePlayers.filter(p => !groupedAlts.has(p));
+    
+    for (const player of players) {
+      // Get events for this player and their alts (if any)
+      const alts = characterGroups[player] || [];
+      const allCharacters = [player, ...alts];
+      
+      // Combine events from all characters in the group
+      const allPlayerEventsUnfiltered = allCharacters.flatMap(char => eventsAll[char] || []);
       
       const allPlayerEvents = allPlayerEventsUnfiltered.filter(
         ev => (selectedBosses.size === 0 || selectedBosses.has(ev.boss))
@@ -589,13 +668,18 @@ export default function WarcraftLogsApp() {
       
       if (!allPlayerEvents.length) continue;
 
+      // Combine pulls from all characters in the group
       let pulls = 0;
       if (selectedBosses.size === 0) {
-        pulls = pullsMap[player]?.length || 0;
+        pulls = allCharacters.reduce((total, char) => {
+          return total + (pullsMap[char]?.length || 0);
+        }, 0);
       } else {
         for (const boss of selectedBosses) {
-          if (bossPart[boss]?.[player]) {
-            pulls += bossPart[boss][player].length;
+          for (const char of allCharacters) {
+            if (bossPart[boss]?.[char]) {
+              pulls += bossPart[boss][char].length;
+            }
           }
         }
       }
@@ -718,9 +802,12 @@ export default function WarcraftLogsApp() {
       });
 
 
-      // Extract class/spec from first death event (use unfiltered to ensure we get it)
-      const playerClass = allPlayerEventsUnfiltered.length > 0 ? (allPlayerEventsUnfiltered[0].class || "Unknown") : "Unknown";
-      const playerSpec = allPlayerEventsUnfiltered.length > 0 ? (allPlayerEventsUnfiltered[0].spec || "Unknown") : "Unknown";
+      // Extract class/spec from PRIMARY character (not alts) to ensure consistent coloring
+      const primaryCharEvents = eventsAll[player] || [];
+      const playerClass = primaryCharEvents.length > 0 ? (primaryCharEvents[0].class || "Unknown") : 
+                         (allPlayerEventsUnfiltered.length > 0 ? (allPlayerEventsUnfiltered[0].class || "Unknown") : "Unknown");
+      const playerSpec = primaryCharEvents.length > 0 ? (primaryCharEvents[0].spec || "Unknown") : 
+                        (allPlayerEventsUnfiltered.length > 0 ? (allPlayerEventsUnfiltered[0].spec || "Unknown") : "Unknown");
 
       stats.push({ 
         player, 
@@ -751,13 +838,27 @@ export default function WarcraftLogsApp() {
   const getOverviewData = () => {
     if (!data) return { bosses: [], players: [], grid: {} };
 
-    // Filter bosses based on selection
-    const allBosses = Object.keys(data.bossParticipation).sort();
+    // Filter bosses based on selection - use proper ordering
+    const allBosses = sortBossesByOrder(Object.keys(data.bossParticipation), config.selectedRaid);
     const bosses = selectedBosses.size === 0 
       ? allBosses 
       : allBosses.filter(boss => selectedBosses.has(boss));
     
-    const players = Object.keys(data.events).sort();
+    // Get all base players
+    const basePlayers = Object.keys(data.events).sort();
+    
+    // Build a map of all characters to their main (for grouped alts)
+    const charToMain = {};
+    Object.entries(characterGroups).forEach(([main, alts]) => {
+      alts.forEach(alt => {
+        charToMain[alt] = main;
+      });
+    });
+    
+    // Get unique players (mains + ungrouped characters)
+    const groupedAlts = new Set(Object.keys(charToMain));
+    const players = basePlayers.filter(p => !groupedAlts.has(p));
+    
     const grid = {};
 
     const hasCheatDeaths = config.enableCheatDeath;
@@ -766,14 +867,25 @@ export default function WarcraftLogsApp() {
     players.forEach(player => {
       grid[player] = {};
       
-      const allPlayerEvents = data.events[player] || [];
+      // Get events for this player and their alts (if any)
+      const alts = characterGroups[player] || [];
+      const allCharacters = [player, ...alts];
       
-      // Extract class/spec from first event (use all events to ensure we get it)
-      const playerClass = allPlayerEvents.length > 0 ? (allPlayerEvents[0].class || "Unknown") : "Unknown";
-      const playerSpec = allPlayerEvents.length > 0 ? (allPlayerEvents[0].spec || "Unknown") : "Unknown";
+      // Combine events from all characters in the group
+      const allPlayerEvents = allCharacters.flatMap(char => data.events[char] || []);
+      
+      // Extract class/spec from PRIMARY character (not alts) to ensure consistent coloring
+      const primaryCharEvents = data.events[player] || [];
+      const playerClass = primaryCharEvents.length > 0 ? (primaryCharEvents[0].class || "Unknown") : 
+                         (allPlayerEvents.length > 0 ? (allPlayerEvents[0].class || "Unknown") : "Unknown");
+      const playerSpec = primaryCharEvents.length > 0 ? (primaryCharEvents[0].spec || "Unknown") : 
+                        (allPlayerEvents.length > 0 ? (allPlayerEvents[0].spec || "Unknown") : "Unknown");
       
       bosses.forEach(boss => {
-        const bossPulls = data.bossParticipation[boss]?.[player]?.length || 0;
+        // Combine boss pulls from all characters in the group
+        const bossPulls = allCharacters.reduce((total, char) => {
+          return total + (data.bossParticipation[boss]?.[char]?.length || 0);
+        }, 0);
         
         // Window-based filtering for this boss with mass death handling
         const playerBossEvents = allPlayerEvents.filter(ev => ev.boss === boss);
@@ -844,8 +956,10 @@ export default function WarcraftLogsApp() {
       let totalWithCheatDeaths = 0;
       
       if (selectedBosses.size === 0) {
-        // Use window-based filtering for all bosses
-        totalPulls = data.pullParticipation[player]?.length || 0;
+        // Use window-based filtering for all bosses - combine all characters in group
+        totalPulls = allCharacters.reduce((total, char) => {
+          return total + (data.pullParticipation[char]?.length || 0);
+        }, 0);
         
         const pullMap = {};
         allPlayerEvents.forEach(ev => {
@@ -892,8 +1006,9 @@ export default function WarcraftLogsApp() {
         
         totalWithCheatDeaths = totalRealDeaths + cheatDeathsCount;
       } else {
+        // For selected bosses, sum up from the grid (already combined for grouped chars)
         bosses.forEach(boss => {
-          totalPulls += data.bossParticipation[boss]?.[player]?.length || 0;
+          totalPulls += grid[player][boss].pulls;
           totalRealDeaths += grid[player][boss].deaths;
           totalWithCheatDeaths += grid[player][boss].totalDeaths;
         });
@@ -1447,6 +1562,21 @@ export default function WarcraftLogsApp() {
                     onChange={handleInputChange}
                     style={{ width: '100%', padding: '10px 14px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
                   />
+                  {user && (
+                    <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#10b981', lineHeight: '1.4' }}>
+                      ✓ Auto-fills from your account settings
+                    </p>
+                  )}
+                  {!user && (
+                    <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
+                      <a 
+                        onClick={() => setShowAuthModal(true)}
+                        style={{ color: '#3b82f6', cursor: 'pointer', textDecoration: 'underline' }}
+                      >
+                        Sign in
+                      </a> to save your credentials
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -1491,7 +1621,7 @@ export default function WarcraftLogsApp() {
                     style={{ width: '100%', padding: '10px 14px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
                   />
                   <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                    Examples: Do Over, Complexity Limit, Method
+                    Enter exactly as shown on WarcraftLogs - Examples: Do Over, Complexity Limit, Method
                   </p>
                 </div>
 
@@ -1507,7 +1637,7 @@ export default function WarcraftLogsApp() {
                     style={{ width: '100%', padding: '10px 14px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
                   />
                   <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                    Remove spaces/apostrophes - Examples: Thrall, Area52, TwistingNether
+                    Enter as shown in-game (spaces OK) - Examples: Thrall, Area 52, Zirkel des Cenarius
                   </p>
                 </div>
               </div>
@@ -1574,13 +1704,37 @@ export default function WarcraftLogsApp() {
                   <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
                     Start Date (Optional)
                   </label>
-                  <input
-                    type="date"
-                    name="startDate"
-                    value={config.startDate}
-                    onChange={handleInputChange}
-                    style={{ width: '100%', padding: '10px 14px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
-                  />
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <input
+                      type="date"
+                      name="startDate"
+                      value={config.startDate}
+                      onChange={handleInputChange}
+                      style={{ flex: 1, padding: '10px 14px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
+                    />
+                    {config.startDate && (
+                      <button
+                        type="button"
+                        onClick={() => setConfig(prev => ({ ...prev, startDate: '' }))}
+                        style={{
+                          padding: '10px 14px',
+                          background: '#334155',
+                          border: '1px solid #475569',
+                          borderRadius: '6px',
+                          color: '#e2e8f0',
+                          cursor: 'pointer',
+                          fontSize: '12px',
+                          fontWeight: '500',
+                          whiteSpace: 'nowrap',
+                          transition: 'all 0.2s'
+                        }}
+                        onMouseOver={(e) => e.target.style.background = '#475569'}
+                        onMouseOut={(e) => e.target.style.background = '#334155'}
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
                   <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
                     Leave blank to include all reports from the beginning of the tier
                   </p>
@@ -1590,13 +1744,37 @@ export default function WarcraftLogsApp() {
                   <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
                     End Date (Optional)
                   </label>
-                  <input
-                    type="date"
-                    name="endDate"
-                    value={config.endDate}
-                    onChange={handleInputChange}
-                    style={{ width: '100%', padding: '10px 14px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
-                  />
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <input
+                      type="date"
+                      name="endDate"
+                      value={config.endDate}
+                      onChange={handleInputChange}
+                      style={{ flex: 1, padding: '10px 14px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
+                    />
+                    {config.endDate && (
+                      <button
+                        type="button"
+                        onClick={() => setConfig(prev => ({ ...prev, endDate: '' }))}
+                        style={{
+                          padding: '10px 14px',
+                          background: '#334155',
+                          border: '1px solid #475569',
+                          borderRadius: '6px',
+                          color: '#e2e8f0',
+                          cursor: 'pointer',
+                          fontSize: '12px',
+                          fontWeight: '500',
+                          whiteSpace: 'nowrap',
+                          transition: 'all 0.2s'
+                        }}
+                        onMouseOver={(e) => e.target.style.background = '#475569'}
+                        onMouseOut={(e) => e.target.style.background = '#334155'}
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
                   <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
                     Leave blank to include all reports up to today
                   </p>
@@ -1624,23 +1802,8 @@ export default function WarcraftLogsApp() {
                 </div>
               </div>
 
-              <div>
-                <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
-                  Author Filters <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '400' }}>(optional, comma-separated)</span>
-                </label>
-                <input
-                  type="text"
-                  name="authorFilters"
-                  value={config.authorFilters}
-                  onChange={handleInputChange}
-                  placeholder="PlayerName1, PlayerName2, PlayerName3"
-                  style={{ width: '100%', padding: '10px 14px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
-                />
-                <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                  Only analyze reports uploaded by these players
-                </p>
-              </div>
-
+              {/* Character Groups - Hidden for now, replaced with post-analysis UI grouping */}
+              {false && (
               <div>
                 <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
                   Character Groups <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '400' }}>(optional, JSON format)</span>
@@ -1657,20 +1820,38 @@ export default function WarcraftLogsApp() {
                   Merge alt characters with their mains for combined statistics
                 </p>
               </div>
+              )}
 
               <div style={{ marginTop: '8px' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1', cursor: 'pointer' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1', cursor: user ? 'pointer' : 'not-allowed', opacity: user ? 1 : 0.6 }}>
                   <input
                     type="checkbox"
                     checked={config.enableCheatDeath}
-                    onChange={(e) => setConfig({...config, enableCheatDeath: e.target.checked})}
-                    style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                    onChange={(e) => user && setConfig({...config, enableCheatDeath: e.target.checked})}
+                    disabled={!user}
+                    style={{ cursor: user ? 'pointer' : 'not-allowed', width: '16px', height: '16px' }}
                   />
                   <span>Enable cheat death detection</span>
                   <span style={{ fontSize: '11px', color: '#f59e0b', fontWeight: '400' }}>(+20-30s slower)</span>
+                  {!user && (
+                    <span style={{ fontSize: '11px', color: '#3b82f6', fontWeight: '500' }}>
+                      (Account required)
+                    </span>
+                  )}
                 </label>
                 <p style={{ margin: '4px 0 0 24px', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                  Detects deaths prevented by Cauterize, Spirit of Redemption, Cheat Death, etc. Adds 1 API query per report.
+                  {user ? (
+                    "Detects deaths prevented by Cauterize, Spirit of Redemption, Cheat Death, etc. Adds 1 API query per report."
+                  ) : (
+                    <>
+                      <a 
+                        onClick={() => setShowAuthModal(true)}
+                        style={{ color: '#3b82f6', cursor: 'pointer', textDecoration: 'underline' }}
+                      >
+                        Sign in
+                      </a> to enable cheat death detection. Detects deaths prevented by Cauterize, Spirit of Redemption, Cheat Death, etc.
+                    </>
+                  )}
                 </p>
               </div>
             </div>
@@ -1749,7 +1930,7 @@ export default function WarcraftLogsApp() {
                   <Filter size={14} />
                   <span style={{ fontSize: '13px', color: '#cbd5e1' }}>Boss filters:</span>
                 </div>
-                {Object.keys(data.bossParticipation).sort().map(boss => (
+                {sortBossesByOrder(Object.keys(data.bossParticipation), config.selectedRaid).map(boss => (
                   <button
                     key={boss}
                     onClick={() => toggleBoss(boss)}
@@ -1836,6 +2017,241 @@ export default function WarcraftLogsApp() {
                 </div>
                 );
               })()}
+
+              {/* Character Grouping UI */}
+              <div style={{ marginTop: '12px', background: '#0f1419', borderRadius: '6px', border: '1px solid #334155', overflow: 'hidden' }}>
+                <button
+                  onClick={() => setShowGroupingUI(!showGroupingUI)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    background: '#1a1f2e',
+                    border: 'none',
+                    color: '#e2e8f0',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    fontWeight: '500',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    textAlign: 'left'
+                  }}
+                >
+                  {showGroupingUI ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                  Group Characters (Merge Alts with Mains)
+                  {Object.keys(characterGroups).length > 0 && (
+                    <span style={{ 
+                      marginLeft: 'auto', 
+                      padding: '2px 8px', 
+                      background: '#3b82f6', 
+                      borderRadius: '10px', 
+                      fontSize: '11px',
+                      fontWeight: '600'
+                    }}>
+                      {Object.keys(characterGroups).length} {Object.keys(characterGroups).length === 1 ? 'group' : 'groups'}
+                    </span>
+                  )}
+                </button>
+
+                {showGroupingUI && (() => {
+                  // Get all players from the grid
+                  const { players } = getOverviewData();
+                  
+                  // Filter out already grouped alts
+                  const groupedAlts = new Set();
+                  Object.values(characterGroups).forEach(alts => {
+                    alts.forEach(alt => groupedAlts.add(alt));
+                  });
+                  
+                  // Filter by search query as well
+                  const availablePlayers = players
+                    .filter(p => !groupedAlts.has(p))
+                    .filter(p => !searchQuery || p.toLowerCase().includes(searchQuery.toLowerCase()));
+                  
+                  // Filter current groups by search query
+                  const filteredGroups = Object.entries(characterGroups).filter(([main, alts]) => {
+                    if (!searchQuery) return true;
+                    const query = searchQuery.toLowerCase();
+                    // Show group if main matches or any alt matches
+                    return main.toLowerCase().includes(query) || 
+                           alts.some(alt => alt.toLowerCase().includes(query));
+                  });
+                  
+                  return (
+                    <div style={{ padding: '12px' }}>
+                      {/* Existing Groups */}
+                      {filteredGroups.length > 0 && (
+                        <div style={{ marginBottom: '12px' }}>
+                          <div style={{ fontSize: '12px', color: '#cbd5e1', marginBottom: '8px', fontWeight: '500' }}>
+                            Current Groups:
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                            {filteredGroups.map(([main, alts]) => (
+                              <div
+                                key={main}
+                                style={{
+                                  padding: '8px 10px',
+                                  background: '#1a1f2e',
+                                  border: '1px solid #2d3748',
+                                  borderRadius: '6px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '8px'
+                                }}
+                              >
+                                <span style={{ color: '#3b82f6', fontSize: '12px', fontWeight: '600' }}>
+                                  {main}
+                                </span>
+                                <span style={{ color: '#64748b', fontSize: '11px' }}>+</span>
+                                <span style={{ color: '#94a3b8', fontSize: '11px' }}>
+                                  {alts.join(', ')}
+                                </span>
+                                <button
+                                  onClick={() => {
+                                    const newGroups = { ...characterGroups };
+                                    delete newGroups[main];
+                                    setCharacterGroups(newGroups);
+                                  }}
+                                  style={{
+                                    marginLeft: 'auto',
+                                    padding: '4px 8px',
+                                    background: '#dc2626',
+                                    border: 'none',
+                                    borderRadius: '4px',
+                                    color: '#fff',
+                                    cursor: 'pointer',
+                                    fontSize: '10px',
+                                    fontWeight: '500'
+                                  }}
+                                >
+                                  Ungroup
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Selection Interface */}
+                      <div style={{ fontSize: '12px', color: '#cbd5e1', marginBottom: '8px', fontWeight: '500' }}>
+                        Select characters to merge:
+                      </div>
+                      
+                      <div style={{ 
+                        display: 'grid', 
+                        gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', 
+                        gap: '6px',
+                        marginBottom: '12px',
+                        maxHeight: '200px',
+                        overflowY: 'auto'
+                      }}>
+                        {availablePlayers.map(player => {
+                          const playerClass = data.events[player]?.[0]?.class || 'Unknown';
+                          const classColor = WOW_CLASS_COLORS[playerClass] || '#cbd5e1';
+                          const isSelected = selectedForGrouping.has(player);
+                          
+                          return (
+                            <button
+                              key={player}
+                              onClick={() => {
+                                const newSelected = new Set(selectedForGrouping);
+                                if (isSelected) {
+                                  newSelected.delete(player);
+                                } else {
+                                  newSelected.add(player);
+                                }
+                                setSelectedForGrouping(newSelected);
+                              }}
+                              style={{
+                                padding: '6px 10px',
+                                background: isSelected ? '#3b82f6' : '#1a1f2e',
+                                border: '1px solid ' + (isSelected ? '#3b82f6' : '#2d3748'),
+                                borderRadius: '4px',
+                                color: isSelected ? '#fff' : classColor,
+                                cursor: 'pointer',
+                                fontSize: '11px',
+                                fontWeight: '500',
+                                textAlign: 'left',
+                                transition: 'all 0.2s'
+                              }}
+                            >
+                              {isSelected && '✓ '}{player}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Merge Button */}
+                      {selectedForGrouping.size >= 2 && (
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                          <div style={{ flex: 1 }}>
+                            <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>
+                              Primary character (keep this name):
+                            </label>
+                            <select
+                              id="mainCharSelect"
+                              style={{
+                                width: '100%',
+                                padding: '6px 10px',
+                                background: '#1a1f2e',
+                                border: '1px solid #334155',
+                                borderRadius: '4px',
+                                color: '#e2e8f0',
+                                fontSize: '12px'
+                              }}
+                            >
+                              {Array.from(selectedForGrouping).map(player => (
+                                <option key={player} value={player}>{player}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <button
+                            onClick={() => {
+                              const mainSelect = document.getElementById('mainCharSelect');
+                              const mainChar = mainSelect.value;
+                              const alts = Array.from(selectedForGrouping).filter(p => p !== mainChar);
+                              
+                              if (mainChar && alts.length > 0) {
+                                setCharacterGroups({
+                                  ...characterGroups,
+                                  [mainChar]: alts
+                                });
+                                setSelectedForGrouping(new Set());
+                              }
+                            }}
+                            style={{
+                              marginTop: '20px',
+                              padding: '8px 16px',
+                              background: '#10b981',
+                              border: 'none',
+                              borderRadius: '6px',
+                              color: '#fff',
+                              cursor: 'pointer',
+                              fontSize: '12px',
+                              fontWeight: '600'
+                            }}
+                          >
+                            Merge Selected
+                          </button>
+                        </div>
+                      )}
+
+                      {selectedForGrouping.size > 0 && selectedForGrouping.size < 2 && (
+                        <div style={{ 
+                          padding: '8px 12px', 
+                          background: '#1e293b', 
+                          border: '1px solid #334155', 
+                          borderRadius: '4px',
+                          fontSize: '11px',
+                          color: '#94a3b8'
+                        }}>
+                          Select at least 2 characters to merge
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
             </div>
 
             {/* Overview Section - Collapsible */}
@@ -1862,14 +2278,22 @@ export default function WarcraftLogsApp() {
                 onMouseOut={(e) => { e.currentTarget.style.background = '#1a1f2e'; }}
               >
                 {overviewCollapsed ? <ChevronRight size={18} /> : <ChevronDown size={18} />}
-                📊 All Bosses Overview {overviewCollapsed && '(click to expand)'}
+                All Bosses Overview {overviewCollapsed && '(click to expand)'}
               </button>
               
               {!overviewCollapsed && (() => {
               const { bosses, players, grid } = getOverviewData();
-              const sortedPlayers = sortConfig.key ? sortOverviewData(bosses, players, grid, sortConfig.key) : players;
               
-              // Calculate all percentage values for color scaling
+              // Filter players by search query
+              const searchFilteredPlayers = players.filter(player => 
+                !searchQuery || player.toLowerCase().includes(searchQuery.toLowerCase())
+              );
+              
+              const sortedPlayers = sortConfig.key 
+                ? sortOverviewData(bosses, searchFilteredPlayers, grid, sortConfig.key) 
+                : searchFilteredPlayers;
+              
+              // Calculate all percentage values for color scaling (use all players, not just filtered)
               const allRealRates = [];
               const allTotalRates = [];
               const allBossRealRates = {};
@@ -1941,15 +2365,8 @@ export default function WarcraftLogsApp() {
                         <tr key={player} style={{ borderBottom: '1px solid #2d3748' }}>
                           <td style={{ padding: '10px', fontWeight: '600', position: 'sticky', left: 0, background: '#1a1f2e', zIndex: 1 }}>
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                              <div>
-                                <div style={{ color: WOW_CLASS_COLORS[grid[player].overall?.class] || '#ffffff' }}>
-                                  {player}
-                                </div>
-                                {grid[player].overall?.class && grid[player].overall?.class !== 'Unknown' && (
-                                  <div style={{ fontSize: '10px', color: '#8b92a0', fontWeight: '400', marginTop: '2px' }}>
-                                    {grid[player].overall.class}
-                                  </div>
-                                )}
+                              <div style={{ color: WOW_CLASS_COLORS[grid[player].overall?.class] || '#ffffff' }}>
+                                {player}{characterGroups[player] && characterGroups[player].length > 0 && ' (grouped)'}
                               </div>
                               <button
                                 onClick={(e) => {
@@ -2044,7 +2461,7 @@ export default function WarcraftLogsApp() {
               const allTotalRates = filteredStats.map(s => s.totalRate);
               
               return (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 {filteredStats.map(({ player, realDeaths, totalDeaths, cheatDeaths, pulls, realRate, totalRate, hasCheatDeaths, deathsByBoss, cheatDeathsByBoss, totalDeathsByBoss, topAbilitiesByBoss, class: playerClass, spec: playerSpec }) => {
                   const isExpanded = expandedPlayers.has(player);
                   const showBothStats = hasCheatDeaths && cheatDeaths > 0;
@@ -2054,7 +2471,7 @@ export default function WarcraftLogsApp() {
                       <div 
                         onClick={() => togglePlayer(player)}
                         style={{ 
-                          padding: '10px 14px', 
+                          padding: '8px 12px', 
                           display: 'flex', 
                           justifyContent: 'space-between', 
                           alignItems: 'center', 
@@ -2063,70 +2480,57 @@ export default function WarcraftLogsApp() {
                           transition: 'background 0.2s'
                         }}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
-                          {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+                          {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                           <div style={{ flex: 1 }}>
-                            <div>
-                              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '600', color: WOW_CLASS_COLORS[playerClass] || '#ffffff' }}>
-                                {player}
+                            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', flexWrap: 'wrap' }}>
+                              <h3 style={{ margin: 0, fontSize: '14px', fontWeight: '600', color: WOW_CLASS_COLORS[playerClass] || '#ffffff' }}>
+                                {player}{characterGroups[player] && characterGroups[player].length > 0 && ' (grouped)'}
                               </h3>
-                              {playerClass && playerClass !== 'Unknown' && (
-                                <div style={{ fontSize: '11px', color: '#8b92a0', marginTop: '2px' }}>
-                                  {playerClass}
-                                </div>
+                              {showBothStats ? (
+                                <>
+                                  <span style={{ fontSize: '13px', color: '#8b92a0' }}>—</span>
+                                  <span style={{ fontSize: '13px', color: '#e2e8f0' }}>
+                                    {realDeaths} death{realDeaths !== 1 ? 's' : ''} / {pulls} pulls
+                                  </span>
+                                  <span style={{ fontSize: '13px', color: '#8b92a0' }}>·</span>
+                                  <span style={{ fontSize: '14px', fontWeight: '600', color: getPercentageColor(realRate, allRealRates) }}>
+                                    {realRate.toFixed(1)}%
+                                  </span>
+                                  <span style={{ fontSize: '11px', color: '#34d399' }}>
+                                    (+{cheatDeaths} cheat)
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <span style={{ fontSize: '13px', color: '#8b92a0' }}>—</span>
+                                  <span style={{ fontSize: '13px', color: '#e2e8f0' }}>
+                                    {realDeaths} death{realDeaths !== 1 ? 's' : ''} / {pulls} pulls
+                                  </span>
+                                  <span style={{ fontSize: '13px', color: '#8b92a0' }}>·</span>
+                                  <span style={{ fontSize: '14px', fontWeight: '600', color: getPercentageColor(realRate, allRealRates) }}>
+                                    {realRate.toFixed(1)}%
+                                  </span>
+                                </>
                               )}
                             </div>
-                            
-                            {showBothStats ? (
-                              // Show BOTH statistics when cheat death detection is on
-                              <div style={{ margin: '4px 0 0', fontSize: '12px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                <p style={{ margin: 0, color: '#e2e8f0' }}>
-                                  <span style={{ color: '#8b92a0' }}>Real only:</span> {realDeaths} deaths / {pulls} pulls
-                                  <span style={{ 
-                                    marginLeft: '8px',
-                                    color: getPercentageColor(realRate, allRealRates),
-                                    fontWeight: '600'
-                                  }}>
-                                    ({realRate.toFixed(1)}%)
-                                  </span>
-                                </p>
-                                <p style={{ margin: 0, color: '#34d399' }}>
-                                  <span style={{ color: '#8b92a0' }}>With cheat:</span> {totalDeaths} deaths / {pulls} pulls
-                                  <span style={{ 
-                                    marginLeft: '8px',
-                                    color: getPercentageColor(totalRate, allTotalRates),
-                                    fontWeight: '600'
-                                  }}>
-                                    ({totalRate.toFixed(1)}%)
-                                  </span>
-                                </p>
-                              </div>
-                            ) : (
-                              // Show simple stats when no cheat deaths
-                              <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#8b92a0' }}>
-                                {realDeaths} deaths / {pulls} pulls
-                              </p>
-                            )}
                           </div>
                         </div>
                         
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                          <div style={{ fontSize: '18px', fontWeight: '700', color: getPercentageColor(realRate, allRealRates) }}>
-                            {realRate.toFixed(1)}%
-                          </div>
+                        <div style={{ display: 'flex', alignItems: 'center', marginLeft: '12px' }}>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               togglePlayerVisibility(player);
                             }}
                             style={{
-                              padding: '4px 10px',
+                              padding: '3px 8px',
                               background: '#2d3748',
                               border: '1px solid #334155',
                               borderRadius: '4px',
                               color: '#cbd5e1',
                               cursor: 'pointer',
-                              fontSize: '11px',
+                              fontSize: '10px',
                               fontWeight: '500'
                             }}
                             title="Hide this player from results"
@@ -2138,7 +2542,8 @@ export default function WarcraftLogsApp() {
 
                       {isExpanded && (
                         <div style={{ padding: '0 14px 12px', borderTop: '1px solid #2d3748' }}>
-                          {Object.entries(deathsByBoss).map(([boss, bossDeaths]) => {
+                          {sortBossesByOrder(Object.keys(deathsByBoss), config.selectedRaid).map(boss => {
+                            const bossDeaths = deathsByBoss[boss];
                             const bossPulls = data.bossParticipation[boss]?.[player]?.length || 0;
                             const realDeathCount = bossDeaths.length;
                             const totalBossDeaths = totalDeathsByBoss[boss] || [];
