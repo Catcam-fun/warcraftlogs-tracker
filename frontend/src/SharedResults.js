@@ -288,10 +288,48 @@ export default function SharedResults() {
             interactive analyzer with this shared data pre-loaded.
           </p>
           <button
-            onClick={() => {
-              // Store the shared data in sessionStorage and navigate to main app
-              sessionStorage.setItem('sharedAnalysisData', JSON.stringify(sharedData));
-              navigate('/?loadShared=true');
+            onClick={async () => {
+              // Store the shared data in IndexedDB and navigate to main app
+              try {
+                const saveToIndexedDB = (key, value) => {
+                  return new Promise((resolve, reject) => {
+                    const request = indexedDB.open('FloorPovDB', 1);
+                    
+                    request.onerror = () => reject(request.error);
+                    
+                    request.onupgradeneeded = (event) => {
+                      const db = event.target.result;
+                      if (!db.objectStoreNames.contains('analysisData')) {
+                        db.createObjectStore('analysisData');
+                      }
+                    };
+                    
+                    request.onsuccess = (event) => {
+                      const db = event.target.result;
+                      const transaction = db.transaction(['analysisData'], 'readwrite');
+                      const store = transaction.objectStore('analysisData');
+                      const putRequest = store.put(value, key);
+                      
+                      putRequest.onsuccess = () => {
+                        db.close();
+                        resolve();
+                      };
+                      
+                      putRequest.onerror = () => {
+                        db.close();
+                        reject(putRequest.error);
+                      };
+                    };
+                  });
+                };
+                
+                await saveToIndexedDB('sharedAnalysisData', sharedData);
+                navigate('/?loadShared=true');
+              } catch (err) {
+                console.error('Error saving to IndexedDB:', err);
+                // Fallback: navigate anyway, the share URL param will still work
+                navigate('/?loadShared=true');
+              }
             }}
             style={{
               padding: '12px 32px',
