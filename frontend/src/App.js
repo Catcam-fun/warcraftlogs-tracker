@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Search, AlertCircle, Loader2, Filter, ChevronDown, ChevronRight, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown, Share2, Copy, Check, LogOut, Settings as SettingsIcon } from 'lucide-react';
+import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
+import { Search, AlertCircle, Loader2, Filter, ChevronDown, ChevronRight, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown, Share2, Copy, Check, LogOut, Settings as SettingsIcon, Info, X } from 'lucide-react';
 import { supabase } from './supabaseClient';
 import Auth from './Auth';
 import Settings from './Settings';
 import LandingPage from './LandingPage';
+import TermsOfService from './TermsOfService';
+import PrivacyPolicy from './PrivacyPolicy';
 
 // Automatically detect if running locally or in production
 const API_URL = window.location.hostname === 'localhost' 
@@ -105,7 +108,21 @@ const sortBossesByOrder = (bosses, raidZone) => {
   });
 };
 
+// Scroll to top component
+function ScrollToTop() {
+  const { pathname } = useLocation();
+  
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
+  
+  return null;
+}
+
 export default function WarcraftLogsApp() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  
   // Authentication state
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -147,10 +164,13 @@ export default function WarcraftLogsApp() {
   const [abortController, setAbortController] = useState(null);
   const [hiddenPlayers, setHiddenPlayers] = useState(new Set());
   const [minPulls, setMinPulls] = useState(0);
-  const [showLanding, setShowLanding] = useState(true);
   const [characterGroups, setCharacterGroups] = useState({}); // { "MainName": ["Alt1", "Alt2"] }
   const [showGroupingUI, setShowGroupingUI] = useState(false);
   const [selectedForGrouping, setSelectedForGrouping] = useState(new Set());
+  const [showTermsModal, setShowTermsModal] = useState(false);
+  const [showInfoModal, setShowInfoModal] = useState(false);
+  const [showAlphaBanner, setShowAlphaBanner] = useState(true);
+
 
   // Check authentication status on mount
   useEffect(() => {
@@ -257,7 +277,7 @@ export default function WarcraftLogsApp() {
     setLoading(true);
     setLoadingStage('Loading shared results...');
     setError('');
-    setShowLanding(false);
+    navigate('/results');
 
     try {
       const response = await fetch(`${API_URL}/api/shared/${shareId}`);
@@ -361,7 +381,7 @@ export default function WarcraftLogsApp() {
     setLoadingStage('Initializing...');
     setError('');
     setData(null);
-    setShowLanding(false);
+    navigate('/results');
 
     // Create abort controller for cancellation
     const controller = new AbortController();
@@ -1162,6 +1182,29 @@ export default function WarcraftLogsApp() {
   // Main app (works for both logged in and anonymous users)
   return (
     <div style={{ minHeight: '100vh', background: '#0a0e1a', color: '#e2e8f0', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+      <ScrollToTop />
+      
+      <Routes>
+        <Route path="/terms" element={
+          <TermsOfService 
+            user={user}
+            onShowAuthModal={() => setShowAuthModal(true)}
+            onShowSettings={() => setShowSettings(true)}
+            onLogout={handleLogout}
+          />
+        } />
+        
+        <Route path="/privacy" element={
+          <PrivacyPolicy 
+            user={user}
+            onShowAuthModal={() => setShowAuthModal(true)}
+            onShowSettings={() => setShowSettings(true)}
+            onLogout={handleLogout}
+          />
+        } />
+        
+        <Route path="/*" element={
+          <>
       {/* Sticky Header */}
       <header style={{
         position: 'sticky',
@@ -1178,7 +1221,7 @@ export default function WarcraftLogsApp() {
               setError('');
               setExpandedPlayers(new Set());
               setSortConfig({ key: null, direction: 'asc' });
-              setShowLanding(true);
+              navigate('/');
             }}
             style={{ 
               display: 'flex', 
@@ -1298,7 +1341,7 @@ export default function WarcraftLogsApp() {
                   setError(''); 
                   setExpandedPlayers(new Set()); 
                   setSortConfig({ key: null, direction: 'asc' }); 
-                  setShowLanding(true);
+                  navigate('/analyze');
                 }}
                 style={{ padding: '8px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', cursor: 'pointer', fontSize: '13px', fontWeight: '600', transition: 'all 0.2s' }}
                 onMouseOver={(e) => { e.target.style.background = '#334155'; }}
@@ -1328,6 +1371,50 @@ export default function WarcraftLogsApp() {
           </div>
         )}
       </header>
+
+      {/* Alpha Warning Banner */}
+      {showAlphaBanner && (
+        <div style={{
+          background: 'rgba(220, 38, 38, 0.15)',
+          borderBottom: '2px solid rgba(220, 38, 38, 0.3)',
+          backdropFilter: 'blur(10px)',
+          padding: '12px 24px',
+          position: 'relative'
+        }}>
+          <div style={{ maxWidth: '1400px', margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
+            <AlertCircle size={20} style={{ color: '#fca5a5', flexShrink: 0 }} />
+            <p style={{ 
+              margin: 0, 
+              color: '#fecaca', 
+              fontSize: '14px', 
+              fontWeight: '500',
+              textAlign: 'center',
+              lineHeight: '1.5'
+            }}>
+              ⚠️ <strong>ALPHA VERSION</strong> - This tool is in active development. Features are being added regularly and you may encounter bugs or incomplete functionality.
+            </p>
+            <button
+              onClick={() => setShowAlphaBanner(false)}
+              style={{
+                background: 'rgba(252, 165, 165, 0.2)',
+                border: 'none',
+                borderRadius: '4px',
+                padding: '4px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                color: '#fecaca',
+                transition: 'background 0.2s',
+                flexShrink: 0
+              }}
+              onMouseOver={(e) => e.target.style.background = 'rgba(252, 165, 165, 0.3)'}
+              onMouseOut={(e) => e.target.style.background = 'rgba(252, 165, 165, 0.2)'}
+            >
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+      )}
       {/* Share Modal */}
       {showShareModal && (
         <div style={{
@@ -1513,19 +1600,47 @@ export default function WarcraftLogsApp() {
           </div>
         )}
 
-        {!data && showLanding && (
-          <LandingPage 
-            onRunAnalysis={() => setShowLanding(false)}
-            onSavedReports={() => {
-              // Placeholder for future saved reports feature
-              alert('Saved Reports feature coming soon!');
-            }}
-          />
-        )}
-
-        {!data && !showLanding && (
+        <Routes>
+          <Route path="/" element={
+            <LandingPage 
+              onRunAnalysis={() => navigate('/analyze')}
+              onSavedReports={() => navigate('/saved')}
+            />
+          } />
+          
+          <Route path="/analyze" element={
           <div style={{ background: '#1a1f2e', borderRadius: '12px', padding: '24px', marginBottom: '20px', border: '1px solid #2d3748' }}>
-            <h2 style={{ margin: '0 0 24px', fontSize: '18px', fontWeight: '600', color: '#ffffff' }}>Configuration</h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+              <h2 style={{ margin: 0, fontSize: '18px', fontWeight: '600', color: '#ffffff' }}>Configuration</h2>
+              <button
+                onClick={() => setShowInfoModal(true)}
+                style={{
+                  padding: '8px 16px',
+                  background: '#1e293b',
+                  border: '1px solid #3b82f6',
+                  borderRadius: '6px',
+                  color: '#3b82f6',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  transition: 'all 0.2s'
+                }}
+                onMouseOver={(e) => { 
+                  e.target.style.background = '#3b82f6'; 
+                  e.target.style.color = '#ffffff';
+                }}
+                onMouseOut={(e) => { 
+                  e.target.style.background = '#1e293b'; 
+                  e.target.style.color = '#3b82f6';
+                }}
+              >
+                <Info size={16} />
+                How It Works
+              </button>
+            </div>
             
             <div style={{ marginBottom: '24px', padding: '14px 16px', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.3)', borderRadius: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'start', gap: '10px' }}>
@@ -1783,8 +1898,18 @@ export default function WarcraftLogsApp() {
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px' }}>
                 <div>
-                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
                     Max Deaths to Track
+                    <div 
+                      style={{ 
+                        position: 'relative', 
+                        display: 'inline-flex',
+                        cursor: 'help'
+                      }}
+                      title="Sets the maximum number of deaths to track per pull. For example, if set to 5, only the first 5 deaths in each pull will be analyzed. This helps focus on early mechanics failures rather than wipe cascades."
+                    >
+                      <Info size={14} style={{ color: '#64748b' }} />
+                    </div>
                   </label>
                   <input
                     type="number"
@@ -1797,7 +1922,7 @@ export default function WarcraftLogsApp() {
                     style={{ width: '100%', padding: '10px 14px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
                   />
                   <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                    Track only the first X deaths per pull (1-10)
+                    Track only the first X deaths per pull (1-10). Useful for identifying early mechanics failures.
                   </p>
                 </div>
               </div>
@@ -1880,14 +2005,99 @@ export default function WarcraftLogsApp() {
                 </>
               )}
             </button>
-          </div>
-        )}
 
-        {data && (
-          <div>
+            {/* Why Death Counts May Vary */}
+            <div style={{
+              background: '#1a1f2e',
+              border: '1px solid #3b82f6',
+              borderRadius: '12px',
+              padding: '24px',
+              marginTop: '32px'
+            }}>
+              <h3 style={{
+                color: '#60a5fa',
+                fontSize: '16px',
+                fontWeight: '600',
+                marginTop: 0,
+                marginBottom: '12px'
+              }}>
+                Why Death Counts May Vary
+              </h3>
+              <p style={{
+                color: '#cbd5e1',
+                fontSize: '14px',
+                margin: 0,
+                lineHeight: '1.7'
+              }}>
+                You may notice slight differences (typically 1-2 deaths per character) between analysis runs due to new reports being uploaded, timestamp edge cases, or WarcraftLogs API updates. These variations don't significantly impact death rate percentages—the tool prioritizes accuracy over perfect consistency.
+              </p>
+            </div>
+          </div>
+          } />
+          
+          <Route path="/results" element={
+            <>
+            {data ? (
+              <div>
+            {/* Analysis Title */}
+            <div style={{
+              background: '#1a1f2e',
+              borderRadius: '12px',
+              padding: '24px',
+              marginBottom: '24px',
+              border: '1px solid #2d3748'
+            }}>
+              <h1 style={{
+                margin: 0,
+                fontSize: '28px',
+                fontWeight: '700',
+                color: '#e2e8f0',
+                marginBottom: '8px'
+              }}>
+                {config.guildName} - {config.server}
+              </h1>
+              <div style={{
+                display: 'flex',
+                gap: '16px',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                fontSize: '14px',
+                color: '#94a3b8'
+              }}>
+                <span>
+                  {RAID_ZONES[config.selectedRaid]?.name} • {
+                    config.difficulty === '3' ? 'Normal' :
+                    config.difficulty === '4' ? 'Heroic' : 'Mythic'
+                  }
+                </span>
+                <span>•</span>
+                <span>
+                  Analyzed on {new Date().toLocaleDateString('en-US', { 
+                    month: 'short', 
+                    day: 'numeric', 
+                    year: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit'
+                  })}
+                </span>
+              </div>
+            </div>
+
             <div style={{ background: '#1a1f2e', borderRadius: '8px', padding: '14px', marginBottom: '16px', border: '1px solid #2d3748' }}>
               <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
-                <label style={{ fontSize: '13px', color: '#cbd5e1' }}>Deaths to count:</label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#cbd5e1' }}>
+                  Deaths to count:
+                  <div 
+                    style={{ 
+                      position: 'relative', 
+                      display: 'inline-flex',
+                      cursor: 'help'
+                    }}
+                    title="Filter results to show only deaths up to this number per pull. Helps focus analysis on early deaths vs late-fight wipe cascades. Change this to see how different death thresholds affect player rankings."
+                  >
+                    <Info size={14} style={{ color: '#64748b' }} />
+                  </div>
+                </label>
                 <select
                   value={cutoff}
                   onChange={(e) => setCutoff(parseInt(e.target.value))}
@@ -2653,12 +2863,97 @@ export default function WarcraftLogsApp() {
             })()}
             </div>
           </div>
-        )}
+            ) : (
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                minHeight: '400px',
+                padding: '40px'
+              }}>
+                <p style={{ color: '#94a3b8', fontSize: '16px', marginBottom: '16px' }}>
+                  {error ? error : 'No analysis data yet. Configure and run an analysis to see results.'}
+                </p>
+                <button
+                  onClick={() => navigate('/analyze')}
+                  style={{
+                    padding: '10px 20px',
+                    background: '#3b82f6',
+                    border: 'none',
+                    borderRadius: '6px',
+                    color: '#fff',
+                    fontSize: '14px',
+                    fontWeight: '600',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Run Analysis
+                </button>
+              </div>
+            )}
+            </>
+          } />
+          
+          <Route path="/saved" element={
+            <div style={{ padding: '40px 20px' }}>
+              <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+                <h2 style={{ 
+                  color: '#e2e8f0',
+                  fontSize: '28px',
+                  fontWeight: '700',
+                  marginBottom: '24px'
+                }}>
+                  Saved Reports
+                </h2>
+                <div style={{
+                  background: '#1a1f2e',
+                  borderRadius: '12px',
+                  padding: '40px',
+                  border: '1px solid #2d3748',
+                  textAlign: 'center'
+                }}>
+                  <p style={{ color: '#94a3b8', fontSize: '16px', marginBottom: '20px' }}>
+                    Saved reports feature coming soon!
+                  </p>
+                  <button
+                    onClick={() => navigate('/analyze')}
+                    style={{
+                      padding: '10px 20px',
+                      background: '#3b82f6',
+                      border: 'none',
+                      borderRadius: '6px',
+                      color: '#fff',
+                      fontSize: '14px',
+                      fontWeight: '600',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Run New Analysis
+                  </button>
+                </div>
+              </div>
+            </div>
+          } />
+        </Routes>
       </div>
+          </>
+        } />
+      </Routes>
 
       {/* Auth Modal */}
       {showAuthModal && (
-        <Auth onClose={() => setShowAuthModal(false)} />
+        <Auth 
+          onClose={() => setShowAuthModal(false)}
+          onShowTerms={() => {
+            setShowAuthModal(false);
+            navigate('/terms');
+          }}
+          onShowPrivacy={() => {
+            setShowAuthModal(false);
+            navigate('/privacy');
+          }}
+        />
       )}
 
       {/* Settings Modal */}
@@ -2667,7 +2962,418 @@ export default function WarcraftLogsApp() {
           user={user} 
           onClose={() => setShowSettings(false)}
           onCredentialsUpdate={loadAPICredentials}
+          onShowPrivacy={() => {
+            setShowSettings(false);
+            navigate('/privacy');
+          }}
         />
+      )}
+
+      {/* Info Modal - How It Works */}
+      {showInfoModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.85)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: '20px',
+          overflowY: 'auto'
+        }}>
+          <div style={{
+            maxWidth: '700px',
+            width: '100%',
+            background: '#1a1f2e',
+            borderRadius: '12px',
+            border: '2px solid #3b82f6',
+            position: 'relative',
+            maxHeight: '90vh',
+            overflowY: 'auto'
+          }}>
+            <div style={{ position: 'sticky', top: 0, background: '#1a1f2e', padding: '24px 24px 16px', borderBottom: '1px solid #2d3748', zIndex: 1 }}>
+              <button
+                onClick={() => setShowInfoModal(false)}
+                style={{
+                  position: 'absolute',
+                  top: '16px',
+                  right: '16px',
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  padding: '4px',
+                  display: 'flex',
+                  alignItems: 'center'
+                }}
+              >
+                <X size={20} />
+              </button>
+              <h2 style={{ 
+                color: '#3b82f6', 
+                margin: 0,
+                fontSize: '24px',
+                fontWeight: '700',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px'
+              }}>
+                <Info size={24} />
+                How Floor Pov Works
+              </h2>
+            </div>
+
+            <div style={{ padding: '24px', color: '#e2e8f0', lineHeight: '1.7' }}>
+              <h3 style={{ color: '#60a5fa', fontSize: '18px', marginTop: 0, marginBottom: '12px' }}>
+                Data Collection & Processing
+              </h3>
+              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
+                Floor Pov analyzes raid death data from WarcraftLogs by:
+              </p>
+              <ul style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '24px', paddingLeft: '20px' }}>
+                <li style={{ marginBottom: '8px' }}>Fetching all guild reports for your selected raid and difficulty</li>
+                <li style={{ marginBottom: '8px' }}>Processing death events from each pull</li>
+                <li style={{ marginBottom: '8px' }}>Tracking player participation across all fights</li>
+                <li style={{ marginBottom: '8px' }}>Calculating death rates (deaths per pull) for each player and boss</li>
+              </ul>
+
+              <h3 style={{ color: '#60a5fa', fontSize: '18px', marginBottom: '12px' }}>
+                Data Validation & Completeness
+              </h3>
+              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '12px' }}>
+                Floor Pov ensures you're getting complete and accurate data through multiple verification steps:
+              </p>
+              <ul style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px', paddingLeft: '20px' }}>
+                <li style={{ marginBottom: '8px' }}><strong>Comprehensive report fetching:</strong> Retrieves all available reports for your guild within the specified date range, ensuring no logs are missed</li>
+                <li style={{ marginBottom: '8px' }}><strong>Participation tracking:</strong> Cross-references player presence across all fights to ensure accurate "pulls participated" counts</li>
+                <li style={{ marginBottom: '8px' }}><strong>Fight boundary validation:</strong> Verifies fight start and end timestamps to ensure all deaths within valid encounters are captured</li>
+                <li style={{ marginBottom: '8px' }}><strong>Missing data detection:</strong> Identifies and handles edge cases where WarcraftLogs data may be incomplete or corrupted</li>
+              </ul>
+
+              <h3 style={{ color: '#60a5fa', fontSize: '18px', marginBottom: '12px' }}>
+                Deduplication & Data Accuracy
+              </h3>
+              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '12px' }}>
+                To ensure accurate results, Floor Pov uses <strong>smart deduplication</strong>:
+              </p>
+              <ul style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px', paddingLeft: '20px' }}>
+                <li style={{ marginBottom: '8px' }}><strong>Report-level deduplication:</strong> The same pull may appear in multiple reports (different log uploaders). We detect and merge these duplicates based on fight timestamps and boss encounters.</li>
+                <li style={{ marginBottom: '8px' }}><strong>Character name normalization:</strong> Handles special characters and accents in player names (e.g., "Catëlynn" vs "Catelynn")</li>
+                <li style={{ marginBottom: '8px' }}><strong>Death timestamp filtering:</strong> Only counts deaths within the valid fight window to ensure accuracy</li>
+                <li style={{ marginBottom: '8px' }}><strong>Mass death detection:</strong> Identifies raid wipes (7+ deaths within 10 seconds) to properly track fight boundaries</li>
+              </ul>
+
+              <h3 style={{ color: '#60a5fa', fontSize: '18px', marginBottom: '12px' }}>
+                Why Death Counts May Vary Between Runs
+              </h3>
+              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '12px' }}>
+                You may notice slight differences in death counts between different analysis runs of the same guild. This is normal and can happen due to:
+              </p>
+              <ul style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px', paddingLeft: '20px' }}>
+                <li style={{ marginBottom: '8px' }}><strong>New reports uploaded:</strong> Guild members may upload additional logs between runs</li>
+                <li style={{ marginBottom: '8px' }}><strong>Timestamp edge cases:</strong> Deaths occurring exactly at fight end boundaries may be handled differently</li>
+                <li style={{ marginBottom: '8px' }}><strong>WarcraftLogs API updates:</strong> The upstream data source occasionally corrects or updates historical data</li>
+              </ul>
+              <p style={{ color: '#94a3b8', fontSize: '13px', fontStyle: 'italic', background: '#0f1419', padding: '12px', borderRadius: '6px', borderLeft: '3px solid #3b82f6' }}>
+                💡 <strong>Tip:</strong> These variations are typically 1-2 deaths per character and don't significantly impact death rate percentages. The tool prioritizes accuracy over perfect consistency.
+              </p>
+
+              <h3 style={{ color: '#60a5fa', fontSize: '18px', marginTop: '24px', marginBottom: '12px' }}>
+                Cheat Death Detection (Premium)
+              </h3>
+              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '12px' }}>
+                For logged-in users, Floor Pov can detect "cheat deaths" - deaths that were prevented by defensive abilities:
+              </p>
+              <ul style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px', paddingLeft: '20px' }}>
+                <li style={{ marginBottom: '8px' }}>Mage: Cauterize</li>
+                <li style={{ marginBottom: '8px' }}>Priest: Spirit of Redemption</li>
+                <li style={{ marginBottom: '8px' }}>Rogue: Cheat Death</li>
+                <li style={{ marginBottom: '8px' }}>Death Knight: Purgatory</li>
+                <li style={{ marginBottom: '8px' }}>Paladin: Divine Shield (when preventing lethal damage)</li>
+                <li style={{ marginBottom: '8px' }}>And more...</li>
+              </ul>
+              <p style={{ color: '#94a3b8', fontSize: '13px', background: '#0f1419', padding: '12px', borderRadius: '6px' }}>
+                Note: Cheat death detection requires 1 additional API call per report and adds ~20-30 seconds to analysis time.
+              </p>
+
+              <h3 style={{ color: '#60a5fa', fontSize: '18px', marginTop: '24px', marginBottom: '12px' }}>
+                Character Grouping (Alts)
+              </h3>
+              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '12px' }}>
+                You can group alternate characters with their mains to see combined statistics. This merges:
+              </p>
+              <ul style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '24px', paddingLeft: '20px' }}>
+                <li style={{ marginBottom: '8px' }}>Total deaths across all characters</li>
+                <li style={{ marginBottom: '8px' }}>Total pulls participated in</li>
+                <li style={{ marginBottom: '8px' }}>Combined death rate calculations</li>
+              </ul>
+
+              <h3 style={{ color: '#60a5fa', fontSize: '18px', marginBottom: '12px' }}>
+                Questions or Issues?
+              </h3>
+              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '8px' }}>
+                Floor Pov is in active alpha development. If you encounter bugs or have suggestions:
+              </p>
+              <ul style={{ color: '#cbd5e1', fontSize: '14px', paddingLeft: '20px', marginBottom: 0 }}>
+                <li style={{ marginBottom: '8px' }}>Check the site updates in the footer for recent changes</li>
+                <li style={{ marginBottom: '8px' }}>Report issues or request features (contact info coming soon)</li>
+                <li>Join our Discord community (link coming soon)</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Terms & Privacy Modal */}
+      {showTermsModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.85)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: '20px',
+          overflowY: 'auto'
+        }}>
+          <div style={{
+            maxWidth: '700px',
+            width: '100%',
+            background: '#1a1f2e',
+            borderRadius: '12px',
+            border: '2px solid #3b82f6',
+            position: 'relative',
+            maxHeight: '90vh',
+            overflowY: 'auto'
+          }}>
+            <div style={{ position: 'sticky', top: 0, background: '#1a1f2e', padding: '24px 24px 16px', borderBottom: '1px solid #2d3748', zIndex: 1 }}>
+              <button
+                onClick={() => setShowTermsModal(false)}
+                style={{
+                  position: 'absolute',
+                  top: '16px',
+                  right: '16px',
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  padding: '4px',
+                  display: 'flex',
+                  alignItems: 'center'
+                }}
+              >
+                <X size={20} />
+              </button>
+              <h2 style={{ 
+                color: '#3b82f6', 
+                margin: 0,
+                fontSize: '24px',
+                fontWeight: '700'
+              }}>
+                Terms of Service & Privacy Policy
+              </h2>
+            </div>
+
+            <div style={{ padding: '24px', color: '#e2e8f0', lineHeight: '1.7' }}>
+              <p style={{ color: '#94a3b8', fontSize: '13px', fontStyle: 'italic', marginBottom: '24px' }}>
+                Last Updated: November 21, 2025
+              </p>
+
+              <h3 style={{ color: '#60a5fa', fontSize: '18px', marginTop: 0, marginBottom: '12px' }}>
+                1. Terms of Service
+              </h3>
+              
+              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
+                1.1 Acceptance of Terms
+              </h4>
+              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
+                By accessing or using Floor Pov ("the Service"), you agree to be bound by these Terms of Service. If you do not agree to these terms, please do not use the Service.
+              </p>
+
+              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
+                1.2 Alpha Software Disclaimer
+              </h4>
+              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
+                Floor Pov is currently in <strong>alpha testing</strong>. The Service is provided "as is" without warranties of any kind. Features may change, be removed, or malfunction without notice. We are not liable for any data loss, errors, or issues arising from use of the Service.
+              </p>
+
+              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
+                1.3 WarcraftLogs API Usage
+              </h4>
+              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
+                Floor Pov uses the WarcraftLogs API to retrieve publicly available raid data. You are responsible for providing your own WarcraftLogs API credentials. By using this Service, you agree to comply with WarcraftLogs' Terms of Service and API usage policies.
+              </p>
+
+              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
+                1.4 Acceptable Use
+              </h4>
+              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
+                You agree not to:
+              </p>
+              <ul style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px', paddingLeft: '20px' }}>
+                <li style={{ marginBottom: '8px' }}>Use the Service for any illegal or unauthorized purpose</li>
+                <li style={{ marginBottom: '8px' }}>Attempt to access, modify, or interfere with the Service's infrastructure</li>
+                <li style={{ marginBottom: '8px' }}>Abuse rate limits or attempt to overload the Service</li>
+                <li style={{ marginBottom: '8px' }}>Use the Service to harass, bully, or harm other players</li>
+                <li>Share or distribute others' API credentials without permission</li>
+              </ul>
+
+              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
+                1.5 Account Termination
+              </h4>
+              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
+                We reserve the right to suspend or terminate accounts that violate these terms, abuse the service or API rate limits, or engage in fraudulent or malicious activity. You may delete your account at any time through your account settings.
+              </p>
+
+              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
+                1.6 Disclaimer and Limitation of Liability
+              </h4>
+              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '12px' }}>
+                FLOOR POV IS PROVIDED "AS IS" WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED. TO THE MAXIMUM EXTENT PERMITTED BY LAW, WE DISCLAIM ALL WARRANTIES INCLUDING MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+              </p>
+              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
+                IN NO EVENT SHALL FLOOR POV OR ITS OPERATORS BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, INCLUDING LOSS OF PROFITS, DATA, OR USE, ARISING OUT OF OR RELATED TO YOUR USE OF THE SERVICE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES. Some jurisdictions do not allow the exclusion of certain warranties or limitation of liability, so the above limitations may not apply to you.
+              </p>
+
+              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
+                1.7 Intellectual Property
+              </h4>
+              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
+                The Floor Pov website design, code, and branding are proprietary and protected by copyright. You may not copy, modify, distribute, or reverse engineer the Service. Analysis results you generate are yours to use and share. WarcraftLogs data remains the property of Warcraft Logs and Blizzard Entertainment.
+              </p>
+
+              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
+                1.8 Governing Law
+              </h4>
+              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
+                These terms are governed by the laws of the State of Florida, United States. Any disputes shall be resolved in the appropriate courts of Florida.
+              </p>
+
+              <h3 style={{ color: '#60a5fa', fontSize: '18px', marginTop: '24px', marginBottom: '12px' }}>
+                2. Privacy Policy
+              </h3>
+
+              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
+                2.1 Data We Collect
+              </h4>
+              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '12px' }}>
+                When you create an account, we collect:
+              </p>
+              <ul style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px', paddingLeft: '20px' }}>
+                <li style={{ marginBottom: '8px' }}><strong>Account Information:</strong> Email address and encrypted password</li>
+                <li style={{ marginBottom: '8px' }}><strong>API Credentials:</strong> Your WarcraftLogs API Client ID and Secret (encrypted at rest)</li>
+                <li style={{ marginBottom: '8px' }}><strong>Analysis History:</strong> Guild names, servers, and analysis configurations you've run</li>
+                <li><strong>Usage Data:</strong> Basic analytics about feature usage and errors (no personal identifying information)</li>
+              </ul>
+
+              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
+                2.2 How We Use Your Data
+              </h4>
+              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '12px' }}>
+                We use your data to:
+              </p>
+              <ul style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px', paddingLeft: '20px' }}>
+                <li style={{ marginBottom: '8px' }}>Provide authentication and account management</li>
+                <li style={{ marginBottom: '8px' }}>Store your API credentials securely for future analyses</li>
+                <li style={{ marginBottom: '8px' }}>Improve the Service and fix bugs</li>
+                <li>Send important service updates (account security, major changes)</li>
+              </ul>
+
+              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
+                2.3 Data Security
+              </h4>
+              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
+                We implement industry-standard security measures:
+              </p>
+              <ul style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px', paddingLeft: '20px' }}>
+                <li style={{ marginBottom: '8px' }}>Passwords are hashed using bcrypt</li>
+                <li style={{ marginBottom: '8px' }}>API credentials are encrypted at rest</li>
+                <li style={{ marginBottom: '8px' }}>Database access is protected with Row-Level Security (RLS) policies</li>
+                <li>HTTPS encryption for all data in transit</li>
+              </ul>
+
+              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
+                2.4 Data Sharing
+              </h4>
+              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
+                We <strong>do not sell, rent, or share</strong> your personal data with third parties, except:
+              </p>
+              <ul style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px', paddingLeft: '20px' }}>
+                <li style={{ marginBottom: '8px' }}>Service providers necessary for operation (Supabase for database, Render for hosting)</li>
+                <li style={{ marginBottom: '8px' }}>When required by law or to protect our legal rights</li>
+                <li>With your explicit consent</li>
+              </ul>
+
+              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
+                2.5 Third-Party Services
+              </h4>
+              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
+                Floor Pov integrates with:
+              </p>
+              <ul style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px', paddingLeft: '20px' }}>
+                <li style={{ marginBottom: '8px' }}><strong>WarcraftLogs:</strong> We access publicly available raid data on your behalf using your API credentials</li>
+                <li style={{ marginBottom: '8px' }}><strong>Supabase:</strong> Our authentication and database provider</li>
+                <li style={{ marginBottom: '8px' }}><strong>Resend:</strong> Email delivery service for account confirmations and notifications</li>
+                <li><strong>Cloudflare:</strong> CDN and API proxy for performance</li>
+              </ul>
+              <p style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '16px' }}>
+                Each service has its own privacy policy. We recommend reviewing them.
+              </p>
+
+              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
+                2.6 Your Rights
+              </h4>
+              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '12px' }}>
+                You have the right to:
+              </p>
+              <ul style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px', paddingLeft: '20px' }}>
+                <li style={{ marginBottom: '8px' }}>Access your personal data</li>
+                <li style={{ marginBottom: '8px' }}>Update or correct your information</li>
+                <li style={{ marginBottom: '8px' }}>Delete your account and associated data</li>
+                <li>Opt out of non-essential communications</li>
+              </ul>
+              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
+                To exercise these rights, contact us (contact information coming soon to footer).
+              </p>
+
+              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
+                2.7 Cookies and Tracking
+              </h4>
+              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
+                We use essential cookies only for:
+              </p>
+              <ul style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px', paddingLeft: '20px' }}>
+                <li style={{ marginBottom: '8px' }}>Authentication session management</li>
+                <li>Remembering your preferences (e.g., dismissing the alpha banner)</li>
+              </ul>
+              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
+                We do not use third-party tracking or advertising cookies.
+              </p>
+
+              <h3 style={{ color: '#60a5fa', fontSize: '18px', marginTop: '24px', marginBottom: '12px' }}>
+                3. Changes to These Terms
+              </h3>
+              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
+                We may update these terms as the Service evolves. Continued use of the Service after changes constitutes acceptance of the updated terms. Major changes will be announced via email and on the site.
+              </p>
+
+              <h3 style={{ color: '#60a5fa', fontSize: '18px', marginTop: '24px', marginBottom: '12px' }}>
+                4. Contact
+              </h3>
+              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '0' }}>
+                For questions about these terms or your data, contact information will be added to the footer soon.
+              </p>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Footer */}
@@ -2796,8 +3502,64 @@ export default function WarcraftLogsApp() {
                 marginTop: 0,
                 letterSpacing: '0.05em'
               }}>
+                LEGAL
+              </h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <a 
+                  onClick={() => navigate('/terms')}
+                  style={{ 
+                    color: '#94a3b8', 
+                    fontSize: '13px', 
+                    textDecoration: 'none', 
+                    transition: 'color 0.2s',
+                    cursor: 'pointer'
+                  }}
+                  onMouseOver={(e) => e.target.style.color = '#3b82f6'}
+                  onMouseOut={(e) => e.target.style.color = '#94a3b8'}
+                >
+                  Terms of Service
+                </a>
+                <a 
+                  onClick={() => navigate('/privacy')}
+                  style={{ 
+                    color: '#94a3b8', 
+                    fontSize: '13px', 
+                    textDecoration: 'none', 
+                    transition: 'color 0.2s',
+                    cursor: 'pointer'
+                  }}
+                  onMouseOver={(e) => e.target.style.color = '#3b82f6'}
+                  onMouseOut={(e) => e.target.style.color = '#94a3b8'}
+                >
+                  Privacy Policy
+                </a>
+              </div>
+            </div>
+
+            <div>
+              <h4 style={{
+                color: '#e2e8f0',
+                fontSize: '12px',
+                fontWeight: '600',
+                marginBottom: '12px',
+                marginTop: 0,
+                letterSpacing: '0.05em'
+              }}>
                 CONTACT
               </h4>
+              <a 
+                href="mailto:support@floorpov.gg"
+                style={{ 
+                  color: '#94a3b8', 
+                  fontSize: '13px', 
+                  textDecoration: 'none', 
+                  transition: 'color 0.2s'
+                }}
+                onMouseOver={(e) => e.target.style.color = '#3b82f6'}
+                onMouseOut={(e) => e.target.style.color = '#94a3b8'}
+              >
+                support@floorpov.gg
+              </a>
             </div>
           </div>
         </div>
