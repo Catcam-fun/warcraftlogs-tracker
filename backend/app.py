@@ -22,6 +22,64 @@ app = Flask(__name__)
 # Configure CORS - simplest approach, allow everything
 CORS(app)
 
+# Retry configuration for network requests
+MAX_RETRIES = 3
+RETRY_BACKOFF_BASE = 1  # seconds
+RETRY_BACKOFF_MAX = 10  # seconds
+
+
+def make_request_with_retry(method, url, max_retries=MAX_RETRIES, timeout=120, **kwargs):
+    """
+    Make an HTTP request with exponential backoff retry logic.
+    
+    Args:
+        method: 'get' or 'post'
+        url: URL to request
+        max_retries: Maximum number of retry attempts
+        timeout: Request timeout in seconds
+        **kwargs: Additional arguments to pass to requests
+    
+    Returns:
+        Response object
+    
+    Raises:
+        Exception: If all retries fail
+    """
+    last_exception = None
+    
+    for attempt in range(max_retries + 1):
+        try:
+            if method.lower() == 'post':
+                response = requests.post(url, timeout=timeout, **kwargs)
+            else:
+                response = requests.get(url, timeout=timeout, **kwargs)
+            
+            response.raise_for_status()
+            return response
+            
+        except requests.exceptions.Timeout as e:
+            last_exception = e
+            if attempt < max_retries:
+                # Calculate backoff time with exponential increase
+                backoff_time = min(RETRY_BACKOFF_BASE * (2 ** attempt), RETRY_BACKOFF_MAX)
+                print(f"[Retry] Request timeout (attempt {attempt + 1}/{max_retries + 1}). Retrying in {backoff_time}s... URL: {url}")
+                time.sleep(backoff_time)
+            else:
+                print(f"[Retry] Request failed after {max_retries + 1} attempts. URL: {url}")
+                
+        except requests.exceptions.RequestException as e:
+            last_exception = e
+            # For non-timeout errors, retry with shorter backoff
+            if attempt < max_retries:
+                backoff_time = min(RETRY_BACKOFF_BASE * (1.5 ** attempt), RETRY_BACKOFF_MAX)
+                print(f"[Retry] Request error: {str(e)} (attempt {attempt + 1}/{max_retries + 1}). Retrying in {backoff_time}s... URL: {url}")
+                time.sleep(backoff_time)
+            else:
+                print(f"[Retry] Request failed after {max_retries + 1} attempts. URL: {url}")
+    
+    # If we get here, all retries failed
+    raise Exception(f"Request failed after {max_retries + 1} attempts: {str(last_exception)}")
+
 # Constants
 MASS_DEATH_THRESHOLD = 7
 MASS_DEATH_WINDOW = 10000  # ms
@@ -104,8 +162,15 @@ def get_access_token(client_id, client_secret):
     }
     
     try:
-        response = requests.post(OAUTH_TOKEN_URL, data=data, timeout=30)
-        response.raise_for_status()
+        # Use retry logic with increased timeout
+        response = make_request_with_retry(
+            'post',
+            OAUTH_TOKEN_URL,
+            data=data,
+            timeout=60,  # Increased from 30 to 60 seconds
+            max_retries=2  # Fewer retries for OAuth (it's usually fast)
+        )
+        
         token_data = response.json()
         
         _token_cache["token"] = token_data["access_token"]
@@ -118,7 +183,7 @@ def get_access_token(client_id, client_secret):
 
 
 def graphql_query(token, query, variables=None):
-    """Execute a GraphQL query against WarcraftLogs V2 API"""
+    """Execute a GraphQL query against WarcraftLogs V2 API with retry logic"""
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json"
@@ -129,8 +194,16 @@ def graphql_query(token, query, variables=None):
         payload["variables"] = variables
     
     try:
-        response = requests.post(GRAPHQL_ENDPOINT, json=payload, headers=headers, timeout=60)
-        response.raise_for_status()
+        # Use retry logic with increased timeout
+        response = make_request_with_retry(
+            'post',
+            GRAPHQL_ENDPOINT,
+            json=payload,
+            headers=headers,
+            timeout=120,  # Increased from 60 to 120 seconds
+            max_retries=3  # Retry up to 3 times with backoff
+        )
+        
         data = response.json()
         
         if "errors" in data:
