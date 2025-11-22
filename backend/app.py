@@ -16,11 +16,36 @@ import json
 import uuid
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import brotli
+import base64
+from supabase import create_client, Client
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 app = Flask(__name__)
 
 # Configure CORS - simplest approach, allow everything
-CORS(app)
+CORS(app, 
+     resources={r"/api/*": {"origins": "*"}},
+     supports_credentials=True,
+     allow_headers=["Content-Type", "Authorization"],
+     methods=["GET", "POST", "DELETE", "OPTIONS", "PUT"])
+
+# Initialize Supabase client
+SUPABASE_URL = os.environ.get('SUPABASE_URL')
+SUPABASE_KEY = os.environ.get('SUPABASE_KEY')
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
+
+# Debug: Verify Supabase configuration
+print(f"[Startup] Supabase configured: {supabase is not None}")
+if not supabase:
+    print(f"[Startup] SUPABASE_URL found: {'SUPABASE_URL' in os.environ}")
+    print(f"[Startup] SUPABASE_KEY found: {'SUPABASE_KEY' in os.environ}")
+else:
+    print(f"[Startup] Supabase client successfully initialized")
+
 
 # Retry configuration for network requests
 MAX_RETRIES = 3
@@ -1376,6 +1401,7 @@ def analyze():
             # Build final response
             response = {
                 "meta": {
+                    "guild_name": guild_name,
                     "maxCutoff": max_cutoff,
                     "authorFilters": author_filters,
                     "startDate": start_date,  # Optional start date filter
@@ -1469,6 +1495,108 @@ def get_shared_results(share_id):
             'success': False,
             'error': str(e)
         }), 500
+
+
+
+@app.route('/api/save-analysis', methods=['POST'])
+def save_analysis():
+    """Save compressed analysis to Supabase"""
+    if not supabase:
+        return jsonify({'error': 'Database not configured'}), 500
+    
+    try:
+        data = request.json
+        user_id = data.get('user_id')
+        analysis_name = data.get('analysis_name')
+        analysis_data = data.get('analysis_data')
+        retention_days = min(int(data.get('retention_days', 7)), 30)  # Max 30 days
+        
+        # Compress with Brotli (quality 11 = max compression)
+        json_str = json.dumps(analysis_data)
+        compressed = brotli.compress(json_str.encode('utf-8'), quality=11)
+        compressed_b64 = base64.b64encode(compressed).decode('utf-8')
+        
+        # Calculate size
+        size_bytes = len(compressed_b64.encode('utf-8'))
+        
+        # Insert into Supabase
+        result = supabase.table('saved_analyses').insert({
+            'user_id': user_id,
+            'analysis_name': analysis_name,
+            'guild_name': analysis_data.get('meta', {}).get('guild_name', 'Unknown'),
+            'analysis_data': compressed_b64,
+            'retention_days': retention_days,
+            'size_bytes': size_bytes
+        }).execute()
+        
+        return jsonify({
+            'success': True, 
+            'id': result.data[0]['id'],
+            'compressed_size': size_bytes,
+            'original_size': len(json_str)
+        })
+        
+    except Exception as e:
+        print(f"Error saving analysis: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/load-analysis/<analysis_id>', methods=['GET'])
+def load_analysis(analysis_id):
+    """Load and decompress analysis from Supabase"""
+    if not supabase:
+        return jsonify({'error': 'Database not configured'}), 500
+    
+    try:
+        # Get from Supabase
+        result = supabase.table('saved_analyses').select('*').eq('id', analysis_id).single().execute()
+        
+        # Decompress
+        compressed_b64 = result.data['analysis_data']
+        compressed = base64.b64decode(compressed_b64)
+        json_str = brotli.decompress(compressed).decode('utf-8')
+        analysis_data = json.loads(json_str)
+        
+        return jsonify(analysis_data)
+        
+    except Exception as e:
+        print(f"Error loading analysis: {str(e)}")
+        return jsonify({'error': str(e)}), 404
+
+
+@app.route('/api/user-analyses/<user_id>', methods=['GET'])
+def get_user_analyses(user_id):
+    """Get all saved analyses for a user"""
+    if not supabase:
+        return jsonify({'error': 'Database not configured'}), 500
+    
+    try:
+        result = supabase.table('saved_analyses')\
+            .select('id, analysis_name, guild_name, created_at, expires_at, retention_days, size_bytes')\
+            .eq('user_id', user_id)\
+            .order('created_at', desc=True)\
+            .execute()
+        
+        return jsonify(result.data)
+        
+    except Exception as e:
+        print(f"Error getting user analyses: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/delete-analysis/<analysis_id>', methods=['DELETE'])
+def delete_analysis(analysis_id):
+    """Delete a saved analysis"""
+    if not supabase:
+        return jsonify({'error': 'Database not configured'}), 500
+    
+    try:
+        supabase.table('saved_analyses').delete().eq('id', analysis_id).execute()
+        return jsonify({'success': True})
+        
+    except Exception as e:
+        print(f"Error deleting analysis: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/health', methods=['GET'])

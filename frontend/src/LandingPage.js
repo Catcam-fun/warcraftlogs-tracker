@@ -41,9 +41,12 @@ export default function LandingPage({ onRunAnalysis, onSavedReports }) {
         {/* Big Buttons */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+          gridTemplateColumns: onSavedReports ? 'repeat(auto-fit, minmax(280px, 1fr))' : '1fr',
           gap: '24px',
-          marginBottom: '40px'
+          marginBottom: '40px',
+          maxWidth: onSavedReports ? '100%' : '400px',
+          marginLeft: 'auto',
+          marginRight: 'auto'
         }}>
           {/* Run Analysis Button */}
           <button
@@ -106,7 +109,8 @@ export default function LandingPage({ onRunAnalysis, onSavedReports }) {
             </div>
           </button>
 
-          {/* Saved Reports Button */}
+          {/* Saved Reports Button - Only show if callback is provided */}
+          {onSavedReports && (
           <button
             onClick={onSavedReports}
             style={{
@@ -168,6 +172,7 @@ export default function LandingPage({ onRunAnalysis, onSavedReports }) {
               </div>
             </div>
           </button>
+          )}
         </div>
 
         {/* Feature Highlights */}

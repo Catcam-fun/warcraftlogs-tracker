@@ -7,6 +7,9 @@ import Settings from './Settings';
 import LandingPage from './LandingPage';
 import TermsOfService from './TermsOfService';
 import PrivacyPolicy from './PrivacyPolicy';
+// import SaveReportDialog from './SaveReportDialog'; // DISABLED - Save Reports feature
+// import SavedReports from './SavedReports'; // DISABLED - Save Reports feature
+import AppHeader from './AppHeader';
 
 // Automatically detect if running locally or in production
 const API_URL = window.location.hostname === 'localhost' 
@@ -170,6 +173,7 @@ export default function WarcraftLogsApp() {
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [showInfoModal, setShowInfoModal] = useState(false);
   const [showAlphaBanner, setShowAlphaBanner] = useState(true);
+  // const [showSaveDialog, setShowSaveDialog] = useState(false); // DISABLED - Save Reports feature
 
 
   // Check authentication status on mount
@@ -232,6 +236,13 @@ export default function WarcraftLogsApp() {
       setLoadingStage('');
     }
   };
+
+  // DISABLED - Save Reports feature
+  // const handleLoadSavedReport = (reportData) => {
+  //   console.log('[SavedReports] Loading saved report');
+  //   setData(reportData);
+  //   navigate('/');
+  // };
 
   // Load shared results when share parameter is present
   useEffect(() => {
@@ -1345,6 +1356,15 @@ export default function WarcraftLogsApp() {
             onLogout={handleLogout}
           />
         } />
+
+        {/* DISABLED - Save Reports feature
+        <Route path="/saved-reports" element={
+          <SavedReports 
+            user={user}
+            onLoadReport={handleLoadSavedReport}
+          />
+        } />
+        */}
         
         <Route path="/*" element={
           <>
@@ -1414,6 +1434,32 @@ export default function WarcraftLogsApp() {
                 >
                   New Analysis
                 </button>
+                {/* DISABLED - Save Reports feature
+                {user && (
+                  <button
+                    onClick={() => setShowSaveDialog(true)}
+                    style={{
+                      padding: '8px 16px',
+                      background: '#3b82f6',
+                      border: 'none',
+                      borderRadius: '6px',
+                      color: '#fff',
+                      cursor: 'pointer',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      transition: 'all 0.2s'
+                    }}
+                    onMouseOver={(e) => { e.target.style.background = '#2563eb'; }}
+                    onMouseOut={(e) => { e.target.style.background = '#3b82f6'; }}
+                  >
+                    <Save size={14} />
+                    Save Report
+                  </button>
+                )}
+                */}
                 <button
                   onClick={handleShare}
                   disabled={sharingData}
@@ -1747,7 +1793,7 @@ export default function WarcraftLogsApp() {
           <Route path="/" element={
             <LandingPage 
               onRunAnalysis={() => navigate('/analyze')}
-              onSavedReports={() => navigate('/saved')}
+              onSavedReports={null}  // DISABLED - Save Reports feature
             />
           } />
           
@@ -3518,6 +3564,17 @@ export default function WarcraftLogsApp() {
           </div>
         </div>
       )}
+
+      {/* DISABLED - Save Reports feature
+      {showSaveDialog && user && data && (
+        <SaveReportDialog
+          analysisData={data}
+          user={user}
+          onClose={() => setShowSaveDialog(false)}
+          onSaved={() => setShowSaveDialog(false)}
+        />
+      )}
+      */}
 
       {/* Footer */}
       <footer style={{
