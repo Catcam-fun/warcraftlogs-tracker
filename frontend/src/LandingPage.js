@@ -259,7 +259,8 @@ export default function LandingPage({ onRunAnalysis, onSavedReports }) {
           </div>
         </div>
 
-        {/* How It Works Section */}
+
+        {/* Recent Updates Section */}
         <div style={{
           marginTop: '80px',
           paddingTop: '60px',
@@ -272,123 +273,65 @@ export default function LandingPage({ onRunAnalysis, onSavedReports }) {
             marginBottom: '16px',
             marginTop: 0
           }}>
-            How It Works
+            Recent Updates
           </h2>
           <p style={{
             fontSize: '16px',
             color: '#94a3b8',
-            maxWidth: '700px',
-            margin: '0 auto 48px',
-            lineHeight: '1.6'
+            marginBottom: '32px'
           }}>
-            Floor Pov analyzes your guild's raid performance using data from WarcraftLogs to provide actionable insights
+            Latest improvements to Floor Pov
           </p>
 
           <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-            gap: '32px',
-            textAlign: 'left',
-            marginBottom: '40px'
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px',
+            maxWidth: '700px',
+            margin: '0 auto',
+            textAlign: 'left'
           }}>
-            <div>
+            {/* Update Item */}
+            <div style={{
+              padding: '20px',
+              background: '#1a1f2e',
+              borderRadius: '8px',
+              border: '1px solid #2d3748',
+              borderLeft: '4px solid #3b82f6'
+            }}>
               <div style={{
-                width: '48px',
-                height: '48px',
-                background: 'rgba(59, 130, 246, 0.15)',
-                borderRadius: '12px',
                 display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: '16px'
-              }}>
-                <BarChart3 size={24} style={{ color: '#3b82f6' }} />
-              </div>
-              <h3 style={{
-                color: '#e2e8f0',
-                fontSize: '18px',
-                fontWeight: '600',
-                marginTop: 0,
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
                 marginBottom: '8px'
               }}>
-                Data Collection
-              </h3>
+                <h3 style={{
+                  color: '#e2e8f0',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  margin: 0
+                }}>
+                  Added Support for Additional Raids
+                </h3>
+                <span style={{
+                  fontSize: '13px',
+                  color: '#64748b',
+                  whiteSpace: 'nowrap',
+                  marginLeft: '16px'
+                }}>
+                  Nov 20
+                </span>
+              </div>
               <p style={{
                 color: '#94a3b8',
                 fontSize: '14px',
                 margin: 0,
                 lineHeight: '1.6'
               }}>
-                Fetches all guild reports for your selected raid and difficulty, processing death events from each pull to track player participation
+                Floor Pov now supports death tracking across all The War Within raids.
               </p>
             </div>
-
-            <div>
-              <div style={{
-                width: '48px',
-                height: '48px',
-                background: 'rgba(59, 130, 246, 0.15)',
-                borderRadius: '12px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: '16px'
-              }}>
-                <CheckCircle size={24} style={{ color: '#3b82f6' }} />
-              </div>
-              <h3 style={{
-                color: '#e2e8f0',
-                fontSize: '18px',
-                fontWeight: '600',
-                marginTop: 0,
-                marginBottom: '8px'
-              }}>
-                Smart Deduplication
-              </h3>
-              <p style={{
-                color: '#94a3b8',
-                fontSize: '14px',
-                margin: 0,
-                lineHeight: '1.6'
-              }}>
-                Merges duplicate pulls from multiple uploaders, normalizes character names with special characters, and filters deaths within valid fight windows to ensure accurate death counts
-              </p>
-            </div>
-
-            <div>
-              <div style={{
-                width: '48px',
-                height: '48px',
-                background: 'rgba(59, 130, 246, 0.15)',
-                borderRadius: '12px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: '16px'
-              }}>
-                <Users size={24} style={{ color: '#3b82f6' }} />
-              </div>
-              <h3 style={{
-                color: '#e2e8f0',
-                fontSize: '18px',
-                fontWeight: '600',
-                marginTop: 0,
-                marginBottom: '8px'
-              }}>
-                Player Analytics
-              </h3>
-              <p style={{
-                color: '#94a3b8',
-                fontSize: '14px',
-                margin: 0,
-                lineHeight: '1.6'
-              }}>
-                Calculates death rates per pull for each player and boss, with support for character grouping (merging alt stats with mains)
-              </p>
-            </div>
-
           </div>
-
         </div>
 
       </div>

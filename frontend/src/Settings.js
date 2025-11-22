@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
-import { X, Save, Eye, EyeOff, Key, Mail } from 'lucide-react';
+import { X, Save, Eye, EyeOff, Key, Mail, Trash2 } from 'lucide-react';
 
 export default function Settings({ user, onClose, onCredentialsUpdate, onShowPrivacy }) {
   const [loading, setLoading] = useState(false);
@@ -21,6 +21,12 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
   const [newEmail, setNewEmail] = useState('');
   const [emailMessage, setEmailMessage] = useState('');
   const [emailLoading, setEmailLoading] = useState(false);
+
+  // Delete account state
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteMessage, setDeleteMessage] = useState('');
 
   // Load existing credentials
   useEffect(() => {
@@ -173,6 +179,49 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
       setEmailMessage(err.message || 'Error updating email');
     } finally {
       setEmailLoading(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (deleteConfirmText !== 'DELETE') {
+      setDeleteMessage('Please type DELETE to confirm');
+      return;
+    }
+
+    setDeleteLoading(true);
+    setDeleteMessage('');
+
+    try {
+      // First, delete user's API credentials from the database
+      const { error: deleteCredsError } = await supabase
+        .from('api_credentials')
+        .delete()
+        .eq('user_id', user.id);
+
+      if (deleteCredsError) {
+        console.error('Error deleting credentials:', deleteCredsError);
+        // Continue anyway - the user account deletion is more important
+      }
+
+      // Delete the user account (this will also log them out)
+      const { error: deleteUserError } = await supabase.auth.admin.deleteUser(user.id);
+      
+      if (deleteUserError) {
+        // If admin deletion doesn't work (requires service_role key), try regular deletion
+        const { error: altDeleteError } = await supabase.rpc('delete_user');
+        if (altDeleteError) throw altDeleteError;
+      }
+
+      // Success - close modal and user will be logged out automatically
+      setDeleteMessage('Account deleted successfully');
+      setTimeout(() => {
+        onClose();
+        window.location.reload(); // Refresh to update UI
+      }, 1000);
+    } catch (err) {
+      setDeleteMessage(err.message || 'Error deleting account. Please contact support.');
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -717,6 +766,170 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
               {emailLoading ? 'Sending...' : 'Update Email'}
             </button>
           </form>
+        </div>
+
+        {/* Delete Account Section */}
+        <div style={{
+          background: '#0f1419',
+          borderRadius: '8px',
+          padding: '20px',
+          border: '1px solid #dc2626',
+          marginTop: '20px'
+        }}>
+          <h3 style={{
+            color: '#ef4444',
+            fontSize: '16px',
+            marginTop: 0,
+            marginBottom: '8px',
+            fontWeight: '600',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}>
+            <Trash2 size={18} />
+            Delete Account
+          </h3>
+          
+          <p style={{
+            color: '#94a3b8',
+            fontSize: '13px',
+            marginBottom: '16px',
+            lineHeight: '1.5'
+          }}>
+            Permanently delete your account and all associated data. This action cannot be undone.
+          </p>
+
+          {!showDeleteConfirm ? (
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              style={{
+                padding: '10px 16px',
+                backgroundColor: '#dc2626',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: '600',
+                transition: 'all 0.2s',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}
+              onMouseOver={(e) => { e.target.style.backgroundColor = '#b91c1c'; }}
+              onMouseOut={(e) => { e.target.style.backgroundColor = '#dc2626'; }}
+            >
+              <Trash2 size={14} />
+              Delete My Account
+            </button>
+          ) : (
+            <div>
+              <p style={{
+                color: '#fbbf24',
+                fontSize: '13px',
+                marginBottom: '16px',
+                padding: '12px',
+                background: 'rgba(251, 191, 36, 0.1)',
+                border: '1px solid rgba(251, 191, 36, 0.3)',
+                borderRadius: '6px',
+                lineHeight: '1.5'
+              }}>
+                <strong>Warning:</strong> This will permanently delete your account, API credentials, and analysis history. Type <strong>DELETE</strong> to confirm.
+              </p>
+
+              <div style={{ marginBottom: '16px' }}>
+                <input
+                  type="text"
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  placeholder="Type DELETE to confirm"
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid #475569',
+                    backgroundColor: '#0a0e1a',
+                    color: '#fff',
+                    fontSize: '14px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              {deleteMessage && (
+                <p style={{
+                  marginBottom: '16px',
+                  padding: '12px',
+                  backgroundColor: deleteMessage.includes('successfully') ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                  border: `1px solid ${deleteMessage.includes('successfully') ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                  color: deleteMessage.includes('successfully') ? '#10b981' : '#ef4444',
+                  borderRadius: '6px',
+                  textAlign: 'center',
+                  fontSize: '13px'
+                }}>
+                  {deleteMessage}
+                </p>
+              )}
+
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <button
+                  onClick={() => {
+                    setShowDeleteConfirm(false);
+                    setDeleteConfirmText('');
+                    setDeleteMessage('');
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: '10px',
+                    backgroundColor: '#334155',
+                    color: '#fff',
+                    border: '1px solid #475569',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: '600',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseOver={(e) => { e.target.style.backgroundColor = '#475569'; }}
+                  onMouseOut={(e) => { e.target.style.backgroundColor = '#334155'; }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeleteAccount}
+                  disabled={deleteLoading || deleteConfirmText !== 'DELETE'}
+                  style={{
+                    flex: 1,
+                    padding: '10px',
+                    backgroundColor: (deleteLoading || deleteConfirmText !== 'DELETE') ? '#991b1b' : '#dc2626',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: (deleteLoading || deleteConfirmText !== 'DELETE') ? 'not-allowed' : 'pointer',
+                    fontSize: '14px',
+                    fontWeight: '600',
+                    opacity: (deleteLoading || deleteConfirmText !== 'DELETE') ? 0.7 : 1,
+                    transition: 'all 0.2s',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px'
+                  }}
+                  onMouseOver={(e) => { 
+                    if (!deleteLoading && deleteConfirmText === 'DELETE') 
+                      e.target.style.backgroundColor = '#b91c1c'; 
+                  }}
+                  onMouseOut={(e) => { 
+                    if (!deleteLoading && deleteConfirmText === 'DELETE') 
+                      e.target.style.backgroundColor = '#dc2626'; 
+                  }}
+                >
+                  <Trash2 size={14} />
+                  {deleteLoading ? 'Deleting...' : 'Confirm Delete'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
