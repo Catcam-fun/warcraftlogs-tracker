@@ -246,6 +246,56 @@ export default function WarcraftLogsApp() {
     }
   }, [location.search, data, loading]);
 
+  // Load from sessionStorage when loadShared parameter is present or on initial mount
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const loadShared = urlParams.get('loadShared');
+    
+    // Try to load from sessionStorage in two cases:
+    // 1. When coming from SharedResults page (loadShared=true)
+    // 2. On initial mount if we don't have data (to survive refreshes)
+    if ((loadShared === 'true' || !data) && !loading) {
+      try {
+        const savedData = sessionStorage.getItem('sharedAnalysisData');
+        if (savedData) {
+          console.log('[Persistence] Loading data from sessionStorage');
+          const parsedData = JSON.parse(savedData);
+          
+          // If this came from SharedResults, it has a specific structure
+          if (parsedData.data && parsedData.config) {
+            setData(parsedData.data);
+            setConfig(prevConfig => ({
+              ...prevConfig,
+              ...parsedData.config
+            }));
+          } else {
+            // Otherwise it's just the raw data
+            setData(parsedData);
+          }
+          
+          // Clean up the URL parameter if it was loadShared
+          if (loadShared === 'true') {
+            navigate(location.pathname, { replace: true });
+          }
+        }
+      } catch (err) {
+        console.error('[Persistence] Error loading from sessionStorage:', err);
+      }
+    }
+  }, [location.search]); // Only run when URL changes
+
+  // Save data to sessionStorage whenever it changes (for refresh persistence)
+  useEffect(() => {
+    if (data) {
+      try {
+        console.log('[Persistence] Saving data to sessionStorage');
+        sessionStorage.setItem('sharedAnalysisData', JSON.stringify({ data, config }));
+      } catch (err) {
+        console.error('[Persistence] Error saving to sessionStorage:', err);
+      }
+    }
+  }, [data, config]);
+
   const loadAPICredentials = async () => {
     try {
       const { data, error } = await supabase
