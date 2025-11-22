@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from './supabaseClient';
 import { X } from 'lucide-react';
@@ -12,9 +12,37 @@ export default function Auth({ onClose }) {
   const [message, setMessage] = useState('');
   const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
+  const [stayLoggedIn, setStayLoggedIn] = useState(true);
+  const [captchaToken, setCaptchaToken] = useState('');
+  const turnstileRef = useRef(null);
+
+  // Load Cloudflare Turnstile script and set up callback
+  useEffect(() => {
+    // Set up global callback function for Turnstile
+    window.onTurnstileSuccess = (token) => {
+      console.log('Turnstile token received:', token ? 'YES' : 'NO');
+      setCaptchaToken(token);
+    };
+
+    if (!document.getElementById('turnstile-script')) {
+      const script = document.createElement('script');
+      script.id = 'turnstile-script';
+      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js';
+      script.async = true;
+      script.defer = true;
+      document.body.appendChild(script);
+    }
+
+    // Cleanup
+    return () => {
+      delete window.onTurnstileSuccess;
+    };
+  }, []);
 
   const handleAuth = async (e) => {
     e.preventDefault();
+    
+    console.log('handleAuth called, captchaToken:', captchaToken);
     
     // Validate checkboxes for sign-up
     if (isSignUp) {
@@ -28,10 +56,31 @@ export default function Auth({ onClose }) {
       }
     }
     
+    // Require CAPTCHA for both sign-in and sign-up
+    if (!captchaToken) {
+      setMessage('Please complete the CAPTCHA verification.');
+      return;
+    }
+    
     setLoading(true);
     setMessage('');
 
     try {
+      console.log('Verifying CAPTCHA...');
+      // Verify Turnstile token on backend
+      const verifyResponse = await fetch('https://wcl-proxy.catcam-fun.workers.dev/verify-turnstile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: captchaToken })
+      });
+
+      const verifyData = await verifyResponse.json();
+      console.log('CAPTCHA verification response:', verifyData);
+
+      if (!verifyResponse.ok || !verifyData.success) {
+        throw new Error('CAPTCHA verification failed. Please try again.');
+      }
+
       if (isSignUp) {
         // Sign up
         const { data, error } = await supabase.auth.signUp({
@@ -41,19 +90,32 @@ export default function Auth({ onClose }) {
         if (error) throw error;
         setMessage('Success! Check your email for confirmation link.');
       } else {
-        // Sign in
+        // Sign in with session persistence based on stayLoggedIn
         const { data, error } = await supabase.auth.signInWithPassword({
           email,
           password,
+          options: {
+            persistSession: stayLoggedIn
+          }
         });
         if (error) throw error;
+
+        // If not staying logged in, set session to expire when browser closes
+        if (!stayLoggedIn) {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session) {
+            sessionStorage.setItem('supabase.auth.token', JSON.stringify(session));
+            localStorage.removeItem('supabase.auth.token');
+          }
+        }
+
         setMessage('Logged in successfully!');
-        // Close modal after successful login
         setTimeout(() => {
           if (onClose) onClose();
         }, 1000);
       }
     } catch (error) {
+      console.error('Auth error:', error);
       setMessage(error.message || 'An error occurred');
     } finally {
       setLoading(false);
@@ -65,6 +127,11 @@ export default function Auth({ onClose }) {
     setMessage('');
     setAgeConfirmed(false);
     setTermsAccepted(false);
+    setCaptchaToken('');
+    // Reset Turnstile widget if it exists
+    if (window.turnstile && turnstileRef.current) {
+      window.turnstile.reset(turnstileRef.current);
+    }
   };
 
   return (
@@ -88,7 +155,9 @@ export default function Auth({ onClose }) {
         border: '1px solid #3b82f6',
         borderRadius: '12px',
         backgroundColor: '#1a1a2e',
-        position: 'relative'
+        position: 'relative',
+        maxHeight: '90vh',
+        overflowY: 'auto'
       }}>
         {onClose && (
           <button
@@ -256,7 +325,7 @@ export default function Auth({ onClose }) {
                   <a 
                     onClick={(e) => {
                       e.preventDefault();
-                      onClose(); // Close modal
+                      onClose();
                       navigate('/terms');
                     }}
                     style={{ 
@@ -271,7 +340,7 @@ export default function Auth({ onClose }) {
                   <a 
                     onClick={(e) => {
                       e.preventDefault();
-                      onClose(); // Close modal
+                      onClose();
                       navigate('/privacy');
                     }}
                     style={{ 
@@ -283,6 +352,44 @@ export default function Auth({ onClose }) {
                     Privacy Policy
                   </a>
                 </span>
+              </label>
+            </div>
+          )}
+
+          {/* Turnstile CAPTCHA - For both Sign In and Sign Up */}
+          <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'center' }}>
+            <div
+              ref={turnstileRef}
+              className="cf-turnstile"
+              data-sitekey="0x4AAAAAACCS9WN5tgUaGBvQ"
+              data-callback="onTurnstileSuccess"
+              data-theme="dark"
+            />
+          </div>
+
+          {/* Stay Logged In Checkbox - Only for Sign In */}
+          {!isSignUp && (
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{
+                display: 'flex',
+                alignItems: 'center',
+                cursor: 'pointer',
+                fontSize: '14px',
+                color: '#e2e8f0'
+              }}>
+                <input
+                  type="checkbox"
+                  checked={stayLoggedIn}
+                  onChange={(e) => setStayLoggedIn(e.target.checked)}
+                  style={{
+                    marginRight: '8px',
+                    cursor: 'pointer',
+                    width: '16px',
+                    height: '16px',
+                    accentColor: '#3b82f6'
+                  }}
+                />
+                Stay logged in
               </label>
             </div>
           )}

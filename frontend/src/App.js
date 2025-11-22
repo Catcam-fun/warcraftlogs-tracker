@@ -2029,7 +2029,7 @@ export default function WarcraftLogsApp() {
                 margin: 0,
                 lineHeight: '1.7'
               }}>
-                You may notice slight differences (typically 1-2 deaths per character) between analysis runs due to new reports being uploaded, timestamp edge cases, or WarcraftLogs API updates. These variations don't significantly impact death rate percentages—the tool prioritizes accuracy over perfect consistency.
+                You may notice slight differences (maybe a death per character) between analysis runs due to new reports being uploaded, timestamp edge cases, or WarcraftLogs API updates. These variations don't significantly impact death rate percentages—the tool prioritizes accuracy over perfect consistency.
               </p>
             </div>
           </div>
@@ -3079,7 +3079,7 @@ export default function WarcraftLogsApp() {
                 <li style={{ marginBottom: '8px' }}><strong>WarcraftLogs API updates:</strong> The upstream data source occasionally corrects or updates historical data</li>
               </ul>
               <p style={{ color: '#94a3b8', fontSize: '13px', fontStyle: 'italic', background: '#0f1419', padding: '12px', borderRadius: '6px', borderLeft: '3px solid #3b82f6' }}>
-                💡 <strong>Tip:</strong> These variations are typically 1-2 deaths per character and don't significantly impact death rate percentages. The tool prioritizes accuracy over perfect consistency.
+                💡 <strong>Tip:</strong> These variations are maybe a death per character and don't significantly impact death rate percentages. The tool prioritizes accuracy over perfect consistency.
               </p>
 
               <h3 style={{ color: '#60a5fa', fontSize: '18px', marginTop: '24px', marginBottom: '12px' }}>
@@ -3385,62 +3385,11 @@ export default function WarcraftLogsApp() {
         color: '#94a3b8'
       }}>
         <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
-          {/* Site Updates Section */}
-          <div style={{ marginBottom: '40px' }}>
-            <h3 style={{
-              color: '#e2e8f0',
-              fontSize: '16px',
-              fontWeight: '600',
-              marginBottom: '16px',
-              marginTop: 0,
-              letterSpacing: '0.05em'
-            }}>
-              SITE UPDATES
-            </h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <div style={{
-                background: '#1a1f2e',
-                padding: '12px 16px',
-                borderRadius: '6px',
-                border: '1px solid #2d3748'
-              }}>
-                <span style={{ color: '#3b82f6', fontSize: '13px', fontWeight: '600' }}>Nov 20th, 2025</span>
-                <span style={{ color: '#cbd5e1', fontSize: '13px', marginLeft: '12px' }}>
-                  Added user authentication and saved credentials
-                </span>
-              </div>
-              <div style={{
-                background: '#1a1f2e',
-                padding: '12px 16px',
-                borderRadius: '6px',
-                border: '1px solid #2d3748'
-              }}>
-                <span style={{ color: '#3b82f6', fontSize: '13px', fontWeight: '600' }}>Nov 11th, 2025</span>
-                <span style={{ color: '#cbd5e1', fontSize: '13px', marginLeft: '12px' }}>
-                  Parallel processing - 5-10x faster analysis
-                </span>
-              </div>
-              <div style={{
-                background: '#1a1f2e',
-                padding: '12px 16px',
-                borderRadius: '6px',
-                border: '1px solid #2d3748'
-              }}>
-                <span style={{ color: '#3b82f6', fontSize: '13px', fontWeight: '600' }}>Nov 9th, 2025</span>
-                <span style={{ color: '#cbd5e1', fontSize: '13px', marginLeft: '12px' }}>
-                  Added Liberation of Undermine support
-                </span>
-              </div>
-            </div>
-          </div>
-
           {/* Links Section */}
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-            gap: '32px',
-            paddingTop: '32px',
-            borderTop: '1px solid #2d3748'
+            gap: '32px'
           }}>
             <div>
               <h4 style={{
