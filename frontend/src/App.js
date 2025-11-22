@@ -1418,7 +1418,7 @@ export default function WarcraftLogsApp() {
             </div>
           </div>
           <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-            {data && (
+            {data && location.pathname === '/results' && (
               <>
                 <button
                   onClick={() => { 
