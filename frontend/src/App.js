@@ -263,43 +263,6 @@ export default function WarcraftLogsApp() {
     }
   };
 
-  // Check for shared results on component mount
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const shareId = urlParams.get('share');
-    
-    if (shareId) {
-      loadSharedResults(shareId);
-    }
-  }, []);
-
-  const loadSharedResults = async (shareId) => {
-    setLoading(true);
-    setLoadingStage('Loading shared results...');
-    setError('');
-    navigate('/results');
-
-    try {
-      const response = await fetch(`${API_URL}/api/shared/${shareId}`);
-      const result = await response.json();
-
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to load shared results');
-      }
-
-      setData(result.data);
-      if (result.config) {
-        setConfig(result.config);
-      }
-      setLoading(false);
-      setLoadingStage('');
-    } catch (err) {
-      setError(err.message);
-      setLoading(false);
-      setLoadingStage('');
-    }
-  };
-
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setUser(null);
@@ -381,7 +344,6 @@ export default function WarcraftLogsApp() {
     setLoadingStage('Initializing...');
     setError('');
     setData(null);
-    navigate('/results');
 
     // Create abort controller for cancellation
     const controller = new AbortController();
@@ -605,6 +567,9 @@ export default function WarcraftLogsApp() {
               setLoadingStage('');
               setLoading(false);
               setAbortController(null);
+              
+              // Navigate to results page after analysis completes
+              navigate('/results');
             }
           }
         }
@@ -1255,6 +1220,43 @@ export default function WarcraftLogsApp() {
             </div>
           </div>
           <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+            {data && (
+              <>
+                <button
+                  onClick={() => { 
+                    setData(null); 
+                    setError(''); 
+                    setExpandedPlayers(new Set()); 
+                    setSortConfig({ key: null, direction: 'asc' }); 
+                    navigate('/analyze');
+                  }}
+                  style={{ padding: '8px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', cursor: 'pointer', fontSize: '13px', fontWeight: '600', transition: 'all 0.2s' }}
+                  onMouseOver={(e) => { e.target.style.background = '#334155'; }}
+                  onMouseOut={(e) => { e.target.style.background = '#1e293b'; }}
+                >
+                  New Analysis
+                </button>
+                <button
+                  onClick={handleShare}
+                  disabled={sharingData}
+                  style={{ padding: '8px 16px', background: sharingData ? '#475569' : '#10b981', border: 'none', borderRadius: '6px', color: 'white', cursor: sharingData ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px', transition: 'all 0.2s' }}
+                  onMouseOver={(e) => { if (!sharingData) e.target.style.background = '#059669'; }}
+                  onMouseOut={(e) => { if (!sharingData) e.target.style.background = '#10b981'; }}
+                >
+                  {sharingData ? (
+                    <>
+                      <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} />
+                      Sharing...
+                    </>
+                  ) : (
+                    <>
+                      <Share2 size={14} />
+                      Share
+                    </>
+                  )}
+                </button>
+              </>
+            )}
             {user ? (
               <div style={{ 
                 display: 'flex', 
@@ -1333,43 +1335,6 @@ export default function WarcraftLogsApp() {
             )}
           </div>
         </div>
-        {data && (
-          <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '0 24px 12px', display: 'flex', gap: '12px', alignItems: 'center' }}>
-            <button
-                onClick={() => { 
-                  setData(null); 
-                  setError(''); 
-                  setExpandedPlayers(new Set()); 
-                  setSortConfig({ key: null, direction: 'asc' }); 
-                  navigate('/analyze');
-                }}
-                style={{ padding: '8px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', cursor: 'pointer', fontSize: '13px', fontWeight: '600', transition: 'all 0.2s' }}
-                onMouseOver={(e) => { e.target.style.background = '#334155'; }}
-                onMouseOut={(e) => { e.target.style.background = '#1e293b'; }}
-              >
-                New Analysis
-              </button>
-              <button
-                onClick={handleShare}
-                disabled={sharingData}
-                style={{ padding: '8px 16px', background: sharingData ? '#475569' : '#10b981', border: 'none', borderRadius: '6px', color: 'white', cursor: sharingData ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px', transition: 'all 0.2s' }}
-                onMouseOver={(e) => { if (!sharingData) e.target.style.background = '#059669'; }}
-                onMouseOut={(e) => { if (!sharingData) e.target.style.background = '#10b981'; }}
-              >
-                {sharingData ? (
-                  <>
-                    <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} />
-                    Sharing...
-                  </>
-                ) : (
-                  <>
-                    <Share2 size={14} />
-                    Share
-                  </>
-                )}
-              </button>
-          </div>
-        )}
       </header>
 
       {/* Alpha Warning Banner */}
