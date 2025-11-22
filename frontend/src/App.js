@@ -195,6 +195,45 @@ export default function WarcraftLogsApp() {
     }
   }, [user]);
 
+  // Load shared results when share parameter is present
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const shareId = urlParams.get('share');
+    
+    if (shareId && !data) {  // Only load if we don't already have data
+      loadSharedResults(shareId);
+    }
+  }, [location.search]);
+
+  const loadSharedResults = async (shareId) => {
+    setLoading(true);
+    setLoadingStage('Loading shared results...');
+    setError('');
+
+    try {
+      const response = await fetch(`${API_URL}/api/shared/${shareId}`);
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.error || 'Shared results not found');
+      }
+
+      setData(result.data);
+      if (result.config) {
+        setConfig(prevConfig => ({
+          ...prevConfig,
+          ...result.config
+        }));
+      }
+      setLoading(false);
+      setLoadingStage('');
+    } catch (err) {
+      setError(err.message);
+      setLoading(false);
+      setLoadingStage('');
+    }
+  };
+
   const loadAPICredentials = async () => {
     try {
       const { data, error } = await supabase
