@@ -246,49 +246,130 @@ export default function WarcraftLogsApp() {
     }
   }, [location.search, data, loading]);
 
-  // Load from sessionStorage on initial mount or when loadShared parameter is present
+  // IndexedDB helper functions for large data storage
+  const saveToIndexedDB = async (key, value) => {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open('FloorPovDB', 1);
+      
+      request.onerror = () => reject(request.error);
+      
+      request.onupgradeneeded = (event) => {
+        const db = event.target.result;
+        if (!db.objectStoreNames.contains('analysisData')) {
+          db.createObjectStore('analysisData');
+        }
+      };
+      
+      request.onsuccess = (event) => {
+        const db = event.target.result;
+        const transaction = db.transaction(['analysisData'], 'readwrite');
+        const store = transaction.objectStore('analysisData');
+        const putRequest = store.put(value, key);
+        
+        putRequest.onsuccess = () => {
+          db.close();
+          resolve();
+        };
+        
+        putRequest.onerror = () => {
+          db.close();
+          reject(putRequest.error);
+        };
+      };
+    });
+  };
+
+  const loadFromIndexedDB = async (key) => {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open('FloorPovDB', 1);
+      
+      request.onerror = () => reject(request.error);
+      
+      request.onupgradeneeded = (event) => {
+        const db = event.target.result;
+        if (!db.objectStoreNames.contains('analysisData')) {
+          db.createObjectStore('analysisData');
+        }
+      };
+      
+      request.onsuccess = (event) => {
+        const db = event.target.result;
+        
+        // Check if object store exists
+        if (!db.objectStoreNames.contains('analysisData')) {
+          db.close();
+          resolve(null);
+          return;
+        }
+        
+        const transaction = db.transaction(['analysisData'], 'readonly');
+        const store = transaction.objectStore('analysisData');
+        const getRequest = store.get(key);
+        
+        getRequest.onsuccess = () => {
+          db.close();
+          resolve(getRequest.result);
+        };
+        
+        getRequest.onerror = () => {
+          db.close();
+          reject(getRequest.error);
+        };
+      };
+    });
+  };
+
+  // Load from IndexedDB on initial mount
   useEffect(() => {
     // Only attempt to load if we don't have data yet
     if (data || loading) return;
     
-    try {
-      const savedData = sessionStorage.getItem('sharedAnalysisData');
-      if (savedData) {
-        console.log('[Persistence] Loading data from sessionStorage');
-        const parsedData = JSON.parse(savedData);
-        
-        // If this came from SharedResults, it has a specific structure
-        if (parsedData.data && parsedData.config) {
-          setData(parsedData.data);
-          setConfig(prevConfig => ({
-            ...prevConfig,
-            ...parsedData.config
-          }));
-        } else {
-          // Otherwise it's just the raw data
-          setData(parsedData);
+    const loadData = async () => {
+      try {
+        const savedData = await loadFromIndexedDB('sharedAnalysisData');
+        if (savedData) {
+          console.log('[Persistence] Loading data from IndexedDB');
+          
+          // If this came from SharedResults, it has a specific structure
+          if (savedData.data && savedData.config) {
+            setData(savedData.data);
+            setConfig(prevConfig => ({
+              ...prevConfig,
+              ...savedData.config
+            }));
+          } else {
+            // Otherwise it's just the raw data
+            setData(savedData);
+          }
+          
+          // Clean up the loadShared URL parameter if present
+          const urlParams = new URLSearchParams(window.location.search);
+          if (urlParams.get('loadShared') === 'true') {
+            navigate(location.pathname, { replace: true });
+          }
         }
-        
-        // Clean up the loadShared URL parameter if present
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('loadShared') === 'true') {
-          navigate(location.pathname, { replace: true });
-        }
+      } catch (err) {
+        console.error('[Persistence] Error loading from IndexedDB:', err);
       }
-    } catch (err) {
-      console.error('[Persistence] Error loading from sessionStorage:', err);
-    }
+    };
+    
+    loadData();
   }, []); // Run once on mount
 
-  // Save data to sessionStorage whenever it changes (for refresh persistence)
+  // Save data to IndexedDB whenever it changes (for refresh persistence)
   useEffect(() => {
     if (data) {
-      try {
-        console.log('[Persistence] Saving data to sessionStorage');
-        sessionStorage.setItem('sharedAnalysisData', JSON.stringify({ data, config }));
-      } catch (err) {
-        console.error('[Persistence] Error saving to sessionStorage:', err);
-      }
+      const saveData = async () => {
+        try {
+          console.log('[Persistence] Saving data to IndexedDB');
+          await saveToIndexedDB('sharedAnalysisData', { data, config });
+          console.log('[Persistence] Data saved successfully');
+        } catch (err) {
+          console.error('[Persistence] Error saving to IndexedDB:', err);
+        }
+      };
+      
+      saveData();
     }
   }, [data, config]);
 
