@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 import { X, Save, Eye, EyeOff, Key, Mail } from 'lucide-react';
 
-export default function Settings({ user, onClose, onCredentialsUpdate }) {
+export default function Settings({ user, onClose, onCredentialsUpdate, onShowPrivacy }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [clientId, setClientId] = useState('');
@@ -260,6 +260,33 @@ export default function Settings({ user, onClose, onCredentialsUpdate }) {
           }}>
             Save your WarcraftLogs API credentials here. They'll automatically fill when you analyze reports.
           </p>
+
+          {/* Privacy Notice */}
+          <div style={{
+            background: 'rgba(59, 130, 246, 0.1)',
+            border: '1px solid rgba(59, 130, 246, 0.3)',
+            borderRadius: '8px',
+            padding: '12px 16px',
+            marginBottom: '20px',
+            fontSize: '13px',
+            color: '#cbd5e1',
+            lineHeight: '1.5'
+          }}>
+            <div style={{ fontWeight: '600', marginBottom: '6px', color: '#60a5fa' }}>
+              🔒 Your Credentials Are Secure
+            </div>
+            Your WarcraftLogs API credentials are encrypted and stored securely in accordance with our{' '}
+            <a 
+              onClick={(e) => {
+                e.preventDefault();
+                if (onShowPrivacy) onShowPrivacy();
+              }}
+              style={{ color: '#3b82f6', textDecoration: 'underline', cursor: 'pointer' }}
+            >
+              Privacy Policy
+            </a>
+            . We only use them to fetch raid data on your behalf.
+          </div>
 
           <div style={{ marginBottom: '16px' }}>
             <label style={{ 

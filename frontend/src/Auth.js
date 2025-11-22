@@ -1,16 +1,33 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from './supabaseClient';
 import { X } from 'lucide-react';
 
 export default function Auth({ onClose }) {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
   const [message, setMessage] = useState('');
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
 
   const handleAuth = async (e) => {
     e.preventDefault();
+    
+    // Validate checkboxes for sign-up
+    if (isSignUp) {
+      if (!ageConfirmed) {
+        setMessage('You must be at least 13 years old to create an account.');
+        return;
+      }
+      if (!termsAccepted) {
+        setMessage('You must accept the Terms of Service and Privacy Policy.');
+        return;
+      }
+    }
+    
     setLoading(true);
     setMessage('');
 
@@ -41,6 +58,13 @@ export default function Auth({ onClose }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleToggleMode = () => {
+    setIsSignUp(!isSignUp);
+    setMessage('');
+    setAgeConfirmed(false);
+    setTermsAccepted(false);
   };
 
   return (
@@ -175,6 +199,94 @@ export default function Auth({ onClose }) {
             )}
           </div>
 
+          {/* Age Confirmation Checkbox - Only for Sign Up */}
+          {isSignUp && (
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{
+                display: 'flex',
+                alignItems: 'center',
+                cursor: 'pointer',
+                fontSize: '14px',
+                color: '#e2e8f0'
+              }}>
+                <input
+                  type="checkbox"
+                  checked={ageConfirmed}
+                  onChange={(e) => setAgeConfirmed(e.target.checked)}
+                  style={{
+                    marginRight: '8px',
+                    cursor: 'pointer',
+                    width: '16px',
+                    height: '16px',
+                    accentColor: '#3b82f6'
+                  }}
+                />
+                I confirm that I am at least 13 years old
+              </label>
+            </div>
+          )}
+
+          {/* Terms Acceptance Checkbox - Only for Sign Up */}
+          {isSignUp && (
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                cursor: 'pointer',
+                fontSize: '14px',
+                color: '#e2e8f0',
+                lineHeight: '1.5'
+              }}>
+                <input
+                  type="checkbox"
+                  checked={termsAccepted}
+                  onChange={(e) => setTermsAccepted(e.target.checked)}
+                  style={{
+                    marginRight: '8px',
+                    marginTop: '4px',
+                    cursor: 'pointer',
+                    width: '16px',
+                    height: '16px',
+                    flexShrink: 0,
+                    accentColor: '#3b82f6'
+                  }}
+                />
+                <span>
+                  I agree to the{' '}
+                  <a 
+                    onClick={(e) => {
+                      e.preventDefault();
+                      onClose(); // Close modal
+                      navigate('/terms');
+                    }}
+                    style={{ 
+                      color: '#3b82f6', 
+                      textDecoration: 'underline',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Terms of Service
+                  </a>
+                  {' '}and{' '}
+                  <a 
+                    onClick={(e) => {
+                      e.preventDefault();
+                      onClose(); // Close modal
+                      navigate('/privacy');
+                    }}
+                    style={{ 
+                      color: '#3b82f6', 
+                      textDecoration: 'underline',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Privacy Policy
+                  </a>
+                </span>
+              </label>
+            </div>
+          )}
+
           <button
             type="submit"
             disabled={loading}
@@ -223,10 +335,7 @@ export default function Auth({ onClose }) {
           {isSignUp ? 'Already have an account?' : "Don't have an account?"}
           {' '}
           <button
-            onClick={() => {
-              setIsSignUp(!isSignUp);
-              setMessage('');
-            }}
+            onClick={handleToggleMode}
             style={{
               background: 'none',
               border: 'none',
