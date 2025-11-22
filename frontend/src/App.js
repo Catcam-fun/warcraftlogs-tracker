@@ -195,29 +195,27 @@ export default function WarcraftLogsApp() {
     }
   }, [user]);
 
-  // Load shared results when share parameter is present
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const shareId = urlParams.get('share');
-    
-    if (shareId && !data) {  // Only load if we don't already have data
-      loadSharedResults(shareId);
-    }
-  }, [location.search]);
-
   const loadSharedResults = async (shareId) => {
+    console.log('[Share] Loading shared results for ID:', shareId);
     setLoading(true);
     setLoadingStage('Loading shared results...');
     setError('');
 
     try {
-      const response = await fetch(`${API_URL}/api/shared/${shareId}`);
+      const url = `${API_URL}/api/shared/${shareId}`;
+      console.log('[Share] Fetching from:', url);
+      
+      const response = await fetch(url);
+      console.log('[Share] Response status:', response.status);
+      
       const result = await response.json();
+      console.log('[Share] Response data:', result);
 
       if (!result.success) {
         throw new Error(result.error || 'Shared results not found');
       }
 
+      console.log('[Share] Successfully loaded data');
       setData(result.data);
       if (result.config) {
         setConfig(prevConfig => ({
@@ -228,11 +226,25 @@ export default function WarcraftLogsApp() {
       setLoading(false);
       setLoadingStage('');
     } catch (err) {
-      setError(err.message);
+      console.error('[Share] Error loading shared results:', err);
+      setError(`Failed to load shared results: ${err.message}`);
       setLoading(false);
       setLoadingStage('');
     }
   };
+
+  // Load shared results when share parameter is present
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const shareId = urlParams.get('share');
+    
+    console.log('[Share] URL changed, share param:', shareId, 'current data:', data ? 'exists' : 'none');
+    
+    if (shareId && !data && !loading) {  // Only load if we don't already have data and aren't already loading
+      console.log('[Share] Triggering load for:', shareId);
+      loadSharedResults(shareId);
+    }
+  }, [location.search, data, loading]);
 
   const loadAPICredentials = async () => {
     try {
