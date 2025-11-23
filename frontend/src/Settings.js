@@ -31,6 +31,7 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
   // Load existing credentials
   useEffect(() => {
     loadCredentials();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadCredentials = async () => {
@@ -192,7 +193,21 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
     setDeleteMessage('');
 
     try {
-      // First, delete user's API credentials from the database
+      // First, delete user's saved analyses from the database
+      const API_BASE = window.location.hostname === 'localhost' 
+        ? 'http://localhost:5000' 
+        : 'https://floorpov-backend.onrender.com';
+      
+      try {
+        await fetch(`${API_BASE}/api/delete-all-analyses/${user.id}`, {
+          method: 'DELETE'
+        });
+      } catch (err) {
+        console.error('Error deleting analyses:', err);
+        // Continue anyway
+      }
+
+      // Delete user's API credentials from the database
       const { error: deleteCredsError } = await supabase
         .from('api_credentials')
         .delete()
@@ -203,13 +218,11 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
         // Continue anyway - the user account deletion is more important
       }
 
-      // Delete the user account (this will also log them out)
-      const { error: deleteUserError } = await supabase.auth.admin.deleteUser(user.id);
+      // Delete the user account using Supabase's deleteUser method
+      const { error: deleteUserError } = await supabase.auth.deleteUser();
       
       if (deleteUserError) {
-        // If admin deletion doesn't work (requires service_role key), try regular deletion
-        const { error: altDeleteError } = await supabase.rpc('delete_user');
-        if (altDeleteError) throw altDeleteError;
+        throw deleteUserError;
       }
 
       // Success - close modal and user will be logged out automatically
@@ -219,6 +232,7 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
         window.location.reload(); // Refresh to update UI
       }, 1000);
     } catch (err) {
+      console.error('Delete account error:', err);
       setDeleteMessage(err.message || 'Error deleting account. Please contact support.');
     } finally {
       setDeleteLoading(false);
@@ -325,15 +339,23 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
               🔒 Your Credentials Are Secure
             </div>
             Your WarcraftLogs API credentials are encrypted and stored securely in accordance with our{' '}
-            <a 
+            <button 
               onClick={(e) => {
                 e.preventDefault();
                 if (onShowPrivacy) onShowPrivacy();
               }}
-              style={{ color: '#3b82f6', textDecoration: 'underline', cursor: 'pointer' }}
+              style={{ 
+                background: 'none',
+                border: 'none',
+                color: '#3b82f6', 
+                textDecoration: 'underline', 
+                cursor: 'pointer',
+                padding: 0,
+                font: 'inherit'
+              }}
             >
               Privacy Policy
-            </a>
+            </button>
             . We only use them to fetch raid data on your behalf.
           </div>
 
