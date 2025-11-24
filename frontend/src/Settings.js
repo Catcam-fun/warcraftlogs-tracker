@@ -193,43 +193,34 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
     setDeleteMessage('');
 
     try {
-      // First, delete user's saved analyses from the database
       const API_BASE = window.location.hostname === 'localhost' 
         ? 'http://localhost:5000' 
         : 'https://floorpov-backend.onrender.com';
       
-      try {
-        await fetch(`${API_BASE}/api/delete-all-analyses/${user.id}`, {
-          method: 'DELETE'
-        });
-      } catch (err) {
-        console.error('Error deleting analyses:', err);
-        // Continue anyway
+      // Call backend endpoint to delete user account
+      // This endpoint will handle:
+      // 1. Deleting api_credentials
+      // 2. Deleting saved_analyses  
+      // 3. Deleting the auth user (requires admin API)
+      const response = await fetch(`${API_BASE}/api/delete-user-account/${user.id}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to delete account');
       }
 
-      // Delete user's API credentials from the database
-      const { error: deleteCredsError } = await supabase
-        .from('api_credentials')
-        .delete()
-        .eq('user_id', user.id);
+      // Success - sign out the user
+      await supabase.auth.signOut();
 
-      if (deleteCredsError) {
-        console.error('Error deleting credentials:', deleteCredsError);
-        // Continue anyway - the user account deletion is more important
-      }
-
-      // Delete the user account using Supabase's deleteUser method
-      const { error: deleteUserError } = await supabase.auth.deleteUser();
-      
-      if (deleteUserError) {
-        throw deleteUserError;
-      }
-
-      // Success - close modal and user will be logged out automatically
       setDeleteMessage('Account deleted successfully');
       setTimeout(() => {
-        onClose();
-        window.location.reload(); // Refresh to update UI
+        window.location.href = '/'; // Redirect to home page
       }, 1000);
     } catch (err) {
       console.error('Delete account error:', err);

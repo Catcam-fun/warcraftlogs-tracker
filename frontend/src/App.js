@@ -147,7 +147,8 @@ export default function WarcraftLogsApp() {
     endDate: '',  // Optional: leave blank to include all reports
     authorFilters: '',
     characterGroups: '',
-    enableCheatDeath: false  // Optional cheat death detection (slower)
+    enableCheatDeath: false,  // Optional cheat death detection (slower)
+    enableDefensiveTracking: false  // Optional defensive ability tracking
   });
 
   const [loading, setLoading] = useState(false);
@@ -2168,6 +2169,22 @@ export default function WarcraftLogsApp() {
                   )}
                 </p>
               </div>
+
+              <div style={{ marginTop: '8px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={config.enableDefensiveTracking}
+                    onChange={(e) => setConfig({...config, enableDefensiveTracking: e.target.checked})}
+                    style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                  />
+                  <span>Show active defensive buffs</span>
+                  <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '400' }}>(Beta)</span>
+                </label>
+                <p style={{ margin: '4px 0 0 24px', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
+                  Shows which defensive buffs were ACTIVE when player died, plus healing received in last 5 seconds. No performance impact.
+                </p>
+              </div>
             </div>
 
             {error && (
@@ -2989,53 +3006,118 @@ export default function WarcraftLogsApp() {
                                   .map((death, idx) => (
                                   <div key={idx} style={{ 
                                     display: 'flex', 
-                                    justifyContent: 'space-between', 
-                                    alignItems: 'center',
+                                    flexDirection: 'column',
+                                    gap: '6px',
                                     padding: '6px 8px',
                                     background: death.isCheatDeath ? '#2d3a2d' : '#0f1419',
                                     borderLeft: death.isCheatDeath ? '2px solid #34d399' : 'none',
                                     borderRadius: '4px',
                                     fontSize: '11px'
                                   }}>
-                                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flex: 1 }}>
-                                      <span style={{ color: '#64748b', minWidth: '55px' }}>Pull #{death.pullNo}</span>
-                                      <span style={{ color: '#8b92a0', minWidth: '110px' }}>{formatTimestamp(death.absTs)}</span>
-                                      {death.isCheatDeath && (
-                                        <span style={{ 
-                                          color: '#34d399', 
-                                          fontSize: '10px', 
-                                          fontWeight: '600',
-                                          padding: '2px 6px',
-                                          background: '#1a2e1a',
-                                          borderRadius: '3px',
-                                          marginRight: '8px'
-                                        }}>
-                                          CHEAT
-                                        </span>
-                                      )}
-                                      <span style={{ color: '#e2e8f0' }}>
-                                        {death.abilityName === 'Unknown' ? (
-                                          <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>
-                                            Unknown ability
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flex: 1 }}>
+                                        <span style={{ color: '#64748b', minWidth: '55px' }}>Pull #{death.pullNo}</span>
+                                        <span style={{ color: '#8b92a0', minWidth: '110px' }}>{formatTimestamp(death.absTs)}</span>
+                                        {death.isCheatDeath && (
+                                          <span style={{ 
+                                            color: '#34d399', 
+                                            fontSize: '10px', 
+                                            fontWeight: '600',
+                                            padding: '2px 6px',
+                                            background: '#1a2e1a',
+                                            borderRadius: '3px',
+                                            marginRight: '8px'
+                                          }}>
+                                            CHEAT
                                           </span>
-                                        ) : death.abilityName}
-                                      </span>
+                                        )}
+                                        <span style={{ color: '#e2e8f0' }}>
+                                          {death.abilityName === 'Unknown' ? (
+                                            <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>
+                                              Unknown ability
+                                            </span>
+                                          ) : death.abilityName}
+                                        </span>
+                                      </div>
+                                      <a 
+                                        href={getWCLLink(death.reportId, death.fightId)} 
+                                        target="_blank" 
+                                        rel="noopener noreferrer"
+                                        style={{ 
+                                          display: 'flex', 
+                                          alignItems: 'center', 
+                                          gap: '4px', 
+                                          color: '#3b82f6', 
+                                          textDecoration: 'none',
+                                          fontSize: '11px'
+                                        }}
+                                      >
+                                        View Log <ExternalLink size={12} />
+                                      </a>
                                     </div>
-                                    <a 
-                                      href={getWCLLink(death.reportId, death.fightId)} 
-                                      target="_blank" 
-                                      rel="noopener noreferrer"
-                                      style={{ 
-                                        display: 'flex', 
-                                        alignItems: 'center', 
-                                        gap: '4px', 
-                                        color: '#3b82f6', 
-                                        textDecoration: 'none',
-                                        fontSize: '11px'
-                                      }}
-                                    >
-                                      View Log <ExternalLink size={12} />
-                                    </a>
+
+                                    {/* Defensive Abilities Display */}
+                                    {config.enableDefensiveTracking && death.defensives && (
+                                      <div style={{
+                                        marginTop: '4px',
+                                        padding: '6px 8px',
+                                        background: '#1a1f2e',
+                                        borderRadius: '4px',
+                                        borderLeft: '2px solid #60a5fa'
+                                      }}>
+                                        <div style={{ 
+                                          display: 'flex', 
+                                          gap: '6px', 
+                                          flexWrap: 'wrap',
+                                          alignItems: 'center'
+                                        }}>
+                                          <span style={{ 
+                                            color: '#60a5fa', 
+                                            fontSize: '10px',
+                                            fontWeight: '600',
+                                            marginRight: '4px'
+                                          }}>
+                                            ACTIVE BUFFS:
+                                          </span>
+                                          {death.defensives.abilities && death.defensives.abilities.length > 0 ? (
+                                            death.defensives.abilities.map((def, defIdx) => (
+                                              <span 
+                                                key={defIdx}
+                                                style={{
+                                                  color: '#cbd5e1',
+                                                  fontSize: '10px',
+                                                  padding: '2px 6px',
+                                                  background: '#0f1419',
+                                                  borderRadius: '3px',
+                                                  border: '1px solid #334155'
+                                                }}
+                                              >
+                                                {def.name} ({def.count}×)
+                                              </span>
+                                            ))
+                                          ) : (
+                                            <span style={{ 
+                                              color: '#ef4444', 
+                                              fontSize: '10px',
+                                              fontStyle: 'italic'
+                                            }}>
+                                              None active
+                                            </span>
+                                          )}
+                                        </div>
+                                        {death.defensives.healing !== undefined && (
+                                          <div style={{ 
+                                            marginTop: '4px',
+                                            fontSize: '10px',
+                                            color: '#94a3b8'
+                                          }}>
+                                            Healing received: <span style={{ color: '#10b981', fontWeight: '500' }}>
+                                              {death.defensives.healing.toLocaleString()}
+                                            </span>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
                                   </div>
                                 ))}
                               </div>
