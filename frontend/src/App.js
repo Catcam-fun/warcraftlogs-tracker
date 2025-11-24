@@ -2137,6 +2137,7 @@ export default function WarcraftLogsApp() {
               </div>
               )}
 
+              {/* DISABLED - Cheat Death and Defensive Tracking features
               <div style={{ marginTop: '8px' }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1', cursor: user ? 'pointer' : 'not-allowed', opacity: user ? 1 : 0.6 }}>
                   <input
@@ -2185,6 +2186,7 @@ export default function WarcraftLogsApp() {
                   Shows which defensive buffs were ACTIVE when player died, plus healing received in last 5 seconds. No performance impact.
                 </p>
               </div>
+              */}
             </div>
 
             {error && (
