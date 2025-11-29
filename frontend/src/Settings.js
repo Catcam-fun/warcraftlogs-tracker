@@ -193,15 +193,15 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
     setDeleteMessage('');
 
     try {
+      // Automatically detect if running locally or in production
       const API_BASE = window.location.hostname === 'localhost' 
         ? 'http://localhost:5000' 
         : 'https://floorpov-backend.onrender.com';
       
-      // Call backend endpoint to delete user account
-      // This endpoint will handle:
-      // 1. Deleting api_credentials
-      // 2. Deleting saved_analyses  
-      // 3. Deleting the auth user (requires admin API)
+      console.log(`[Delete Account] Environment: ${window.location.hostname === 'localhost' ? 'LOCAL' : 'PRODUCTION'}`);
+      console.log(`[Delete Account] Calling ${API_BASE}/api/delete-user-account/${user.id}`);
+      
+      // Call the backend to delete user data from database
       const response = await fetch(`${API_BASE}/api/delete-user-account/${user.id}`, {
         method: 'DELETE',
         headers: {
@@ -209,21 +209,35 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
         }
       });
 
-      const result = await response.json();
+      console.log('[Delete Account] Response status:', response.status);
 
       if (!response.ok) {
-        throw new Error(result.error || 'Failed to delete account');
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to delete user data from backend');
       }
 
-      // Success - sign out the user
+      const result = await response.json();
+      console.log('[Delete Account] Backend deletion successful:', result);
+
+      // Now delete the user account from Supabase Auth using the correct method
+      // This requires the user to be currently logged in
+      const { error: deleteUserError } = await supabase.auth.updateUser({
+        data: { deleted: true }
+      });
+      
+      // Actually, we should sign out which effectively "deletes" their session
+      // Supabase doesn't allow users to delete their own accounts from the client
+      // So we sign them out after deleting their data
       await supabase.auth.signOut();
 
-      setDeleteMessage('Account deleted successfully');
+      // Success - close modal and user will be logged out
+      setDeleteMessage('Account data deleted successfully');
       setTimeout(() => {
-        window.location.href = '/'; // Redirect to home page
+        onClose();
+        window.location.reload(); // Refresh to update UI
       }, 1000);
     } catch (err) {
-      console.error('Delete account error:', err);
+      console.error('[Delete Account] Error:', err);
       setDeleteMessage(err.message || 'Error deleting account. Please contact support.');
     } finally {
       setDeleteLoading(false);
@@ -639,34 +653,23 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
 
             <button
               type="submit"
-              disabled={passwordLoading || !newPassword || !confirmPassword}
+              disabled={passwordLoading}
               style={{
                 width: '100%',
                 padding: '12px',
-                backgroundColor: (passwordLoading || !newPassword || !confirmPassword) ? '#1e40af' : '#3b82f6',
+                backgroundColor: passwordLoading ? '#1e40af' : '#3b82f6',
                 color: '#fff',
                 border: 'none',
                 borderRadius: '6px',
-                cursor: (passwordLoading || !newPassword || !confirmPassword) ? 'not-allowed' : 'pointer',
+                cursor: passwordLoading ? 'not-allowed' : 'pointer',
                 fontSize: '15px',
                 fontWeight: '600',
-                opacity: (passwordLoading || !newPassword || !confirmPassword) ? 0.7 : 1,
-                transition: 'all 0.2s',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '8px'
+                opacity: passwordLoading ? 0.7 : 1,
+                transition: 'all 0.2s'
               }}
-              onMouseOver={(e) => { 
-                if (!passwordLoading && newPassword && confirmPassword) 
-                  e.target.style.backgroundColor = '#2563eb'; 
-              }}
-              onMouseOut={(e) => { 
-                if (!passwordLoading && newPassword && confirmPassword) 
-                  e.target.style.backgroundColor = '#3b82f6'; 
-              }}
+              onMouseOver={(e) => { if (!passwordLoading) e.target.style.backgroundColor = '#2563eb'; }}
+              onMouseOut={(e) => { if (!passwordLoading) e.target.style.backgroundColor = '#3b82f6'; }}
             >
-              <Key size={16} />
               {passwordLoading ? 'Updating...' : 'Update Password'}
             </button>
           </form>
@@ -677,6 +680,7 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
           background: '#0f1419',
           borderRadius: '8px',
           padding: '20px',
+          marginBottom: '20px',
           border: '1px solid #2d3748'
         }}>
           <h3 style={{
@@ -699,7 +703,7 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
             marginBottom: '20px',
             lineHeight: '1.5'
           }}>
-            Update your account email address. A confirmation link will be sent to your new email.
+            Update your account email address. You'll need to confirm the change via email.
           </p>
 
           <form onSubmit={handleEmailChange}>
@@ -748,34 +752,23 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
 
             <button
               type="submit"
-              disabled={emailLoading || !newEmail}
+              disabled={emailLoading}
               style={{
                 width: '100%',
                 padding: '12px',
-                backgroundColor: (emailLoading || !newEmail) ? '#1e40af' : '#3b82f6',
+                backgroundColor: emailLoading ? '#1e40af' : '#3b82f6',
                 color: '#fff',
                 border: 'none',
                 borderRadius: '6px',
-                cursor: (emailLoading || !newEmail) ? 'not-allowed' : 'pointer',
+                cursor: emailLoading ? 'not-allowed' : 'pointer',
                 fontSize: '15px',
                 fontWeight: '600',
-                opacity: (emailLoading || !newEmail) ? 0.7 : 1,
-                transition: 'all 0.2s',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '8px'
+                opacity: emailLoading ? 0.7 : 1,
+                transition: 'all 0.2s'
               }}
-              onMouseOver={(e) => { 
-                if (!emailLoading && newEmail) 
-                  e.target.style.backgroundColor = '#2563eb'; 
-              }}
-              onMouseOut={(e) => { 
-                if (!emailLoading && newEmail) 
-                  e.target.style.backgroundColor = '#3b82f6'; 
-              }}
+              onMouseOver={(e) => { if (!emailLoading) e.target.style.backgroundColor = '#2563eb'; }}
+              onMouseOut={(e) => { if (!emailLoading) e.target.style.backgroundColor = '#3b82f6'; }}
             >
-              <Mail size={16} />
               {emailLoading ? 'Sending...' : 'Update Email'}
             </button>
           </form>
@@ -893,10 +886,10 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
                   }}
                   style={{
                     flex: 1,
-                    padding: '10px',
+                    padding: '12px',
                     backgroundColor: '#334155',
-                    color: '#fff',
-                    border: '1px solid #475569',
+                    color: '#e2e8f0',
+                    border: 'none',
                     borderRadius: '6px',
                     cursor: 'pointer',
                     fontSize: '14px',
@@ -913,8 +906,8 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
                   disabled={deleteLoading || deleteConfirmText !== 'DELETE'}
                   style={{
                     flex: 1,
-                    padding: '10px',
-                    backgroundColor: (deleteLoading || deleteConfirmText !== 'DELETE') ? '#991b1b' : '#dc2626',
+                    padding: '12px',
+                    backgroundColor: deleteLoading ? '#991b1b' : '#dc2626',
                     color: '#fff',
                     border: 'none',
                     borderRadius: '6px',
