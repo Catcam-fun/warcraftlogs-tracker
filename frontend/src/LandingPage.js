@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, FolderOpen, CheckCircle, Users, BarChart3, Shield } from 'lucide-react';
+import { Play, FolderOpen, CheckCircle, BarChart3, Shield } from 'lucide-react';
 
 export default function LandingPage({ onRunAnalysis, onSavedReports }) {
   return (
@@ -44,218 +44,155 @@ export default function LandingPage({ onRunAnalysis, onSavedReports }) {
           gridTemplateColumns: onSavedReports ? 'repeat(auto-fit, minmax(280px, 1fr))' : '1fr',
           gap: '24px',
           marginBottom: '40px',
-          maxWidth: onSavedReports ? '100%' : '400px',
-          marginLeft: 'auto',
-          marginRight: 'auto'
+          maxWidth: onSavedReports ? '800px' : '400px',
+          margin: '0 auto'
         }}>
-          {/* Run Analysis Button */}
           <button
             onClick={onRunAnalysis}
             style={{
+              padding: '24px 32px',
               background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
-              border: '2px solid #3b82f6',
+              color: '#ffffff',
+              border: 'none',
               borderRadius: '12px',
-              padding: '48px 32px',
               cursor: 'pointer',
-              transition: 'all 0.3s ease',
-              position: 'relative',
-              overflow: 'hidden'
-            }}
-            onMouseOver={(e) => {
-              e.currentTarget.style.transform = 'translateY(-4px)';
-              e.currentTarget.style.boxShadow = '0 12px 40px rgba(59, 130, 246, 0.4)';
-            }}
-            onMouseOut={(e) => {
-              e.currentTarget.style.transform = 'translateY(0)';
-              e.currentTarget.style.boxShadow = 'none';
-            }}
-          >
-            <div style={{
+              fontSize: '16px',
+              fontWeight: '600',
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
-              gap: '16px'
-            }}>
-              <div style={{
-                width: '64px',
-                height: '64px',
-                background: 'rgba(255, 255, 255, 0.15)',
-                borderRadius: '16px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}>
-                <Play size={32} style={{ color: '#fff' }} />
-              </div>
-              <div>
-                <h3 style={{
-                  fontSize: '24px',
-                  fontWeight: '700',
-                  color: '#fff',
-                  marginBottom: '8px',
-                  marginTop: 0
-                }}>
-                  Run Analysis
-                </h3>
-                <p style={{
-                  fontSize: '14px',
-                  color: 'rgba(255, 255, 255, 0.9)',
-                  margin: 0,
-                  lineHeight: '1.5'
-                }}>
-                  Analyze a guild's raid deaths
-                </p>
-              </div>
+              gap: '12px',
+              transition: 'all 0.2s',
+              boxShadow: '0 4px 12px rgba(59, 130, 246, 0.3)'
+            }}
+            onMouseOver={(e) => {
+              e.currentTarget.style.transform = 'translateY(-2px)';
+              e.currentTarget.style.boxShadow = '0 6px 16px rgba(59, 130, 246, 0.4)';
+            }}
+            onMouseOut={(e) => {
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = '0 4px 12px rgba(59, 130, 246, 0.3)';
+            }}
+          >
+            <Play size={28} />
+            <div>
+              <div style={{ fontSize: '18px', marginBottom: '4px' }}>Run Analysis</div>
+              <div style={{ fontSize: '13px', opacity: 0.9, fontWeight: '400' }}>Analyze your guild's deaths</div>
             </div>
           </button>
 
-          {/* Saved Reports Button - Only show if callback is provided */}
           {onSavedReports && (
-          <button
-            onClick={onSavedReports}
-            style={{
-              background: '#1a1f2e',
-              border: '2px solid #2d3748',
-              borderRadius: '12px',
-              padding: '48px 32px',
-              cursor: 'pointer',
-              transition: 'all 0.3s ease',
-              position: 'relative',
-              overflow: 'hidden'
-            }}
-            onMouseOver={(e) => {
-              e.currentTarget.style.transform = 'translateY(-4px)';
-              e.currentTarget.style.border = '2px solid #3b82f6';
-              e.currentTarget.style.boxShadow = '0 12px 40px rgba(59, 130, 246, 0.2)';
-            }}
-            onMouseOut={(e) => {
-              e.currentTarget.style.transform = 'translateY(0)';
-              e.currentTarget.style.border = '2px solid #2d3748';
-              e.currentTarget.style.boxShadow = 'none';
-            }}
-          >
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: '16px'
-            }}>
-              <div style={{
-                width: '64px',
-                height: '64px',
-                background: 'rgba(59, 130, 246, 0.15)',
-                borderRadius: '16px',
+            <button
+              onClick={onSavedReports}
+              style={{
+                padding: '24px 32px',
+                background: '#1e293b',
+                color: '#e2e8f0',
+                border: '1px solid #334155',
+                borderRadius: '12px',
+                cursor: 'pointer',
+                fontSize: '16px',
+                fontWeight: '600',
                 display: 'flex',
+                flexDirection: 'column',
                 alignItems: 'center',
-                justifyContent: 'center'
-              }}>
-                <FolderOpen size={32} style={{ color: '#3b82f6' }} />
-              </div>
+                gap: '12px',
+                transition: 'all 0.2s'
+              }}
+              onMouseOver={(e) => {
+                e.currentTarget.style.background = '#2d3748';
+                e.currentTarget.style.transform = 'translateY(-2px)';
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.style.background = '#1e293b';
+                e.currentTarget.style.transform = 'translateY(0)';
+              }}
+            >
+              <FolderOpen size={28} />
               <div>
-                <h3 style={{
-                  fontSize: '24px',
-                  fontWeight: '700',
-                  color: '#e2e8f0',
-                  marginBottom: '8px',
-                  marginTop: 0
-                }}>
-                  Saved Reports
-                </h3>
-                <p style={{
-                  fontSize: '14px',
-                  color: '#94a3b8',
-                  margin: 0,
-                  lineHeight: '1.5'
-                }}>
-                  View and manage your previously analyzed reports
-                </p>
+                <div style={{ fontSize: '18px', marginBottom: '4px' }}>Saved Reports</div>
+                <div style={{ fontSize: '13px', opacity: 0.7, fontWeight: '400' }}>View saved analyses</div>
               </div>
-            </div>
-          </button>
+            </button>
           )}
         </div>
 
-        {/* Feature Highlights */}
+        {/* Features Grid */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-          gap: '20px',
-          marginTop: '60px'
+          gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+          gap: '24px',
+          marginTop: '60px',
+          textAlign: 'left'
         }}>
           <div style={{
-            padding: '20px',
+            padding: '24px',
             background: '#1a1f2e',
-            borderRadius: '8px',
+            borderRadius: '12px',
             border: '1px solid #2d3748'
           }}>
-            <h4 style={{
-              color: '#3b82f6',
-              fontSize: '14px',
+            <CheckCircle size={32} style={{ color: '#10b981', marginBottom: '12px' }} />
+            <h3 style={{
+              color: '#e2e8f0',
+              fontSize: '16px',
               fontWeight: '600',
-              marginTop: 0,
-              marginBottom: '8px',
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em'
-            }}>
-              Real-time Tracking
-            </h4>
-            <p style={{
-              color: '#94a3b8',
-              fontSize: '13px',
-              margin: 0,
-              lineHeight: '1.5'
-            }}>
-              Live progress updates during analysis
-            </p>
-          </div>
-
-          <div style={{
-            padding: '20px',
-            background: '#1a1f2e',
-            borderRadius: '8px',
-            border: '1px solid #2d3748'
-          }}>
-            <h4 style={{
-              color: '#3b82f6',
-              fontSize: '14px',
-              fontWeight: '600',
-              marginTop: 0,
-              marginBottom: '8px',
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em'
+              margin: '0 0 8px 0'
             }}>
               Smart Filtering
-            </h4>
+            </h3>
             <p style={{
               color: '#94a3b8',
-              fontSize: '13px',
+              fontSize: '14px',
               margin: 0,
               lineHeight: '1.5'
             }}>
-              Filter by boss, difficulty, and more
+              Track first X deaths per pull, excluding wipe cascades
             </p>
           </div>
 
           <div style={{
-            padding: '20px',
+            padding: '24px',
             background: '#1a1f2e',
-            borderRadius: '8px',
+            borderRadius: '12px',
             border: '1px solid #2d3748'
           }}>
-            <h4 style={{
-              color: '#3b82f6',
-              fontSize: '14px',
+            <BarChart3 size={32} style={{ color: '#f59e0b', marginBottom: '12px' }} />
+            <h3 style={{
+              color: '#e2e8f0',
+              fontSize: '16px',
               fontWeight: '600',
-              marginTop: 0,
-              marginBottom: '8px',
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em'
+              margin: '0 0 8px 0'
             }}>
-              Share Results
-            </h4>
+              Detailed Metrics
+            </h3>
             <p style={{
               color: '#94a3b8',
-              fontSize: '13px',
+              fontSize: '14px',
+              margin: 0,
+              lineHeight: '1.5'
+            }}>
+              Per-player, per-boss, and overall statistics
+            </p>
+          </div>
+
+          <div style={{
+            padding: '24px',
+            background: '#1a1f2e',
+            borderRadius: '12px',
+            border: '1px solid #2d3748'
+          }}>
+            <Shield size={32} style={{ color: '#8b5cf6', marginBottom: '12px' }} />
+            <h3 style={{
+              color: '#e2e8f0',
+              fontSize: '16px',
+              fontWeight: '600',
+              margin: '0 0 8px 0'
+            }}>
+              Shareable Results
+            </h3>
+            <p style={{
+              color: '#94a3b8',
+              fontSize: '14px',
               margin: 0,
               lineHeight: '1.5'
             }}>
@@ -296,7 +233,48 @@ export default function LandingPage({ onRunAnalysis, onSavedReports }) {
             margin: '0 auto',
             textAlign: 'left'
           }}>
-            {/* Update Item */}
+            {/* Update Item - Cheat Death Optimization */}
+            <div style={{
+              padding: '20px',
+              background: '#1a1f2e',
+              borderRadius: '8px',
+              border: '1px solid #2d3748',
+              borderLeft: '4px solid #10b981'
+            }}>
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                marginBottom: '8px'
+              }}>
+                <h3 style={{
+                  color: '#e2e8f0',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  margin: 0
+                }}>
+                  Optimized Cheat Death Detection
+                </h3>
+                <span style={{
+                  fontSize: '13px',
+                  color: '#64748b',
+                  whiteSpace: 'nowrap',
+                  marginLeft: '16px'
+                }}>
+                  Dec 8
+                </span>
+              </div>
+              <p style={{
+                color: '#94a3b8',
+                fontSize: '14px',
+                margin: 0,
+                lineHeight: '1.6'
+              }}>
+                Cheat death detection now available for logged-in users with improved deduplication logic.
+              </p>
+            </div>
+
+            {/* Update Item - Additional Raids */}
             <div style={{
               padding: '20px',
               background: '#1a1f2e',

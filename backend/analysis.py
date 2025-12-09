@@ -415,6 +415,87 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
                         })
             
             print(f"  Found {len(cheat_death_events)} cheat death events to add")
+            
+            # STEP 3.5: Deduplicate cheat death events
+            # Issue 1: Same fight logged by multiple people → duplicate cheat deaths across reports
+            # Issue 2: WarcraftLogs bug → same player shows multiple cheat deaths in one fight
+            # Solution: Deduplicate by (player, fight) first, then by (player, timestamp) across reports
+            
+            print(f"  [DEDUP] Deduplicating cheat deaths...")
+            print(f"  [DEDUP] Before deduplication: {len(cheat_death_events)} cheat death events")
+            
+            # PHASE 1: Per-fight per-player deduplication (keep only FIRST cheat death per player per fight)
+            # This handles the WarcraftLogs bug where same player shows multiple cheat deaths in one fight
+            fight_player_first_cheat = {}  # Key: (fightId, normalized_player_name) -> earliest cheat death event
+            
+            for event in cheat_death_events:
+                fight_id = event['fightId']
+                player_name = normalize_character_name(event['targetName'])
+                key = (fight_id, player_name)
+                
+                # Keep only the earliest cheat death for this player in this fight
+                if key not in fight_player_first_cheat:
+                    fight_player_first_cheat[key] = event
+                else:
+                    # Already have a cheat death for this player in this fight
+                    # Keep whichever happened first
+                    existing_timestamp = fight_player_first_cheat[key]['timestamp']
+                    if event['timestamp'] < existing_timestamp:
+                        fight_player_first_cheat[key] = event
+            
+            # Replace list with per-fight deduplicated events
+            cheat_death_events = list(fight_player_first_cheat.values())
+            
+            per_fight_removed = len(cheat_death_events)
+            print(f"  [DEDUP] After per-fight per-player filtering: {len(cheat_death_events)} events")
+            
+            # PHASE 2: Cross-report deduplication (same fight logged by multiple people)
+            # When 3 people log the same fight, each report has the same cheat death
+            # Deduplicate based on: same player + similar timestamp (within 100ms) + same ability
+            
+            # Sort by player name and timestamp for efficient deduplication
+            cheat_death_events.sort(key=lambda x: (normalize_character_name(x['targetName']), x['timestamp']))
+            
+            deduplicated_events = []
+            TIMESTAMP_WINDOW_MS = 100  # Consider events within 100ms as duplicates
+            
+            for event in cheat_death_events:
+                is_duplicate = False
+                target_name = normalize_character_name(event['targetName'])
+                timestamp = event['timestamp']
+                ability_id = event['abilityGameID']
+                
+                # Check against already added events
+                for existing in deduplicated_events:
+                    existing_name = normalize_character_name(existing['targetName'])
+                    existing_timestamp = existing['timestamp']
+                    existing_ability = existing['abilityGameID']
+                    
+                    # Same player, same ability, timestamps within 100ms → duplicate
+                    if (existing_name == target_name and 
+                        existing_ability == ability_id and
+                        abs(existing_timestamp - timestamp) <= TIMESTAMP_WINDOW_MS):
+                        is_duplicate = True
+                        break
+                
+                if not is_duplicate:
+                    deduplicated_events.append(event)
+            
+            cross_report_removed = len(cheat_death_events) - len(deduplicated_events)
+            
+            print(f"  [DEDUP] After cross-report deduplication: {len(deduplicated_events)} unique cheat death events")
+            
+            if per_fight_removed > 0 or cross_report_removed > 0:
+                total_removed = (len(list(fight_player_first_cheat.values())) - len(cheat_death_events)) + cross_report_removed
+                print(f"  [DEDUP] Summary:")
+                if len(list(fight_player_first_cheat.values())) - len(cheat_death_events) > 0:
+                    print(f"    - Removed {len(list(fight_player_first_cheat.values())) - len(cheat_death_events)} duplicate cheat deaths (same player, same fight)")
+                if cross_report_removed > 0:
+                    print(f"    - Removed {cross_report_removed} duplicate cheat deaths (multiple loggers)")
+                print(f"    - Total removed: {total_removed}")
+            
+            # Replace the original list with fully deduplicated list
+            cheat_death_events = deduplicated_events
         else:
             print(f"[DISABLED] Cheat death detection DISABLED - skipping debuff queries (faster)")
         
