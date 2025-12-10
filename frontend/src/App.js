@@ -1926,7 +1926,10 @@ export default function WarcraftLogsApp() {
                     style={{ width: '100%', padding: '10px 14px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
                   />
                   <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                    Enter exactly as shown on WarcraftLogs - Examples: Do Over, Complexity Limit, Method
+                    Use proper capitalization (First Letter Caps) - Examples: Do Over, Method, Liquid
+                  </p>
+                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#f59e0b', lineHeight: '1.4' }}>
+                    ⚠️ Case-sensitive! "do over" will fail, but "Do Over" will work
                   </p>
                 </div>
 
@@ -1942,7 +1945,7 @@ export default function WarcraftLogsApp() {
                     style={{ width: '100%', padding: '10px 14px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
                   />
                   <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                    Enter as shown in-game (spaces OK) - Examples: Thrall, Area 52, Zirkel des Cenarius
+                    Spaces or hyphens both work - Examples: Thrall, Area-52, Zirkel des Cenarius
                   </p>
                 </div>
               </div>
@@ -2041,7 +2044,7 @@ export default function WarcraftLogsApp() {
                     )}
                   </div>
                   <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                    Leave blank to include all reports from the beginning of the tier
+                    Filters reports uploaded on or after this date (leave blank for all)
                   </p>
                 </div>
 
@@ -2081,7 +2084,7 @@ export default function WarcraftLogsApp() {
                     )}
                   </div>
                   <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                    Leave blank to include all reports up to today
+                    Filters reports uploaded on or before this date (leave blank for all)
                   </p>
                 </div>
               </div>
