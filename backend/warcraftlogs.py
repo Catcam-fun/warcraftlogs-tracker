@@ -6,6 +6,7 @@ import time
 import json
 import requests
 import unicodedata
+import base64
 from datetime import datetime
 
 # API Endpoints
@@ -80,12 +81,18 @@ def get_access_token(client_id, client_secret):
     if _token_cache["token"] and time.time() < _token_cache["expires_at"]:
         return _token_cache["token"]
     
-    # Request new token
-    data = {
-        "grant_type": "client_credentials",
-        "client_id": client_id,
-        "client_secret": client_secret
+    # Request new token using Authorization header (required by Cloudflare Worker)
+    # Encode credentials as Basic auth
+    credentials = f"{client_id}:{client_secret}"
+    encoded_credentials = base64.b64encode(credentials.encode()).decode()
+    
+    headers = {
+        'Authorization': f'Basic {encoded_credentials}',
+        'Content-Type': 'application/x-www-form-urlencoded'
     }
+    
+    # Body only contains grant_type
+    data = 'grant_type=client_credentials'
     
     try:
         # Use retry logic with increased timeout
@@ -93,6 +100,7 @@ def get_access_token(client_id, client_secret):
             'post',
             OAUTH_TOKEN_URL,
             data=data,
+            headers=headers,
             timeout=60,  # Increased from 30 to 60 seconds
             max_retries=2  # Fewer retries for OAuth (it's usually fast)
         )
