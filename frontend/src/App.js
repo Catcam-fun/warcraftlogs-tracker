@@ -207,7 +207,6 @@ export default function WarcraftLogsApp() {
     setError('');
 
     try {
-      // Decode the data from URL
       const response = await fetch(`${API_URL}/api/decode-share`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -215,13 +214,13 @@ export default function WarcraftLogsApp() {
       });
       
       const result = await response.json();
-      console.log('[Share] Decode response:', result.success ? 'success' : 'failed');
+      console.log('[Share] Response data:', result);
 
       if (!result.success) {
         throw new Error(result.error || 'Failed to load shared results');
       }
 
-      console.log('[Share] Successfully decoded data');
+      console.log('[Share] Successfully loaded data');
       setData(result.data);
       if (result.config) {
         setConfig(prevConfig => ({
@@ -233,7 +232,7 @@ export default function WarcraftLogsApp() {
       setLoadingStage('');
     } catch (err) {
       console.error('[Share] Error loading shared results:', err);
-      setError(`Failed to load shared results: ${err.message}. The share link may be invalid or corrupted.`);
+      setError(`Failed to load shared results: ${err.message}`);
       setLoading(false);
       setLoadingStage('');
     }
@@ -251,10 +250,10 @@ export default function WarcraftLogsApp() {
     const urlParams = new URLSearchParams(window.location.search);
     const shareData = urlParams.get('share');
     
-    console.log('[Share] URL changed, share param:', shareData ? `present (${shareData.length} chars)` : 'none', 'current data:', data ? 'exists' : 'none');
+    console.log('[Share] URL changed, share param:', shareData ? 'present' : 'none', 'current data:', data ? 'exists' : 'none');
     
     if (shareData && !data && !loading) {  // Only load if we don't already have data and aren't already loading
-      console.log('[Share] Triggering load for:', shareData.substring(0, 20) + '...');
+      console.log('[Share] Triggering load');
       loadSharedResults(shareData);
     }
   }, [location.search, data, loading]);
@@ -481,17 +480,7 @@ export default function WarcraftLogsApp() {
         throw new Error(result.error || 'Failed to create shareable link');
       }
 
-      // Create URL with data encoded in it
       const shareUrl = `${window.location.origin}${window.location.pathname}?share=${result.encodedData}`;
-      
-      // Check if URL is too long (browsers have ~2000 char limit)
-      if (shareUrl.length > 2000) {
-        setError('Analysis is too large to share via URL. Try analyzing fewer reports or filtering by date range.');
-        setSharingData(false);
-        return;
-      }
-      
-      console.log('[Share] Created share URL, length:', shareUrl.length, 'chars');
       setShareLink(shareUrl);
       setShowShareModal(true);
       setSharingData(false);
