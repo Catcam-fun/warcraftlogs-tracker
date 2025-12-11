@@ -200,27 +200,28 @@ export default function WarcraftLogsApp() {
     }
   }, [user]);
 
-  const loadSharedResults = async (shareId) => {
-    console.log('[Share] Loading shared results for ID:', shareId);
+  const loadSharedResults = async (encodedData) => {
+    console.log('[Share] Loading shared results from URL');
     setLoading(true);
     setLoadingStage('Loading shared results...');
     setError('');
 
     try {
-      const url = `${API_URL}/api/shared/${shareId}`;
-      console.log('[Share] Fetching from:', url);
-      
-      const response = await fetch(url);
-      console.log('[Share] Response status:', response.status);
+      // Decode the data from URL
+      const response = await fetch(`${API_URL}/api/decode-share`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ encodedData })
+      });
       
       const result = await response.json();
-      console.log('[Share] Response data:', result);
+      console.log('[Share] Decode response:', result.success ? 'success' : 'failed');
 
       if (!result.success) {
-        throw new Error(result.error || 'Shared results not found');
+        throw new Error(result.error || 'Failed to load shared results');
       }
 
-      console.log('[Share] Successfully loaded data');
+      console.log('[Share] Successfully decoded data');
       setData(result.data);
       if (result.config) {
         setConfig(prevConfig => ({
@@ -232,7 +233,7 @@ export default function WarcraftLogsApp() {
       setLoadingStage('');
     } catch (err) {
       console.error('[Share] Error loading shared results:', err);
-      setError(`Failed to load shared results: ${err.message}`);
+      setError(`Failed to load shared results: ${err.message}. The share link may be invalid or corrupted.`);
       setLoading(false);
       setLoadingStage('');
     }
@@ -248,13 +249,13 @@ export default function WarcraftLogsApp() {
   // Load shared results when share parameter is present
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
-    const shareId = urlParams.get('share');
+    const shareData = urlParams.get('share');
     
-    console.log('[Share] URL changed, share param:', shareId, 'current data:', data ? 'exists' : 'none');
+    console.log('[Share] URL changed, share param:', shareData ? `present (${shareData.length} chars)` : 'none', 'current data:', data ? 'exists' : 'none');
     
-    if (shareId && !data && !loading) {  // Only load if we don't already have data and aren't already loading
-      console.log('[Share] Triggering load for:', shareId);
-      loadSharedResults(shareId);
+    if (shareData && !data && !loading) {  // Only load if we don't already have data and aren't already loading
+      console.log('[Share] Triggering load for:', shareData.substring(0, 20) + '...');
+      loadSharedResults(shareData);
     }
   }, [location.search, data, loading]);
 
@@ -480,7 +481,17 @@ export default function WarcraftLogsApp() {
         throw new Error(result.error || 'Failed to create shareable link');
       }
 
-      const shareUrl = `${window.location.origin}${window.location.pathname}?share=${result.shareId}`;
+      // Create URL with data encoded in it
+      const shareUrl = `${window.location.origin}${window.location.pathname}?share=${result.encodedData}`;
+      
+      // Check if URL is too long (browsers have ~2000 char limit)
+      if (shareUrl.length > 2000) {
+        setError('Analysis is too large to share via URL. Try analyzing fewer reports or filtering by date range.');
+        setSharingData(false);
+        return;
+      }
+      
+      console.log('[Share] Created share URL, length:', shareUrl.length, 'chars');
       setShareLink(shareUrl);
       setShowShareModal(true);
       setSharingData(false);
@@ -1926,10 +1937,7 @@ export default function WarcraftLogsApp() {
                     style={{ width: '100%', padding: '10px 14px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
                   />
                   <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                    Use proper capitalization (First Letter Caps) - Examples: Do Over, Method, Liquid
-                  </p>
-                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#f59e0b', lineHeight: '1.4' }}>
-                    ⚠️ Case-sensitive! "do over" will fail, but "Do Over" will work
+                    Enter exactly as shown on WarcraftLogs - Examples: Do Over, Complexity Limit, Method
                   </p>
                 </div>
 
@@ -1945,7 +1953,7 @@ export default function WarcraftLogsApp() {
                     style={{ width: '100%', padding: '10px 14px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
                   />
                   <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                    Spaces or hyphens both work - Examples: Thrall, Area-52, Zirkel des Cenarius
+                    Enter as shown in-game (spaces OK) - Examples: Thrall, Area 52, Zirkel des Cenarius
                   </p>
                 </div>
               </div>
@@ -2044,7 +2052,7 @@ export default function WarcraftLogsApp() {
                     )}
                   </div>
                   <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                    Filters reports uploaded on or after this date (leave blank for all)
+                    Leave blank to include all reports from the beginning of the tier
                   </p>
                 </div>
 
@@ -2084,7 +2092,7 @@ export default function WarcraftLogsApp() {
                     )}
                   </div>
                   <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                    Filters reports uploaded on or before this date (leave blank for all)
+                    Leave blank to include all reports up to today
                   </p>
                 </div>
               </div>
@@ -2140,7 +2148,7 @@ export default function WarcraftLogsApp() {
               </div>
               )}
 
-              {/* Cheat Death Detection - Premium Feature for Authenticated Users */}
+              {/* DISABLED - Cheat Death and Defensive Tracking features
               <div style={{ marginTop: '8px' }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1', cursor: user ? 'pointer' : 'not-allowed', opacity: user ? 1 : 0.6 }}>
                   <input
@@ -2174,7 +2182,6 @@ export default function WarcraftLogsApp() {
                 </p>
               </div>
 
-              {/* DISABLED - Defensive Tracking Feature (Temporarily Disabled)
               <div style={{ marginTop: '8px' }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1', cursor: 'pointer' }}>
                   <input
