@@ -2,17 +2,17 @@
 """
 app.py - Flask API routes for Floor Pov Death Tracker
 Imports from: warcraftlogs, analysis, features, supabase_client
-VERSION: 3.1 COMPLETE - All endpoints + delete account
+VERSION: 3.1 COMPLETE - All endpoints + delete account + short share URLs
 """
 
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import uuid
-import brotli
+import brotli  # Kept for future saved reports feature
 import base64
 import os
 from dotenv import load_dotenv
@@ -57,6 +57,24 @@ print(f"[Startup] Supabase configured: {supabase is not None}")
 print(f"[Startup] Supabase Admin configured: {supabase_admin is not None}")
 
 # =============================================================================
+# IN-MEMORY SHARE STORAGE (temporary, 72hr expiration)
+# =============================================================================
+
+share_storage = {}  # {share_id: {"data": {...}, "config": {...}, "created_at": datetime}}
+
+def cleanup_expired_shares():
+    """Remove shares older than 72 hours"""
+    now = datetime.now()
+    expired = [
+        share_id for share_id, share_data in share_storage.items()
+        if (now - share_data["created_at"]).total_seconds() > 72 * 3600
+    ]
+    for share_id in expired:
+        del share_storage[share_id]
+    if expired:
+        print(f"[Share Cleanup] Removed {len(expired)} expired shares")
+
+# =============================================================================
 # FLASK SETUP
 # =============================================================================
 
@@ -69,7 +87,7 @@ CORS(app,
 
 
 # =============================================================================
-# MAIN ANALYSIS ENDPOINT (COMPLETE FROM GITHUB)
+# MAIN ANALYSIS ENDPOINT (UNCHANGED FROM YOUR ORIGINAL)
 # =============================================================================
 
 @app.route('/api/analyze', methods=['POST', 'OPTIONS'])
@@ -467,56 +485,80 @@ def analyze():
 
 
 # =============================================================================
-# SHARING ENDPOINTS - URL-BASED (NO DATABASE REQUIRED)
+# SHARING ENDPOINTS - SIMPLE IN-MEMORY (SHORT URLs)
 # =============================================================================
 
 @app.route('/api/share', methods=['POST'])
 def share_results():
-    """Create a shareable link by encoding data in URL (no database storage)."""
+    """Create a shareable link with short ID (stored in memory for 72hrs)"""
     try:
         data = request.json
         
-        # Compress and encode the data
-        json_str = json.dumps(data)
-        compressed = brotli.compress(json_str.encode('utf-8'))
-        # Use urlsafe_b64encode to avoid issues with special characters in URLs
-        encoded = base64.urlsafe_b64encode(compressed).decode('utf-8')
+        # Generate short 8-character ID
+        share_id = str(uuid.uuid4())[:8]
         
-        # Return the encoded data (frontend will put it in URL)
+        # Store in memory with timestamp
+        share_storage[share_id] = {
+            "data": data.get("data"),
+            "config": data.get("config"),
+            "created_at": datetime.now()
+        }
+        
+        # Cleanup old shares
+        cleanup_expired_shares()
+        
+        print(f"[Share] Created share ID: {share_id} (Total shares: {len(share_storage)})")
+        
         return jsonify({
             "success": True,
-            "encodedData": encoded,
-            "sizeBytes": len(encoded),
-            "urlLength": len(encoded) + 30  # Approximate URL length with domain
+            "shareId": share_id
         })
     except Exception as e:
+        print(f"[Share] Error: {str(e)}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-@app.route('/api/decode-share', methods=['POST'])
-def decode_share():
-    """Decode shared data from URL."""
+@app.route('/api/shared/<share_id>', methods=['GET'])
+def get_shared(share_id):
+    """Retrieve shared data by short ID"""
     try:
-        encoded = request.json.get('encodedData')
-        if not encoded:
-            return jsonify({"success": False, "error": "No data provided"}), 400
+        # Cleanup expired shares first
+        cleanup_expired_shares()
         
-        # Decode and decompress
-        compressed = base64.urlsafe_b64decode(encoded.encode('utf-8'))
-        json_str = brotli.decompress(compressed).decode('utf-8')
-        data = json.loads(json_str)
+        share_data = share_storage.get(share_id)
         
-        # Return the original data structure
+        if not share_data:
+            print(f"[Share] Share ID not found: {share_id}")
+            return jsonify({
+                "success": False, 
+                "error": "Share not found or expired"
+            }), 404
+        
+        # Check if expired (72 hours)
+        age = (datetime.now() - share_data["created_at"]).total_seconds()
+        if age > 72 * 3600:
+            del share_storage[share_id]
+            print(f"[Share] Share expired: {share_id}")
+            return jsonify({
+                "success": False,
+                "error": "Share has expired (72 hours)"
+            }), 404
+        
+        print(f"[Share] Retrieved share ID: {share_id}")
+        
         return jsonify({
             "success": True,
-            **data  # Spread the data into the response
+            "data": share_data["data"],
+            "config": share_data["config"],
+            "timestamp": share_data["created_at"].isoformat()
         })
     except Exception as e:
+        print(f"[Share] Error retrieving: {str(e)}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
 # =============================================================================
-# ANALYSIS STORAGE ENDPOINTS
+# ANALYSIS STORAGE ENDPOINTS (UNCHANGED FROM YOUR ORIGINAL)
 # =============================================================================
 
 @app.route('/api/save-analysis', methods=['POST'])
@@ -572,7 +614,7 @@ def delete_all_analyses(user_id):
 
 
 # =============================================================================
-# USER ACCOUNT ENDPOINTS
+# USER ACCOUNT ENDPOINTS (UNCHANGED FROM YOUR ORIGINAL)
 # =============================================================================
 
 @app.route('/api/delete-user-account/<user_id>', methods=['DELETE', 'OPTIONS'])
@@ -629,7 +671,7 @@ def delete_user_account(user_id):
 
 
 # =============================================================================
-# HEALTH & STATUS
+# HEALTH & STATUS (UNCHANGED FROM YOUR ORIGINAL)
 # =============================================================================
 
 @app.route('/api/health', methods=['GET'])
@@ -648,5 +690,5 @@ def root():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    print(f"Starting Floor Pov API v3.1.0 (complete) on port {port}...")
+    print(f"Starting Floor Pov API v3.1.0 (complete + short share URLs) on port {port}...")
     app.run(host='0.0.0.0', port=port, debug=False)

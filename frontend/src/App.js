@@ -200,24 +200,24 @@ export default function WarcraftLogsApp() {
     }
   }, [user]);
 
-  const loadSharedResults = async (encodedData) => {
-    console.log('[Share] Loading shared results from URL');
+  const loadSharedResults = async (shareId) => {
+    console.log('[Share] Loading shared results for ID:', shareId);
     setLoading(true);
     setLoadingStage('Loading shared results...');
     setError('');
 
     try {
-      const response = await fetch(`${API_URL}/api/decode-share`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ encodedData })
-      });
+      const url = `${API_URL}/api/shared/${shareId}`;
+      console.log('[Share] Fetching from:', url);
+      
+      const response = await fetch(url);
+      console.log('[Share] Response status:', response.status);
       
       const result = await response.json();
       console.log('[Share] Response data:', result);
 
       if (!result.success) {
-        throw new Error(result.error || 'Failed to load shared results');
+        throw new Error(result.error || 'Shared results not found');
       }
 
       console.log('[Share] Successfully loaded data');
@@ -248,13 +248,13 @@ export default function WarcraftLogsApp() {
   // Load shared results when share parameter is present
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
-    const shareData = urlParams.get('share');
+    const shareId = urlParams.get('share');
     
-    console.log('[Share] URL changed, share param:', shareData ? 'present' : 'none', 'current data:', data ? 'exists' : 'none');
+    console.log('[Share] URL changed, share param:', shareId, 'current data:', data ? 'exists' : 'none');
     
-    if (shareData && !data && !loading) {  // Only load if we don't already have data and aren't already loading
-      console.log('[Share] Triggering load');
-      loadSharedResults(shareData);
+    if (shareId && !data && !loading) {  // Only load if we don't already have data and aren't already loading
+      console.log('[Share] Triggering load for:', shareId);
+      loadSharedResults(shareId);
     }
   }, [location.search, data, loading]);
 
@@ -480,7 +480,7 @@ export default function WarcraftLogsApp() {
         throw new Error(result.error || 'Failed to create shareable link');
       }
 
-      const shareUrl = `${window.location.origin}${window.location.pathname}?share=${result.encodedData}`;
+      const shareUrl = `${window.location.origin}${window.location.pathname}?share=${result.shareId}`;
       setShareLink(shareUrl);
       setShowShareModal(true);
       setSharingData(false);
