@@ -467,37 +467,52 @@ def analyze():
 
 
 # =============================================================================
-# SHARING ENDPOINTS
+# SHARING ENDPOINTS - URL-BASED (NO DATABASE REQUIRED)
 # =============================================================================
 
 @app.route('/api/share', methods=['POST'])
 def share_results():
-    """Create a shareable link for analysis results."""
+    """Create a shareable link by encoding data in URL (no database storage)."""
     try:
         data = request.json
-        share_id = str(uuid.uuid4())[:8]
+        
+        # Compress and encode the data
         json_str = json.dumps(data)
         compressed = brotli.compress(json_str.encode('utf-8'))
-        encoded = base64.b64encode(compressed).decode('utf-8')
-        supabase_client.store_shared_result(share_id, encoded)
-        return jsonify({"shareId": share_id})
+        # Use urlsafe_b64encode to avoid issues with special characters in URLs
+        encoded = base64.urlsafe_b64encode(compressed).decode('utf-8')
+        
+        # Return the encoded data (frontend will put it in URL)
+        return jsonify({
+            "success": True,
+            "encodedData": encoded,
+            "sizeBytes": len(encoded),
+            "urlLength": len(encoded) + 30  # Approximate URL length with domain
+        })
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
-@app.route('/api/shared/<share_id>', methods=['GET'])
-def get_shared_results(share_id):
-    """Get shared analysis results."""
+@app.route('/api/decode-share', methods=['POST'])
+def decode_share():
+    """Decode shared data from URL."""
     try:
-        encoded = supabase_client.get_shared_result(share_id)
+        encoded = request.json.get('encodedData')
         if not encoded:
-            return jsonify({"error": "Share link not found or expired"}), 404
-        compressed = base64.b64decode(encoded)
+            return jsonify({"success": False, "error": "No data provided"}), 400
+        
+        # Decode and decompress
+        compressed = base64.urlsafe_b64decode(encoded.encode('utf-8'))
         json_str = brotli.decompress(compressed).decode('utf-8')
         data = json.loads(json_str)
-        return jsonify(data)
+        
+        # Return the original data structure
+        return jsonify({
+            "success": True,
+            **data  # Spread the data into the response
+        })
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 # =============================================================================
