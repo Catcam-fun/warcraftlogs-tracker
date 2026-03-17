@@ -8,3 +8,11 @@ backend/__pycache__/analysis.cpython-313.pyc
 backend/full_log.txt
 .gitignore
 full_log.txt
+frontend/src/App.js.backup_20260317_142125
+.gitignore
+.gitignore
+backend/analysis.py.backup_20260317_142125
+backend/__pycache__/warcraftlogs.cpython-312.pyc
+backend/__pycache__/features.cpython-312.pyc
+backend/__pycache__/analysis.cpython-312.pyc
+backend/__pycache__/supabase_client.cpython-312.pyc

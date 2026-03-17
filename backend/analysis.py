@@ -135,9 +135,14 @@ def find_mass_death_start(cutoff_idx, deaths_list):
 
 
 def analyze_fights(fights, fight_zone, difficulty):
-    """Filter fights by zone and difficulty."""
+    """Filter fights by zone and difficulty.
+    If fight_zone is 0, skip zone check (for multi-raid WCL zones like Midnight S1).
+    """
+    zone_filter = int(fight_zone)
+    if zone_filter == 0:
+        return [f for f in fights if f.get("boss") and f.get("difficulty") == int(difficulty)]
     return [f for f in fights if f.get("boss") and 
-            f.get("zoneID") == int(fight_zone) and f.get("difficulty") == int(difficulty)]
+            f.get("zoneID") == zone_filter and f.get("difficulty") == int(difficulty)]
 
 
 # =============================================================================
