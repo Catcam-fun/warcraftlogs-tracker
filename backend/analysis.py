@@ -20,8 +20,8 @@ from features import (
 # CONSTANTS
 # =============================================================================
 
-MASS_DEATH_THRESHOLD = 7
-MASS_DEATH_WINDOW = 10000  # ms
+MASS_DEATH_THRESHOLD = 8
+MASS_DEATH_WINDOW = 8000  # ms
 
 WOW_CLASS_COLORS = {
     "DeathKnight": "#C41E3A", "DemonHunter": "#A330C9", "Druid": "#FF7C0A",
