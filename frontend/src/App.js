@@ -19,6 +19,28 @@ const API_URL = window.location.hostname === 'localhost'
 
 // Raid Zone Definitions
 const RAID_ZONES = {
+  // === MIDNIGHT SEASON 1 ===
+  'voidspire': {
+    name: 'The Voidspire',
+    reportZone: '48',
+    fightZone: '0'   // All Midnight raids share WCL zone 48; fightZone 0 = match all
+  },
+  'dreamrift': {
+    name: 'The Dreamrift',
+    reportZone: '48',
+    fightZone: '0'
+  },
+  'queldanas': {
+    name: "March on Quel'Danas",
+    reportZone: '48',
+    fightZone: '0'
+  },
+  'midnight-all': {
+    name: 'Midnight S1 Raids',
+    reportZone: '48',
+    fightZone: '0'
+  },
+  // === THE WAR WITHIN ===
   'manaforge': {
     name: 'Manaforge Omega',
     reportZone: '44',
@@ -38,6 +60,34 @@ const RAID_ZONES = {
 
 // Boss Ordering (Adventure Guide order)
 const BOSS_ORDER = {
+  // === MIDNIGHT SEASON 1 ===
+  'voidspire': [
+    'Imperator Averzian',
+    'Vorasius',
+    'Fallen-King Salhadaar',
+    'Vaelgor & Ezzorak',
+    'Lightblinded Vanguard',
+    'Crown of the Cosmos'
+  ],
+  'dreamrift': [
+    'Chimaerus, the Undreamt God'
+  ],
+  'queldanas': [
+    "Belo'ren",
+    "L'ura"
+  ],
+  'midnight-all': [
+    'Imperator Averzian',
+    'Vorasius',
+    'Fallen-King Salhadaar',
+    'Vaelgor & Ezzorak',
+    'Lightblinded Vanguard',
+    'Crown of the Cosmos',
+    'Chimaerus, the Undreamt God',
+    "Belo'ren",
+    "L'ura"
+  ],
+  // === THE WAR WITHIN ===
   'manaforge': [
     'Plexus Sentinel',
     "Loom'ithar",
@@ -572,9 +622,13 @@ export default function WarcraftLogsApp() {
 
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
 
-        buffer += decoder.decode(value, { stream: true });
+        // CRITICAL FIX: Process remaining buffer before breaking on stream end
+        if (done) {
+          buffer += decoder.decode(); // Flush decoder
+        } else {
+          buffer += decoder.decode(value, { stream: true });
+        }
         const lines = buffer.split('\n\n');
         buffer = lines.pop() || '';
 
@@ -763,6 +817,7 @@ export default function WarcraftLogsApp() {
             }
           }
         }
+        if (done) break;
       }
     } catch (err) {
       if (err.name === 'AbortError') {
@@ -1994,9 +2049,17 @@ export default function WarcraftLogsApp() {
                     onChange={handleRaidChange}
                     style={{ width: '100%', padding: '10px 14px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
                   >
-                    <option value="manaforge">Manaforge Omega</option>
-                    <option value="undermine">Liberation of Undermine</option>
-                    <option value="nerubar">Nerub'ar Palace</option>
+                    <optgroup label="── Midnight ──">
+                      <option value="voidspire">The Voidspire</option>
+                      <option value="dreamrift">The Dreamrift</option>
+                      <option value="queldanas">March on Quel'Danas</option>
+                      <option value="midnight-all">Midnight S1 Raids</option>
+                    </optgroup>
+                    <optgroup label="── The War Within ──">
+                      <option value="manaforge">Manaforge Omega</option>
+                      <option value="undermine">Liberation of Undermine</option>
+                      <option value="nerubar">Nerub'ar Palace</option>
+                    </optgroup>
                   </select>
                   <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
                     Select which raid to analyze
