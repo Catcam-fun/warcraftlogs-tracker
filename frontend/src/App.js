@@ -22,23 +22,23 @@ const RAID_ZONES = {
   // === MIDNIGHT SEASON 1 ===
   'voidspire': {
     name: 'The Voidspire',
-    reportZone: '48',
-    fightZone: '0'   // All Midnight raids share WCL zone 48; fightZone 0 = match all
+    reportZone: '46',
+    fightZone: '2912'
   },
   'dreamrift': {
     name: 'The Dreamrift',
-    reportZone: '48',
-    fightZone: '0'
+    reportZone: '46',
+    fightZone: '0'   // TODO: Update once Dreamrift logs are available
   },
   'queldanas': {
     name: "March on Quel'Danas",
-    reportZone: '48',
-    fightZone: '0'
+    reportZone: '46',
+    fightZone: '0'   // Opens March 31 — update fightZone then
   },
   'midnight-all': {
     name: 'Midnight S1 Raids',
-    reportZone: '48',
-    fightZone: '0'
+    reportZone: '46',
+    fightZone: '0'   // 0 = match all fights across all 3 raids
   },
   // === THE WAR WITHIN ===
   'manaforge': {
