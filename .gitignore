@@ -16,3 +16,4 @@ backend/__pycache__/warcraftlogs.cpython-312.pyc
 backend/__pycache__/features.cpython-312.pyc
 backend/__pycache__/analysis.cpython-312.pyc
 backend/__pycache__/supabase_client.cpython-312.pyc
+backend/check_zones.py

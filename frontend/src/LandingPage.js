@@ -233,6 +233,47 @@ export default function LandingPage({ onRunAnalysis, onSavedReports }) {
             margin: '0 auto',
             textAlign: 'left'
           }}>
+            {/* Update Item - Midnight Raids */}
+            <div style={{
+              padding: '20px',
+              background: '#1a1f2e',
+              borderRadius: '8px',
+              border: '1px solid #2d3748',
+              borderLeft: '4px solid #8b5cf6'
+            }}>
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                marginBottom: '8px'
+              }}>
+                <h3 style={{
+                  color: '#e2e8f0',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  margin: 0
+                }}>
+                  Midnight Raid Support
+                </h3>
+                <span style={{
+                  fontSize: '13px',
+                  color: '#64748b',
+                  whiteSpace: 'nowrap',
+                  marginLeft: '16px'
+                }}>
+                  Mar 17
+                </span>
+              </div>
+              <p style={{
+                color: '#94a3b8',
+                fontSize: '14px',
+                margin: 0,
+                lineHeight: '1.6'
+              }}>
+                Added support for all Midnight Season 1 raids: The Voidspire, The Dreamrift, and March on Quel'Danas.
+              </p>
+            </div>
+
             {/* Update Item - Cheat Death Optimization */}
             <div style={{
               padding: '20px',
