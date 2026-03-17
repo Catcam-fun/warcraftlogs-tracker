@@ -238,6 +238,12 @@ def analyze():
             all_fights_raw.sort(key=lambda x: x['abs_start'])
             yield f"data: {json.dumps({'stage': 'fights', 'message': f'Collected {len(all_fights_raw)} total fights'})}\n\n"
             
+            if not all_fights_raw:
+                diff_names = {'3': 'Normal', '4': 'Heroic', '5': 'Mythic'}
+                diff_label = diff_names.get(str(difficulty), f'difficulty {difficulty}')
+                yield f"data: {json.dumps({'error': f'No {diff_label} fights found in the reports. Check that the selected difficulty is available for this raid.'})}\n\n"
+                return
+            
             # Deduplicate
             yield f"data: {json.dumps({'stage': 'dedup', 'message': 'Removing duplicate pulls...'})}\n\n"
             seen_pulls_by_boss = {}
