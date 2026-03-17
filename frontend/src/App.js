@@ -28,7 +28,7 @@ const RAID_ZONES = {
   'dreamrift': {
     name: 'The Dreamrift',
     reportZone: '46',
-    fightZone: '0'   // TODO: Update once Dreamrift logs are available
+    fightZone: '2939'
   },
   'queldanas': {
     name: "March on Quel'Danas",
