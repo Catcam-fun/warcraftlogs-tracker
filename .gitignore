@@ -1,5 +1,6 @@
 backend/.env.txt
 backend/.env
+backend/.venv
 backend/shared_results/99b32081.json
 backend/__pycache__/warcraftlogs.cpython-313.pyc
 backend/__pycache__/supabase_client.cpython-313.pyc
@@ -17,3 +18,8 @@ backend/__pycache__/features.cpython-312.pyc
 backend/__pycache__/analysis.cpython-312.pyc
 backend/__pycache__/supabase_client.cpython-312.pyc
 backend/check_zones.py
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key

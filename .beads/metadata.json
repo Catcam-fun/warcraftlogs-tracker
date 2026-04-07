@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "warcraftlogs_tracker",
+  "project_id": "7f0b8a1b-5b96-49a2-9815-5d95b321eef9"
+}
