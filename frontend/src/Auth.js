@@ -41,9 +41,9 @@ export default function Auth({ onClose }) {
 
   const handleAuth = async (e) => {
     e.preventDefault();
-    
+
     console.log('handleAuth called, captchaToken:', captchaToken);
-    
+
     // Validate checkboxes for sign-up
     if (isSignUp) {
       if (!ageConfirmed) {
@@ -55,13 +55,13 @@ export default function Auth({ onClose }) {
         return;
       }
     }
-    
+
     // Require CAPTCHA for both sign-in and sign-up
     if (!captchaToken) {
       setMessage('Please complete the CAPTCHA verification.');
       return;
     }
-    
+
     setLoading(true);
     setMessage('');
 
@@ -135,30 +135,8 @@ export default function Auth({ onClose }) {
   };
 
   return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      background: 'rgba(0, 0, 0, 0.85)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 9999
-    }}>
-      <div style={{
-        maxWidth: '420px',
-        width: '90%',
-        margin: '0 auto',
-        padding: '32px',
-        border: '1px solid #3b82f6',
-        borderRadius: '12px',
-        backgroundColor: '#1a1a2e',
-        position: 'relative',
-        maxHeight: '90vh',
-        overflowY: 'auto'
-      }}>
+    <div className="fp-auth auth-shell">
+      <div className="auth-card surface-panel" style={{ position: 'relative' }}>
         {onClose && (
           <button
             onClick={onClose}
@@ -168,7 +146,7 @@ export default function Auth({ onClose }) {
               right: '12px',
               background: 'transparent',
               border: 'none',
-              color: '#94a3b8',
+              color: 'var(--color-muted)',
               cursor: 'pointer',
               padding: '4px'
             }}
@@ -177,9 +155,9 @@ export default function Auth({ onClose }) {
           </button>
         )}
 
-        <h2 style={{ 
-          color: '#3b82f6', 
-          textAlign: 'center', 
+        <h2 style={{
+          color: 'var(--color-gold-2)',
+          textAlign: 'center',
           marginBottom: '24px',
           marginTop: 0,
           fontSize: '24px'
@@ -188,24 +166,24 @@ export default function Auth({ onClose }) {
         </h2>
 
         <p style={{
-          color: '#94a3b8',
+          color: 'var(--color-muted)',
           textAlign: 'center',
           fontSize: '14px',
           marginBottom: '24px',
           lineHeight: '1.5'
         }}>
-          {isSignUp 
-            ? 'Create an account to save your API credentials and analysis history' 
+          {isSignUp
+            ? 'Create an account to save your API credentials and analysis history'
             : 'Sign in to access your saved credentials and analysis history'
           }
         </p>
-        
+
         <form onSubmit={handleAuth}>
           <div style={{ marginBottom: '16px' }}>
-            <label style={{ 
-              display: 'block', 
-              marginBottom: '6px', 
-              color: '#e2e8f0',
+            <label style={{
+              display: 'block',
+              marginBottom: '6px',
+              color: 'var(--color-text)',
               fontSize: '14px',
               fontWeight: '500'
             }}>
@@ -219,10 +197,6 @@ export default function Auth({ onClose }) {
               style={{
                 width: '100%',
                 padding: '10px 12px',
-                borderRadius: '6px',
-                border: '1px solid #475569',
-                backgroundColor: '#0f1419',
-                color: '#fff',
                 fontSize: '14px',
                 boxSizing: 'border-box'
               }}
@@ -230,10 +204,10 @@ export default function Auth({ onClose }) {
           </div>
 
           <div style={{ marginBottom: '20px' }}>
-            <label style={{ 
-              display: 'block', 
-              marginBottom: '6px', 
-              color: '#e2e8f0',
+            <label style={{
+              display: 'block',
+              marginBottom: '6px',
+              color: 'var(--color-text)',
               fontSize: '14px',
               fontWeight: '500'
             }}>
@@ -248,10 +222,6 @@ export default function Auth({ onClose }) {
               style={{
                 width: '100%',
                 padding: '10px 12px',
-                borderRadius: '6px',
-                border: '1px solid #475569',
-                backgroundColor: '#0f1419',
-                color: '#fff',
                 fontSize: '14px',
                 boxSizing: 'border-box'
               }}
@@ -259,7 +229,7 @@ export default function Auth({ onClose }) {
             {isSignUp && (
               <p style={{
                 fontSize: '12px',
-                color: '#64748b',
+                color: 'var(--color-subtle)',
                 marginTop: '4px',
                 marginBottom: 0
               }}>
@@ -276,7 +246,7 @@ export default function Auth({ onClose }) {
                 alignItems: 'center',
                 cursor: 'pointer',
                 fontSize: '14px',
-                color: '#e2e8f0'
+                color: 'var(--color-text)'
               }}>
                 <input
                   type="checkbox"
@@ -287,7 +257,7 @@ export default function Auth({ onClose }) {
                     cursor: 'pointer',
                     width: '16px',
                     height: '16px',
-                    accentColor: '#3b82f6'
+                    accentColor: 'var(--color-gold-2)'
                   }}
                 />
                 I confirm that I am at least 13 years old
@@ -303,7 +273,7 @@ export default function Auth({ onClose }) {
                 alignItems: 'flex-start',
                 cursor: 'pointer',
                 fontSize: '14px',
-                color: '#e2e8f0',
+                color: 'var(--color-text)',
                 lineHeight: '1.5'
               }}>
                 <input
@@ -317,19 +287,19 @@ export default function Auth({ onClose }) {
                     width: '16px',
                     height: '16px',
                     flexShrink: 0,
-                    accentColor: '#3b82f6'
+                    accentColor: 'var(--color-gold-2)'
                   }}
                 />
                 <span>
                   I agree to the{' '}
-                  <a 
+                  <a
                     onClick={(e) => {
                       e.preventDefault();
                       onClose();
                       navigate('/terms');
                     }}
-                    style={{ 
-                      color: '#3b82f6', 
+                    style={{
+                      color: 'var(--color-gold-2)',
                       textDecoration: 'underline',
                       cursor: 'pointer'
                     }}
@@ -337,14 +307,14 @@ export default function Auth({ onClose }) {
                     Terms of Service
                   </a>
                   {' '}and{' '}
-                  <a 
+                  <a
                     onClick={(e) => {
                       e.preventDefault();
                       onClose();
                       navigate('/privacy');
                     }}
-                    style={{ 
-                      color: '#3b82f6', 
+                    style={{
+                      color: 'var(--color-gold-2)',
                       textDecoration: 'underline',
                       cursor: 'pointer'
                     }}
@@ -375,7 +345,7 @@ export default function Auth({ onClose }) {
                 alignItems: 'center',
                 cursor: 'pointer',
                 fontSize: '14px',
-                color: '#e2e8f0'
+                color: 'var(--color-text)'
               }}>
                 <input
                   type="checkbox"
@@ -386,7 +356,7 @@ export default function Auth({ onClose }) {
                     cursor: 'pointer',
                     width: '16px',
                     height: '16px',
-                    accentColor: '#3b82f6'
+                    accentColor: 'var(--color-gold-2)'
                   }}
                 />
                 Stay logged in
@@ -397,22 +367,12 @@ export default function Auth({ onClose }) {
           <button
             type="submit"
             disabled={loading}
+            className="btn btn-primary"
             style={{
               width: '100%',
-              padding: '12px',
-              backgroundColor: loading ? '#1e40af' : '#3b82f6',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: loading ? 'not-allowed' : 'pointer',
-              fontSize: '15px',
-              fontWeight: '600',
               opacity: loading ? 0.7 : 1,
-              transition: 'all 0.2s',
-              boxSizing: 'border-box'
+              cursor: loading ? 'not-allowed' : 'pointer'
             }}
-            onMouseOver={(e) => { if (!loading) e.target.style.backgroundColor = '#2563eb'; }}
-            onMouseOut={(e) => { if (!loading) e.target.style.backgroundColor = '#3b82f6'; }}
           >
             {loading ? 'Loading...' : (isSignUp ? 'Sign Up' : 'Sign In')}
           </button>
@@ -422,10 +382,10 @@ export default function Auth({ onClose }) {
           <p style={{
             marginTop: '16px',
             padding: '12px',
-            backgroundColor: (message.includes('Success') || message.includes('successfully')) ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-            border: `1px solid ${(message.includes('Success') || message.includes('successfully')) ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
-            color: (message.includes('Success') || message.includes('successfully')) ? '#10b981' : '#ef4444',
-            borderRadius: '6px',
+            backgroundColor: (message.includes('Success') || message.includes('successfully')) ? 'rgba(56, 217, 140, 0.1)' : 'rgba(255, 93, 102, 0.1)',
+            border: `1px solid ${(message.includes('Success') || message.includes('successfully')) ? 'rgba(56, 217, 140, 0.3)' : 'rgba(255, 93, 102, 0.3)'}`,
+            color: (message.includes('Success') || message.includes('successfully')) ? 'var(--color-green)' : 'var(--color-red)',
+            borderRadius: 'var(--radius-md)',
             textAlign: 'center',
             fontSize: '13px'
           }}>
@@ -433,10 +393,10 @@ export default function Auth({ onClose }) {
           </p>
         )}
 
-        <p style={{ 
-          marginTop: '20px', 
-          textAlign: 'center', 
-          color: '#94a3b8',
+        <p style={{
+          marginTop: '20px',
+          textAlign: 'center',
+          color: 'var(--color-muted)',
           fontSize: '14px'
         }}>
           {isSignUp ? 'Already have an account?' : "Don't have an account?"}
@@ -446,7 +406,7 @@ export default function Auth({ onClose }) {
             style={{
               background: 'none',
               border: 'none',
-              color: '#3b82f6',
+              color: 'var(--color-gold-2)',
               cursor: 'pointer',
               textDecoration: 'underline',
               fontSize: '14px',
