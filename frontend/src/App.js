@@ -6,6 +6,8 @@ import { supabase } from './supabaseClient';
 import Auth from './Auth';
 import Settings from './Settings';
 import LandingPage from './LandingPage';
+import AnalyzeConfig from './AnalyzeConfig';
+import InfoModal from './InfoModal';
 import TermsOfService from './TermsOfService';
 import PrivacyPolicy from './PrivacyPolicy';
 
@@ -173,6 +175,7 @@ function ScrollToTop() {
 export default function WarcraftLogsApp() {
   const navigate = useNavigate();
   const location = useLocation();
+  const fullBleed = location.pathname === '/' || location.pathname === '/analyze';
   
   // Authentication state
   const [user, setUser] = useState(null);
@@ -1465,7 +1468,8 @@ export default function WarcraftLogsApp() {
         
         <Route path="/*" element={
           <>
-      {/* Sticky Header */}
+      {/* Sticky Header — hidden on the landing route, which owns its own chrome */}
+      {!fullBleed && (
       <header className="app-header">
         <div className="app-header-inner">
           <div className="brand-lockup"
@@ -1564,9 +1568,10 @@ export default function WarcraftLogsApp() {
           </div>
         </div>
       </header>
+      )}
 
-      {/* Alpha Warning Banner */}
-      {showAlphaBanner && (
+      {/* Alpha Warning Banner — suppressed on landing (owns its own chrome) */}
+      {showAlphaBanner && !fullBleed && (
         <div style={{
           background: 'rgba(220, 38, 38, 0.15)',
           borderBottom: '2px solid rgba(220, 38, 38, 0.3)',
@@ -1703,7 +1708,10 @@ export default function WarcraftLogsApp() {
         </div>
       )}
 
-      <div className="analysis-content" style={{ maxWidth: '1400px', margin: '0 auto', padding: '24px' }}>
+      <div
+        className={fullBleed ? 'fpx-landing-wrap' : 'analysis-content'}
+        style={fullBleed ? undefined : { maxWidth: '1400px', margin: '0 auto', padding: '24px' }}
+      >
         {loading && (
           <div style={{ 
             position: 'fixed', 
@@ -1780,444 +1788,34 @@ export default function WarcraftLogsApp() {
 
         <Routes>
           <Route path="/" element={
-            <LandingPage 
+            <LandingPage
               onRunAnalysis={() => navigate('/analyze')}
               onSavedReports={null}  // DISABLED - Save Reports feature
+              user={user}
+              onShowAuthModal={() => setShowAuthModal(true)}
+              onShowSettings={() => setShowSettings(true)}
+              onLogout={handleLogout}
             />
           } />
           
           <Route path="/analyze" element={
-          <div className="surface-panel" style={{ padding: '24px', marginBottom: '20px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-              <h2 style={{ margin: 0, fontSize: '18px', fontWeight: '700' }}>Configuration</h2>
-              <button
-                className="btn"
-                onClick={() => setShowInfoModal(true)}
-              >
-                <Info size={16} />
-                How It Works
-              </button>
-            </div>
-
-            <div style={{ marginBottom: '24px', padding: '14px 16px', background: 'rgba(215, 180, 90, 0.06)', border: '1px solid var(--color-border-strong)', borderRadius: '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'start', gap: '10px' }}>
-                <div style={{ fontSize: '18px' }}>🔑</div>
-                <div>
-                  <h3 style={{ margin: '0 0 6px', fontSize: '14px', fontWeight: '600', color: 'var(--color-gold-2)' }}>
-                    Need API Credentials?
-                  </h3>
-                  <p style={{ margin: '0 0 6px', fontSize: '12px', color: '#cbd5e1', lineHeight: '1.6' }}>
-                    You need a WarcraftLogs V2 API Client ID and Secret to use this tool.
-                  </p>
-                  <ol style={{ margin: '6px 0 0 16px', padding: 0, fontSize: '12px', color: '#cbd5e1', lineHeight: '1.7' }}>
-                    <li>Go to <a href="https://www.warcraftlogs.com/api/clients/" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-info)', textDecoration: 'underline' }}>WarcraftLogs API Clients</a></li>
-                    <li>Click "Create a Client"</li>
-                    <li>Enter a name (e.g., "Death Tracker")</li>
-                    <li>For redirect URL, enter the website URL or just use: <code style={{ background: '#0f1419', padding: '2px 6px', borderRadius: '3px', fontSize: '11px' }}>http://localhost</code></li>
-                    <li><strong>Do NOT check</strong> the "Public Client" box</li>
-                    <li>Click "Create" and copy your Client ID and Client Secret</li>
-                  </ol>
-                </div>
-              </div>
-            </div>
-            
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px' }}>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
-                    Client ID (V2 API) *
-                  </label>
-                  <input
-                    type="text"
-                    name="clientId"
-                    value={config.clientId}
-                    onChange={handleInputChange}
-                    style={{ width: '100%', padding: '10px 14px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
-                  />
-                  {user && (
-                    <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#10b981', lineHeight: '1.4' }}>
-                      ✓ Auto-fills from your account settings
-                    </p>
-                  )}
-                  {!user && (
-                    <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                      <a 
-                        onClick={() => setShowAuthModal(true)}
-                        style={{ color: 'var(--color-gold-2)', cursor: 'pointer', textDecoration: 'underline' }}
-                      >
-                        Sign in
-                      </a> to save your credentials
-                    </p>
-                  )}
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
-                    Client Secret (V2 API) *
-                  </label>
-                  <input
-                    type="password"
-                    name="clientSecret"
-                    value={config.clientSecret}
-                    onChange={handleInputChange}
-                    style={{ width: '100%', padding: '10px 14px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
-                  />
-                  {user && (
-                    <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#10b981', lineHeight: '1.4' }}>
-                      ✓ Auto-fills from your account settings
-                    </p>
-                  )}
-                  {!user && (
-                    <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                      <a 
-                        onClick={() => setShowAuthModal(true)}
-                        style={{ color: 'var(--color-gold-2)', cursor: 'pointer', textDecoration: 'underline' }}
-                      >
-                        Sign in
-                      </a> to save your credentials
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px' }}>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
-                    Guild Name *
-                  </label>
-                  <input
-                    type="text"
-                    name="guildName"
-                    value={config.guildName}
-                    onChange={handleInputChange}
-                    style={{ width: '100%', padding: '10px 14px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
-                  />
-                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                    Enter exactly as shown on WarcraftLogs - Examples: Do Over, Complexity Limit, Method
-                  </p>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
-                    Server *
-                  </label>
-                  <input
-                    type="text"
-                    name="server"
-                    value={config.server}
-                    onChange={handleInputChange}
-                    style={{ width: '100%', padding: '10px 14px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
-                  />
-                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                    Enter as shown in-game (spaces OK) - Examples: Thrall, Area 52, Zirkel des Cenarius
-                  </p>
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px' }}>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
-                    Region *
-                  </label>
-                  <select
-                    name="region"
-                    value={config.region}
-                    onChange={handleInputChange}
-                    style={{ width: '100%', padding: '10px 14px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
-                  >
-                    <option value="us">US</option>
-                    <option value="eu">EU</option>
-                    <option value="kr">KR</option>
-                    <option value="tw">TW</option>
-                    <option value="cn">CN</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
-                    Difficulty *
-                  </label>
-                  <select
-                    name="difficulty"
-                    value={config.difficulty}
-                    onChange={handleInputChange}
-                    style={{ width: '100%', padding: '10px 14px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
-                  >
-                    <option value="3">Normal</option>
-                    <option value="4">Heroic</option>
-                    <option value="5">Mythic</option>
-                  </select>
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px' }}>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
-                    Raid *
-                  </label>
-                  <select
-                    name="selectedRaid"
-                    value={config.selectedRaid}
-                    onChange={handleRaidChange}
-                    style={{ width: '100%', padding: '10px 14px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
-                  >
-                    <optgroup label="── Midnight ──">
-                      <option value="voidspire">The Voidspire</option>
-                      <option value="dreamrift">The Dreamrift</option>
-                      <option value="queldanas">March on Quel'Danas</option>
-                      <option value="midnight-all">Midnight S1 Raids</option>
-                    </optgroup>
-                    <optgroup label="── The War Within ──">
-                      <option value="manaforge">Manaforge Omega</option>
-                      <option value="undermine">Liberation of Undermine</option>
-                      <option value="nerubar">Nerub'ar Palace</option>
-                    </optgroup>
-                  </select>
-                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                    Select which raid to analyze
-                  </p>
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px' }}>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
-                    Start Date (Optional)
-                  </label>
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <input
-                      type="date"
-                      name="startDate"
-                      value={config.startDate}
-                      onChange={handleInputChange}
-                      style={{ flex: 1, padding: '10px 14px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
-                    />
-                    {config.startDate && (
-                      <button
-                        type="button"
-                        onClick={() => setConfig(prev => ({ ...prev, startDate: '' }))}
-                        style={{
-                          padding: '10px 14px',
-                          background: '#334155',
-                          border: '1px solid #475569',
-                          borderRadius: '6px',
-                          color: '#e2e8f0',
-                          cursor: 'pointer',
-                          fontSize: '12px',
-                          fontWeight: '500',
-                          whiteSpace: 'nowrap',
-                          transition: 'all 0.2s'
-                        }}
-                        onMouseOver={(e) => e.target.style.background = '#475569'}
-                        onMouseOut={(e) => e.target.style.background = '#334155'}
-                      >
-                        Clear
-                      </button>
-                    )}
-                  </div>
-                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                    Leave blank to include all reports from the beginning of the tier
-                  </p>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
-                    End Date (Optional)
-                  </label>
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <input
-                      type="date"
-                      name="endDate"
-                      value={config.endDate}
-                      onChange={handleInputChange}
-                      style={{ flex: 1, padding: '10px 14px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
-                    />
-                    {config.endDate && (
-                      <button
-                        type="button"
-                        onClick={() => setConfig(prev => ({ ...prev, endDate: '' }))}
-                        style={{
-                          padding: '10px 14px',
-                          background: '#334155',
-                          border: '1px solid #475569',
-                          borderRadius: '6px',
-                          color: '#e2e8f0',
-                          cursor: 'pointer',
-                          fontSize: '12px',
-                          fontWeight: '500',
-                          whiteSpace: 'nowrap',
-                          transition: 'all 0.2s'
-                        }}
-                        onMouseOver={(e) => e.target.style.background = '#475569'}
-                        onMouseOut={(e) => e.target.style.background = '#334155'}
-                      >
-                        Clear
-                      </button>
-                    )}
-                  </div>
-                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                    Leave blank to include all reports up to today
-                  </p>
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '18px' }}>
-                <div>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
-                    Max Deaths to Track
-                    <div 
-                      style={{ 
-                        position: 'relative', 
-                        display: 'inline-flex',
-                        cursor: 'help'
-                      }}
-                      title="Sets the maximum number of deaths to track per pull. For example, if set to 5, only the first 5 deaths in each pull will be analyzed. This helps focus on early mechanics failures rather than wipe cascades."
-                    >
-                      <Info size={14} style={{ color: '#64748b' }} />
-                    </div>
-                  </label>
-                  <input
-                    type="number"
-                    name="maxCutoff"
-                    value={config.maxCutoff}
-                    onChange={handleInputChange}
-                    min="1"
-                    max="10"
-                    placeholder="5"
-                    style={{ width: '100%', padding: '10px 14px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', boxSizing: 'border-box' }}
-                  />
-                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                    Track only the first X deaths per pull (1-10). Useful for identifying early mechanics failures.
-                  </p>
-                </div>
-              </div>
-
-              {/* Character Groups - Hidden for now, replaced with post-analysis UI grouping */}
-              {false && (
-              <div>
-                <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1' }}>
-                  Character Groups <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '400' }}>(optional, JSON format)</span>
-                </label>
-                <textarea
-                  name="characterGroups"
-                  value={config.characterGroups}
-                  onChange={handleInputChange}
-                  placeholder='{"MainCharacter": ["AltName1", "AltName2"], "AnotherMain": ["TheirAlt"]}'
-                  rows="3"
-                  style={{ width: '100%', padding: '10px 14px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', fontFamily: 'monospace', resize: 'vertical', boxSizing: 'border-box' }}
-                />
-                <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                  Merge alt characters with their mains for combined statistics
-                </p>
-              </div>
-              )}
-
-              {/* Cheat Death Detection - Premium Feature for Authenticated Users */}
-              <div style={{ marginTop: '8px' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1', cursor: user ? 'pointer' : 'not-allowed', opacity: user ? 1 : 0.6 }}>
-                  <input
-                    type="checkbox"
-                    checked={config.enableCheatDeath}
-                    onChange={(e) => user && setConfig({...config, enableCheatDeath: e.target.checked})}
-                    disabled={!user}
-                    style={{ cursor: user ? 'pointer' : 'not-allowed', width: '16px', height: '16px' }}
-                  />
-                  <span>Enable cheat death detection</span>
-                  <span style={{ fontSize: '11px', color: '#f59e0b', fontWeight: '400' }}>(+20-30s slower)</span>
-                  {!user && (
-                    <span style={{ fontSize: '11px', color: 'var(--color-info)', fontWeight: '500' }}>
-                      (Account required)
-                    </span>
-                  )}
-                </label>
-                <p style={{ margin: '4px 0 0 24px', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                  {user ? (
-                    "Detects deaths prevented by Cauterize, Spirit of Redemption, Cheat Death, etc. Adds 1 API query per report."
-                  ) : (
-                    <>
-                      <a 
-                        onClick={() => setShowAuthModal(true)}
-                        style={{ color: 'var(--color-gold-2)', cursor: 'pointer', textDecoration: 'underline' }}
-                      >
-                        Sign in
-                      </a> to enable cheat death detection. Detects deaths prevented by Cauterize, Spirit of Redemption, Cheat Death, etc.
-                    </>
-                  )}
-                </p>
-              </div>
-
-              {/* DISABLED - Defensive Tracking Feature (Temporarily Disabled)
-              <div style={{ marginTop: '8px' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: '500', color: '#cbd5e1', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={config.enableDefensiveTracking}
-                    onChange={(e) => setConfig({...config, enableDefensiveTracking: e.target.checked})}
-                    style={{ cursor: 'pointer', width: '16px', height: '16px' }}
-                  />
-                  <span>Show active defensive buffs</span>
-                  <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '400' }}>(Beta)</span>
-                </label>
-                <p style={{ margin: '4px 0 0 24px', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
-                  Shows which defensive buffs were ACTIVE when player died, plus healing received in last 5 seconds. No performance impact.
-                </p>
-              </div>
-              */}
-            </div>
-
-            {error && (
-              <div style={{ marginTop: '20px', padding: '10px 14px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
-                <AlertCircle size={18} />
-                <span>{error}</span>
-              </div>
-            )}
-
-            <button
-              onClick={handleSubmit}
-              disabled={loading}
-              className="btn btn-primary"
-              style={{ marginTop: '24px', padding: '12px 24px', opacity: loading ? 0.6 : 1, cursor: loading ? 'not-allowed' : 'pointer' }}
-            >
-              {loading ? (
-                <>
-                  <Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} />
-                  Analyzing...
-                </>
-              ) : (
-                <>
-                  <Search size={18} />
-                  Analyze Reports
-                </>
-              )}
-            </button>
-
-            {/* Why Death Counts May Vary */}
-            <div className="inset-panel" style={{
-              padding: '24px',
-              marginTop: '32px',
-              borderColor: 'var(--color-border-strong)'
-            }}>
-              <h3 style={{
-                color: 'var(--color-info)',
-                fontSize: '16px',
-                fontWeight: '600',
-                marginTop: 0,
-                marginBottom: '12px'
-              }}>
-                Why Death Counts May Vary
-              </h3>
-              <p style={{
-                color: '#cbd5e1',
-                fontSize: '14px',
-                margin: 0,
-                lineHeight: '1.7'
-              }}>
-                You may notice slight differences (maybe a death per character) between analysis runs due to new reports being uploaded, timestamp edge cases, or WarcraftLogs API updates. These variations don't significantly impact death rate percentages—the tool prioritizes accuracy over perfect consistency.
-              </p>
-            </div>
-          </div>
+            <AnalyzeConfig
+              config={config}
+              onChange={handleInputChange}
+              onRaidChange={handleRaidChange}
+              onSubmit={handleSubmit}
+              setConfig={setConfig}
+              loading={loading}
+              error={error}
+              user={user}
+              onShowAuth={() => setShowAuthModal(true)}
+              onShowSettings={() => setShowSettings(true)}
+              onLogout={handleLogout}
+              onShowInfo={() => setShowInfoModal(true)}
+              onHome={() => { setData(null); setError(''); navigate('/'); }}
+            />
           } />
-          
+
           <Route path="/results" element={
             <>
             {data ? (
@@ -3243,161 +2841,7 @@ export default function WarcraftLogsApp() {
       )}
 
       {/* Info Modal - How It Works */}
-      {showInfoModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0, 0, 0, 0.85)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 9999,
-          padding: '20px',
-          overflowY: 'auto'
-        }}>
-          <div className="surface-panel" style={{
-            maxWidth: '700px',
-            width: '100%',
-            border: '1px solid var(--color-border-strong)',
-            position: 'relative',
-            maxHeight: '90vh',
-            overflowY: 'auto'
-          }}>
-            <div style={{ position: 'sticky', top: 0, background: 'var(--color-surface)', padding: '24px 24px 16px', borderBottom: '1px solid var(--color-border)', zIndex: 1 }}>
-              <button
-                onClick={() => setShowInfoModal(false)}
-                style={{
-                  position: 'absolute',
-                  top: '16px',
-                  right: '16px',
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'var(--color-muted)',
-                  cursor: 'pointer',
-                  padding: '4px',
-                  display: 'flex',
-                  alignItems: 'center'
-                }}
-              >
-                <X size={20} />
-              </button>
-              <h2 style={{
-                color: 'var(--color-gold-2)',
-                margin: 0,
-                fontSize: '24px',
-                fontWeight: '700',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px'
-              }}>
-                <Info size={24} />
-                How Floor Pov Works
-              </h2>
-            </div>
-
-            <div style={{ padding: '24px', color: '#e2e8f0', lineHeight: '1.7' }}>
-              <h3 style={{ color: 'var(--color-info)', fontSize: '18px', marginTop: 0, marginBottom: '12px' }}>
-                Data Collection & Processing
-              </h3>
-              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
-                Floor Pov analyzes raid death data from WarcraftLogs by:
-              </p>
-              <ul style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '24px', paddingLeft: '20px' }}>
-                <li style={{ marginBottom: '8px' }}>Fetching all guild reports for your selected raid and difficulty</li>
-                <li style={{ marginBottom: '8px' }}>Processing death events from each pull</li>
-                <li style={{ marginBottom: '8px' }}>Tracking player participation across all fights</li>
-                <li style={{ marginBottom: '8px' }}>Calculating death rates (deaths per pull) for each player and boss</li>
-              </ul>
-
-              <h3 style={{ color: 'var(--color-info)', fontSize: '18px', marginBottom: '12px' }}>
-                Data Validation & Completeness
-              </h3>
-              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '12px' }}>
-                Floor Pov ensures you're getting complete and accurate data through multiple verification steps:
-              </p>
-              <ul style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px', paddingLeft: '20px' }}>
-                <li style={{ marginBottom: '8px' }}><strong>Comprehensive report fetching:</strong> Retrieves all available reports for your guild within the specified date range, ensuring no logs are missed</li>
-                <li style={{ marginBottom: '8px' }}><strong>Participation tracking:</strong> Cross-references player presence across all fights to ensure accurate "pulls participated" counts</li>
-                <li style={{ marginBottom: '8px' }}><strong>Fight boundary validation:</strong> Verifies fight start and end timestamps to ensure all deaths within valid encounters are captured</li>
-                <li style={{ marginBottom: '8px' }}><strong>Missing data detection:</strong> Identifies and handles edge cases where WarcraftLogs data may be incomplete or corrupted</li>
-              </ul>
-
-              <h3 style={{ color: 'var(--color-info)', fontSize: '18px', marginBottom: '12px' }}>
-                Deduplication & Data Accuracy
-              </h3>
-              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '12px' }}>
-                To ensure accurate results, Floor Pov uses <strong>smart deduplication</strong>:
-              </p>
-              <ul style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px', paddingLeft: '20px' }}>
-                <li style={{ marginBottom: '8px' }}><strong>Report-level deduplication:</strong> The same pull may appear in multiple reports (different log uploaders). We detect and merge these duplicates based on fight timestamps and boss encounters.</li>
-                <li style={{ marginBottom: '8px' }}><strong>Character name normalization:</strong> Handles special characters and accents in player names (e.g., "Catëlynn" vs "Catelynn")</li>
-                <li style={{ marginBottom: '8px' }}><strong>Death timestamp filtering:</strong> Only counts deaths within the valid fight window to ensure accuracy</li>
-                <li style={{ marginBottom: '8px' }}><strong>Mass death detection:</strong> Identifies raid wipes (7+ deaths within 10 seconds) to properly track fight boundaries</li>
-              </ul>
-
-              <h3 style={{ color: 'var(--color-info)', fontSize: '18px', marginBottom: '12px' }}>
-                Why Death Counts May Vary Between Runs
-              </h3>
-              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '12px' }}>
-                You may notice slight differences in death counts between different analysis runs of the same guild. This is normal and can happen due to:
-              </p>
-              <ul style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px', paddingLeft: '20px' }}>
-                <li style={{ marginBottom: '8px' }}><strong>New reports uploaded:</strong> Guild members may upload additional logs between runs</li>
-                <li style={{ marginBottom: '8px' }}><strong>Timestamp edge cases:</strong> Deaths occurring exactly at fight end boundaries may be handled differently</li>
-                <li style={{ marginBottom: '8px' }}><strong>WarcraftLogs API updates:</strong> The upstream data source occasionally corrects or updates historical data</li>
-              </ul>
-              <p style={{ color: '#94a3b8', fontSize: '13px', fontStyle: 'italic', background: '#0f1419', padding: '12px', borderRadius: '6px', borderLeft: '3px solid var(--color-info)' }}>
-                💡 <strong>Tip:</strong> These variations are maybe a death per character and don't significantly impact death rate percentages. The tool prioritizes accuracy over perfect consistency.
-              </p>
-
-              <h3 style={{ color: 'var(--color-info)', fontSize: '18px', marginTop: '24px', marginBottom: '12px' }}>
-                Cheat Death Detection (Premium)
-              </h3>
-              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '12px' }}>
-                For logged-in users, Floor Pov can detect "cheat deaths" - deaths that were prevented by defensive abilities:
-              </p>
-              <ul style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px', paddingLeft: '20px' }}>
-                <li style={{ marginBottom: '8px' }}>Mage: Cauterize</li>
-                <li style={{ marginBottom: '8px' }}>Priest: Spirit of Redemption</li>
-                <li style={{ marginBottom: '8px' }}>Rogue: Cheat Death</li>
-                <li style={{ marginBottom: '8px' }}>Death Knight: Purgatory</li>
-                <li style={{ marginBottom: '8px' }}>Paladin: Divine Shield (when preventing lethal damage)</li>
-                <li style={{ marginBottom: '8px' }}>And more...</li>
-              </ul>
-              <p style={{ color: '#94a3b8', fontSize: '13px', background: '#0f1419', padding: '12px', borderRadius: '6px' }}>
-                Note: Cheat death detection requires 1 additional API call per report and adds ~20-30 seconds to analysis time.
-              </p>
-
-              <h3 style={{ color: 'var(--color-info)', fontSize: '18px', marginTop: '24px', marginBottom: '12px' }}>
-                Character Grouping (Alts)
-              </h3>
-              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '12px' }}>
-                You can group alternate characters with their mains to see combined statistics. This merges:
-              </p>
-              <ul style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '24px', paddingLeft: '20px' }}>
-                <li style={{ marginBottom: '8px' }}>Total deaths across all characters</li>
-                <li style={{ marginBottom: '8px' }}>Total pulls participated in</li>
-                <li style={{ marginBottom: '8px' }}>Combined death rate calculations</li>
-              </ul>
-
-              <h3 style={{ color: 'var(--color-info)', fontSize: '18px', marginBottom: '12px' }}>
-                Questions or Issues?
-              </h3>
-              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '8px' }}>
-                Floor Pov is in active alpha development. If you encounter bugs or have suggestions:
-              </p>
-              <ul style={{ color: '#cbd5e1', fontSize: '14px', paddingLeft: '20px', marginBottom: 0 }}>
-                <li style={{ marginBottom: '8px' }}>Check the site updates in the footer for recent changes</li>
-                <li style={{ marginBottom: '8px' }}>Report issues or request features (contact info coming soon)</li>
-                <li>Join our Discord community (link coming soon)</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      )}
+      {showInfoModal && <InfoModal onClose={() => setShowInfoModal(false)} />}
 
       {/* Terms & Privacy Modal */}
       {showTermsModal && (
@@ -3656,7 +3100,8 @@ export default function WarcraftLogsApp() {
       )}
       */}
 
-      {/* Footer */}
+      {/* Footer — suppressed on landing, which carries its own on-brand footer */}
+      {!fullBleed && (
       <footer className="fp-footer" style={{
         background: 'rgba(9, 13, 21, 0.94)',
         borderTop: '1px solid var(--color-border)',
@@ -3779,6 +3224,7 @@ export default function WarcraftLogsApp() {
           </div>
         </div>
       </footer>
+      )}
 
       <style>{`
         @keyframes spin {
