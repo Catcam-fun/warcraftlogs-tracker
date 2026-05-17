@@ -1,364 +1,102 @@
 import React from 'react';
-import { Play, FolderOpen, CheckCircle, BarChart3, Shield } from 'lucide-react';
+import { BarChart3, Clock3, FolderOpen, Play, Shield, Skull, Sparkles, Users } from 'lucide-react';
+
+const timeline = [
+  ['00:43', 'First death', 'Shadow crash clipped melee', 'danger'],
+  ['01:18', 'No defensive', 'Personal cooldowns still available', 'warning'],
+  ['02:02', 'Mass event', 'Seven deaths within ten seconds', 'danger'],
+  ['03:41', 'Recovery', 'External healing stabilized the pull', 'good']
+];
+
+const updates = [
+  ['Midnight Raid Support', 'The Voidspire, The Dreamrift, and March on Quel\'Danas are ready for raid-night review.', 'Mar 17'],
+  ['Cheat Death Detection', 'Logged-in users can identify prevented lethal events with improved deduplication.', 'Dec 8'],
+  ['The War Within Coverage', 'Death tracking is available across the current raid catalog.', 'Nov 20']
+];
 
 export default function LandingPage({ onRunAnalysis, onSavedReports }) {
   return (
-    <div style={{
-      minHeight: 'calc(100vh - 200px)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: '40px 20px'
-    }}>
-      <div style={{
-        maxWidth: '900px',
-        width: '100%',
-        textAlign: 'center'
-      }}>
-        {/* Hero Section */}
-        <div style={{ marginBottom: '60px' }}>
-          <h1 style={{
-            fontSize: '48px',
-            fontWeight: '700',
-            color: '#e2e8f0',
-            marginBottom: '16px',
-            marginTop: 0,
-            lineHeight: '1.2'
-          }}>
-            Floor Pov
-          </h1>
-          <p style={{
-            fontSize: '18px',
-            color: '#94a3b8',
-            maxWidth: '600px',
-            margin: '0 auto',
-            lineHeight: '1.6'
-          }}>
-            Track and analyze raid deaths from WarcraftLogs
+    <main className="fp-landing landing-shell">
+      <section className="landing-hero">
+        <div>
+          <div className="landing-eyebrow">WarcraftLogs death investigation</div>
+          <h1 className="landing-title">Floor Pov</h1>
+          <p className="landing-copy">
+            A focused raid review cockpit for finding early deaths, missing defensives, repeated boss patterns,
+            and wipe cascades before the next pull timer starts.
           </p>
-        </div>
-
-        {/* Big Buttons */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: onSavedReports ? 'repeat(auto-fit, minmax(280px, 1fr))' : '1fr',
-          gap: '24px',
-          marginBottom: '40px',
-          maxWidth: onSavedReports ? '800px' : '400px',
-          margin: '0 auto'
-        }}>
-          <button
-            onClick={onRunAnalysis}
-            style={{
-              padding: '24px 32px',
-              background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '12px',
-              cursor: 'pointer',
-              fontSize: '16px',
-              fontWeight: '600',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: '12px',
-              transition: 'all 0.2s',
-              boxShadow: '0 4px 12px rgba(59, 130, 246, 0.3)'
-            }}
-            onMouseOver={(e) => {
-              e.currentTarget.style.transform = 'translateY(-2px)';
-              e.currentTarget.style.boxShadow = '0 6px 16px rgba(59, 130, 246, 0.4)';
-            }}
-            onMouseOut={(e) => {
-              e.currentTarget.style.transform = 'translateY(0)';
-              e.currentTarget.style.boxShadow = '0 4px 12px rgba(59, 130, 246, 0.3)';
-            }}
-          >
-            <Play size={28} />
-            <div>
-              <div style={{ fontSize: '18px', marginBottom: '4px' }}>Run Analysis</div>
-              <div style={{ fontSize: '13px', opacity: 0.9, fontWeight: '400' }}>Analyze your guild's deaths</div>
-            </div>
-          </button>
-
-          {onSavedReports && (
-            <button
-              onClick={onSavedReports}
-              style={{
-                padding: '24px 32px',
-                background: '#1e293b',
-                color: '#e2e8f0',
-                border: '1px solid #334155',
-                borderRadius: '12px',
-                cursor: 'pointer',
-                fontSize: '16px',
-                fontWeight: '600',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: '12px',
-                transition: 'all 0.2s'
-              }}
-              onMouseOver={(e) => {
-                e.currentTarget.style.background = '#2d3748';
-                e.currentTarget.style.transform = 'translateY(-2px)';
-              }}
-              onMouseOut={(e) => {
-                e.currentTarget.style.background = '#1e293b';
-                e.currentTarget.style.transform = 'translateY(0)';
-              }}
-            >
-              <FolderOpen size={28} />
-              <div>
-                <div style={{ fontSize: '18px', marginBottom: '4px' }}>Saved Reports</div>
-                <div style={{ fontSize: '13px', opacity: 0.7, fontWeight: '400' }}>View saved analyses</div>
-              </div>
+          <div className="landing-actions">
+            <button className="btn btn-primary" onClick={onRunAnalysis}>
+              <Play size={18} />
+              Run Analysis
             </button>
-          )}
-        </div>
-
-        {/* Features Grid */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-          gap: '24px',
-          marginTop: '60px',
-          textAlign: 'left'
-        }}>
-          <div style={{
-            padding: '24px',
-            background: '#1a1f2e',
-            borderRadius: '12px',
-            border: '1px solid #2d3748'
-          }}>
-            <CheckCircle size={32} style={{ color: '#10b981', marginBottom: '12px' }} />
-            <h3 style={{
-              color: '#e2e8f0',
-              fontSize: '16px',
-              fontWeight: '600',
-              margin: '0 0 8px 0'
-            }}>
-              Smart Filtering
-            </h3>
-            <p style={{
-              color: '#94a3b8',
-              fontSize: '14px',
-              margin: 0,
-              lineHeight: '1.5'
-            }}>
-              Track first X deaths per pull, excluding wipe cascades
-            </p>
-          </div>
-
-          <div style={{
-            padding: '24px',
-            background: '#1a1f2e',
-            borderRadius: '12px',
-            border: '1px solid #2d3748'
-          }}>
-            <BarChart3 size={32} style={{ color: '#f59e0b', marginBottom: '12px' }} />
-            <h3 style={{
-              color: '#e2e8f0',
-              fontSize: '16px',
-              fontWeight: '600',
-              margin: '0 0 8px 0'
-            }}>
-              Detailed Metrics
-            </h3>
-            <p style={{
-              color: '#94a3b8',
-              fontSize: '14px',
-              margin: 0,
-              lineHeight: '1.5'
-            }}>
-              Per-player, per-boss, and overall statistics
-            </p>
-          </div>
-
-          <div style={{
-            padding: '24px',
-            background: '#1a1f2e',
-            borderRadius: '12px',
-            border: '1px solid #2d3748'
-          }}>
-            <Shield size={32} style={{ color: '#8b5cf6', marginBottom: '12px' }} />
-            <h3 style={{
-              color: '#e2e8f0',
-              fontSize: '16px',
-              fontWeight: '600',
-              margin: '0 0 8px 0'
-            }}>
-              Shareable Results
-            </h3>
-            <p style={{
-              color: '#94a3b8',
-              fontSize: '14px',
-              margin: 0,
-              lineHeight: '1.5'
-            }}>
-              Share analysis with your guild
-            </p>
+            {onSavedReports && (
+              <button className="btn" onClick={onSavedReports}>
+                <FolderOpen size={18} />
+                Saved Reports
+              </button>
+            )}
           </div>
         </div>
 
-
-        {/* Recent Updates Section */}
-        <div style={{
-          marginTop: '80px',
-          paddingTop: '60px',
-          borderTop: '1px solid #2d3748'
-        }}>
-          <h2 style={{
-            fontSize: '32px',
-            fontWeight: '700',
-            color: '#e2e8f0',
-            marginBottom: '16px',
-            marginTop: 0
-          }}>
-            Recent Updates
-          </h2>
-          <p style={{
-            fontSize: '16px',
-            color: '#94a3b8',
-            marginBottom: '32px'
-          }}>
-            Latest improvements to Floor Pov
-          </p>
-
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '16px',
-            maxWidth: '700px',
-            margin: '0 auto',
-            textAlign: 'left'
-          }}>
-            {/* Update Item - Midnight Raids */}
-            <div style={{
-              padding: '20px',
-              background: '#1a1f2e',
-              borderRadius: '8px',
-              border: '1px solid #2d3748',
-              borderLeft: '4px solid #8b5cf6'
-            }}>
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'flex-start',
-                marginBottom: '8px'
-              }}>
-                <h3 style={{
-                  color: '#e2e8f0',
-                  fontSize: '16px',
-                  fontWeight: '600',
-                  margin: 0
-                }}>
-                  Midnight Raid Support
-                </h3>
-                <span style={{
-                  fontSize: '13px',
-                  color: '#64748b',
-                  whiteSpace: 'nowrap',
-                  marginLeft: '16px'
-                }}>
-                  Mar 17
-                </span>
-              </div>
-              <p style={{
-                color: '#94a3b8',
-                fontSize: '14px',
-                margin: 0,
-                lineHeight: '1.6'
-              }}>
-                Added support for all Midnight Season 1 raids: The Voidspire, The Dreamrift, and March on Quel'Danas.
-              </p>
+        <div className="investigation-board surface-panel">
+          <div className="stat-grid">
+            <div className="stat-tile">
+              <p className="stat-label">Deaths Tracked</p>
+              <p className="stat-value">128</p>
             </div>
-
-            {/* Update Item - Cheat Death Optimization */}
-            <div style={{
-              padding: '20px',
-              background: '#1a1f2e',
-              borderRadius: '8px',
-              border: '1px solid #2d3748',
-              borderLeft: '4px solid #10b981'
-            }}>
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'flex-start',
-                marginBottom: '8px'
-              }}>
-                <h3 style={{
-                  color: '#e2e8f0',
-                  fontSize: '16px',
-                  fontWeight: '600',
-                  margin: 0
-                }}>
-                  Optimized Cheat Death Detection
-                </h3>
-                <span style={{
-                  fontSize: '13px',
-                  color: '#64748b',
-                  whiteSpace: 'nowrap',
-                  marginLeft: '16px'
-                }}>
-                  Dec 8
-                </span>
-              </div>
-              <p style={{
-                color: '#94a3b8',
-                fontSize: '14px',
-                margin: 0,
-                lineHeight: '1.6'
-              }}>
-                Cheat death detection now available for logged-in users with improved deduplication logic.
-              </p>
-            </div>
-
-            {/* Update Item - Additional Raids */}
-            <div style={{
-              padding: '20px',
-              background: '#1a1f2e',
-              borderRadius: '8px',
-              border: '1px solid #2d3748',
-              borderLeft: '4px solid #3b82f6'
-            }}>
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'flex-start',
-                marginBottom: '8px'
-              }}>
-                <h3 style={{
-                  color: '#e2e8f0',
-                  fontSize: '16px',
-                  fontWeight: '600',
-                  margin: 0
-                }}>
-                  Added Support for Additional Raids
-                </h3>
-                <span style={{
-                  fontSize: '13px',
-                  color: '#64748b',
-                  whiteSpace: 'nowrap',
-                  marginLeft: '16px'
-                }}>
-                  Nov 20
-                </span>
-              </div>
-              <p style={{
-                color: '#94a3b8',
-                fontSize: '14px',
-                margin: 0,
-                lineHeight: '1.6'
-              }}>
-                Floor Pov now supports death tracking across all The War Within raids.
-              </p>
+            <div className="stat-tile">
+              <p className="stat-label">Pulls Reviewed</p>
+              <p className="stat-value">34</p>
             </div>
           </div>
+          {timeline.map(([time, label, detail, tone]) => (
+            <div className="timeline-row" key={`${time}-${label}`}>
+              <strong style={{ color: 'var(--color-gold-2)' }}>{time}</strong>
+              <span>
+                <b>{label}</b>
+                <br />
+                <span style={{ color: 'var(--color-muted)', fontSize: 13 }}>{detail}</span>
+              </span>
+              <span style={{ color: tone === 'good' ? 'var(--color-green)' : tone === 'warning' ? 'var(--color-gold-2)' : 'var(--color-red)' }}>
+                {tone === 'good' ? <Shield size={18} /> : <Skull size={18} />}
+              </span>
+            </div>
+          ))}
         </div>
+      </section>
 
-      </div>
-    </div>
+      <section className="feature-grid">
+        <div className="feature-card surface-panel">
+          <Clock3 color="var(--color-gold-2)" />
+          <h3>Early Pull Focus</h3>
+          <p>Track the first deaths per pull and keep late wipe noise from hiding mechanical failures.</p>
+        </div>
+        <div className="feature-card surface-panel">
+          <BarChart3 color="var(--color-blue)" />
+          <h3>Boss Pattern Charts</h3>
+          <p>Compare deaths, pull counts, rates, and player outliers in a single visual system.</p>
+        </div>
+        <div className="feature-card surface-panel">
+          <Users color="var(--color-green)" />
+          <h3>Roster-Aware Review</h3>
+          <p>Group alts with mains, filter low attendance, and keep class colors visible in dense tables.</p>
+        </div>
+      </section>
+
+      <section className="updates-list">
+        <div className="landing-eyebrow">Recent updates</div>
+        {updates.map(([title, copy, date]) => (
+          <div className="update-card surface-panel" key={title}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+              <h3 style={{ margin: 0 }}>{title}</h3>
+              <span style={{ color: 'var(--color-subtle)', whiteSpace: 'nowrap' }}>{date}</span>
+            </div>
+            <p style={{ color: 'var(--color-muted)', marginBottom: 0 }}>{copy}</p>
+          </div>
+        ))}
+        <Sparkles size={1} aria-hidden="true" />
+      </section>
+    </main>
   );
 }

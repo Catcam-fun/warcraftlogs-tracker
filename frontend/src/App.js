@@ -1,15 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { Search, AlertCircle, Loader2, Filter, ChevronDown, ChevronRight, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown, Share2, Copy, Check, LogOut, Settings as SettingsIcon, Info, X } from 'lucide-react';
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { supabase } from './supabaseClient';
 import Auth from './Auth';
 import Settings from './Settings';
 import LandingPage from './LandingPage';
 import TermsOfService from './TermsOfService';
 import PrivacyPolicy from './PrivacyPolicy';
-// import SaveReportDialog from './SaveReportDialog'; // DISABLED - Save Reports feature
-// import SavedReports from './SavedReports'; // DISABLED - Save Reports feature
-import AppHeader from './AppHeader';
 
 // Automatically detect if running locally or in production
 const API_URL = window.location.hostname === 'localhost' 
@@ -1302,6 +1300,49 @@ export default function WarcraftLogsApp() {
     return sortConfig.direction === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />;
   };
 
+  const getAnalysisChartData = () => {
+    if (!data) return { bossDeaths: [], playerRates: [] };
+
+    const { bosses, players, grid } = getOverviewData();
+    const bossDeaths = bosses.map(boss => {
+      const totals = players.reduce((acc, player) => {
+        const cell = grid[player]?.[boss];
+        if (!cell) return acc;
+        acc.deaths += cell.deaths || 0;
+        acc.pulls += cell.pulls || 0;
+        return acc;
+      }, { deaths: 0, pulls: 0 });
+
+      return {
+        boss,
+        deaths: totals.deaths,
+        pulls: totals.pulls,
+        rate: totals.pulls > 0 ? Number((totals.deaths / totals.pulls * 100).toFixed(1)) : 0
+      };
+    });
+
+    const playerRates = getFilteredStats()
+      .slice(0, 10)
+      .map(stat => ({
+        player: stat.player,
+        deaths: stat.realDeaths,
+        pulls: stat.pulls,
+        rate: Number(stat.realRate.toFixed(1))
+      }));
+
+    return { bossDeaths, playerRates };
+  };
+
+  const chartTooltip = {
+    contentStyle: {
+      background: '#090d15',
+      border: '1px solid rgba(215, 180, 90, 0.32)',
+      borderRadius: '8px',
+      color: '#f2f5f8'
+    },
+    labelStyle: { color: '#f5d779' }
+  };
+
   const formatTimestamp = (absTs) => {
     const date = new Date(absTs);
     return date.toLocaleString('en-US', { 
@@ -1383,15 +1424,15 @@ export default function WarcraftLogsApp() {
   // Show loading while checking auth
   if (authLoading) {
     return (
-      <div style={{ minHeight: '100vh', background: '#0a0e1a', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Loader2 size={48} style={{ color: '#3b82f6', animation: 'spin 1s linear infinite' }} />
+      <div className="fp-analysis analysis-shell" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Loader2 size={48} style={{ color: 'var(--color-gold-2)', animation: 'spin 1s linear infinite' }} />
       </div>
     );
   }
 
   // Main app (works for both logged in and anonymous users)
   return (
-    <div style={{ minHeight: '100vh', background: '#0a0e1a', color: '#e2e8f0', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+    <div className="fp-analysis analysis-shell app-shell" style={{ minHeight: '100vh' }}>
       <ScrollToTop />
       
       <Routes>
@@ -1425,16 +1466,9 @@ export default function WarcraftLogsApp() {
         <Route path="/*" element={
           <>
       {/* Sticky Header */}
-      <header style={{
-        position: 'sticky',
-        top: 0,
-        zIndex: 1000,
-        background: '#0f1419',
-        borderBottom: '1px solid #1e293b',
-        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)'
-      }}>
-        <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '16px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div 
+      <header className="app-header">
+        <div className="app-header-inner">
+          <div className="brand-lockup"
             onClick={() => {
               setData(null);
               setError('');
@@ -1442,51 +1476,25 @@ export default function WarcraftLogsApp() {
               setSortConfig({ key: null, direction: 'asc' });
               navigate('/');
             }}
-            style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: '12px',
-              cursor: 'pointer',
-              transition: 'opacity 0.2s'
-            }}
-            onMouseOver={(e) => { e.currentTarget.style.opacity = '0.8'; }}
-            onMouseOut={(e) => { e.currentTarget.style.opacity = '1'; }}
           >
-            <div style={{
-              width: '40px',
-              height: '40px',
-              background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
-              borderRadius: '8px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '16px',
-              fontWeight: '700',
-              color: '#ffffff'
-            }}>
-              FP
-            </div>
+            <div className="brand-mark">FP</div>
             <div>
-              <h1 style={{ margin: 0, fontSize: '20px', fontWeight: '700', color: '#ffffff' }}>
-                Floor Pov
-              </h1>
-              <p style={{ margin: 0, fontSize: '11px', color: '#64748b' }}>Death Analytics for World of Warcraft</p>
+              <h1 className="brand-title">Floor Pov</h1>
+              <p className="brand-subtitle">Late-night raid death analytics</p>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+          <div className="nav-actions">
             {data && location.pathname === '/results' && (
               <>
                 <button
-                  onClick={() => { 
-                    setData(null); 
-                    setError(''); 
-                    setExpandedPlayers(new Set()); 
-                    setSortConfig({ key: null, direction: 'asc' }); 
+                  className="btn"
+                  onClick={() => {
+                    setData(null);
+                    setError('');
+                    setExpandedPlayers(new Set());
+                    setSortConfig({ key: null, direction: 'asc' });
                     navigate('/analyze');
                   }}
-                  style={{ padding: '8px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', cursor: 'pointer', fontSize: '13px', fontWeight: '600', transition: 'all 0.2s' }}
-                  onMouseOver={(e) => { e.target.style.background = '#334155'; }}
-                  onMouseOut={(e) => { e.target.style.background = '#1e293b'; }}
                 >
                   New Analysis
                 </button>
@@ -1517,11 +1525,10 @@ export default function WarcraftLogsApp() {
                 )}
                 */}
                 <button
+                  className={`btn btn-success${sharingData ? ' btn-disabled' : ''}`}
                   onClick={handleShare}
                   disabled={sharingData}
-                  style={{ padding: '8px 16px', background: sharingData ? '#475569' : '#10b981', border: 'none', borderRadius: '6px', color: 'white', cursor: sharingData ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px', transition: 'all 0.2s' }}
-                  onMouseOver={(e) => { if (!sharingData) e.target.style.background = '#059669'; }}
-                  onMouseOut={(e) => { if (!sharingData) e.target.style.background = '#10b981'; }}
+                  style={{ opacity: sharingData ? 0.7 : 1, cursor: sharingData ? 'not-allowed' : 'pointer' }}
                 >
                   {sharingData ? (
                     <>
@@ -1538,78 +1545,19 @@ export default function WarcraftLogsApp() {
               </>
             )}
             {user ? (
-              <div style={{ 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: '12px',
-                padding: '8px 12px',
-                background: '#1e293b',
-                borderRadius: '6px',
-                fontSize: '13px'
-              }}>
-                <span style={{ color: '#94a3b8' }}>{user.email}</span>
-                <button
-                  onClick={() => setShowSettings(true)}
-                  style={{ 
-                    padding: '6px 12px', 
-                    background: '#334155', 
-                    border: '1px solid #475569', 
-                    borderRadius: '4px', 
-                    color: '#e2e8f0', 
-                    cursor: 'pointer', 
-                    fontSize: '12px', 
-                    fontWeight: '600',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    transition: 'all 0.2s'
-                  }}
-                  onMouseOver={(e) => { e.target.style.background = '#475569'; }}
-                  onMouseOut={(e) => { e.target.style.background = '#334155'; }}
-                >
+              <div className="user-pill">
+                <span>{user.email}</span>
+                <button className="btn" onClick={() => setShowSettings(true)}>
                   <SettingsIcon size={14} />
                   Settings
                 </button>
-                <button
-                  onClick={handleLogout}
-                  style={{ 
-                    padding: '6px 12px', 
-                    background: '#334155', 
-                    border: '1px solid #475569', 
-                    borderRadius: '4px', 
-                    color: '#e2e8f0', 
-                    cursor: 'pointer', 
-                    fontSize: '12px', 
-                    fontWeight: '600',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    transition: 'all 0.2s'
-                  }}
-                  onMouseOver={(e) => { e.target.style.background = '#475569'; }}
-                  onMouseOut={(e) => { e.target.style.background = '#334155'; }}
-                >
+                <button className="btn" onClick={handleLogout}>
                   <LogOut size={14} />
                   Logout
                 </button>
               </div>
             ) : (
-              <button
-                onClick={() => setShowAuthModal(true)}
-                style={{ 
-                  padding: '8px 16px', 
-                  background: '#3b82f6', 
-                  border: 'none', 
-                  borderRadius: '6px', 
-                  color: '#fff', 
-                  cursor: 'pointer', 
-                  fontSize: '13px', 
-                  fontWeight: '600',
-                  transition: 'all 0.2s'
-                }}
-                onMouseOver={(e) => { e.target.style.background = '#2563eb'; }}
-                onMouseOut={(e) => { e.target.style.background = '#3b82f6'; }}
-              >
+              <button className="btn btn-primary" onClick={() => setShowAuthModal(true)}>
                 Sign In
               </button>
             )}
@@ -1674,24 +1622,21 @@ export default function WarcraftLogsApp() {
           justifyContent: 'center',
           zIndex: 10000
         }}>
-          <div style={{
-            background: '#1a1f2e',
+          <div className="surface-panel" style={{
             padding: '30px',
-            borderRadius: '12px',
-            border: '2px solid #3b82f6',
+            border: '1px solid var(--color-border-strong)',
             maxWidth: '500px',
             width: '90%'
           }}>
-            <h2 style={{ 
-              color: '#ffffff', 
-              marginTop: 0, 
+            <h2 style={{
+              marginTop: 0,
               marginBottom: '20px',
               fontSize: '24px',
               display: 'flex',
               alignItems: 'center',
               gap: '10px'
             }}>
-              <Share2 size={24} style={{ color: '#3b82f6' }} />
+              <Share2 size={24} style={{ color: 'var(--color-gold-2)' }} />
               Shareable Link Created!
             </h2>
             <p style={{ color: '#8b92a0', marginBottom: '15px' }}>
@@ -1721,20 +1666,8 @@ export default function WarcraftLogsApp() {
               />
               <button
                 onClick={copyToClipboard}
-                style={{
-                  background: copied ? '#10b981' : '#3b82f6',
-                  color: '#ffffff',
-                  border: 'none',
-                  padding: '8px 16px',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  fontSize: '14px',
-                  fontWeight: '600',
-                  transition: 'all 0.2s'
-                }}
+                className={copied ? 'btn btn-success' : 'btn btn-primary'}
+                style={{ flexShrink: 0 }}
               >
                 {copied ? (
                   <>
@@ -1770,7 +1703,7 @@ export default function WarcraftLogsApp() {
         </div>
       )}
 
-      <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '24px' }}>
+      <div className="analysis-content" style={{ maxWidth: '1400px', margin: '0 auto', padding: '24px' }}>
         {loading && (
           <div style={{ 
             position: 'fixed', 
@@ -1786,11 +1719,11 @@ export default function WarcraftLogsApp() {
             backdropFilter: 'blur(8px)'
           }}>
             <div style={{ textAlign: 'center', maxWidth: '500px', padding: '40px' }}>
-              <div style={{ 
-                width: '80px', 
-                height: '80px', 
-                border: '4px solid #1e293b', 
-                borderTop: '4px solid #3b82f6',
+              <div style={{
+                width: '80px',
+                height: '80px',
+                border: '4px solid var(--color-border)',
+                borderTop: '4px solid var(--color-gold-2)',
                 borderRadius: '50%',
                 animation: 'spin 1s linear infinite',
                 margin: '0 auto 24px'
@@ -1812,7 +1745,7 @@ export default function WarcraftLogsApp() {
                 <p style={{ 
                   margin: 0, 
                   fontSize: '14px', 
-                  color: '#60a5fa', 
+                  color: 'var(--color-info)', 
                   fontWeight: '500',
                   lineHeight: '1.6'
                 }}>
@@ -1854,51 +1787,30 @@ export default function WarcraftLogsApp() {
           } />
           
           <Route path="/analyze" element={
-          <div style={{ background: '#1a1f2e', borderRadius: '12px', padding: '24px', marginBottom: '20px', border: '1px solid #2d3748' }}>
+          <div className="surface-panel" style={{ padding: '24px', marginBottom: '20px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-              <h2 style={{ margin: 0, fontSize: '18px', fontWeight: '600', color: '#ffffff' }}>Configuration</h2>
+              <h2 style={{ margin: 0, fontSize: '18px', fontWeight: '700' }}>Configuration</h2>
               <button
+                className="btn"
                 onClick={() => setShowInfoModal(true)}
-                style={{
-                  padding: '8px 16px',
-                  background: '#1e293b',
-                  border: '1px solid #3b82f6',
-                  borderRadius: '6px',
-                  color: '#3b82f6',
-                  cursor: 'pointer',
-                  fontSize: '13px',
-                  fontWeight: '600',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  transition: 'all 0.2s'
-                }}
-                onMouseOver={(e) => { 
-                  e.target.style.background = '#3b82f6'; 
-                  e.target.style.color = '#ffffff';
-                }}
-                onMouseOut={(e) => { 
-                  e.target.style.background = '#1e293b'; 
-                  e.target.style.color = '#3b82f6';
-                }}
               >
                 <Info size={16} />
                 How It Works
               </button>
             </div>
-            
-            <div style={{ marginBottom: '24px', padding: '14px 16px', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.3)', borderRadius: '8px' }}>
+
+            <div style={{ marginBottom: '24px', padding: '14px 16px', background: 'rgba(215, 180, 90, 0.06)', border: '1px solid var(--color-border-strong)', borderRadius: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'start', gap: '10px' }}>
                 <div style={{ fontSize: '18px' }}>🔑</div>
                 <div>
-                  <h3 style={{ margin: '0 0 6px', fontSize: '14px', fontWeight: '600', color: '#60a5fa' }}>
+                  <h3 style={{ margin: '0 0 6px', fontSize: '14px', fontWeight: '600', color: 'var(--color-gold-2)' }}>
                     Need API Credentials?
                   </h3>
                   <p style={{ margin: '0 0 6px', fontSize: '12px', color: '#cbd5e1', lineHeight: '1.6' }}>
                     You need a WarcraftLogs V2 API Client ID and Secret to use this tool.
                   </p>
                   <ol style={{ margin: '6px 0 0 16px', padding: 0, fontSize: '12px', color: '#cbd5e1', lineHeight: '1.7' }}>
-                    <li>Go to <a href="https://www.warcraftlogs.com/api/clients/" target="_blank" rel="noopener noreferrer" style={{ color: '#60a5fa', textDecoration: 'underline' }}>WarcraftLogs API Clients</a></li>
+                    <li>Go to <a href="https://www.warcraftlogs.com/api/clients/" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-info)', textDecoration: 'underline' }}>WarcraftLogs API Clients</a></li>
                     <li>Click "Create a Client"</li>
                     <li>Enter a name (e.g., "Death Tracker")</li>
                     <li>For redirect URL, enter the website URL or just use: <code style={{ background: '#0f1419', padding: '2px 6px', borderRadius: '3px', fontSize: '11px' }}>http://localhost</code></li>
@@ -1931,7 +1843,7 @@ export default function WarcraftLogsApp() {
                     <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
                       <a 
                         onClick={() => setShowAuthModal(true)}
-                        style={{ color: '#3b82f6', cursor: 'pointer', textDecoration: 'underline' }}
+                        style={{ color: 'var(--color-gold-2)', cursor: 'pointer', textDecoration: 'underline' }}
                       >
                         Sign in
                       </a> to save your credentials
@@ -1959,7 +1871,7 @@ export default function WarcraftLogsApp() {
                     <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b', lineHeight: '1.4' }}>
                       <a 
                         onClick={() => setShowAuthModal(true)}
-                        style={{ color: '#3b82f6', cursor: 'pointer', textDecoration: 'underline' }}
+                        style={{ color: 'var(--color-gold-2)', cursor: 'pointer', textDecoration: 'underline' }}
                       >
                         Sign in
                       </a> to save your credentials
@@ -2213,7 +2125,7 @@ export default function WarcraftLogsApp() {
                   <span>Enable cheat death detection</span>
                   <span style={{ fontSize: '11px', color: '#f59e0b', fontWeight: '400' }}>(+20-30s slower)</span>
                   {!user && (
-                    <span style={{ fontSize: '11px', color: '#3b82f6', fontWeight: '500' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--color-info)', fontWeight: '500' }}>
                       (Account required)
                     </span>
                   )}
@@ -2225,7 +2137,7 @@ export default function WarcraftLogsApp() {
                     <>
                       <a 
                         onClick={() => setShowAuthModal(true)}
-                        style={{ color: '#3b82f6', cursor: 'pointer', textDecoration: 'underline' }}
+                        style={{ color: 'var(--color-gold-2)', cursor: 'pointer', textDecoration: 'underline' }}
                       >
                         Sign in
                       </a> to enable cheat death detection. Detects deaths prevented by Cauterize, Spirit of Redemption, Cheat Death, etc.
@@ -2263,7 +2175,8 @@ export default function WarcraftLogsApp() {
             <button
               onClick={handleSubmit}
               disabled={loading}
-              style={{ marginTop: '24px', padding: '12px 24px', background: loading ? '#334155' : '#3b82f6', border: 'none', borderRadius: '6px', color: 'white', fontSize: '14px', fontWeight: '600', cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.6 : 1, display: 'flex', alignItems: 'center', gap: '8px' }}
+              className="btn btn-primary"
+              style={{ marginTop: '24px', padding: '12px 24px', opacity: loading ? 0.6 : 1, cursor: loading ? 'not-allowed' : 'pointer' }}
             >
               {loading ? (
                 <>
@@ -2279,15 +2192,13 @@ export default function WarcraftLogsApp() {
             </button>
 
             {/* Why Death Counts May Vary */}
-            <div style={{
-              background: '#1a1f2e',
-              border: '1px solid #3b82f6',
-              borderRadius: '12px',
+            <div className="inset-panel" style={{
               padding: '24px',
-              marginTop: '32px'
+              marginTop: '32px',
+              borderColor: 'var(--color-border-strong)'
             }}>
               <h3 style={{
-                color: '#60a5fa',
+                color: 'var(--color-info)',
                 fontSize: '16px',
                 fontWeight: '600',
                 marginTop: 0,
@@ -2355,6 +2266,46 @@ export default function WarcraftLogsApp() {
               </div>
             </div>
 
+            {(() => {
+              const { bossDeaths, playerRates } = getAnalysisChartData();
+              return (
+                <div className="chart-grid" style={{ marginBottom: '16px' }}>
+                  <div className="chart-panel">
+                    <h2 className="chart-title">Deaths by Boss</h2>
+                    {bossDeaths.length > 0 ? (
+                      <ResponsiveContainer width="100%" height={230}>
+                        <BarChart data={bossDeaths} margin={{ top: 8, right: 12, left: -18, bottom: 48 }}>
+                          <CartesianGrid stroke="rgba(147, 165, 196, 0.14)" vertical={false} />
+                          <XAxis dataKey="boss" angle={-28} textAnchor="end" interval={0} height={70} />
+                          <YAxis allowDecimals={false} />
+                          <Tooltip {...chartTooltip} />
+                          <Bar dataKey="deaths" name="Deaths" fill="var(--chart-2)" radius={[6, 6, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="chart-empty">No boss death data for the active filters.</div>
+                    )}
+                  </div>
+                  <div className="chart-panel">
+                    <h2 className="chart-title">Highest Death Rates</h2>
+                    {playerRates.length > 0 ? (
+                      <ResponsiveContainer width="100%" height={230}>
+                        <BarChart data={playerRates} layout="vertical" margin={{ top: 8, right: 18, left: 24, bottom: 8 }}>
+                          <CartesianGrid stroke="rgba(147, 165, 196, 0.14)" horizontal={false} />
+                          <XAxis type="number" unit="%" />
+                          <YAxis type="category" dataKey="player" width={92} />
+                          <Tooltip {...chartTooltip} />
+                          <Bar dataKey="rate" name="Death rate" fill="var(--chart-1)" radius={[0, 6, 6, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="chart-empty">No player rate data for the active filters.</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
             <div style={{ background: '#1a1f2e', borderRadius: '8px', padding: '14px', marginBottom: '16px', border: '1px solid #2d3748' }}>
               <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#cbd5e1' }}>
@@ -2416,7 +2367,7 @@ export default function WarcraftLogsApp() {
                   <button
                     key={boss}
                     onClick={() => toggleBoss(boss)}
-                    style={{ padding: '4px 10px', background: selectedBosses.has(boss) ? '#3b82f6' : '#2d3748', border: '1px solid ' + (selectedBosses.has(boss) ? '#3b82f6' : '#334155'), borderRadius: '14px', color: 'white', cursor: 'pointer', fontSize: '12px' }}
+                    style={{ padding: '4px 10px', background: selectedBosses.has(boss) ? 'var(--color-gold)' : 'rgba(28, 38, 56, 0.9)', border: '1px solid ' + (selectedBosses.has(boss) ? 'var(--color-gold-2)' : 'var(--color-border)'), borderRadius: '14px', color: selectedBosses.has(boss) ? '#140f04' : 'var(--color-text)', cursor: 'pointer', fontSize: '12px', fontWeight: selectedBosses.has(boss) ? '700' : '400' }}
                   >
                     {boss}
                   </button>
@@ -2522,13 +2473,14 @@ export default function WarcraftLogsApp() {
                   {showGroupingUI ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                   Group Characters (Merge Alts with Mains)
                   {Object.keys(characterGroups).length > 0 && (
-                    <span style={{ 
-                      marginLeft: 'auto', 
-                      padding: '2px 8px', 
-                      background: '#3b82f6', 
-                      borderRadius: '10px', 
+                    <span style={{
+                      marginLeft: 'auto',
+                      padding: '2px 8px',
+                      background: 'var(--color-gold)',
+                      color: '#140f04',
+                      borderRadius: '10px',
                       fontSize: '11px',
-                      fontWeight: '600'
+                      fontWeight: '700'
                     }}>
                       {Object.keys(characterGroups).length} {Object.keys(characterGroups).length === 1 ? 'group' : 'groups'}
                     </span>
@@ -2581,7 +2533,7 @@ export default function WarcraftLogsApp() {
                                   gap: '8px'
                                 }}
                               >
-                                <span style={{ color: '#3b82f6', fontSize: '12px', fontWeight: '600' }}>
+                                <span style={{ color: 'var(--color-gold-2)', fontSize: '12px', fontWeight: '600' }}>
                                   {main}
                                 </span>
                                 <span style={{ color: '#64748b', fontSize: '11px' }}>+</span>
@@ -2646,13 +2598,13 @@ export default function WarcraftLogsApp() {
                               }}
                               style={{
                                 padding: '6px 10px',
-                                background: isSelected ? '#3b82f6' : '#1a1f2e',
-                                border: '1px solid ' + (isSelected ? '#3b82f6' : '#2d3748'),
+                                background: isSelected ? 'var(--color-gold)' : 'rgba(9, 13, 21, 0.72)',
+                                border: '1px solid ' + (isSelected ? 'var(--color-gold-2)' : 'var(--color-border)'),
                                 borderRadius: '4px',
-                                color: isSelected ? '#fff' : classColor,
+                                color: isSelected ? '#140f04' : classColor,
                                 cursor: 'pointer',
                                 fontSize: '11px',
-                                fontWeight: '500',
+                                fontWeight: isSelected ? '700' : '500',
                                 textAlign: 'left',
                                 transition: 'all 0.2s'
                               }}
@@ -3036,7 +2988,7 @@ export default function WarcraftLogsApp() {
                             
                             return (
                             <div key={boss} style={{ marginTop: '10px' }}>
-                              <h4 style={{ margin: '0 0 8px', fontSize: '13px', fontWeight: '600', color: '#3b82f6' }}>
+                              <h4 style={{ margin: '0 0 8px', fontSize: '13px', fontWeight: '600', color: 'var(--color-info)' }}>
                                 {boss}
                                 {showBothStats && cheatDeathCount > 0 ? (
                                   <div style={{ fontSize: '12px', fontWeight: '400', marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
@@ -3109,11 +3061,11 @@ export default function WarcraftLogsApp() {
                                         href={getWCLLink(death.reportId, death.fightId)} 
                                         target="_blank" 
                                         rel="noopener noreferrer"
-                                        style={{ 
-                                          display: 'flex', 
-                                          alignItems: 'center', 
-                                          gap: '4px', 
-                                          color: '#3b82f6', 
+                                        style={{
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          gap: '4px',
+                                          color: 'var(--color-info)',
                                           textDecoration: 'none',
                                           fontSize: '11px'
                                         }}
@@ -3138,7 +3090,7 @@ export default function WarcraftLogsApp() {
                                           alignItems: 'center'
                                         }}>
                                           <span style={{ 
-                                            color: '#60a5fa', 
+                                            color: 'var(--color-info)', 
                                             fontSize: '10px',
                                             fontWeight: '600',
                                             marginRight: '4px'
@@ -3213,17 +3165,9 @@ export default function WarcraftLogsApp() {
                   {error ? error : 'No analysis data yet. Configure and run an analysis to see results.'}
                 </p>
                 <button
+                  className="btn btn-primary"
                   onClick={() => navigate('/analyze')}
-                  style={{
-                    padding: '10px 20px',
-                    background: '#3b82f6',
-                    border: 'none',
-                    borderRadius: '6px',
-                    color: '#fff',
-                    fontSize: '14px',
-                    fontWeight: '600',
-                    cursor: 'pointer'
-                  }}
+                  style={{ padding: '10px 20px' }}
                 >
                   Run Analysis
                 </button>
@@ -3254,17 +3198,9 @@ export default function WarcraftLogsApp() {
                     Saved reports feature coming soon!
                   </p>
                   <button
+                    className="btn btn-primary"
                     onClick={() => navigate('/analyze')}
-                    style={{
-                      padding: '10px 20px',
-                      background: '#3b82f6',
-                      border: 'none',
-                      borderRadius: '6px',
-                      color: '#fff',
-                      fontSize: '14px',
-                      fontWeight: '600',
-                      cursor: 'pointer'
-                    }}
+                    style={{ padding: '10px 20px' }}
                   >
                     Run New Analysis
                   </button>
@@ -3322,17 +3258,15 @@ export default function WarcraftLogsApp() {
           padding: '20px',
           overflowY: 'auto'
         }}>
-          <div style={{
+          <div className="surface-panel" style={{
             maxWidth: '700px',
             width: '100%',
-            background: '#1a1f2e',
-            borderRadius: '12px',
-            border: '2px solid #3b82f6',
+            border: '1px solid var(--color-border-strong)',
             position: 'relative',
             maxHeight: '90vh',
             overflowY: 'auto'
           }}>
-            <div style={{ position: 'sticky', top: 0, background: '#1a1f2e', padding: '24px 24px 16px', borderBottom: '1px solid #2d3748', zIndex: 1 }}>
+            <div style={{ position: 'sticky', top: 0, background: 'var(--color-surface)', padding: '24px 24px 16px', borderBottom: '1px solid var(--color-border)', zIndex: 1 }}>
               <button
                 onClick={() => setShowInfoModal(false)}
                 style={{
@@ -3341,7 +3275,7 @@ export default function WarcraftLogsApp() {
                   right: '16px',
                   background: 'transparent',
                   border: 'none',
-                  color: '#94a3b8',
+                  color: 'var(--color-muted)',
                   cursor: 'pointer',
                   padding: '4px',
                   display: 'flex',
@@ -3350,8 +3284,8 @@ export default function WarcraftLogsApp() {
               >
                 <X size={20} />
               </button>
-              <h2 style={{ 
-                color: '#3b82f6', 
+              <h2 style={{
+                color: 'var(--color-gold-2)',
                 margin: 0,
                 fontSize: '24px',
                 fontWeight: '700',
@@ -3365,7 +3299,7 @@ export default function WarcraftLogsApp() {
             </div>
 
             <div style={{ padding: '24px', color: '#e2e8f0', lineHeight: '1.7' }}>
-              <h3 style={{ color: '#60a5fa', fontSize: '18px', marginTop: 0, marginBottom: '12px' }}>
+              <h3 style={{ color: 'var(--color-info)', fontSize: '18px', marginTop: 0, marginBottom: '12px' }}>
                 Data Collection & Processing
               </h3>
               <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
@@ -3378,7 +3312,7 @@ export default function WarcraftLogsApp() {
                 <li style={{ marginBottom: '8px' }}>Calculating death rates (deaths per pull) for each player and boss</li>
               </ul>
 
-              <h3 style={{ color: '#60a5fa', fontSize: '18px', marginBottom: '12px' }}>
+              <h3 style={{ color: 'var(--color-info)', fontSize: '18px', marginBottom: '12px' }}>
                 Data Validation & Completeness
               </h3>
               <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '12px' }}>
@@ -3391,7 +3325,7 @@ export default function WarcraftLogsApp() {
                 <li style={{ marginBottom: '8px' }}><strong>Missing data detection:</strong> Identifies and handles edge cases where WarcraftLogs data may be incomplete or corrupted</li>
               </ul>
 
-              <h3 style={{ color: '#60a5fa', fontSize: '18px', marginBottom: '12px' }}>
+              <h3 style={{ color: 'var(--color-info)', fontSize: '18px', marginBottom: '12px' }}>
                 Deduplication & Data Accuracy
               </h3>
               <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '12px' }}>
@@ -3404,7 +3338,7 @@ export default function WarcraftLogsApp() {
                 <li style={{ marginBottom: '8px' }}><strong>Mass death detection:</strong> Identifies raid wipes (7+ deaths within 10 seconds) to properly track fight boundaries</li>
               </ul>
 
-              <h3 style={{ color: '#60a5fa', fontSize: '18px', marginBottom: '12px' }}>
+              <h3 style={{ color: 'var(--color-info)', fontSize: '18px', marginBottom: '12px' }}>
                 Why Death Counts May Vary Between Runs
               </h3>
               <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '12px' }}>
@@ -3415,11 +3349,11 @@ export default function WarcraftLogsApp() {
                 <li style={{ marginBottom: '8px' }}><strong>Timestamp edge cases:</strong> Deaths occurring exactly at fight end boundaries may be handled differently</li>
                 <li style={{ marginBottom: '8px' }}><strong>WarcraftLogs API updates:</strong> The upstream data source occasionally corrects or updates historical data</li>
               </ul>
-              <p style={{ color: '#94a3b8', fontSize: '13px', fontStyle: 'italic', background: '#0f1419', padding: '12px', borderRadius: '6px', borderLeft: '3px solid #3b82f6' }}>
+              <p style={{ color: '#94a3b8', fontSize: '13px', fontStyle: 'italic', background: '#0f1419', padding: '12px', borderRadius: '6px', borderLeft: '3px solid var(--color-info)' }}>
                 💡 <strong>Tip:</strong> These variations are maybe a death per character and don't significantly impact death rate percentages. The tool prioritizes accuracy over perfect consistency.
               </p>
 
-              <h3 style={{ color: '#60a5fa', fontSize: '18px', marginTop: '24px', marginBottom: '12px' }}>
+              <h3 style={{ color: 'var(--color-info)', fontSize: '18px', marginTop: '24px', marginBottom: '12px' }}>
                 Cheat Death Detection (Premium)
               </h3>
               <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '12px' }}>
@@ -3437,7 +3371,7 @@ export default function WarcraftLogsApp() {
                 Note: Cheat death detection requires 1 additional API call per report and adds ~20-30 seconds to analysis time.
               </p>
 
-              <h3 style={{ color: '#60a5fa', fontSize: '18px', marginTop: '24px', marginBottom: '12px' }}>
+              <h3 style={{ color: 'var(--color-info)', fontSize: '18px', marginTop: '24px', marginBottom: '12px' }}>
                 Character Grouping (Alts)
               </h3>
               <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '12px' }}>
@@ -3449,7 +3383,7 @@ export default function WarcraftLogsApp() {
                 <li style={{ marginBottom: '8px' }}>Combined death rate calculations</li>
               </ul>
 
-              <h3 style={{ color: '#60a5fa', fontSize: '18px', marginBottom: '12px' }}>
+              <h3 style={{ color: 'var(--color-info)', fontSize: '18px', marginBottom: '12px' }}>
                 Questions or Issues?
               </h3>
               <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '8px' }}>
@@ -3481,17 +3415,15 @@ export default function WarcraftLogsApp() {
           padding: '20px',
           overflowY: 'auto'
         }}>
-          <div style={{
+          <div className="surface-panel" style={{
             maxWidth: '700px',
             width: '100%',
-            background: '#1a1f2e',
-            borderRadius: '12px',
-            border: '2px solid #3b82f6',
+            border: '1px solid var(--color-border-strong)',
             position: 'relative',
             maxHeight: '90vh',
             overflowY: 'auto'
           }}>
-            <div style={{ position: 'sticky', top: 0, background: '#1a1f2e', padding: '24px 24px 16px', borderBottom: '1px solid #2d3748', zIndex: 1 }}>
+            <div style={{ position: 'sticky', top: 0, background: 'var(--color-surface)', padding: '24px 24px 16px', borderBottom: '1px solid var(--color-border)', zIndex: 1 }}>
               <button
                 onClick={() => setShowTermsModal(false)}
                 style={{
@@ -3500,7 +3432,7 @@ export default function WarcraftLogsApp() {
                   right: '16px',
                   background: 'transparent',
                   border: 'none',
-                  color: '#94a3b8',
+                  color: 'var(--color-muted)',
                   cursor: 'pointer',
                   padding: '4px',
                   display: 'flex',
@@ -3509,8 +3441,8 @@ export default function WarcraftLogsApp() {
               >
                 <X size={20} />
               </button>
-              <h2 style={{ 
-                color: '#3b82f6', 
+              <h2 style={{
+                color: 'var(--color-gold-2)',
                 margin: 0,
                 fontSize: '24px',
                 fontWeight: '700'
@@ -3524,7 +3456,7 @@ export default function WarcraftLogsApp() {
                 Last Updated: November 21, 2025
               </p>
 
-              <h3 style={{ color: '#60a5fa', fontSize: '18px', marginTop: 0, marginBottom: '12px' }}>
+              <h3 style={{ color: 'var(--color-info)', fontSize: '18px', marginTop: 0, marginBottom: '12px' }}>
                 1. Terms of Service
               </h3>
               
@@ -3594,7 +3526,7 @@ export default function WarcraftLogsApp() {
                 These terms are governed by the laws of the State of Florida, United States. Any disputes shall be resolved in the appropriate courts of Florida.
               </p>
 
-              <h3 style={{ color: '#60a5fa', fontSize: '18px', marginTop: '24px', marginBottom: '12px' }}>
+              <h3 style={{ color: 'var(--color-info)', fontSize: '18px', marginTop: '24px', marginBottom: '12px' }}>
                 2. Privacy Policy
               </h3>
 
@@ -3695,14 +3627,14 @@ export default function WarcraftLogsApp() {
                 We do not use third-party tracking or advertising cookies.
               </p>
 
-              <h3 style={{ color: '#60a5fa', fontSize: '18px', marginTop: '24px', marginBottom: '12px' }}>
+              <h3 style={{ color: 'var(--color-info)', fontSize: '18px', marginTop: '24px', marginBottom: '12px' }}>
                 3. Changes to These Terms
               </h3>
               <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
                 We may update these terms as the Service evolves. Continued use of the Service after changes constitutes acceptance of the updated terms. Major changes will be announced via email and on the site.
               </p>
 
-              <h3 style={{ color: '#60a5fa', fontSize: '18px', marginTop: '24px', marginBottom: '12px' }}>
+              <h3 style={{ color: 'var(--color-info)', fontSize: '18px', marginTop: '24px', marginBottom: '12px' }}>
                 4. Contact
               </h3>
               <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '0' }}>
@@ -3725,15 +3657,14 @@ export default function WarcraftLogsApp() {
       */}
 
       {/* Footer */}
-      <footer style={{
-        background: '#0f1419',
-        borderTop: '1px solid #1e293b',
+      <footer className="fp-footer" style={{
+        background: 'rgba(9, 13, 21, 0.94)',
+        borderTop: '1px solid var(--color-border)',
         marginTop: '60px',
         padding: '40px 24px',
-        color: '#94a3b8'
+        color: 'var(--color-muted)'
       }}>
         <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
-          {/* Links Section */}
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
@@ -3741,33 +3672,34 @@ export default function WarcraftLogsApp() {
           }}>
             <div>
               <h4 style={{
-                color: '#e2e8f0',
+                color: 'var(--color-text)',
                 fontSize: '12px',
-                fontWeight: '600',
+                fontWeight: '700',
                 marginBottom: '12px',
                 marginTop: 0,
-                letterSpacing: '0.05em'
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase'
               }}>
-                RESOURCES
+                Resources
               </h4>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <a 
-                  href="https://www.warcraftlogs.com/api/clients" 
-                  target="_blank" 
+                <a
+                  href="https://www.warcraftlogs.com/api/clients"
+                  target="_blank"
                   rel="noopener noreferrer"
-                  style={{ color: '#94a3b8', fontSize: '13px', textDecoration: 'none', transition: 'color 0.2s' }}
-                  onMouseOver={(e) => e.target.style.color = '#3b82f6'}
-                  onMouseOut={(e) => e.target.style.color = '#94a3b8'}
+                  style={{ color: 'var(--color-muted)', fontSize: '13px', textDecoration: 'none' }}
+                  onMouseOver={(e) => e.target.style.color = 'var(--color-gold-2)'}
+                  onMouseOut={(e) => e.target.style.color = 'var(--color-muted)'}
                 >
                   WarcraftLogs API
                 </a>
-                <a 
-                  href="https://www.warcraftlogs.com/" 
-                  target="_blank" 
+                <a
+                  href="https://www.warcraftlogs.com/"
+                  target="_blank"
                   rel="noopener noreferrer"
-                  style={{ color: '#94a3b8', fontSize: '13px', textDecoration: 'none', transition: 'color 0.2s' }}
-                  onMouseOver={(e) => e.target.style.color = '#3b82f6'}
-                  onMouseOut={(e) => e.target.style.color = '#94a3b8'}
+                  style={{ color: 'var(--color-muted)', fontSize: '13px', textDecoration: 'none' }}
+                  onMouseOver={(e) => e.target.style.color = 'var(--color-gold-2)'}
+                  onMouseOut={(e) => e.target.style.color = 'var(--color-muted)'}
                 >
                   WarcraftLogs
                 </a>
@@ -3776,57 +3708,47 @@ export default function WarcraftLogsApp() {
 
             <div>
               <h4 style={{
-                color: '#e2e8f0',
+                color: 'var(--color-text)',
                 fontSize: '12px',
-                fontWeight: '600',
+                fontWeight: '700',
                 marginBottom: '12px',
                 marginTop: 0,
-                letterSpacing: '0.05em'
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase'
               }}>
-                ABOUT
+                About
               </h4>
-              <p style={{ color: '#64748b', fontSize: '12px', lineHeight: '1.6', margin: 0 }}>
+              <p style={{ color: 'var(--color-subtle)', fontSize: '12px', lineHeight: '1.6', margin: 0 }}>
                 Floor Pov is a death analytics tool for World of Warcraft guilds using WarcraftLogs data.
               </p>
             </div>
 
             <div>
               <h4 style={{
-                color: '#e2e8f0',
+                color: 'var(--color-text)',
                 fontSize: '12px',
-                fontWeight: '600',
+                fontWeight: '700',
                 marginBottom: '12px',
                 marginTop: 0,
-                letterSpacing: '0.05em'
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase'
               }}>
-                LEGAL
+                Legal
               </h4>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <a 
+                <a
                   onClick={() => navigate('/terms')}
-                  style={{ 
-                    color: '#94a3b8', 
-                    fontSize: '13px', 
-                    textDecoration: 'none', 
-                    transition: 'color 0.2s',
-                    cursor: 'pointer'
-                  }}
-                  onMouseOver={(e) => e.target.style.color = '#3b82f6'}
-                  onMouseOut={(e) => e.target.style.color = '#94a3b8'}
+                  style={{ color: 'var(--color-muted)', fontSize: '13px', textDecoration: 'none', cursor: 'pointer' }}
+                  onMouseOver={(e) => e.target.style.color = 'var(--color-gold-2)'}
+                  onMouseOut={(e) => e.target.style.color = 'var(--color-muted)'}
                 >
                   Terms of Service
                 </a>
-                <a 
+                <a
                   onClick={() => navigate('/privacy')}
-                  style={{ 
-                    color: '#94a3b8', 
-                    fontSize: '13px', 
-                    textDecoration: 'none', 
-                    transition: 'color 0.2s',
-                    cursor: 'pointer'
-                  }}
-                  onMouseOver={(e) => e.target.style.color = '#3b82f6'}
-                  onMouseOut={(e) => e.target.style.color = '#94a3b8'}
+                  style={{ color: 'var(--color-muted)', fontSize: '13px', textDecoration: 'none', cursor: 'pointer' }}
+                  onMouseOver={(e) => e.target.style.color = 'var(--color-gold-2)'}
+                  onMouseOut={(e) => e.target.style.color = 'var(--color-muted)'}
                 >
                   Privacy Policy
                 </a>
@@ -3835,25 +3757,21 @@ export default function WarcraftLogsApp() {
 
             <div>
               <h4 style={{
-                color: '#e2e8f0',
+                color: 'var(--color-text)',
                 fontSize: '12px',
-                fontWeight: '600',
+                fontWeight: '700',
                 marginBottom: '12px',
                 marginTop: 0,
-                letterSpacing: '0.05em'
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase'
               }}>
-                CONTACT
+                Contact
               </h4>
-              <a 
+              <a
                 href="mailto:support@floorpov.gg"
-                style={{ 
-                  color: '#94a3b8', 
-                  fontSize: '13px', 
-                  textDecoration: 'none', 
-                  transition: 'color 0.2s'
-                }}
-                onMouseOver={(e) => e.target.style.color = '#3b82f6'}
-                onMouseOut={(e) => e.target.style.color = '#94a3b8'}
+                style={{ color: 'var(--color-muted)', fontSize: '13px', textDecoration: 'none' }}
+                onMouseOver={(e) => e.target.style.color = 'var(--color-gold-2)'}
+                onMouseOut={(e) => e.target.style.color = 'var(--color-muted)'}
               >
                 support@floorpov.gg
               </a>
