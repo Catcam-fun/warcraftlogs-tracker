@@ -245,30 +245,8 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
   };
 
   return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      background: 'rgba(0, 0, 0, 0.85)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 9999
-    }}>
-      <div style={{
-        maxWidth: '600px',
-        width: '90%',
-        margin: '0 auto',
-        padding: '32px',
-        border: '1px solid #3b82f6',
-        borderRadius: '12px',
-        backgroundColor: '#1a1a2e',
-        position: 'relative',
-        maxHeight: '90vh',
-        overflowY: 'auto'
-      }}>
+    <div className="fp-settings settings-shell">
+      <div className="settings-card surface-panel" style={{ position: 'relative' }}>
         <button
           onClick={onClose}
           style={{
@@ -285,8 +263,8 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
           <X size={20} />
         </button>
 
-        <h2 style={{ 
-          color: '#3b82f6', 
+        <h2 style={{
+          color: 'var(--color-gold-2)',
           marginBottom: '8px',
           marginTop: 0,
           fontSize: '24px'
@@ -295,21 +273,15 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
         </h2>
 
         <p style={{
-          color: '#64748b',
+          color: 'var(--color-subtle)',
           fontSize: '13px',
           marginBottom: '24px'
         }}>
-          Logged in as: <span style={{ color: '#e2e8f0', fontWeight: '500' }}>{user.email}</span>
+          Logged in as: <span style={{ color: 'var(--color-text)', fontWeight: '500' }}>{user.email}</span>
         </p>
 
         {/* WarcraftLogs API Credentials Section */}
-        <div style={{
-          background: '#0f1419',
-          borderRadius: '8px',
-          padding: '20px',
-          marginBottom: '20px',
-          border: '1px solid #2d3748'
-        }}>
+        <div className="inset-panel" style={{ padding: '20px', marginBottom: '20px' }}>
           <h3 style={{
             color: '#e2e8f0',
             fontSize: '16px',
@@ -331,17 +303,17 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
 
           {/* Privacy Notice */}
           <div style={{
-            background: 'rgba(59, 130, 246, 0.1)',
-            border: '1px solid rgba(59, 130, 246, 0.3)',
-            borderRadius: '8px',
+            background: 'rgba(215, 180, 90, 0.06)',
+            border: '1px solid var(--color-border-strong)',
+            borderRadius: 'var(--radius-md)',
             padding: '12px 16px',
             marginBottom: '20px',
             fontSize: '13px',
-            color: '#cbd5e1',
+            color: 'var(--color-muted)',
             lineHeight: '1.5'
           }}>
-            <div style={{ fontWeight: '600', marginBottom: '6px', color: '#60a5fa' }}>
-              🔒 Your Credentials Are Secure
+            <div style={{ fontWeight: '600', marginBottom: '6px', color: 'var(--color-gold-2)' }}>
+              Your Credentials Are Secure
             </div>
             Your WarcraftLogs API credentials are encrypted and stored securely in accordance with our{' '}
             <button 
@@ -349,11 +321,11 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
                 e.preventDefault();
                 if (onShowPrivacy) onShowPrivacy();
               }}
-              style={{ 
+              style={{
                 background: 'none',
                 border: 'none',
-                color: '#3b82f6', 
-                textDecoration: 'underline', 
+                color: 'var(--color-gold-2)',
+                textDecoration: 'underline',
                 cursor: 'pointer',
                 padding: 0,
                 font: 'inherit'
@@ -453,7 +425,7 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
               href="https://www.warcraftlogs.com/api/clients" 
               target="_blank" 
               rel="noopener noreferrer"
-              style={{ color: '#3b82f6', textDecoration: 'underline' }}
+              style={{ color: 'var(--color-gold-2)', textDecoration: 'underline' }}
             >
               WarcraftLogs API Clients
             </a>
@@ -477,25 +449,12 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
           <button
             onClick={handleSave}
             disabled={loading}
+            className="btn btn-primary"
             style={{
               width: '100%',
-              padding: '12px',
-              backgroundColor: loading ? '#1e40af' : '#3b82f6',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: loading ? 'not-allowed' : 'pointer',
-              fontSize: '15px',
-              fontWeight: '600',
               opacity: loading ? 0.7 : 1,
-              transition: 'all 0.2s',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '8px'
+              cursor: loading ? 'not-allowed' : 'pointer'
             }}
-            onMouseOver={(e) => { if (!loading) e.target.style.backgroundColor = '#2563eb'; }}
-            onMouseOut={(e) => { if (!loading) e.target.style.backgroundColor = '#3b82f6'; }}
           >
             <Save size={16} />
             {loading ? 'Saving...' : 'Save Credentials'}
@@ -503,13 +462,7 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
         </div>
 
         {/* Change Password Section */}
-        <div style={{
-          background: '#0f1419',
-          borderRadius: '8px',
-          padding: '20px',
-          marginBottom: '20px',
-          border: '1px solid #2d3748'
-        }}>
+        <div className="inset-panel" style={{ padding: '20px', marginBottom: '20px' }}>
           <h3 style={{
             color: '#e2e8f0',
             fontSize: '16px',
@@ -654,21 +607,12 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
             <button
               type="submit"
               disabled={passwordLoading}
+              className="btn btn-primary"
               style={{
                 width: '100%',
-                padding: '12px',
-                backgroundColor: passwordLoading ? '#1e40af' : '#3b82f6',
-                color: '#fff',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: passwordLoading ? 'not-allowed' : 'pointer',
-                fontSize: '15px',
-                fontWeight: '600',
                 opacity: passwordLoading ? 0.7 : 1,
-                transition: 'all 0.2s'
+                cursor: passwordLoading ? 'not-allowed' : 'pointer'
               }}
-              onMouseOver={(e) => { if (!passwordLoading) e.target.style.backgroundColor = '#2563eb'; }}
-              onMouseOut={(e) => { if (!passwordLoading) e.target.style.backgroundColor = '#3b82f6'; }}
             >
               {passwordLoading ? 'Updating...' : 'Update Password'}
             </button>
@@ -676,13 +620,7 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
         </div>
 
         {/* Change Email Section */}
-        <div style={{
-          background: '#0f1419',
-          borderRadius: '8px',
-          padding: '20px',
-          marginBottom: '20px',
-          border: '1px solid #2d3748'
-        }}>
+        <div className="inset-panel" style={{ padding: '20px', marginBottom: '20px' }}>
           <h3 style={{
             color: '#e2e8f0',
             fontSize: '16px',
@@ -753,21 +691,12 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
             <button
               type="submit"
               disabled={emailLoading}
+              className="btn btn-primary"
               style={{
                 width: '100%',
-                padding: '12px',
-                backgroundColor: emailLoading ? '#1e40af' : '#3b82f6',
-                color: '#fff',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: emailLoading ? 'not-allowed' : 'pointer',
-                fontSize: '15px',
-                fontWeight: '600',
                 opacity: emailLoading ? 0.7 : 1,
-                transition: 'all 0.2s'
+                cursor: emailLoading ? 'not-allowed' : 'pointer'
               }}
-              onMouseOver={(e) => { if (!emailLoading) e.target.style.backgroundColor = '#2563eb'; }}
-              onMouseOut={(e) => { if (!emailLoading) e.target.style.backgroundColor = '#3b82f6'; }}
             >
               {emailLoading ? 'Sending...' : 'Update Email'}
             </button>
@@ -775,13 +704,7 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
         </div>
 
         {/* Delete Account Section */}
-        <div style={{
-          background: '#0f1419',
-          borderRadius: '8px',
-          padding: '20px',
-          border: '1px solid #dc2626',
-          marginTop: '20px'
-        }}>
+        <div className="inset-panel" style={{ padding: '20px', marginTop: '20px', borderColor: 'var(--color-red)' }}>
           <h3 style={{
             color: '#ef4444',
             fontSize: '16px',
@@ -884,20 +807,8 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
                     setDeleteConfirmText('');
                     setDeleteMessage('');
                   }}
-                  style={{
-                    flex: 1,
-                    padding: '12px',
-                    backgroundColor: '#334155',
-                    color: '#e2e8f0',
-                    border: 'none',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    fontSize: '14px',
-                    fontWeight: '600',
-                    transition: 'all 0.2s'
-                  }}
-                  onMouseOver={(e) => { e.target.style.backgroundColor = '#475569'; }}
-                  onMouseOut={(e) => { e.target.style.backgroundColor = '#334155'; }}
+                  className="btn"
+                  style={{ flex: 1 }}
                 >
                   Cancel
                 </button>
