@@ -244,609 +244,210 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
     }
   };
 
+  const msgClass = (m, okWord) => `fpx-mmsg ${m.includes(okWord) ? 'ok' : 'err'}`;
+
   return (
-    <div className="fp-settings settings-shell">
-      <div className="settings-card surface-panel" style={{ position: 'relative' }}>
-        <button
-          onClick={onClose}
-          style={{
-            position: 'absolute',
-            top: '12px',
-            right: '12px',
-            background: 'transparent',
-            border: 'none',
-            color: '#94a3b8',
-            cursor: 'pointer',
-            padding: '4px'
-          }}
-        >
-          <X size={20} />
-        </button>
+    <div className="fpx-mov" onClick={onClose}>
+      <div className="fpx-mcard" onClick={(e) => e.stopPropagation()}>
+        <div className="fpx-mhead">
+          <h2>Account settings</h2>
+          <button className="fpx-mclose" onClick={onClose} aria-label="Close"><X size={18} /></button>
+        </div>
 
-        <h2 style={{
-          color: 'var(--color-gold-2)',
-          marginBottom: '8px',
-          marginTop: 0,
-          fontSize: '24px'
-        }}>
-          Account Settings
-        </h2>
+        <div className="fpx-mbody">
+          <p className="lead">Logged in as <strong style={{ color: 'var(--fpx-ink)' }}>{user.email}</strong></p>
 
-        <p style={{
-          color: 'var(--color-subtle)',
-          fontSize: '13px',
-          marginBottom: '24px'
-        }}>
-          Logged in as: <span style={{ color: 'var(--color-text)', fontWeight: '500' }}>{user.email}</span>
-        </p>
+          {/* WarcraftLogs API Credentials */}
+          <section className="fpx-msec">
+            <h3><Key size={16} /> WarcraftLogs API credentials</h3>
+            <p>Save your WarcraftLogs API credentials here — they auto-fill when you analyze reports.</p>
 
-        {/* WarcraftLogs API Credentials Section */}
-        <div className="inset-panel" style={{ padding: '20px', marginBottom: '20px' }}>
-          <h3 style={{
-            color: '#e2e8f0',
-            fontSize: '16px',
-            marginTop: 0,
-            marginBottom: '8px',
-            fontWeight: '600'
-          }}>
-            WarcraftLogs API Credentials
-          </h3>
-          
-          <p style={{
-            color: '#94a3b8',
-            fontSize: '13px',
-            marginBottom: '20px',
-            lineHeight: '1.5'
-          }}>
-            Save your WarcraftLogs API credentials here. They'll automatically fill when you analyze reports.
-          </p>
-
-          {/* Privacy Notice */}
-          <div style={{
-            background: 'rgba(215, 180, 90, 0.06)',
-            border: '1px solid var(--color-border-strong)',
-            borderRadius: 'var(--radius-md)',
-            padding: '12px 16px',
-            marginBottom: '20px',
-            fontSize: '13px',
-            color: 'var(--color-muted)',
-            lineHeight: '1.5'
-          }}>
-            <div style={{ fontWeight: '600', marginBottom: '6px', color: 'var(--color-gold-2)' }}>
-              Your Credentials Are Secure
-            </div>
-            Your WarcraftLogs API credentials are encrypted and stored securely in accordance with our{' '}
-            <button 
-              onClick={(e) => {
-                e.preventDefault();
-                if (onShowPrivacy) onShowPrivacy();
-              }}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: 'var(--color-gold-2)',
-                textDecoration: 'underline',
-                cursor: 'pointer',
-                padding: 0,
-                font: 'inherit'
-              }}
-            >
-              Privacy Policy
-            </button>
-            . We only use them to fetch raid data on your behalf.
-          </div>
-
-          <div style={{ marginBottom: '16px' }}>
-            <label style={{ 
-              display: 'block', 
-              marginBottom: '6px', 
-              color: '#e2e8f0',
-              fontSize: '14px',
-              fontWeight: '500'
-            }}>
-              Client ID
-            </label>
-            <input
-              type="text"
-              value={clientId}
-              onChange={(e) => setClientId(e.target.value)}
-              placeholder="Your WarcraftLogs Client ID"
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                borderRadius: '6px',
-                border: '1px solid #475569',
-                backgroundColor: '#0a0e1a',
-                color: '#fff',
-                fontSize: '14px',
-                boxSizing: 'border-box'
-              }}
-            />
-          </div>
-
-          <div style={{ marginBottom: '8px' }}>
-            <label style={{ 
-              display: 'block', 
-              marginBottom: '6px', 
-              color: '#e2e8f0',
-              fontSize: '14px',
-              fontWeight: '500'
-            }}>
-              Client Secret
-            </label>
-            <div style={{ position: 'relative' }}>
-              <input
-                type={showSecret ? 'text' : 'password'}
-                value={clientSecret}
-                onChange={(e) => setClientSecret(e.target.value)}
-                placeholder="Your WarcraftLogs Client Secret"
-                style={{
-                  width: '100%',
-                  padding: '10px 12px',
-                  paddingRight: '45px',
-                  borderRadius: '6px',
-                  border: '1px solid #475569',
-                  backgroundColor: '#0a0e1a',
-                  color: '#fff',
-                  fontSize: '14px',
-                  boxSizing: 'border-box'
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => setShowSecret(!showSecret)}
-                style={{
-                  position: 'absolute',
-                  right: '8px',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  background: 'transparent',
-                  border: 'none',
-                  color: '#94a3b8',
-                  cursor: 'pointer',
-                  padding: '4px',
-                  display: 'flex',
-                  alignItems: 'center'
-                }}
-              >
-                {showSecret ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
-            </div>
-          </div>
-
-          <p style={{
-            color: '#64748b',
-            fontSize: '12px',
-            marginTop: '8px',
-            marginBottom: '16px'
-          }}>
-            Get your API credentials from{' '}
-            <a 
-              href="https://www.warcraftlogs.com/api/clients" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              style={{ color: 'var(--color-gold-2)', textDecoration: 'underline' }}
-            >
-              WarcraftLogs API Clients
-            </a>
-          </p>
-
-          {message && (
-            <p style={{
-              marginBottom: '16px',
-              padding: '12px',
-              backgroundColor: message.includes('successfully') ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-              border: `1px solid ${message.includes('successfully') ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
-              color: message.includes('successfully') ? '#10b981' : '#ef4444',
-              borderRadius: '6px',
-              textAlign: 'center',
-              fontSize: '13px'
-            }}>
-              {message}
+            <p className="fpx-mnote">
+              <strong style={{ color: 'var(--fpx-ink)' }}>Your credentials are secure.</strong>{' '}
+              Encrypted and stored in accordance with our{' '}
+              <button type="button" className="fpx-link" onClick={() => { if (onShowPrivacy) onShowPrivacy(); }}>
+                Privacy Policy
+              </button>. We only use them to fetch raid data on your behalf.
             </p>
-          )}
 
-          <button
-            onClick={handleSave}
-            disabled={loading}
-            className="btn btn-primary"
-            style={{
-              width: '100%',
-              opacity: loading ? 0.7 : 1,
-              cursor: loading ? 'not-allowed' : 'pointer'
-            }}
-          >
-            <Save size={16} />
-            {loading ? 'Saving...' : 'Save Credentials'}
-          </button>
-        </div>
-
-        {/* Change Password Section */}
-        <div className="inset-panel" style={{ padding: '20px', marginBottom: '20px' }}>
-          <h3 style={{
-            color: '#e2e8f0',
-            fontSize: '16px',
-            marginTop: 0,
-            marginBottom: '8px',
-            fontWeight: '600',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px'
-          }}>
-            <Key size={18} />
-            Change Password
-          </h3>
-          
-          <p style={{
-            color: '#94a3b8',
-            fontSize: '13px',
-            marginBottom: '20px',
-            lineHeight: '1.5'
-          }}>
-            Update your account password. Changes take effect immediately.
-          </p>
-
-          <form onSubmit={handlePasswordChange}>
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ 
-                display: 'block', 
-                marginBottom: '6px', 
-                color: '#e2e8f0',
-                fontSize: '14px',
-                fontWeight: '500'
-              }}>
-                New Password
-              </label>
-              <div style={{ position: 'relative' }}>
-                <input
-                  type={showNewPassword ? 'text' : 'password'}
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Enter new password"
-                  minLength={6}
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    paddingRight: '45px',
-                    borderRadius: '6px',
-                    border: '1px solid #475569',
-                    backgroundColor: '#0a0e1a',
-                    color: '#fff',
-                    fontSize: '14px',
-                    boxSizing: 'border-box'
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowNewPassword(!showNewPassword)}
-                  style={{
-                    position: 'absolute',
-                    right: '8px',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    background: 'transparent',
-                    border: 'none',
-                    color: '#94a3b8',
-                    cursor: 'pointer',
-                    padding: '4px',
-                    display: 'flex',
-                    alignItems: 'center'
-                  }}
-                >
-                  {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
-              </div>
-            </div>
-
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ 
-                display: 'block', 
-                marginBottom: '6px', 
-                color: '#e2e8f0',
-                fontSize: '14px',
-                fontWeight: '500'
-              }}>
-                Confirm New Password
-              </label>
-              <div style={{ position: 'relative' }}>
-                <input
-                  type={showConfirmPassword ? 'text' : 'password'}
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="Confirm new password"
-                  minLength={6}
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    paddingRight: '45px',
-                    borderRadius: '6px',
-                    border: '1px solid #475569',
-                    backgroundColor: '#0a0e1a',
-                    color: '#fff',
-                    fontSize: '14px',
-                    boxSizing: 'border-box'
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  style={{
-                    position: 'absolute',
-                    right: '8px',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    background: 'transparent',
-                    border: 'none',
-                    color: '#94a3b8',
-                    cursor: 'pointer',
-                    padding: '4px',
-                    display: 'flex',
-                    alignItems: 'center'
-                  }}
-                >
-                  {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
-              </div>
-            </div>
-
-            {passwordMessage && (
-              <p style={{
-                marginBottom: '16px',
-                padding: '12px',
-                backgroundColor: passwordMessage.includes('successfully') ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                border: `1px solid ${passwordMessage.includes('successfully') ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
-                color: passwordMessage.includes('successfully') ? '#10b981' : '#ef4444',
-                borderRadius: '6px',
-                textAlign: 'center',
-                fontSize: '13px'
-              }}>
-                {passwordMessage}
-              </p>
-            )}
-
-            <button
-              type="submit"
-              disabled={passwordLoading}
-              className="btn btn-primary"
-              style={{
-                width: '100%',
-                opacity: passwordLoading ? 0.7 : 1,
-                cursor: passwordLoading ? 'not-allowed' : 'pointer'
-              }}
-            >
-              {passwordLoading ? 'Updating...' : 'Update Password'}
-            </button>
-          </form>
-        </div>
-
-        {/* Change Email Section */}
-        <div className="inset-panel" style={{ padding: '20px', marginBottom: '20px' }}>
-          <h3 style={{
-            color: '#e2e8f0',
-            fontSize: '16px',
-            marginTop: 0,
-            marginBottom: '8px',
-            fontWeight: '600',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px'
-          }}>
-            <Mail size={18} />
-            Change Email
-          </h3>
-          
-          <p style={{
-            color: '#94a3b8',
-            fontSize: '13px',
-            marginBottom: '20px',
-            lineHeight: '1.5'
-          }}>
-            Update your account email address. You'll need to confirm the change via email.
-          </p>
-
-          <form onSubmit={handleEmailChange}>
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ 
-                display: 'block', 
-                marginBottom: '6px', 
-                color: '#e2e8f0',
-                fontSize: '14px',
-                fontWeight: '500'
-              }}>
-                New Email Address
-              </label>
-              <input
-                type="email"
-                value={newEmail}
-                onChange={(e) => setNewEmail(e.target.value)}
-                placeholder="Enter new email address"
-                style={{
-                  width: '100%',
-                  padding: '10px 12px',
-                  borderRadius: '6px',
-                  border: '1px solid #475569',
-                  backgroundColor: '#0a0e1a',
-                  color: '#fff',
-                  fontSize: '14px',
-                  boxSizing: 'border-box'
-                }}
-              />
-            </div>
-
-            {emailMessage && (
-              <p style={{
-                marginBottom: '16px',
-                padding: '12px',
-                backgroundColor: emailMessage.includes('sent') ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                border: `1px solid ${emailMessage.includes('sent') ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
-                color: emailMessage.includes('sent') ? '#10b981' : '#ef4444',
-                borderRadius: '6px',
-                textAlign: 'center',
-                fontSize: '13px'
-              }}>
-                {emailMessage}
-              </p>
-            )}
-
-            <button
-              type="submit"
-              disabled={emailLoading}
-              className="btn btn-primary"
-              style={{
-                width: '100%',
-                opacity: emailLoading ? 0.7 : 1,
-                cursor: emailLoading ? 'not-allowed' : 'pointer'
-              }}
-            >
-              {emailLoading ? 'Sending...' : 'Update Email'}
-            </button>
-          </form>
-        </div>
-
-        {/* Delete Account Section */}
-        <div className="inset-panel" style={{ padding: '20px', marginTop: '20px', borderColor: 'var(--color-red)' }}>
-          <h3 style={{
-            color: '#ef4444',
-            fontSize: '16px',
-            marginTop: 0,
-            marginBottom: '8px',
-            fontWeight: '600',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px'
-          }}>
-            <Trash2 size={18} />
-            Delete Account
-          </h3>
-          
-          <p style={{
-            color: '#94a3b8',
-            fontSize: '13px',
-            marginBottom: '16px',
-            lineHeight: '1.5'
-          }}>
-            Permanently delete your account and all associated data. This action cannot be undone.
-          </p>
-
-          {!showDeleteConfirm ? (
-            <button
-              onClick={() => setShowDeleteConfirm(true)}
-              style={{
-                padding: '10px 16px',
-                backgroundColor: '#dc2626',
-                color: '#fff',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                fontWeight: '600',
-                transition: 'all 0.2s',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}
-              onMouseOver={(e) => { e.target.style.backgroundColor = '#b91c1c'; }}
-              onMouseOut={(e) => { e.target.style.backgroundColor = '#dc2626'; }}
-            >
-              <Trash2 size={14} />
-              Delete My Account
-            </button>
-          ) : (
-            <div>
-              <p style={{
-                color: '#fbbf24',
-                fontSize: '13px',
-                marginBottom: '16px',
-                padding: '12px',
-                background: 'rgba(251, 191, 36, 0.1)',
-                border: '1px solid rgba(251, 191, 36, 0.3)',
-                borderRadius: '6px',
-                lineHeight: '1.5'
-              }}>
-                <strong>Warning:</strong> This will permanently delete your account, API credentials, and analysis history. Type <strong>DELETE</strong> to confirm.
-              </p>
-
-              <div style={{ marginBottom: '16px' }}>
+            <div className="fpx-mform">
+              <div className="f">
+                <label>Client ID</label>
                 <input
                   type="text"
-                  value={deleteConfirmText}
-                  onChange={(e) => setDeleteConfirmText(e.target.value)}
-                  placeholder="Type DELETE to confirm"
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    borderRadius: '6px',
-                    border: '1px solid #475569',
-                    backgroundColor: '#0a0e1a',
-                    color: '#fff',
-                    fontSize: '14px',
-                    boxSizing: 'border-box'
-                  }}
+                  value={clientId}
+                  onChange={(e) => setClientId(e.target.value)}
+                  placeholder="Your WarcraftLogs Client ID"
                 />
               </div>
 
-              {deleteMessage && (
-                <p style={{
-                  marginBottom: '16px',
-                  padding: '12px',
-                  backgroundColor: deleteMessage.includes('successfully') ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                  border: `1px solid ${deleteMessage.includes('successfully') ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
-                  color: deleteMessage.includes('successfully') ? '#10b981' : '#ef4444',
-                  borderRadius: '6px',
-                  textAlign: 'center',
-                  fontSize: '13px'
-                }}>
-                  {deleteMessage}
+              <div className="f">
+                <label>Client Secret</label>
+                <div className="pw">
+                  <input
+                    type={showSecret ? 'text' : 'password'}
+                    value={clientSecret}
+                    onChange={(e) => setClientSecret(e.target.value)}
+                    placeholder="Your WarcraftLogs Client Secret"
+                  />
+                  <button type="button" className="eye" onClick={() => setShowSecret(!showSecret)} aria-label="Toggle visibility">
+                    {showSecret ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+                <p className="hint">
+                  Get your API credentials from{' '}
+                  <a href="https://www.warcraftlogs.com/api/clients" target="_blank" rel="noopener noreferrer" className="fpx-link">
+                    WarcraftLogs API Clients
+                  </a>
                 </p>
-              )}
-
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <button
-                  onClick={() => {
-                    setShowDeleteConfirm(false);
-                    setDeleteConfirmText('');
-                    setDeleteMessage('');
-                  }}
-                  className="btn"
-                  style={{ flex: 1 }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleDeleteAccount}
-                  disabled={deleteLoading || deleteConfirmText !== 'DELETE'}
-                  style={{
-                    flex: 1,
-                    padding: '12px',
-                    backgroundColor: deleteLoading ? '#991b1b' : '#dc2626',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: '6px',
-                    cursor: (deleteLoading || deleteConfirmText !== 'DELETE') ? 'not-allowed' : 'pointer',
-                    fontSize: '14px',
-                    fontWeight: '600',
-                    opacity: (deleteLoading || deleteConfirmText !== 'DELETE') ? 0.7 : 1,
-                    transition: 'all 0.2s',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px'
-                  }}
-                  onMouseOver={(e) => { 
-                    if (!deleteLoading && deleteConfirmText === 'DELETE') 
-                      e.target.style.backgroundColor = '#b91c1c'; 
-                  }}
-                  onMouseOut={(e) => { 
-                    if (!deleteLoading && deleteConfirmText === 'DELETE') 
-                      e.target.style.backgroundColor = '#dc2626'; 
-                  }}
-                >
-                  <Trash2 size={14} />
-                  {deleteLoading ? 'Deleting...' : 'Confirm Delete'}
-                </button>
               </div>
+
+              {message && <p className={msgClass(message, 'successfully')}>{message}</p>}
+
+              <button
+                onClick={handleSave}
+                disabled={loading}
+                className="fpx-btn"
+                style={{ opacity: loading ? 0.7 : 1, cursor: loading ? 'not-allowed' : 'pointer' }}
+              >
+                <Save size={16} /> {loading ? 'Saving…' : 'Save credentials'}
+              </button>
             </div>
-          )}
+          </section>
+
+          {/* Change Password */}
+          <section className="fpx-msec">
+            <h3><Key size={16} /> Change password</h3>
+            <p>Update your account password. Changes take effect immediately.</p>
+
+            <form className="fpx-mform" onSubmit={handlePasswordChange}>
+              <div className="f">
+                <label>New password</label>
+                <div className="pw">
+                  <input
+                    type={showNewPassword ? 'text' : 'password'}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Enter new password"
+                    minLength={6}
+                  />
+                  <button type="button" className="eye" onClick={() => setShowNewPassword(!showNewPassword)} aria-label="Toggle visibility">
+                    {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="f">
+                <label>Confirm new password</label>
+                <div className="pw">
+                  <input
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Confirm new password"
+                    minLength={6}
+                  />
+                  <button type="button" className="eye" onClick={() => setShowConfirmPassword(!showConfirmPassword)} aria-label="Toggle visibility">
+                    {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              </div>
+
+              {passwordMessage && <p className={msgClass(passwordMessage, 'successfully')}>{passwordMessage}</p>}
+
+              <button
+                type="submit"
+                disabled={passwordLoading}
+                className="fpx-btn"
+                style={{ opacity: passwordLoading ? 0.7 : 1, cursor: passwordLoading ? 'not-allowed' : 'pointer' }}
+              >
+                {passwordLoading ? 'Updating…' : 'Update password'}
+              </button>
+            </form>
+          </section>
+
+          {/* Change Email */}
+          <section className="fpx-msec">
+            <h3><Mail size={16} /> Change email</h3>
+            <p>Update your account email address. You'll confirm the change via email.</p>
+
+            <form className="fpx-mform" onSubmit={handleEmailChange}>
+              <div className="f">
+                <label>New email address</label>
+                <input
+                  type="email"
+                  value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                  placeholder="Enter new email address"
+                />
+              </div>
+
+              {emailMessage && <p className={msgClass(emailMessage, 'sent')}>{emailMessage}</p>}
+
+              <button
+                type="submit"
+                disabled={emailLoading}
+                className="fpx-btn"
+                style={{ opacity: emailLoading ? 0.7 : 1, cursor: emailLoading ? 'not-allowed' : 'pointer' }}
+              >
+                {emailLoading ? 'Sending…' : 'Update email'}
+              </button>
+            </form>
+          </section>
+
+          {/* Delete Account */}
+          <section className="fpx-msec danger">
+            <h3><Trash2 size={16} /> Delete account</h3>
+            <p>Permanently delete your account and all associated data. This cannot be undone.</p>
+
+            {!showDeleteConfirm ? (
+              <button className="fpx-btn danger" onClick={() => setShowDeleteConfirm(true)}>
+                <Trash2 size={14} /> Delete my account
+              </button>
+            ) : (
+              <div className="fpx-mform">
+                <p className="fpx-mmsg warn">
+                  <strong>Warning:</strong> this permanently deletes your account, API credentials,
+                  and analysis history. Type <strong>DELETE</strong> to confirm.
+                </p>
+
+                <div className="f">
+                  <input
+                    type="text"
+                    value={deleteConfirmText}
+                    onChange={(e) => setDeleteConfirmText(e.target.value)}
+                    placeholder="Type DELETE to confirm"
+                  />
+                </div>
+
+                {deleteMessage && <p className={msgClass(deleteMessage, 'successfully')}>{deleteMessage}</p>}
+
+                <div className="fpx-mrow">
+                  <button
+                    className="fpx-btn ghost"
+                    onClick={() => {
+                      setShowDeleteConfirm(false);
+                      setDeleteConfirmText('');
+                      setDeleteMessage('');
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="fpx-btn danger"
+                    onClick={handleDeleteAccount}
+                    disabled={deleteLoading || deleteConfirmText !== 'DELETE'}
+                    style={{
+                      opacity: (deleteLoading || deleteConfirmText !== 'DELETE') ? 0.6 : 1,
+                      cursor: (deleteLoading || deleteConfirmText !== 'DELETE') ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    <Trash2 size={14} /> {deleteLoading ? 'Deleting…' : 'Confirm delete'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </section>
         </div>
       </div>
     </div>
