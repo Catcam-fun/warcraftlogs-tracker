@@ -120,85 +120,6 @@ code {
   color: var(--color-text) !important;
 }
 
-.app-header {
-  position: sticky !important;
-  top: 0 !important;
-  z-index: 1000 !important;
-  background: rgba(9, 13, 21, 0.84) !important;
-  border-bottom: 1px solid var(--color-border) !important;
-  box-shadow: 0 10px 36px rgba(0, 0, 0, 0.28) !important;
-  backdrop-filter: blur(18px);
-}
-
-.app-header-inner,
-.surface-width {
-  width: min(1400px, calc(100% - 32px));
-  margin: 0 auto;
-}
-
-.app-header-inner {
-  min-height: 72px;
-  padding: 12px 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.brand-lockup {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  cursor: pointer;
-  min-width: 0;
-}
-
-.brand-mark {
-  width: 42px;
-  height: 42px;
-  border-radius: var(--radius-md);
-  display: grid;
-  place-items: center;
-  color: #140f04 !important;
-  font-weight: 900;
-  letter-spacing: 0.02em;
-  background: linear-gradient(135deg, var(--color-gold-2), #9b6c20) !important;
-  border: 1px solid rgba(255, 239, 184, 0.4) !important;
-  box-shadow: 0 0 24px rgba(215, 180, 90, 0.22) !important;
-  font-size: 15px;
-}
-
-.brand-title {
-  margin: 0;
-  color: var(--color-text) !important;
-  font-size: 19px;
-  line-height: 1.1;
-}
-
-.brand-subtitle {
-  margin: 2px 0 0;
-  color: var(--color-muted) !important;
-  font-size: 11px;
-}
-
-.nav-actions,
-.user-pill {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.user-pill {
-  padding: 8px 10px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: rgba(21, 29, 44, 0.74);
-  color: var(--color-muted);
-  font-size: 12px;
-}
-
 .btn {
   min-height: 36px;
   padding: 8px 14px;
@@ -476,34 +397,6 @@ code {
   color: var(--color-gold-2) !important;
 }
 
-/* Footer link hover — override the blue JS hover with CSS hover */
-.fp-footer a:hover,
-.fp-footer [role="button"]:hover {
-  color: var(--color-gold-2) !important;
-}
-
-/* App-header nav buttons — use design system look */
-.app-header .btn-nav-action {
-  padding: 8px 16px;
-  background: rgba(28, 38, 56, 0.9);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  color: var(--color-text);
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 700;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  transition: background-color 160ms var(--ease-out), border-color 160ms var(--ease-out), transform 160ms var(--ease-out);
-}
-
-.app-header .btn-nav-action:hover {
-  transform: translateY(-1px);
-  border-color: rgba(215, 180, 90, 0.45);
-  background: var(--color-surface-3);
-}
-
 .legal-shell {
   line-height: 1.7;
 }
@@ -539,17 +432,6 @@ code {
 }
 
 @media (max-width: 760px) {
-  .app-header-inner {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .nav-actions,
-  .user-pill {
-    width: 100%;
-    justify-content: flex-start;
-  }
-
   .landing-hero {
     grid-template-columns: 1fr;
   }
