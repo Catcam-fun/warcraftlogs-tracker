@@ -153,38 +153,41 @@ def graphql_query(token, query, variables=None, timeout=120, max_retries=3):
     except Exception as e:
         raise Exception(f"GraphQL query failed: {str(e)}")
 
-def get_guild_reports(token, guild_name, server, region, zone_id, start_date=None, end_date=None):
-    """Fetch guild reports using V2 GraphQL API with optional date range filtering"""
-    
-    # Convert dates to timestamps if provided (handle empty strings as None)
-    start_ts = None
-    end_ts = None
-    
-    # Convert empty strings to None
+def get_guild_reports(token, guild_name, server, region, start_date=None, end_date=None):
+    """Fetch guild reports via V2 GraphQL, scoped server-side by a date window.
+
+    We deliberately do NOT filter by zoneID. WCL assigns each report a single
+    primary zone, so a report that mixes a raid night with Mythic+ dungeons
+    gets classified under the dungeon zone and a zoneID filter silently drops
+    it along with all its raid pulls. The fight-level RAID_ENCOUNTERS allowlist
+    in analyze_fights is the authoritative raid/dungeon separator, so the zone
+    filter was redundant and lossy. Date bounds are pushed into the query so we
+    only page through one tier's window, not the guild's entire history.
+    """
     if start_date == "":
         start_date = None
     if end_date == "":
         end_date = None
-    
+
+    start_ts = None
+    end_ts = None
     if start_date:
-        # Start of the start_date (00:00:00)
         start_ts = int(datetime.strptime(start_date, "%Y-%m-%d").timestamp() * 1000)
-    
     if end_date:
-        # End of the end_date (23:59:59)
+        # Inclusive end-of-day for the end date.
         end_ts = int(datetime.strptime(end_date, "%Y-%m-%d").timestamp() * 1000) + 86400000 - 1
-    
+
     query = """
-    query($guildName: String!, $serverSlug: String!, $serverRegion: String!, $zoneID: Int!) {
+    query($guildName: String!, $serverSlug: String!, $serverRegion: String!,
+          $startTime: Float, $endTime: Float, $page: Int!) {
       reportData {
-        reports(guildName: $guildName, guildServerSlug: $serverSlug, guildServerRegion: $serverRegion, zoneID: $zoneID, limit: 100) {
+        reports(guildName: $guildName, guildServerSlug: $serverSlug,
+                guildServerRegion: $serverRegion, startTime: $startTime,
+                endTime: $endTime, limit: 100, page: $page) {
           data {
             code
             startTime
             endTime
-            zone {
-              id
-            }
             owner {
               name
             }
@@ -193,37 +196,34 @@ def get_guild_reports(token, guild_name, server, region, zone_id, start_date=Non
       }
     }
     """
-    
-    variables = {
+
+    base_vars = {
         "guildName": guild_name,
         "serverSlug": server.lower().replace(" ", "-").replace("'", ""),
         "serverRegion": region.upper(),
-        "zoneID": int(zone_id)
+        "startTime": start_ts,
+        "endTime": end_ts,
     }
-    
+
     try:
-        data = graphql_query(token, query, variables)
-        reports_data = data.get("reportData", {}).get("reports", {}).get("data", [])
-        
         out = []
-        for rep in reports_data:
-            report_start_time = rep.get("startTime", 0)
-            
-            # Filter by start date if provided
-            if start_ts is not None and report_start_time < start_ts:
-                continue
-            
-            # Filter by end date if provided
-            if end_ts is not None and report_start_time > end_ts:
-                continue
-            
-            out.append({
-                "id": rep["code"],
-                "start": report_start_time,
-                "end": rep.get("endTime", 0),
-                "owner": rep.get("owner", {}).get("name", "")
-            })
-        
+        page = 1
+        # Cap pages so an unexpected always-full response can't loop forever.
+        # A single tier window is realistically a few pages of 100.
+        while page <= 50:
+            data = graphql_query(token, query, {**base_vars, "page": page})
+            rows = (((data.get("reportData") or {}).get("reports") or {})
+                    .get("data")) or []
+            for rep in rows:
+                out.append({
+                    "id": rep["code"],
+                    "start": rep.get("startTime", 0),
+                    "end": rep.get("endTime", 0),
+                    "owner": (rep.get("owner") or {}).get("name", ""),
+                })
+            if len(rows) < 100:
+                break
+            page += 1
         return out
     except Exception as e:
         raise Exception(f"Failed to fetch guild reports: {str(e)}")
