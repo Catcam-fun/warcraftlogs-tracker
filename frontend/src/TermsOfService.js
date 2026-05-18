@@ -1,21 +1,46 @@
-import React, { useEffect } from 'react';
-import AppHeader from './AppHeader';
+import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { LogIn, LogOut, Settings as SettingsIcon } from 'lucide-react';
+import FpxRail from './FpxRail';
 
 export default function TermsOfService({ user, onShowAuthModal, onShowSettings, onLogout }) {
+  const navigate = useNavigate();
+  const [collapsed, setCollapsed] = useState(false);
   useEffect(() => {
     window.scrollTo(0, 0);
   }, []);
 
   return (
-    <div className="fp-legal legal-shell" style={{ minHeight: '100vh' }}>
-      <AppHeader
-        user={user}
-        onShowAuthModal={onShowAuthModal}
-        onShowSettings={onShowSettings}
-        onLogout={onLogout}
-      />
+    <>
+    <div className="fpx-atmos base" />
+    <div className="fpx-atmos vignette" />
+    <div className="fpx-atmos grain" />
+    <main className="fpx-land">
+      <div className={`fpx-shell${collapsed ? ' collapsed' : ''}`}>
+        <FpxRail
+          collapsed={collapsed}
+          onToggle={() => setCollapsed((v) => !v)}
+          active={null}
+          onHome={() => navigate('/')}
+          onAnalyze={() => navigate('/analyze')}
+          onResults={() => navigate('/results')}
+        />
+        <div className="fpx-main">
+          <div className="fpx-top fpx-rv">
+            <div className="fpx-crumbs">LEGAL&nbsp; /&nbsp; <b>TERMS</b></div>
+            <div className="fpx-auth">
+              {user ? (
+                <>
+                  <button className="fpx-btn ghost sm" onClick={onShowSettings}><SettingsIcon size={15} /> Settings</button>
+                  <button className="fpx-btn ghost sm" onClick={onLogout}><LogOut size={15} /> Logout</button>
+                </>
+              ) : (
+                <button className="fpx-btn ghost sm" onClick={onShowAuthModal}><LogIn size={15} /> Sign In</button>
+              )}
+            </div>
+          </div>
 
-      <div className="legal-content">
+      <div className="fpx-legal">
         <h1>Terms of Service</h1>
         <p style={{ color: 'var(--color-muted)', fontSize: '14px', marginBottom: '40px' }}>
           Last Updated: November 21, 2024
@@ -142,13 +167,16 @@ export default function TermsOfService({ user, onShowAuthModal, onShowSettings, 
             </p>
           </section>
 
-          <div className="inset-panel" style={{ padding: '20px', marginTop: '40px', borderColor: 'var(--color-border-strong)' }}>
-            <p style={{ margin: 0, textAlign: 'center', fontSize: '13px' }}>
+          <div className="disclaimer">
+            <p>
               <strong>Floor Pov is an independent fan project and is not affiliated with, endorsed by, or sponsored by Blizzard Entertainment, Inc. or Kihra/WarcraftLogs.</strong>
             </p>
           </div>
         </div>
+          </div>
+        </div>
       </div>
-    </div>
+    </main>
+    </>
   );
 }
