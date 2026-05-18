@@ -8,6 +8,7 @@ import requests
 import unicodedata
 import base64
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # API Endpoints
 GRAPHQL_ENDPOINT = "https://wcl-proxy.catcam-fun.workers.dev/api/v2/client"
@@ -229,82 +230,67 @@ def get_guild_reports(token, guild_name, server, region, zone_id, start_date=Non
 
 
 def get_guild_roster(token, guild_name, server, region):
-    """Fetch guild roster to identify guild members using pagination"""
-    
+    """Fetch the full guild roster.
+
+    WoW caps guilds at 1000 members and WCL serves 100/page, so the
+    roster is at most ~10 pages. WCL's guild.members endpoint is slow
+    through the proxy, so we fetch every possible page CONCURRENTLY —
+    total wall time is the slowest single page, not the sum. Best-effort:
+    a page that fails is skipped (analysis falls back to counting
+    everyone if the whole thing comes back empty).
+    """
     query = """
     query($guildName: String!, $serverSlug: String!, $serverRegion: String!, $page: Int!) {
       guildData {
         guild(name: $guildName, serverSlug: $serverSlug, serverRegion: $serverRegion) {
           members(limit: 100, page: $page) {
-            data {
-              name
-            }
-            has_more_pages
+            data { name }
           }
         }
       }
     }
     """
-    
-    all_members = set()
-    page = 1
-    PAGE_LIMIT = 100          # matches `members(limit: 100, ...)` in the query
-    MAX_PAGES = 25            # 2500-member safety cap
-    serverSlug = server.lower().replace(" ", "-").replace("'", "")
 
-    while page <= MAX_PAGES:
-        variables = {
-            "guildName": guild_name,
-            "serverSlug": serverSlug,
-            "serverRegion": region.upper(),
-            "page": page,
-        }
+    MAX_PAGES = 12  # 1000-member cap / 100 per page = 10, + margin
+    base_vars = {
+        "guildName": guild_name,
+        "serverSlug": server.lower().replace(" ", "-").replace("'", ""),
+        "serverRegion": region.upper(),
+    }
 
+    def fetch_page(page):
         try:
-            # Tight budget: WCL's guild.members endpoint is frequently
-            # very slow through the proxy. The roster is best-effort
-            # (analysis falls back to counting everyone), so never let it
-            # stall for minutes on the default 3x120s retry stack.
-            data = graphql_query(token, query, variables, timeout=40, max_retries=1)
+            # Bounded per request so one stuck page can't hold the whole
+            # (parallel) batch hostage beyond its own timeout.
+            data = graphql_query(token, query, {**base_vars, "page": page},
+                                  timeout=40, max_retries=1)
+            guild = (data.get("guildData") or {}).get("guild") or {}
+            members = ((guild.get("members") or {}).get("data")) or []
+            return page, members, None
         except Exception as e:
-            # Don't nuke the roster we've collected — a partial roster
-            # still filters
-            # correctly for everyone we did fetch; just stop here.
-            print(f"Warning: roster page {page} failed ({e}); using {len(all_members)} members fetched so far")
-            break
+            return page, None, str(e)
 
-        guild = (data.get("guildData") or {}).get("guild") or {}
-        if not guild:
-            if page == 1:
-                print(f"Warning: Could not fetch guild roster for {guild_name}")
-            break
-
-        members_response = guild.get("members") or {}
-        members = members_response.get("data") or []
-        has_more = members_response.get("has_more_pages", False)
-
-        for member in members:
-            name = normalize_character_name(member.get("name"))
-            if name:
-                all_members.add(name.lower())
-
-        print(f"Fetched page {page}: {len(members)} members (total so far: {len(all_members)})")
-
-        # Keep going while WCL says there's more OR the page came back
-        # full (a full page almost always means another page exists —
-        # this is the backstop for when has_more_pages is unreliable,
-        # which was the original "can't get all pages" bug).
-        if not members:
-            break
-        if not has_more and len(members) < PAGE_LIMIT:
-            break
-        page += 1
+    all_members = set()
+    pages_fetched = 0
+    with ThreadPoolExecutor(max_workers=MAX_PAGES) as executor:
+        futures = {executor.submit(fetch_page, p): p for p in range(1, MAX_PAGES + 1)}
+        for fut in as_completed(futures):
+            page, members, err = fut.result()
+            if err:
+                print(f"Warning: roster page {page} failed ({err})")
+                continue
+            if members:
+                pages_fetched += 1
+                for member in members:
+                    name = normalize_character_name(member.get("name"))
+                    if name:
+                        all_members.add(name.lower())
 
     if not all_members:
         print(f"Warning: Guild {guild_name} has no members or roster not available")
         return set()
 
-    print(f"Successfully fetched {len(all_members)} guild members across {page} page(s)")
+    print(f"Successfully fetched {len(all_members)} guild members across {pages_fetched} page(s)")
     return all_members
 def get_fights(token, report_code):
     """Fetch fights for a report using V2 GraphQL API, including player class/spec info"""
