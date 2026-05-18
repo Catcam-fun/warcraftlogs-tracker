@@ -6,33 +6,27 @@ export default function AppHeader({ user, onShowAuthModal, onShowSettings, onLog
   const navigate = useNavigate();
 
   return (
-    <header className="fp-app-header app-header">
-      <div className="app-header-inner">
-        <div className="brand-lockup" onClick={() => navigate('/')}>
-          <div className="brand-mark">FP</div>
-          <div>
-            <h1 className="brand-title">Floor Pov</h1>
-            <p className="brand-subtitle">Late-night raid death analytics</p>
-          </div>
+    <header className="fpx-apphead">
+      <div className="fpx-apphead-in">
+        <div className="fpx-brand" onClick={() => navigate('/')}>
+          <div className="mk">FP</div>
+          <div className="wm">FLOOR&nbsp;POV<small>DEATH ANALYSIS</small></div>
         </div>
 
-        <div className="nav-actions">
+        <div className="fpx-auth">
           {user ? (
-            <div className="user-pill">
-              <span>{user.email}</span>
-              <button className="btn" onClick={onShowSettings}>
-                <SettingsIcon size={14} />
-                Settings
+            <>
+              <span className="fpx-userpill">{user.email}</span>
+              <button className="fpx-btn ghost sm" onClick={onShowSettings}>
+                <SettingsIcon size={15} /> Settings
               </button>
-              <button className="btn" onClick={onLogout}>
-                <LogOut size={14} />
-                Logout
+              <button className="fpx-btn ghost sm" onClick={onLogout}>
+                <LogOut size={15} /> Logout
               </button>
-            </div>
+            </>
           ) : (
-            <button className="btn btn-primary" onClick={onShowAuthModal}>
-              <LogIn size={15} />
-              Sign In
+            <button className="fpx-btn ghost sm" onClick={onShowAuthModal}>
+              <LogIn size={15} /> Sign In
             </button>
           )}
         </div>

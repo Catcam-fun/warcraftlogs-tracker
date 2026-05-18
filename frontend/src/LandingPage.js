@@ -1,9 +1,10 @@
 import React, { useState, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Play, LogIn, LogOut, Settings as SettingsIcon, ChevronRight,
-  Home, Crosshair, Grid3x3, Skull, Users, ChevronsLeft, ChevronsRight
+  Crosshair, Grid3x3, Skull, Users
 } from 'lucide-react';
+import FpxRail from './FpxRail';
 
 /* Real encounters from the live BOSS_ORDER catalog (App.js). Render
    art slots into the --img var per tile once boss renders land. */
@@ -83,6 +84,7 @@ export default function LandingPage({
   onRunAnalysis, onSavedReports,
   user, onShowAuthModal, onShowSettings, onLogout,
 }) {
+  const navigate = useNavigate();
   const [railCollapsed, setRailCollapsed] = useState(false);
   const bg = useMemo(
     () => BACKGROUNDS[Math.floor(Math.random() * BACKGROUNDS.length)],
@@ -115,33 +117,15 @@ export default function LandingPage({
 
       <main className="fpx-land">
         <div className={`fpx-shell${railCollapsed ? ' collapsed' : ''}`}>
-          {/* ░ LEFT RAIL — lean, honest, collapsible ░ */}
-          <aside className={`fpx-rail${railCollapsed ? ' collapsed' : ''}`}>
-            <div className="fpx-railhead">
-              <div className="fpx-brand" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
-                <div className="mk">FP</div>
-                <div className="wm">FLOOR&nbsp;POV<small>DEATH ANALYSIS</small></div>
-              </div>
-              <button
-                className="fpx-railtoggle"
-                onClick={() => setRailCollapsed((v) => !v)}
-                aria-label={railCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-                title={railCollapsed ? 'Expand' : 'Collapse'}
-              >
-                {railCollapsed ? <ChevronsRight size={16} /> : <ChevronsLeft size={16} />}
-              </button>
-            </div>
-
-            <nav className="fpx-navsec">
-              <h4>FLOOR POV</h4>
-              <button className="fpx-nav on" title="Home">
-                <Home /><span className="lbl">Home</span>
-              </button>
-              <button className="fpx-nav" onClick={onRunAnalysis} title="Run Analysis">
-                <Crosshair /><span className="lbl">Run Analysis</span>
-              </button>
-            </nav>
-          </aside>
+          {/* ░ LEFT RAIL — shared component ░ */}
+          <FpxRail
+            collapsed={railCollapsed}
+            onToggle={() => setRailCollapsed((v) => !v)}
+            active="home"
+            onHome={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+            onAnalyze={onRunAnalysis}
+            onResults={() => navigate('/results')}
+          />
 
           {/* ░ MAIN ░ */}
           <div className="fpx-main">

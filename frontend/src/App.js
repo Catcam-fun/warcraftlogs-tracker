@@ -1,15 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
-import { Search, AlertCircle, Loader2, Filter, ChevronDown, ChevronRight, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown, Share2, Copy, Check, LogOut, Settings as SettingsIcon, Info, X } from 'lucide-react';
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Search, AlertCircle, Loader2, Filter, ChevronDown, ChevronRight, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown, Share2, Copy, Check, LogOut, Settings as SettingsIcon, Info, X, Crosshair, BarChart3, LogIn } from 'lucide-react';
 import { supabase } from './supabaseClient';
 import Auth from './Auth';
 import Settings from './Settings';
 import LandingPage from './LandingPage';
 import AnalyzeConfig from './AnalyzeConfig';
 import InfoModal from './InfoModal';
+import FpxRail from './FpxRail';
 import TermsOfService from './TermsOfService';
 import PrivacyPolicy from './PrivacyPolicy';
+import { MOCK_RESULTS, MOCK_CONFIG } from './mockResults';
 
 // Automatically detect if running locally or in production
 const API_URL = window.location.hostname === 'localhost' 
@@ -175,7 +176,8 @@ function ScrollToTop() {
 export default function WarcraftLogsApp() {
   const navigate = useNavigate();
   const location = useLocation();
-  const fullBleed = location.pathname === '/' || location.pathname === '/analyze';
+  const fullBleed = location.pathname === '/' || location.pathname === '/analyze' || location.pathname === '/results' || location.pathname === '/saved';
+  const [resultsRailCollapsed, setResultsRailCollapsed] = useState(false);
   
   // Authentication state
   const [user, setUser] = useState(null);
@@ -224,7 +226,8 @@ export default function WarcraftLogsApp() {
   const [selectedForGrouping, setSelectedForGrouping] = useState(new Set());
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [showInfoModal, setShowInfoModal] = useState(false);
-  const [showAlphaBanner, setShowAlphaBanner] = useState(true);
+  const [recentRuns, setRecentRuns] = useState([]);
+  const [showRecentMenu, setShowRecentMenu] = useState(false);
   // const [showSaveDialog, setShowSaveDialog] = useState(false); // DISABLED - Save Reports feature
 
 
@@ -309,6 +312,27 @@ export default function WarcraftLogsApp() {
     }
   }, [location.search, data, loading]);
 
+  // Dev-only: ?mock=1 seeds the Results surface with a fixture so the
+  // redesign can be iterated without a live WarcraftLogs run. Gated to
+  // localhost (dev server + locally-served prod build) so it can never
+  // fire on the deployed site, same idiom as API_URL above.
+  useEffect(() => {
+    const isLocal = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+    if (!isLocal) return;
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('mock') === '1' && !data && !loading) {
+      setConfig((prev) => ({ ...prev, ...MOCK_CONFIG }));
+      setData(MOCK_RESULTS);
+      if (location.pathname !== '/results') navigate('/results');
+    }
+    // ?loader=1 forces the analysis loader overlay so it can be previewed
+    // without a live run (Cancel dismisses it).
+    if (urlParams.get('loader') === '1' && !loading) {
+      setLoadingStage('Fetching guild reports from WarcraftLogs…');
+      setLoading(true);
+    }
+  }, [location.search, location.pathname, data, loading, navigate]);
+
   // IndexedDB helper functions for large data storage
   const saveToIndexedDB = async (key, value) => {
     return new Promise((resolve, reject) => {
@@ -381,6 +405,72 @@ export default function WarcraftLogsApp() {
       };
     });
   };
+
+  // ---- Recent runs (last 5, browser-local; no account needed) ----
+  const RECENT_KEY = 'recentRuns';
+  const MAX_RECENT = 5;
+
+  const runLabel = (cfg) => ({
+    title: `${cfg.guildName || 'Unknown guild'} · ${cfg.server || ''}`.trim().replace(/·\s*$/, '').trim(),
+    sub: `${RAID_ZONES[cfg.selectedRaid]?.name || cfg.selectedRaid} · ${
+      cfg.difficulty === '3' ? 'Normal' : cfg.difficulty === '4' ? 'Heroic' : 'Mythic'
+    }`,
+  });
+
+  const loadRecentRuns = async () => {
+    try {
+      const arr = await loadFromIndexedDB(RECENT_KEY);
+      return Array.isArray(arr) ? arr : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const saveRecentRun = async (resultData, cfg) => {
+    try {
+      const { title, sub } = runLabel(cfg);
+      const record = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        savedAt: new Date().toISOString(),
+        title,
+        sub,
+        config: { ...cfg },
+        data: resultData,
+      };
+      const existing = await loadRecentRuns();
+      const next = [record, ...existing].slice(0, MAX_RECENT);
+      await saveToIndexedDB(RECENT_KEY, next);
+      setRecentRuns(next);
+    } catch (err) {
+      console.error('[RecentRuns] save failed (non-fatal):', err);
+    }
+  };
+
+  const removeRecentRun = async (id) => {
+    try {
+      const next = (await loadRecentRuns()).filter((r) => r.id !== id);
+      await saveToIndexedDB(RECENT_KEY, next);
+      setRecentRuns(next);
+    } catch (err) {
+      console.error('[RecentRuns] remove failed (non-fatal):', err);
+    }
+  };
+
+  const openRecentRun = (record) => {
+    setShowRecentMenu(false);
+    setError('');
+    setExpandedPlayers(new Set());
+    setSortConfig({ key: null, direction: 'asc' });
+    setConfig((prev) => ({ ...prev, ...record.config }));
+    setData(record.data);
+    if (location.pathname !== '/results') navigate('/results');
+  };
+
+  // hydrate the recent-runs list once on mount
+  useEffect(() => {
+    loadRecentRuns().then(setRecentRuns);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Load from IndexedDB on initial mount
   useEffect(() => {
@@ -552,6 +642,7 @@ export default function WarcraftLogsApp() {
       abortController.abort();
       setAbortController(null);
     }
+    setLoading(false);
   };
 
   const handleInputChange = (e) => {
@@ -812,7 +903,10 @@ export default function WarcraftLogsApp() {
               setLoadingStage('');
               setLoading(false);
               setAbortController(null);
-              
+
+              // Persist this completed run to the browser-local recent list
+              saveRecentRun(data.result, config);
+
               // Navigate to results page after analysis completes
               navigate('/results');
             }
@@ -1303,49 +1397,6 @@ export default function WarcraftLogsApp() {
     return sortConfig.direction === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />;
   };
 
-  const getAnalysisChartData = () => {
-    if (!data) return { bossDeaths: [], playerRates: [] };
-
-    const { bosses, players, grid } = getOverviewData();
-    const bossDeaths = bosses.map(boss => {
-      const totals = players.reduce((acc, player) => {
-        const cell = grid[player]?.[boss];
-        if (!cell) return acc;
-        acc.deaths += cell.deaths || 0;
-        acc.pulls += cell.pulls || 0;
-        return acc;
-      }, { deaths: 0, pulls: 0 });
-
-      return {
-        boss,
-        deaths: totals.deaths,
-        pulls: totals.pulls,
-        rate: totals.pulls > 0 ? Number((totals.deaths / totals.pulls * 100).toFixed(1)) : 0
-      };
-    });
-
-    const playerRates = getFilteredStats()
-      .slice(0, 10)
-      .map(stat => ({
-        player: stat.player,
-        deaths: stat.realDeaths,
-        pulls: stat.pulls,
-        rate: Number(stat.realRate.toFixed(1))
-      }));
-
-    return { bossDeaths, playerRates };
-  };
-
-  const chartTooltip = {
-    contentStyle: {
-      background: '#090d15',
-      border: '1px solid rgba(215, 180, 90, 0.32)',
-      borderRadius: '8px',
-      color: '#f2f5f8'
-    },
-    labelStyle: { color: '#f5d779' }
-  };
-
   const formatTimestamp = (absTs) => {
     const date = new Date(absTs);
     return date.toLocaleString('en-US', { 
@@ -1386,26 +1437,28 @@ export default function WarcraftLogsApp() {
     const minVal = Math.min(...filteredValues);
     const maxVal = Math.max(...filteredValues);
     
-    // Assign extreme colors to outliers
+    // Assign extreme colors to outliers — endpoints clamped to stay
+    // legible on the near-black fpx panels (dark green / dark red read
+    // at ~3:1 on #0d111c; these floors keep severity meaning at ~5.5:1+)
     if (percentage < lowerBound) {
-      return '#166534'; // dark green for low outliers
+      return '#34aa5c'; // deep green for low outliers (good)
     }
     if (percentage > upperBound) {
-      return '#dc2626'; // dark red for high outliers
+      return '#f05248'; // red for high outliers (bad)
     }
-    
+
     // Color scale for non-outliers
     if (percentage <= median) {
-      // Below median: light green (#86efac) to darker green (#166534)
+      // Below median: light green (#86efac) to deep green (#34aa5c)
       const ratio = (median - percentage) / (median - minVal);
-      const r = Math.round(134 + (22 - 134) * ratio);
-      const g = Math.round(239 + (101 - 239) * ratio);
-      const b = Math.round(172 + (52 - 172) * ratio);
+      const r = Math.round(134 + (52 - 134) * ratio);
+      const g = Math.round(239 + (170 - 239) * ratio);
+      const b = Math.round(172 + (92 - 172) * ratio);
       return `rgb(${r}, ${g}, ${b})`;
     } else {
       // Above median: light green to light yellow to red
       const ratio = (percentage - median) / (maxVal - median);
-      
+
       if (ratio < 0.5) {
         // Light green (#86efac) to light yellow (#fef08a)
         const localRatio = ratio * 2;
@@ -1414,11 +1467,11 @@ export default function WarcraftLogsApp() {
         const b = Math.round(172 + (138 - 172) * localRatio);
         return `rgb(${r}, ${g}, ${b})`;
       } else {
-        // Light yellow (#fef08a) to red (#dc2626)
+        // Light yellow (#fef08a) to red (#f05248)
         const localRatio = (ratio - 0.5) * 2;
-        const r = Math.round(254 + (220 - 254) * localRatio);
-        const g = Math.round(240 + (38 - 240) * localRatio);
-        const b = Math.round(138 + (38 - 138) * localRatio);
+        const r = Math.round(254 + (240 - 254) * localRatio);
+        const g = Math.round(240 + (82 - 240) * localRatio);
+        const b = Math.round(138 + (72 - 138) * localRatio);
         return `rgb(${r}, ${g}, ${b})`;
       }
     }
@@ -1468,151 +1521,6 @@ export default function WarcraftLogsApp() {
         
         <Route path="/*" element={
           <>
-      {/* Sticky Header — hidden on the landing route, which owns its own chrome */}
-      {!fullBleed && (
-      <header className="app-header">
-        <div className="app-header-inner">
-          <div className="brand-lockup"
-            onClick={() => {
-              setData(null);
-              setError('');
-              setExpandedPlayers(new Set());
-              setSortConfig({ key: null, direction: 'asc' });
-              navigate('/');
-            }}
-          >
-            <div className="brand-mark">FP</div>
-            <div>
-              <h1 className="brand-title">Floor Pov</h1>
-              <p className="brand-subtitle">Late-night raid death analytics</p>
-            </div>
-          </div>
-          <div className="nav-actions">
-            {data && location.pathname === '/results' && (
-              <>
-                <button
-                  className="btn"
-                  onClick={() => {
-                    setData(null);
-                    setError('');
-                    setExpandedPlayers(new Set());
-                    setSortConfig({ key: null, direction: 'asc' });
-                    navigate('/analyze');
-                  }}
-                >
-                  New Analysis
-                </button>
-                {/* DISABLED - Save Reports feature
-                {user && (
-                  <button
-                    onClick={() => setShowSaveDialog(true)}
-                    style={{
-                      padding: '8px 16px',
-                      background: '#3b82f6',
-                      border: 'none',
-                      borderRadius: '6px',
-                      color: '#fff',
-                      cursor: 'pointer',
-                      fontSize: '13px',
-                      fontWeight: '600',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      transition: 'all 0.2s'
-                    }}
-                    onMouseOver={(e) => { e.target.style.background = '#2563eb'; }}
-                    onMouseOut={(e) => { e.target.style.background = '#3b82f6'; }}
-                  >
-                    <Save size={14} />
-                    Save Report
-                  </button>
-                )}
-                */}
-                <button
-                  className={`btn btn-success${sharingData ? ' btn-disabled' : ''}`}
-                  onClick={handleShare}
-                  disabled={sharingData}
-                  style={{ opacity: sharingData ? 0.7 : 1, cursor: sharingData ? 'not-allowed' : 'pointer' }}
-                >
-                  {sharingData ? (
-                    <>
-                      <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} />
-                      Sharing...
-                    </>
-                  ) : (
-                    <>
-                      <Share2 size={14} />
-                      Share
-                    </>
-                  )}
-                </button>
-              </>
-            )}
-            {user ? (
-              <div className="user-pill">
-                <span>{user.email}</span>
-                <button className="btn" onClick={() => setShowSettings(true)}>
-                  <SettingsIcon size={14} />
-                  Settings
-                </button>
-                <button className="btn" onClick={handleLogout}>
-                  <LogOut size={14} />
-                  Logout
-                </button>
-              </div>
-            ) : (
-              <button className="btn btn-primary" onClick={() => setShowAuthModal(true)}>
-                Sign In
-              </button>
-            )}
-          </div>
-        </div>
-      </header>
-      )}
-
-      {/* Alpha Warning Banner — suppressed on landing (owns its own chrome) */}
-      {showAlphaBanner && !fullBleed && (
-        <div style={{
-          background: 'rgba(220, 38, 38, 0.15)',
-          borderBottom: '2px solid rgba(220, 38, 38, 0.3)',
-          backdropFilter: 'blur(10px)',
-          padding: '12px 24px',
-          position: 'relative'
-        }}>
-          <div style={{ maxWidth: '1400px', margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
-            <AlertCircle size={20} style={{ color: '#fca5a5', flexShrink: 0 }} />
-            <p style={{ 
-              margin: 0, 
-              color: '#fecaca', 
-              fontSize: '14px', 
-              fontWeight: '500',
-              textAlign: 'center',
-              lineHeight: '1.5'
-            }}>
-              ⚠️ <strong>ALPHA VERSION</strong> - This tool is in active development. Features are being added regularly and you may encounter bugs or incomplete functionality.
-            </p>
-            <button
-              onClick={() => setShowAlphaBanner(false)}
-              style={{
-                background: 'rgba(252, 165, 165, 0.2)',
-                border: 'none',
-                borderRadius: '4px',
-                padding: '4px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                color: '#fecaca',
-                transition: 'background 0.2s',
-                flexShrink: 0
-              }}
-              onMouseOver={(e) => e.target.style.background = 'rgba(252, 165, 165, 0.3)'}
-              onMouseOut={(e) => e.target.style.background = 'rgba(252, 165, 165, 0.2)'}
-            >
-              <X size={16} />
-            </button>
-          </div>
-        </div>
-      )}
       {/* Share Modal */}
       {showShareModal && (
         <div style={{
@@ -1713,75 +1621,31 @@ export default function WarcraftLogsApp() {
         style={fullBleed ? undefined : { maxWidth: '1400px', margin: '0 auto', padding: '24px' }}
       >
         {loading && (
-          <div style={{ 
-            position: 'fixed', 
-            top: 0, 
-            left: 0, 
-            right: 0, 
-            bottom: 0, 
-            background: 'rgba(10, 14, 26, 0.98)', 
-            display: 'flex', 
-            alignItems: 'center', 
-            justifyContent: 'center', 
-            zIndex: 9999,
-            backdropFilter: 'blur(8px)'
-          }}>
-            <div style={{ textAlign: 'center', maxWidth: '500px', padding: '40px' }}>
-              <div style={{
-                width: '80px',
-                height: '80px',
-                border: '4px solid var(--color-border)',
-                borderTop: '4px solid var(--color-gold-2)',
-                borderRadius: '50%',
-                animation: 'spin 1s linear infinite',
-                margin: '0 auto 24px'
-              }} />
-              <h2 style={{ margin: '0 0 16px', fontSize: '22px', fontWeight: '600', color: '#ffffff' }}>
-                Analyzing Reports
-              </h2>
-              <div style={{ 
-                padding: '14px 18px', 
-                background: '#1a1f2e', 
-                borderRadius: '8px',
-                border: '1px solid #2d3748',
-                marginBottom: '16px',
-                minHeight: '60px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}>
-                <p style={{ 
-                  margin: 0, 
-                  fontSize: '14px', 
-                  color: 'var(--color-info)', 
-                  fontWeight: '500',
-                  lineHeight: '1.6'
-                }}>
-                  {loadingStage || 'Starting analysis...'}
-                </p>
+          <div className="fpx-loadov">
+            <div className={`fpx-shell${resultsRailCollapsed ? ' collapsed' : ''}`}>
+              <FpxRail
+                collapsed={resultsRailCollapsed}
+                onToggle={() => setResultsRailCollapsed((v) => !v)}
+                active={null}
+                onHome={() => { handleCancel(); navigate('/'); }}
+                onAnalyze={() => { handleCancel(); navigate('/analyze'); }}
+                onResults={() => { handleCancel(); navigate('/results'); }}
+              />
+              <div className="fpx-main fpx-loadmain">
+                <div className="fpx-load">
+                  <div className="fpx-load-orb">
+                    <video
+                      src={`${process.env.PUBLIC_URL}/art/lura-loader.webm`}
+                      poster={`${process.env.PUBLIC_URL}/art/lura-loader.jpg`}
+                      autoPlay loop muted playsInline aria-hidden="true"
+                    />
+                  </div>
+                  <h2>ANALYZING REPORTS</h2>
+                  <div className="stage">{loadingStage || 'Starting analysis…'}</div>
+                  <p className="sub">Pulling data from WarcraftLogs — this can take a while.</p>
+                  <button className="cancel" onClick={handleCancel}>Cancel analysis</button>
+                </div>
               </div>
-              <p style={{ color: '#8b92a0', fontSize: '13px', margin: '0 0 16px', lineHeight: '1.6' }}>
-                Processing data from WarcraftLogs...<br />
-                This may take a while
-              </p>
-              <button
-                onClick={handleCancel}
-                style={{
-                  padding: '10px 24px',
-                  background: '#ef4444',
-                  color: '#ffffff',
-                  border: 'none',
-                  borderRadius: '6px',
-                  fontSize: '14px',
-                  fontWeight: '600',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s'
-                }}
-                onMouseOver={(e) => e.target.style.background = '#dc2626'}
-                onMouseOut={(e) => e.target.style.background = '#ef4444'}
-              >
-                Cancel Analysis
-              </button>
             </div>
           </div>
         )}
@@ -1818,112 +1682,98 @@ export default function WarcraftLogsApp() {
 
           <Route path="/results" element={
             <>
-            {data ? (
-              <div>
-            {/* Analysis Title */}
-            <div style={{
-              background: '#1a1f2e',
-              borderRadius: '12px',
-              padding: '24px',
-              marginBottom: '24px',
-              border: '1px solid #2d3748'
-            }}>
-              <h1 style={{
-                margin: 0,
-                fontSize: '28px',
-                fontWeight: '700',
-                color: '#e2e8f0',
-                marginBottom: '8px'
-              }}>
-                {config.guildName} - {config.server}
-              </h1>
-              <div style={{
-                display: 'flex',
-                gap: '16px',
-                flexWrap: 'wrap',
-                alignItems: 'center',
-                fontSize: '14px',
-                color: '#94a3b8'
-              }}>
-                <span>
-                  {RAID_ZONES[config.selectedRaid]?.name} • {
-                    config.difficulty === '3' ? 'Normal' :
-                    config.difficulty === '4' ? 'Heroic' : 'Mythic'
-                  }
-                </span>
-                <span>•</span>
-                <span>
-                  Analyzed on {new Date().toLocaleDateString('en-US', { 
-                    month: 'short', 
-                    day: 'numeric', 
-                    year: 'numeric',
-                    hour: 'numeric',
-                    minute: '2-digit'
-                  })}
-                </span>
-              </div>
-            </div>
+            <div className="fpx-atmos base" />
+            <div className="fpx-atmos vignette" />
+            <div className="fpx-atmos grain" />
+            <main className="fpx-land">
+              <div className={`fpx-shell${resultsRailCollapsed ? ' collapsed' : ''}`}>
+                <FpxRail
+                  collapsed={resultsRailCollapsed}
+                  onToggle={() => setResultsRailCollapsed((v) => !v)}
+                  active="results"
+                  onHome={() => { setData(null); setError(''); setExpandedPlayers(new Set()); setSortConfig({ key: null, direction: 'asc' }); navigate('/'); }}
+                  onAnalyze={() => { setData(null); setError(''); setExpandedPlayers(new Set()); setSortConfig({ key: null, direction: 'asc' }); navigate('/analyze'); }}
+                  onResults={() => {}}
+                />
 
-            {(() => {
-              const { bossDeaths, playerRates } = getAnalysisChartData();
-              return (
-                <div className="chart-grid" style={{ marginBottom: '16px' }}>
-                  <div className="chart-panel">
-                    <h2 className="chart-title">Deaths by Boss</h2>
-                    {bossDeaths.length > 0 ? (
-                      <ResponsiveContainer width="100%" height={230}>
-                        <BarChart data={bossDeaths} margin={{ top: 8, right: 12, left: -18, bottom: 48 }}>
-                          <CartesianGrid stroke="rgba(147, 165, 196, 0.14)" vertical={false} />
-                          <XAxis dataKey="boss" angle={-28} textAnchor="end" interval={0} height={70} />
-                          <YAxis allowDecimals={false} />
-                          <Tooltip {...chartTooltip} />
-                          <Bar dataKey="deaths" name="Deaths" fill="var(--chart-2)" radius={[6, 6, 0, 0]} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    ) : (
-                      <div className="chart-empty">No boss death data for the active filters.</div>
-                    )}
+                <div className="fpx-main">
+                  <div className="fpx-top fpx-rv">
+                    <div className="fpx-crumbs">ANALYSIS&nbsp; /&nbsp; <b>RESULTS</b></div>
+                    <div className="fpx-auth">
+                      {data && (
+                        <>
+                          {recentRuns.length > 0 && (
+                            <div className="fpx-recent">
+                              <button className="fpx-btn ghost sm" onClick={() => setShowRecentMenu((v) => !v)}>
+                                Recent <ChevronDown size={13} />
+                              </button>
+                              {showRecentMenu && (
+                                <div className="fpx-recent-menu">
+                                  {recentRuns.map((r) => (
+                                    <div key={r.id} className="fpx-recent-item">
+                                      <button className="open" onClick={() => openRecentRun(r)}>
+                                        <span className="t">{r.title}</span>
+                                        <span className="s">{r.sub} · {new Date(r.savedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
+                                      </button>
+                                      <button className="rm" onClick={() => removeRecentRun(r.id)} title="Remove run">
+                                        <X size={13} />
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          <button className="fpx-btn ghost sm" onClick={() => { setData(null); setError(''); setExpandedPlayers(new Set()); setSortConfig({ key: null, direction: 'asc' }); navigate('/analyze'); }}>
+                            <Crosshair size={15} /> New Analysis
+                          </button>
+                          <button className="fpx-btn sm" onClick={handleShare} disabled={sharingData}
+                            style={{ opacity: sharingData ? 0.7 : 1, cursor: sharingData ? 'not-allowed' : 'pointer' }}>
+                            {sharingData ? <><Loader2 size={15} className="fpx-spin" /> Sharing…</> : <><Share2 size={15} /> Share</>}
+                          </button>
+                        </>
+                      )}
+                      {user ? (
+                        <>
+                          <button className="fpx-btn ghost sm" onClick={() => setShowSettings(true)}><SettingsIcon size={15} /> Settings</button>
+                          <button className="fpx-btn ghost sm" onClick={handleLogout}><LogOut size={15} /> Logout</button>
+                        </>
+                      ) : (
+                        <button className="fpx-btn ghost sm" onClick={() => setShowAuthModal(true)}><LogIn size={15} /> Sign In</button>
+                      )}
+                    </div>
                   </div>
-                  <div className="chart-panel">
-                    <h2 className="chart-title">Highest Death Rates</h2>
-                    {playerRates.length > 0 ? (
-                      <ResponsiveContainer width="100%" height={230}>
-                        <BarChart data={playerRates} layout="vertical" margin={{ top: 8, right: 18, left: 24, bottom: 8 }}>
-                          <CartesianGrid stroke="rgba(147, 165, 196, 0.14)" horizontal={false} />
-                          <XAxis type="number" unit="%" />
-                          <YAxis type="category" dataKey="player" width={92} />
-                          <Tooltip {...chartTooltip} />
-                          <Bar dataKey="rate" name="Death rate" fill="var(--chart-1)" radius={[0, 6, 6, 0]} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    ) : (
-                      <div className="chart-empty">No player rate data for the active filters.</div>
-                    )}
-                  </div>
-                </div>
-              );
-            })()}
 
-            <div style={{ background: '#1a1f2e', borderRadius: '8px', padding: '14px', marginBottom: '16px', border: '1px solid #2d3748' }}>
-              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#cbd5e1' }}>
-                  Deaths to count:
-                  <div 
-                    style={{ 
-                      position: 'relative', 
-                      display: 'inline-flex',
-                      cursor: 'help'
-                    }}
+                  {data ? (
+                    <>
+                    <div className="fpx-pagehead fpx-rv">
+                      <div>
+                        <h2>{config.guildName} — {config.server}</h2>
+                        <p>{RAID_ZONES[config.selectedRaid]?.name} · {
+                          config.difficulty === '3' ? 'Normal' :
+                          config.difficulty === '4' ? 'Heroic' : 'Mythic'
+                        } · Analyzed {new Date().toLocaleDateString('en-US', {
+                          month: 'short', day: 'numeric', year: 'numeric',
+                          hour: 'numeric', minute: '2-digit'
+                        })}</p>
+                      </div>
+                    </div>
+
+                    <div className="fpx-results">
+
+            <div className="fpx-rsec fpx-rv"><h3>FILTERS</h3><span className="sub">scope the death review</span><div className="rule" /></div>
+            <div className="fpx-filters fpx-rv">
+              <div className="fpx-frow">
+                <label className="fpx-flabel">
+                  Deaths to count
+                  <span
                     title="Filter results to show only deaths up to this number per pull. Helps focus analysis on early deaths vs late-fight wipe cascades. Change this to see how different death thresholds affect player rankings."
+                    style={{ display: 'inline-flex' }}
                   >
-                    <Info size={14} style={{ color: '#64748b' }} />
-                  </div>
+                    <Info size={14} />
+                  </span>
                 </label>
-                <select
-                  value={cutoff}
-                  onChange={(e) => setCutoff(parseInt(e.target.value))}
-                  style={{ padding: '6px 10px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px' }}
-                >
+                <select value={cutoff} onChange={(e) => setCutoff(parseInt(e.target.value))}>
                   {[...Array(data.meta.maxCutoff)].map((_, i) => (
                     <option key={i + 1} value={i + 1}>
                       {i + 1} {i === 0 ? 'Death' : 'Deaths'}
@@ -1945,27 +1795,22 @@ export default function WarcraftLogsApp() {
                   }
                   return cheatDeathCount > 0 && (
                     <>
-                      <div style={{ marginLeft: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span style={{ fontSize: '11px', color: '#10b981', background: '#1a2e1a', padding: '3px 8px', borderRadius: '4px', fontWeight: '500' }}>
-                          ✓ {cheatDeathCount} cheat deaths detected
-                        </span>
-                      </div>
-                      <div style={{ marginLeft: '12px', fontSize: '11px', color: '#8b92a0', padding: '4px 8px', background: '#0f1419', borderRadius: '4px' }}>
-                        Legend: <span style={{ color: '#cbd5e1' }}>Top</span> = Real deaths only, <span style={{ color: '#34d399' }}>Bottom (green)</span> = Including cheat deaths
-                      </div>
+                      <span className="fpx-tag ok">✓ {cheatDeathCount} cheat deaths detected</span>
+                      <span className="fpx-tag muted">
+                        Legend: <b>Top</b> real only · <b style={{ color: 'var(--fpx-best)' }}>Bottom</b> incl. cheat
+                      </span>
                     </>
                   );
                 })()}
 
-                <div style={{ marginLeft: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Filter size={14} />
-                  <span style={{ fontSize: '13px', color: '#cbd5e1' }}>Boss filters:</span>
+                <div className="fpx-flabel" style={{ marginLeft: '4px' }}>
+                  <Filter size={14} /> Boss filters
                 </div>
                 {sortBossesByOrder(Object.keys(data.bossParticipation), config.selectedRaid).map(boss => (
                   <button
                     key={boss}
                     onClick={() => toggleBoss(boss)}
-                    style={{ padding: '4px 10px', background: selectedBosses.has(boss) ? 'var(--color-gold)' : 'rgba(28, 38, 56, 0.9)', border: '1px solid ' + (selectedBosses.has(boss) ? 'var(--color-gold-2)' : 'var(--color-border)'), borderRadius: '14px', color: selectedBosses.has(boss) ? '#140f04' : 'var(--color-text)', cursor: 'pointer', fontSize: '12px', fontWeight: selectedBosses.has(boss) ? '700' : '400' }}
+                    className={`fpx-chip${selectedBosses.has(boss) ? ' on' : ''}`}
                   >
                     {boss}
                   </button>
@@ -1973,8 +1818,8 @@ export default function WarcraftLogsApp() {
               </div>
 
               {/* Minimum Pulls Filter */}
-              <div style={{ marginTop: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <label style={{ fontSize: '13px', color: '#cbd5e1' }}>Minimum pulls:</label>
+              <div className="fpx-frow">
+                <label className="fpx-flabel">Minimum pulls</label>
                 <input
                   type="text"
                   value={minPulls}
@@ -1984,18 +1829,18 @@ export default function WarcraftLogsApp() {
                       setMinPulls(val === '' ? 0 : parseInt(val));
                     }
                   }}
-                  style={{ width: '80px', padding: '6px 10px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px' }}
+                  style={{ width: '88px' }}
                 />
-                <span style={{ fontSize: '11px', color: '#8b92a0' }}>
-                  (Hide players with fewer than this many pulls)
+                <span style={{ fontSize: '11px', color: 'var(--fpx-ink-faint)' }}>
+                  hide players below this pull count
                 </span>
-                
+
                 <input
                   type="text"
+                  className="fpx-search"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search players..."
-                  style={{ marginLeft: 'auto', width: '200px', padding: '6px 10px', background: '#0f1419', border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0', fontSize: '13px' }}
+                  placeholder="Search players…"
                 />
               </div>
 
@@ -2011,37 +1856,24 @@ export default function WarcraftLogsApp() {
                     }
                   });
                 }
-                
+
                 return (
-                <div style={{ marginTop: '12px', padding: '10px', background: '#0f1419', borderRadius: '6px', border: '1px solid #334155' }}>
-                  <div style={{ fontSize: '12px', color: '#cbd5e1', marginBottom: '6px', fontWeight: '500' }}>
-                    Hidden Players ({hiddenPlayers.size}):
-                  </div>
+                <div className="fpx-subpanel">
+                  <div className="fpx-subpanel-t">Hidden players ({hiddenPlayers.size})</div>
                   <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                     {Array.from(hiddenPlayers).map(player => {
                       const playerClass = playerClassMap[player] || 'Unknown';
-                      const classColor = WOW_CLASS_COLORS[playerClass] || '#cbd5e1';
-                      
+                      const classColor = WOW_CLASS_COLORS[playerClass] || 'var(--fpx-ink)';
+
                       return (
                       <button
                         key={player}
                         onClick={() => togglePlayerVisibility(player)}
-                        style={{
-                          padding: '4px 8px',
-                          background: '#1a1f2e',
-                          border: '1px solid #334155',
-                          borderRadius: '4px',
-                          color: classColor,
-                          cursor: 'pointer',
-                          fontSize: '11px',
-                          fontWeight: '500',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '4px'
-                        }}
+                        className="fpx-pill"
+                        style={{ color: classColor }}
                         title={`Show ${player}`}
                       >
-                        {player} <span style={{ color: '#8b92a0' }}>✓ Show</span>
+                        {player} <span style={{ color: 'var(--fpx-ink-faint)' }}>✓ show</span>
                       </button>
                     )})}
                   </div>
@@ -2050,36 +1882,15 @@ export default function WarcraftLogsApp() {
               })()}
 
               {/* Character Grouping UI */}
-              <div style={{ marginTop: '12px', background: '#0f1419', borderRadius: '6px', border: '1px solid #334155', overflow: 'hidden' }}>
+              <div className="fpx-acc">
                 <button
                   onClick={() => setShowGroupingUI(!showGroupingUI)}
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    background: '#1a1f2e',
-                    border: 'none',
-                    color: '#e2e8f0',
-                    cursor: 'pointer',
-                    fontSize: '13px',
-                    fontWeight: '500',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    textAlign: 'left'
-                  }}
+                  className="fpx-acc-head"
                 >
                   {showGroupingUI ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                  Group Characters (Merge Alts with Mains)
+                  Group characters — merge alts with mains
                   {Object.keys(characterGroups).length > 0 && (
-                    <span style={{
-                      marginLeft: 'auto',
-                      padding: '2px 8px',
-                      background: 'var(--color-gold)',
-                      color: '#140f04',
-                      borderRadius: '10px',
-                      fontSize: '11px',
-                      fontWeight: '700'
-                    }}>
+                    <span className="count">
                       {Object.keys(characterGroups).length} {Object.keys(characterGroups).length === 1 ? 'group' : 'groups'}
                     </span>
                   )}
@@ -2088,73 +1899,46 @@ export default function WarcraftLogsApp() {
                 {showGroupingUI && (() => {
                   // Get all players from the grid
                   const { players } = getOverviewData();
-                  
+
                   // Filter out already grouped alts
                   const groupedAlts = new Set();
                   Object.values(characterGroups).forEach(alts => {
                     alts.forEach(alt => groupedAlts.add(alt));
                   });
-                  
+
                   // Filter by search query as well
                   const availablePlayers = players
                     .filter(p => !groupedAlts.has(p))
                     .filter(p => !searchQuery || p.toLowerCase().includes(searchQuery.toLowerCase()));
-                  
+
                   // Filter current groups by search query
                   const filteredGroups = Object.entries(characterGroups).filter(([main, alts]) => {
                     if (!searchQuery) return true;
                     const query = searchQuery.toLowerCase();
                     // Show group if main matches or any alt matches
-                    return main.toLowerCase().includes(query) || 
+                    return main.toLowerCase().includes(query) ||
                            alts.some(alt => alt.toLowerCase().includes(query));
                   });
-                  
+
                   return (
-                    <div style={{ padding: '12px' }}>
+                    <div className="fpx-acc-body">
                       {/* Existing Groups */}
                       {filteredGroups.length > 0 && (
-                        <div style={{ marginBottom: '12px' }}>
-                          <div style={{ fontSize: '12px', color: '#cbd5e1', marginBottom: '8px', fontWeight: '500' }}>
-                            Current Groups:
-                          </div>
+                        <div>
+                          <div className="fpx-subpanel-t">Current groups</div>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                             {filteredGroups.map(([main, alts]) => (
-                              <div
-                                key={main}
-                                style={{
-                                  padding: '8px 10px',
-                                  background: '#1a1f2e',
-                                  border: '1px solid #2d3748',
-                                  borderRadius: '6px',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '8px'
-                                }}
-                              >
-                                <span style={{ color: 'var(--color-gold-2)', fontSize: '12px', fontWeight: '600' }}>
-                                  {main}
-                                </span>
-                                <span style={{ color: '#64748b', fontSize: '11px' }}>+</span>
-                                <span style={{ color: '#94a3b8', fontSize: '11px' }}>
-                                  {alts.join(', ')}
-                                </span>
+                              <div key={main} className="fpx-grouprow">
+                                <span className="main">{main}</span>
+                                <span className="plus">+</span>
+                                <span className="alts">{alts.join(', ')}</span>
                                 <button
                                   onClick={() => {
                                     const newGroups = { ...characterGroups };
                                     delete newGroups[main];
                                     setCharacterGroups(newGroups);
                                   }}
-                                  style={{
-                                    marginLeft: 'auto',
-                                    padding: '4px 8px',
-                                    background: '#dc2626',
-                                    border: 'none',
-                                    borderRadius: '4px',
-                                    color: '#fff',
-                                    cursor: 'pointer',
-                                    fontSize: '10px',
-                                    fontWeight: '500'
-                                  }}
+                                  className="fpx-ungroup"
                                 >
                                   Ungroup
                                 </button>
@@ -2165,73 +1949,44 @@ export default function WarcraftLogsApp() {
                       )}
 
                       {/* Selection Interface */}
-                      <div style={{ fontSize: '12px', color: '#cbd5e1', marginBottom: '8px', fontWeight: '500' }}>
-                        Select characters to merge:
-                      </div>
-                      
-                      <div style={{ 
-                        display: 'grid', 
-                        gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', 
-                        gap: '6px',
-                        marginBottom: '12px',
-                        maxHeight: '200px',
-                        overflowY: 'auto'
-                      }}>
-                        {availablePlayers.map(player => {
-                          const playerClass = data.events[player]?.[0]?.class || 'Unknown';
-                          const classColor = WOW_CLASS_COLORS[playerClass] || '#cbd5e1';
-                          const isSelected = selectedForGrouping.has(player);
-                          
-                          return (
-                            <button
-                              key={player}
-                              onClick={() => {
-                                const newSelected = new Set(selectedForGrouping);
-                                if (isSelected) {
-                                  newSelected.delete(player);
-                                } else {
-                                  newSelected.add(player);
-                                }
-                                setSelectedForGrouping(newSelected);
-                              }}
-                              style={{
-                                padding: '6px 10px',
-                                background: isSelected ? 'var(--color-gold)' : 'rgba(9, 13, 21, 0.72)',
-                                border: '1px solid ' + (isSelected ? 'var(--color-gold-2)' : 'var(--color-border)'),
-                                borderRadius: '4px',
-                                color: isSelected ? '#140f04' : classColor,
-                                cursor: 'pointer',
-                                fontSize: '11px',
-                                fontWeight: isSelected ? '700' : '500',
-                                textAlign: 'left',
-                                transition: 'all 0.2s'
-                              }}
-                            >
-                              {isSelected && '✓ '}{player}
-                            </button>
-                          );
-                        })}
+                      <div>
+                        <div className="fpx-subpanel-t">Select characters to merge</div>
+                        <div className="fpx-pillgrid">
+                          {availablePlayers.map(player => {
+                            const playerClass = data.events[player]?.[0]?.class || 'Unknown';
+                            const classColor = WOW_CLASS_COLORS[playerClass] || 'var(--fpx-ink)';
+                            const isSelected = selectedForGrouping.has(player);
+
+                            return (
+                              <button
+                                key={player}
+                                onClick={() => {
+                                  const newSelected = new Set(selectedForGrouping);
+                                  if (isSelected) {
+                                    newSelected.delete(player);
+                                  } else {
+                                    newSelected.add(player);
+                                  }
+                                  setSelectedForGrouping(newSelected);
+                                }}
+                                className={`fpx-pill${isSelected ? ' on' : ''}`}
+                                style={{ color: isSelected ? undefined : classColor, textAlign: 'left' }}
+                              >
+                                {isSelected && '✓ '}{player}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
 
                       {/* Merge Button */}
                       {selectedForGrouping.size >= 2 && (
-                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end' }}>
                           <div style={{ flex: 1 }}>
-                            <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>
-                              Primary character (keep this name):
+                            <label style={{ display: 'block', fontSize: '11px', color: 'var(--fpx-ink-faint)', marginBottom: '5px', fontWeight: 600 }}>
+                              Primary character (keep this name)
                             </label>
-                            <select
-                              id="mainCharSelect"
-                              style={{
-                                width: '100%',
-                                padding: '6px 10px',
-                                background: '#1a1f2e',
-                                border: '1px solid #334155',
-                                borderRadius: '4px',
-                                color: '#e2e8f0',
-                                fontSize: '12px'
-                              }}
-                            >
+                            <select id="mainCharSelect" style={{ width: '100%' }}>
                               {Array.from(selectedForGrouping).map(player => (
                                 <option key={player} value={player}>{player}</option>
                               ))}
@@ -2242,7 +1997,7 @@ export default function WarcraftLogsApp() {
                               const mainSelect = document.getElementById('mainCharSelect');
                               const mainChar = mainSelect.value;
                               const alts = Array.from(selectedForGrouping).filter(p => p !== mainChar);
-                              
+
                               if (mainChar && alts.length > 0) {
                                 setCharacterGroups({
                                   ...characterGroups,
@@ -2251,32 +2006,15 @@ export default function WarcraftLogsApp() {
                                 setSelectedForGrouping(new Set());
                               }
                             }}
-                            style={{
-                              marginTop: '20px',
-                              padding: '8px 16px',
-                              background: '#10b981',
-                              border: 'none',
-                              borderRadius: '6px',
-                              color: '#fff',
-                              cursor: 'pointer',
-                              fontSize: '12px',
-                              fontWeight: '600'
-                            }}
+                            className="fpx-merge"
                           >
-                            Merge Selected
+                            Merge selected
                           </button>
                         </div>
                       )}
 
                       {selectedForGrouping.size > 0 && selectedForGrouping.size < 2 && (
-                        <div style={{ 
-                          padding: '8px 12px', 
-                          background: '#1e293b', 
-                          border: '1px solid #334155', 
-                          borderRadius: '4px',
-                          fontSize: '11px',
-                          color: '#94a3b8'
-                        }}>
+                        <div style={{ fontSize: '11px', color: 'var(--fpx-ink-faint)' }}>
                           Select at least 2 characters to merge
                         </div>
                       )}
@@ -2287,30 +2025,15 @@ export default function WarcraftLogsApp() {
             </div>
 
             {/* Overview Section - Collapsible */}
-            <div style={{ background: '#1a1f2e', borderRadius: '8px', marginBottom: '16px', border: '1px solid #2d3748', overflow: 'hidden' }}>
+            <div className="fpx-rsec fpx-rv"><h3>DEATH-RATE MATRIX</h3><span className="sub">player × boss</span><div className="rule" /></div>
+            <div className="fpx-matrix fpx-rv">
               <button
                 onClick={() => setOverviewCollapsed(!overviewCollapsed)}
-                style={{ 
-                  width: '100%', 
-                  padding: '12px 16px', 
-                  background: '#1a1f2e', 
-                  border: 'none', 
-                  borderBottom: overviewCollapsed ? 'none' : '1px solid #2d3748',
-                  color: '#e2e8f0', 
-                  cursor: 'pointer', 
-                  fontSize: '15px', 
-                  fontWeight: '600',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  textAlign: 'left',
-                  transition: 'background 0.2s'
-                }}
-                onMouseOver={(e) => { e.currentTarget.style.background = '#212736'; }}
-                onMouseOut={(e) => { e.currentTarget.style.background = '#1a1f2e'; }}
+                className="fpx-matrix-head"
               >
                 {overviewCollapsed ? <ChevronRight size={18} /> : <ChevronDown size={18} />}
-                All Bosses Overview {overviewCollapsed && '(click to expand)'}
+                ALL BOSSES OVERVIEW
+                <span className="hint">{overviewCollapsed ? 'click to expand' : 'sortable — click any column'}</span>
               </button>
               
               {!overviewCollapsed && (() => {
@@ -2358,64 +2081,37 @@ export default function WarcraftLogsApp() {
               });
               
               return (
-                <div style={{ background: '#1a1f2e', borderRadius: '12px', padding: '16px', border: '1px solid #2d3748', overflowX: 'auto' }}>
-                  <h2 style={{ margin: '0 0 14px', fontSize: '16px', fontWeight: '600', color: '#ffffff' }}>Death Rate Overview</h2>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                <div className="fpx-mtx-wrap">
+                  <table className="fpx-mtx">
                     <thead>
-                      <tr style={{ background: '#0f1419' }}>
-                        <th 
-                          onClick={() => handleSort('player')}
-                          style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #334155', position: 'sticky', left: 0, background: '#0f1419', zIndex: 2, cursor: 'pointer', userSelect: 'none', color: '#ffffff' }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            Player {getSortIcon('player')}
-                          </div>
+                      <tr>
+                        <th onClick={() => handleSort('player')}>
+                          <span className="sortc">Player {getSortIcon('player')}</span>
                         </th>
                         {bosses.map(boss => (
-                          <th 
-                            key={boss} 
-                            onClick={() => handleSort(boss)}
-                            style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #334155', minWidth: '80px', cursor: 'pointer', userSelect: 'none', color: '#ffffff' }}
-                          >
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
-                              {boss} {getSortIcon(boss)}
-                            </div>
+                          <th key={boss} onClick={() => handleSort(boss)}>
+                            <span className="sortc">{boss} {getSortIcon(boss)}</span>
                           </th>
                         ))}
-                        <th 
-                          onClick={() => handleSort('overall')}
-                          style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #334155', fontWeight: '700', minWidth: '80px', cursor: 'pointer', userSelect: 'none', color: '#ffffff' }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
-                            Overall {getSortIcon('overall')}
-                          </div>
+                        <th onClick={() => handleSort('overall')}>
+                          <span className="sortc">Overall {getSortIcon('overall')}</span>
                         </th>
                       </tr>
                     </thead>
                     <tbody>
                       {sortedPlayers.map(player => (
-                        <tr key={player} style={{ borderBottom: '1px solid #2d3748' }}>
-                          <td style={{ padding: '10px', fontWeight: '600', position: 'sticky', left: 0, background: '#1a1f2e', zIndex: 1 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                              <div style={{ color: WOW_CLASS_COLORS[grid[player].overall?.class] || '#ffffff' }}>
+                        <tr key={player}>
+                          <td>
+                            <div className="fpx-cellname">
+                              <span style={{ color: WOW_CLASS_COLORS[grid[player].overall?.class] || 'var(--fpx-ink)' }}>
                                 {player}{characterGroups[player] && characterGroups[player].length > 0 && ' (grouped)'}
-                              </div>
+                              </span>
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   togglePlayerVisibility(player);
                                 }}
-                                style={{
-                                  padding: '3px 8px',
-                                  background: '#2d3748',
-                                  border: '1px solid #334155',
-                                  borderRadius: '4px',
-                                  color: '#cbd5e1',
-                                  cursor: 'pointer',
-                                  fontSize: '10px',
-                                  fontWeight: '500',
-                                  whiteSpace: 'nowrap'
-                                }}
+                                className="fpx-rowhide"
                                 title="Hide this player from results"
                               >
                                 Hide
@@ -2425,40 +2121,40 @@ export default function WarcraftLogsApp() {
                           {bosses.map(boss => {
                             const cellData = grid[player][boss];
                             const showBothStats = cellData.hasCheatDeaths && cellData.totalDeaths > cellData.deaths;
-                            
+
                             return (
-                              <td key={boss} style={{ padding: '10px', textAlign: 'center' }}>
+                              <td key={boss} className={cellData.rate !== null ? 'val' : undefined}>
                                 {cellData.rate !== null ? (
                                   showBothStats ? (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                      <span style={{ color: getPercentageColor(cellData.rate, allBossRealRates[boss]), fontWeight: '600', fontSize: '11px' }}>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
+                                      <span style={{ color: getPercentageColor(cellData.rate, allBossRealRates[boss]) }}>
                                         {cellData.rate.toFixed(1)}%
                                       </span>
-                                      <span style={{ color: getPercentageColor(cellData.totalRate, allBossTotalRates[boss]), fontSize: '10px', fontWeight: '500' }}>
+                                      <span className="mini" style={{ color: getPercentageColor(cellData.totalRate, allBossTotalRates[boss]) }}>
                                         ({cellData.totalRate.toFixed(1)}%)
                                       </span>
                                     </div>
                                   ) : (
-                                    <span style={{ color: getPercentageColor(cellData.rate, allBossRealRates[boss]), fontWeight: '600' }}>
+                                    <span style={{ color: getPercentageColor(cellData.rate, allBossRealRates[boss]) }}>
                                       {cellData.rate.toFixed(1)}%
                                     </span>
                                   )
                                 ) : (
-                                  <span style={{ color: '#475569' }}>—</span>
+                                  <span>—</span>
                                 )}
                               </td>
                             );
                           })}
-                          <td style={{ padding: '10px', textAlign: 'center', fontWeight: '700' }}>
+                          <td className="ov">
                             {grid[player].overall.rate !== null ? (
                               (() => {
                                 const showBothStats = grid[player].overall.hasCheatDeaths && grid[player].overall.totalDeaths > grid[player].overall.deaths;
                                 return showBothStats ? (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'center' }}>
-                                    <span style={{ color: getPercentageColor(grid[player].overall.rate, allRealRates), fontSize: '11px' }}>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', alignItems: 'center' }}>
+                                    <span style={{ color: getPercentageColor(grid[player].overall.rate, allRealRates) }}>
                                       {grid[player].overall.rate.toFixed(1)}%
                                     </span>
-                                    <span style={{ color: getPercentageColor(grid[player].overall.totalRate, allTotalRates), fontSize: '10px', fontWeight: '500' }}>
+                                    <span className="mini" style={{ color: getPercentageColor(grid[player].overall.totalRate, allTotalRates) }}>
                                       ({grid[player].overall.totalRate.toFixed(1)}%)
                                     </span>
                                   </div>
@@ -2469,7 +2165,7 @@ export default function WarcraftLogsApp() {
                                 );
                               })()
                             ) : (
-                              <span style={{ color: '#475569' }}>—</span>
+                              <span>—</span>
                             )}
                           </td>
                         </tr>
@@ -2482,98 +2178,49 @@ export default function WarcraftLogsApp() {
             </div>
 
             {/* Players Section */}
-            <div style={{ background: '#1a1f2e', borderRadius: '8px', padding: '14px', border: '1px solid #2d3748' }}>
-              <h2 style={{ margin: '0 0 12px', fontSize: '15px', fontWeight: '600', color: '#e2e8f0' }}>
-                Players
-              </h2>
-              {(() => {
+            <div className="fpx-rsec fpx-rv"><h3>PLAYERS</h3><span className="sub">expand for the per-boss death log</span><div className="rule" /></div>
+            {(() => {
               const filteredStats = getFilteredStats();
               // Calculate all percentage values for color scaling
               const allRealRates = filteredStats.map(s => s.realRate);
               const allTotalRates = filteredStats.map(s => s.totalRate);
-              
+
               return (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <div className="fpx-plist fpx-rv">
                 {filteredStats.map(({ player, realDeaths, totalDeaths, cheatDeaths, pulls, realRate, totalRate, hasCheatDeaths, deathsByBoss, cheatDeathsByBoss, totalDeathsByBoss, topAbilitiesByBoss, class: playerClass, spec: playerSpec }) => {
                   const isExpanded = expandedPlayers.has(player);
                   const showBothStats = hasCheatDeaths && cheatDeaths > 0;
-                  
+
                   return (
-                    <div key={player} style={{ background: '#1a1f2e', borderRadius: '6px', border: '1px solid #2d3748', overflow: 'hidden' }}>
-                      <div 
-                        onClick={() => togglePlayer(player)}
-                        style={{ 
-                          padding: '8px 12px', 
-                          display: 'flex', 
-                          justifyContent: 'space-between', 
-                          alignItems: 'center', 
-                          cursor: 'pointer',
-                          background: isExpanded ? '#0f1419' : '#1a1f2e',
-                          transition: 'background 0.2s'
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
-                          {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                          <div style={{ flex: 1 }}>
-                            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', flexWrap: 'wrap' }}>
-                              <h3 style={{ margin: 0, fontSize: '14px', fontWeight: '600', color: WOW_CLASS_COLORS[playerClass] || '#ffffff' }}>
-                                {player}{characterGroups[player] && characterGroups[player].length > 0 && ' (grouped)'}
-                              </h3>
-                              {showBothStats ? (
-                                <>
-                                  <span style={{ fontSize: '13px', color: '#8b92a0' }}>—</span>
-                                  <span style={{ fontSize: '13px', color: '#e2e8f0' }}>
-                                    {realDeaths} death{realDeaths !== 1 ? 's' : ''} / {pulls} pulls
-                                  </span>
-                                  <span style={{ fontSize: '13px', color: '#8b92a0' }}>·</span>
-                                  <span style={{ fontSize: '14px', fontWeight: '600', color: getPercentageColor(realRate, allRealRates) }}>
-                                    {realRate.toFixed(1)}%
-                                  </span>
-                                  <span style={{ fontSize: '11px', color: '#34d399' }}>
-                                    (+{cheatDeaths} cheat)
-                                  </span>
-                                </>
-                              ) : (
-                                <>
-                                  <span style={{ fontSize: '13px', color: '#8b92a0' }}>—</span>
-                                  <span style={{ fontSize: '13px', color: '#e2e8f0' }}>
-                                    {realDeaths} death{realDeaths !== 1 ? 's' : ''} / {pulls} pulls
-                                  </span>
-                                  <span style={{ fontSize: '13px', color: '#8b92a0' }}>·</span>
-                                  <span style={{ fontSize: '14px', fontWeight: '600', color: getPercentageColor(realRate, allRealRates) }}>
-                                    {realRate.toFixed(1)}%
-                                  </span>
-                                </>
-                              )}
-                            </div>
-                          </div>
+                    <div key={player} className={`fpx-prow${isExpanded ? ' open' : ''}`}>
+                      <div onClick={() => togglePlayer(player)} className="fpx-prow-h">
+                        {isExpanded ? <ChevronDown size={14} className="chev" /> : <ChevronRight size={14} className="chev" />}
+                        <div style={{ flex: 1, display: 'flex', alignItems: 'baseline', gap: '7px', flexWrap: 'wrap' }}>
+                          <span className="fpx-pname" style={{ color: WOW_CLASS_COLORS[playerClass] || 'var(--fpx-ink)' }}>
+                            {player}{characterGroups[player] && characterGroups[player].length > 0 && ' (grouped)'}
+                          </span>
+                          <span className="fpx-pdot">—</span>
+                          <span className="fpx-pmeta">{realDeaths} death{realDeaths !== 1 ? 's' : ''} / {pulls} pulls</span>
+                          <span className="fpx-pdot">·</span>
+                          <span className="fpx-prate" style={{ color: getPercentageColor(realRate, allRealRates) }}>
+                            {realRate.toFixed(1)}%
+                          </span>
+                          {showBothStats && <span className="fpx-pcheat">(+{cheatDeaths} cheat)</span>}
                         </div>
-                        
-                        <div style={{ display: 'flex', alignItems: 'center', marginLeft: '12px' }}>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              togglePlayerVisibility(player);
-                            }}
-                            style={{
-                              padding: '3px 8px',
-                              background: '#2d3748',
-                              border: '1px solid #334155',
-                              borderRadius: '4px',
-                              color: '#cbd5e1',
-                              cursor: 'pointer',
-                              fontSize: '10px',
-                              fontWeight: '500'
-                            }}
-                            title="Hide this player from results"
-                          >
-                            Hide
-                          </button>
-                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            togglePlayerVisibility(player);
+                          }}
+                          className="fpx-hide"
+                          title="Hide this player from results"
+                        >
+                          Hide
+                        </button>
                       </div>
 
                       {isExpanded && (
-                        <div style={{ padding: '0 14px 12px', borderTop: '1px solid #2d3748' }}>
+                        <div className="fpx-pbody">
                           {sortBossesByOrder(Object.keys(deathsByBoss), config.selectedRaid).map(boss => {
                             const bossDeaths = deathsByBoss[boss];
                             const bossPulls = data.bossParticipation[boss]?.[player]?.length || 0;
@@ -2583,153 +2230,77 @@ export default function WarcraftLogsApp() {
                             const cheatDeathCount = totalBossDeaths.filter(d => d.isCheatDeath).length;
                             const bossRealRate = bossPulls > 0 ? (realDeathCount / bossPulls * 100) : 0;
                             const bossTotalRate = bossPulls > 0 ? (totalDeathCount / bossPulls * 100) : 0;
-                            
+
                             return (
-                            <div key={boss} style={{ marginTop: '10px' }}>
-                              <h4 style={{ margin: '0 0 8px', fontSize: '13px', fontWeight: '600', color: 'var(--color-info)' }}>
+                            <div key={boss} className="fpx-pboss">
+                              <h4 className="fpx-pboss-h">
                                 {boss}
                                 {showBothStats && cheatDeathCount > 0 ? (
-                                  <div style={{ fontSize: '12px', fontWeight: '400', marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                    <span style={{ color: '#cbd5e1' }}>
-                                      Real: {realDeathCount} / {bossPulls} pulls - {bossRealRate.toFixed(1)}%
-                                    </span>
-                                    <span style={{ color: '#34d399' }}>
-                                      With cheat: {totalDeathCount} / {bossPulls} pulls - {bossTotalRate.toFixed(1)}%
-                                    </span>
-                                  </div>
+                                  <>
+                                    <span className="r">Real {realDeathCount}/{bossPulls} pulls · {bossRealRate.toFixed(1)}%</span>
+                                    <span className="c">+cheat {totalDeathCount}/{bossPulls} pulls · {bossTotalRate.toFixed(1)}%</span>
+                                  </>
                                 ) : (
-                                  <span style={{ fontSize: '12px', fontWeight: '400', color: '#cbd5e1', marginLeft: '8px' }}>
-                                    ({realDeathCount} / {bossPulls} pulls - {bossRealRate.toFixed(1)}%)
-                                  </span>
+                                  <span className="r">{realDeathCount}/{bossPulls} pulls · {bossRealRate.toFixed(1)}%</span>
                                 )}
                               </h4>
-                              
+
                               {topAbilitiesByBoss[boss] && topAbilitiesByBoss[boss].length > 0 && (
-                                <div style={{ marginBottom: '8px', padding: '6px 8px', background: '#0f1419', borderRadius: '4px' }}>
-                                  <div style={{ fontSize: '10px', color: '#8b92a0', marginBottom: '3px' }}>Top Abilities:</div>
-                                  <div style={{ fontSize: '11px', color: '#cbd5e1' }}>
-                                    {topAbilitiesByBoss[boss].map(([ability, count], idx) => (
-                                      <span key={ability}>
-                                        {idx + 1}. {ability} ({count}){idx < topAbilitiesByBoss[boss].length - 1 ? ' • ' : ''}
-                                      </span>
-                                    ))}
-                                  </div>
+                                <div className="fpx-abil">
+                                  <span className="lbl">Top abilities</span>
+                                  {topAbilitiesByBoss[boss].map(([ability, count], idx) => (
+                                    <span key={ability}>
+                                      {idx + 1}. {ability} ({count}){idx < topAbilitiesByBoss[boss].length - 1 ? '   ·   ' : ''}
+                                    </span>
+                                  ))}
                                 </div>
                               )}
 
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                              <div className="fpx-dlist">
                                 {(showBothStats ? totalBossDeaths : bossDeaths)
                                   .map((death, idx) => (
-                                  <div key={idx} style={{ 
-                                    display: 'flex', 
-                                    flexDirection: 'column',
-                                    gap: '6px',
-                                    padding: '6px 8px',
-                                    background: death.isCheatDeath ? '#2d3a2d' : '#0f1419',
-                                    borderLeft: death.isCheatDeath ? '2px solid #34d399' : 'none',
-                                    borderRadius: '4px',
-                                    fontSize: '11px'
-                                  }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flex: 1 }}>
-                                        <span style={{ color: '#64748b', minWidth: '55px' }}>Pull #{death.pullNo}</span>
-                                        <span style={{ color: '#8b92a0', minWidth: '110px' }}>{formatTimestamp(death.absTs)}</span>
+                                  <div key={idx} className={`fpx-death${death.isCheatDeath ? ' cheat' : ''}`}>
+                                    <div className="fpx-death-top">
+                                      <div className="fpx-death-meta">
+                                        <span className="pn">Pull #{death.pullNo}</span>
+                                        <span>{formatTimestamp(death.absTs)}</span>
                                         {death.isCheatDeath && (
-                                          <span style={{ 
-                                            color: '#34d399', 
-                                            fontSize: '10px', 
-                                            fontWeight: '600',
-                                            padding: '2px 6px',
-                                            background: '#1a2e1a',
-                                            borderRadius: '3px',
-                                            marginRight: '8px'
-                                          }}>
-                                            CHEAT
-                                          </span>
+                                          <span className="fpx-cheatbadge">CHEAT</span>
                                         )}
-                                        <span style={{ color: '#e2e8f0' }}>
+                                        <span className="ab">
                                           {death.abilityName === 'Unknown' ? (
-                                            <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>
-                                              Unknown ability
-                                            </span>
+                                            <span className="un">Unknown ability</span>
                                           ) : death.abilityName}
                                         </span>
                                       </div>
-                                      <a 
-                                        href={getWCLLink(death.reportId, death.fightId)} 
-                                        target="_blank" 
+                                      <a
+                                        href={getWCLLink(death.reportId, death.fightId)}
+                                        target="_blank"
                                         rel="noopener noreferrer"
-                                        style={{
-                                          display: 'flex',
-                                          alignItems: 'center',
-                                          gap: '4px',
-                                          color: 'var(--color-info)',
-                                          textDecoration: 'none',
-                                          fontSize: '11px'
-                                        }}
+                                        className="fpx-wcl"
                                       >
-                                        View Log <ExternalLink size={12} />
+                                        View log <ExternalLink size={12} />
                                       </a>
                                     </div>
 
                                     {/* Defensive Abilities Display */}
                                     {config.enableDefensiveTracking && death.defensives && (
-                                      <div style={{
-                                        marginTop: '4px',
-                                        padding: '6px 8px',
-                                        background: '#1a1f2e',
-                                        borderRadius: '4px',
-                                        borderLeft: '2px solid #60a5fa'
-                                      }}>
-                                        <div style={{ 
-                                          display: 'flex', 
-                                          gap: '6px', 
-                                          flexWrap: 'wrap',
-                                          alignItems: 'center'
-                                        }}>
-                                          <span style={{ 
-                                            color: 'var(--color-info)', 
-                                            fontSize: '10px',
-                                            fontWeight: '600',
-                                            marginRight: '4px'
-                                          }}>
-                                            ACTIVE BUFFS:
-                                          </span>
+                                      <div className="fpx-defs">
+                                        <div className="fpx-defs-row">
+                                          <span className="lbl">ACTIVE BUFFS</span>
                                           {death.defensives.abilities && death.defensives.abilities.length > 0 ? (
                                             death.defensives.abilities.map((def, defIdx) => (
-                                              <span 
-                                                key={defIdx}
-                                                style={{
-                                                  color: '#cbd5e1',
-                                                  fontSize: '10px',
-                                                  padding: '2px 6px',
-                                                  background: '#0f1419',
-                                                  borderRadius: '3px',
-                                                  border: '1px solid #334155'
-                                                }}
-                                              >
+                                              <span key={defIdx} className="d">
                                                 {def.name} ({def.count}×)
                                               </span>
                                             ))
                                           ) : (
-                                            <span style={{ 
-                                              color: '#ef4444', 
-                                              fontSize: '10px',
-                                              fontStyle: 'italic'
-                                            }}>
-                                              None active
-                                            </span>
+                                            <span className="none">None active</span>
                                           )}
                                         </div>
                                         {death.defensives.healing !== undefined && (
-                                          <div style={{ 
-                                            marginTop: '4px',
-                                            fontSize: '10px',
-                                            color: '#94a3b8'
-                                          }}>
-                                            Healing received: <span style={{ color: '#10b981', fontWeight: '500' }}>
-                                              {death.defensives.healing.toLocaleString()}
-                                            </span>
+                                          <div className="heal">
+                                            Healing received: <b>{death.defensives.healing.toLocaleString()}</b>
                                           </div>
                                         )}
                                       </div>
@@ -2748,63 +2319,84 @@ export default function WarcraftLogsApp() {
               </div>
               );
             })()}
-            </div>
-          </div>
-            ) : (
-              <div style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                minHeight: '400px',
-                padding: '40px'
-              }}>
-                <p style={{ color: '#94a3b8', fontSize: '16px', marginBottom: '16px' }}>
-                  {error ? error : 'No analysis data yet. Configure and run an analysis to see results.'}
-                </p>
-                <button
-                  className="btn btn-primary"
-                  onClick={() => navigate('/analyze')}
-                  style={{ padding: '10px 20px' }}
-                >
-                  Run Analysis
-                </button>
+                    </div>
+          </>
+                  ) : (
+                    <div className="fpx-results-empty fpx-rv">
+                      <AlertCircle size={34} />
+                      <p>{error
+                        ? error
+                        : recentRuns.length > 0
+                          ? 'No analysis loaded — open a recent run below or start a new one.'
+                          : 'No analysis yet. Configure and run a death review to see results here.'}</p>
+                      <button className="fpx-btn" onClick={() => navigate('/analyze')}>
+                        <Crosshair size={17} /> Run Analysis <ChevronRight size={15} />
+                      </button>
+                      {recentRuns.length > 0 && (
+                        <div className="fpx-recentlist">
+                          <div className="fpx-recentlist-h">RECENT RUNS · LAST {recentRuns.length}</div>
+                          {recentRuns.map((r) => (
+                            <div key={r.id} className="fpx-recent-card">
+                              <button className="open" onClick={() => openRecentRun(r)}>
+                                <span className="t">{r.title}</span>
+                                <span className="s">{r.sub}</span>
+                                <span className="d">{new Date(r.savedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
+                              </button>
+                              <button className="rm" onClick={() => removeRecentRun(r.id)} title="Remove run">
+                                <X size={14} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
-            )}
+            </main>
             </>
           } />
           
           <Route path="/saved" element={
-            <div style={{ padding: '40px 20px' }}>
-              <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-                <h2 style={{ 
-                  color: '#e2e8f0',
-                  fontSize: '28px',
-                  fontWeight: '700',
-                  marginBottom: '24px'
-                }}>
-                  Saved Reports
-                </h2>
-                <div style={{
-                  background: '#1a1f2e',
-                  borderRadius: '12px',
-                  padding: '40px',
-                  border: '1px solid #2d3748',
-                  textAlign: 'center'
-                }}>
-                  <p style={{ color: '#94a3b8', fontSize: '16px', marginBottom: '20px' }}>
-                    Saved reports feature coming soon!
-                  </p>
-                  <button
-                    className="btn btn-primary"
-                    onClick={() => navigate('/analyze')}
-                    style={{ padding: '10px 20px' }}
-                  >
-                    Run New Analysis
-                  </button>
+            <>
+            <div className="fpx-atmos base" />
+            <div className="fpx-atmos vignette" />
+            <div className="fpx-atmos grain" />
+            <main className="fpx-land">
+              <div className={`fpx-shell${resultsRailCollapsed ? ' collapsed' : ''}`}>
+                <FpxRail
+                  collapsed={resultsRailCollapsed}
+                  onToggle={() => setResultsRailCollapsed((v) => !v)}
+                  active={null}
+                  onHome={() => navigate('/')}
+                  onAnalyze={() => navigate('/analyze')}
+                  onResults={() => navigate('/results')}
+                />
+                <div className="fpx-main">
+                  <div className="fpx-top fpx-rv">
+                    <div className="fpx-crumbs">ANALYSIS&nbsp; /&nbsp; <b>SAVED</b></div>
+                    <div className="fpx-auth">
+                      {user ? (
+                        <>
+                          <button className="fpx-btn ghost sm" onClick={() => setShowSettings(true)}><SettingsIcon size={15} /> Settings</button>
+                          <button className="fpx-btn ghost sm" onClick={handleLogout}><LogOut size={15} /> Logout</button>
+                        </>
+                      ) : (
+                        <button className="fpx-btn ghost sm" onClick={() => setShowAuthModal(true)}><LogIn size={15} /> Sign In</button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="fpx-results-empty fpx-rv" style={{ minHeight: '64vh' }}>
+                    <BarChart3 size={34} />
+                    <p>Saved reports are coming soon — you'll be able to revisit past death reviews here.</p>
+                    <button className="fpx-btn" onClick={() => navigate('/analyze')}>
+                      <Crosshair size={17} /> Run an analysis <ChevronRight size={15} />
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
+            </main>
+            </>
           } />
         </Routes>
       </div>
@@ -2845,57 +2437,16 @@ export default function WarcraftLogsApp() {
 
       {/* Terms & Privacy Modal */}
       {showTermsModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0, 0, 0, 0.85)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 9999,
-          padding: '20px',
-          overflowY: 'auto'
-        }}>
-          <div className="surface-panel" style={{
-            maxWidth: '700px',
-            width: '100%',
-            border: '1px solid var(--color-border-strong)',
-            position: 'relative',
-            maxHeight: '90vh',
-            overflowY: 'auto'
-          }}>
-            <div style={{ position: 'sticky', top: 0, background: 'var(--color-surface)', padding: '24px 24px 16px', borderBottom: '1px solid var(--color-border)', zIndex: 1 }}>
-              <button
-                onClick={() => setShowTermsModal(false)}
-                style={{
-                  position: 'absolute',
-                  top: '16px',
-                  right: '16px',
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'var(--color-muted)',
-                  cursor: 'pointer',
-                  padding: '4px',
-                  display: 'flex',
-                  alignItems: 'center'
-                }}
-              >
-                <X size={20} />
+        <div className="fpx-mov" onClick={() => setShowTermsModal(false)}>
+          <div className="fpx-mcard" onClick={(e) => e.stopPropagation()}>
+            <div className="fpx-mhead">
+              <h2>Terms of Service &amp; Privacy Policy</h2>
+              <button className="fpx-mclose" onClick={() => setShowTermsModal(false)} aria-label="Close">
+                <X size={18} />
               </button>
-              <h2 style={{
-                color: 'var(--color-gold-2)',
-                margin: 0,
-                fontSize: '24px',
-                fontWeight: '700'
-              }}>
-                Terms of Service & Privacy Policy
-              </h2>
             </div>
 
-            <div style={{ padding: '24px', color: '#e2e8f0', lineHeight: '1.7' }}>
+            <div className="fpx-mbody fpx-legalbody">
               <p style={{ color: '#94a3b8', fontSize: '13px', fontStyle: 'italic', marginBottom: '24px' }}>
                 Last Updated: November 21, 2025
               </p>
@@ -3099,132 +2650,6 @@ export default function WarcraftLogsApp() {
         />
       )}
       */}
-
-      {/* Footer — suppressed on landing, which carries its own on-brand footer */}
-      {!fullBleed && (
-      <footer className="fp-footer" style={{
-        background: 'rgba(9, 13, 21, 0.94)',
-        borderTop: '1px solid var(--color-border)',
-        marginTop: '60px',
-        padding: '40px 24px',
-        color: 'var(--color-muted)'
-      }}>
-        <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-            gap: '32px'
-          }}>
-            <div>
-              <h4 style={{
-                color: 'var(--color-text)',
-                fontSize: '12px',
-                fontWeight: '700',
-                marginBottom: '12px',
-                marginTop: 0,
-                letterSpacing: '0.08em',
-                textTransform: 'uppercase'
-              }}>
-                Resources
-              </h4>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <a
-                  href="https://www.warcraftlogs.com/api/clients"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ color: 'var(--color-muted)', fontSize: '13px', textDecoration: 'none' }}
-                  onMouseOver={(e) => e.target.style.color = 'var(--color-gold-2)'}
-                  onMouseOut={(e) => e.target.style.color = 'var(--color-muted)'}
-                >
-                  WarcraftLogs API
-                </a>
-                <a
-                  href="https://www.warcraftlogs.com/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ color: 'var(--color-muted)', fontSize: '13px', textDecoration: 'none' }}
-                  onMouseOver={(e) => e.target.style.color = 'var(--color-gold-2)'}
-                  onMouseOut={(e) => e.target.style.color = 'var(--color-muted)'}
-                >
-                  WarcraftLogs
-                </a>
-              </div>
-            </div>
-
-            <div>
-              <h4 style={{
-                color: 'var(--color-text)',
-                fontSize: '12px',
-                fontWeight: '700',
-                marginBottom: '12px',
-                marginTop: 0,
-                letterSpacing: '0.08em',
-                textTransform: 'uppercase'
-              }}>
-                About
-              </h4>
-              <p style={{ color: 'var(--color-subtle)', fontSize: '12px', lineHeight: '1.6', margin: 0 }}>
-                Floor Pov is a death analytics tool for World of Warcraft guilds using WarcraftLogs data.
-              </p>
-            </div>
-
-            <div>
-              <h4 style={{
-                color: 'var(--color-text)',
-                fontSize: '12px',
-                fontWeight: '700',
-                marginBottom: '12px',
-                marginTop: 0,
-                letterSpacing: '0.08em',
-                textTransform: 'uppercase'
-              }}>
-                Legal
-              </h4>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <a
-                  onClick={() => navigate('/terms')}
-                  style={{ color: 'var(--color-muted)', fontSize: '13px', textDecoration: 'none', cursor: 'pointer' }}
-                  onMouseOver={(e) => e.target.style.color = 'var(--color-gold-2)'}
-                  onMouseOut={(e) => e.target.style.color = 'var(--color-muted)'}
-                >
-                  Terms of Service
-                </a>
-                <a
-                  onClick={() => navigate('/privacy')}
-                  style={{ color: 'var(--color-muted)', fontSize: '13px', textDecoration: 'none', cursor: 'pointer' }}
-                  onMouseOver={(e) => e.target.style.color = 'var(--color-gold-2)'}
-                  onMouseOut={(e) => e.target.style.color = 'var(--color-muted)'}
-                >
-                  Privacy Policy
-                </a>
-              </div>
-            </div>
-
-            <div>
-              <h4 style={{
-                color: 'var(--color-text)',
-                fontSize: '12px',
-                fontWeight: '700',
-                marginBottom: '12px',
-                marginTop: 0,
-                letterSpacing: '0.08em',
-                textTransform: 'uppercase'
-              }}>
-                Contact
-              </h4>
-              <a
-                href="mailto:support@floorpov.gg"
-                style={{ color: 'var(--color-muted)', fontSize: '13px', textDecoration: 'none' }}
-                onMouseOver={(e) => e.target.style.color = 'var(--color-gold-2)'}
-                onMouseOut={(e) => e.target.style.color = 'var(--color-muted)'}
-              >
-                support@floorpov.gg
-              </a>
-            </div>
-          </div>
-        </div>
-      </footer>
-      )}
 
       <style>{`
         @keyframes spin {

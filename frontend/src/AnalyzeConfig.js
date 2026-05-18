@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
-  Play, LogIn, LogOut, Settings as SettingsIcon, ChevronRight, Home,
-  Crosshair, Search, Loader2, AlertCircle, Info, KeyRound, ChevronsLeft,
-  ChevronsRight, ExternalLink,
+  Play, LogIn, LogOut, Settings as SettingsIcon, ChevronRight,
+  Search, Loader2, AlertCircle, Info, KeyRound, ExternalLink,
 } from 'lucide-react';
+import FpxRail from './FpxRail';
 
 /* Mirrors RAID_ZONES / BOSS_ORDER in App.js. Visual layer only — the
    key is what gets written to config.selectedRaid (handleRaidChange). */
@@ -25,6 +26,7 @@ export default function AnalyzeConfig({
   config, onChange, onRaidChange, onSubmit, setConfig,
   loading, error, user, onShowAuth, onShowSettings, onLogout, onShowInfo, onHome,
 }) {
+  const navigate = useNavigate();
   const [railCollapsed, setRailCollapsed] = useState(false);
   const selected = RAIDS.find((r) => r.key === config.selectedRaid) || RAIDS[0];
 
@@ -49,23 +51,14 @@ export default function AnalyzeConfig({
 
       <main className="fpx-land">
         <div className={`fpx-shell${railCollapsed ? ' collapsed' : ''}`}>
-          <aside className={`fpx-rail${railCollapsed ? ' collapsed' : ''}`}>
-            <div className="fpx-railhead">
-              <div className="fpx-brand" onClick={onHome}>
-                <div className="mk">FP</div>
-                <div className="wm">FLOOR&nbsp;POV<small>DEATH ANALYSIS</small></div>
-              </div>
-              <button className="fpx-railtoggle" onClick={() => setRailCollapsed((v) => !v)}
-                aria-label={railCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
-                {railCollapsed ? <ChevronsRight size={16} /> : <ChevronsLeft size={16} />}
-              </button>
-            </div>
-            <nav className="fpx-navsec">
-              <h4>FLOOR POV</h4>
-              <button className="fpx-nav" onClick={onHome} title="Home"><Home /><span className="lbl">Home</span></button>
-              <button className="fpx-nav on" title="Run Analysis"><Crosshair /><span className="lbl">Run Analysis</span></button>
-            </nav>
-          </aside>
+          <FpxRail
+            collapsed={railCollapsed}
+            onToggle={() => setRailCollapsed((v) => !v)}
+            active="analyze"
+            onHome={onHome}
+            onAnalyze={() => {}}
+            onResults={() => navigate('/results')}
+          />
 
           <div className="fpx-main fpx-analyze">
             <div className="fpx-top fpx-rv">
