@@ -124,6 +124,7 @@ def analyze():
             region = config.get('region')
             report_zone = config.get('reportZone')
             fight_zone = config.get('fightZone')
+            selected_raid = config.get('selectedRaid')
             difficulty = config.get('difficulty')
             max_cutoff = int(config.get('maxCutoff', 5))
             start_date = config.get('startDate')
@@ -162,7 +163,14 @@ def analyze():
             except Exception as e:
                 print(f"Guild roster fetch error: {str(e)}")
                 yield f"data: {json.dumps({'stage': 'roster', 'message': 'Could not fetch guild roster - processing all reports'})}\n\n"
-            
+
+            # Only count players who are on the guild roster. If the roster
+            # couldn't be fetched, fall back to counting everyone.
+            def is_guild_member(nm):
+                if not guild_roster:
+                    return True
+                return normalize_character_name(nm or "").lower() in guild_roster
+
             # Get guild reports
             yield f"data: {json.dumps({'stage': 'reports', 'message': 'Fetching guild reports...'})}\n\n"
             reports = get_guild_reports(token, guild_name, server, region, report_zone, start_date, end_date)
@@ -195,23 +203,18 @@ def analyze():
                 friendlies = fights_data.get("friendlies", [])
                 player_details = fights_data.get("player_details", {})
                 
-                # Check if report has enough guild members (15+)
+                # Process every guild report. Non-guild members in the raid
+                # are filtered out per-player below (only roster members count).
                 if guild_roster:
-                    friendly_names = {f.get("name", "").lower() for f in friendlies if f.get("name")}
+                    friendly_names = {normalize_character_name(f.get("name", "")).lower() for f in friendlies if f.get("name")}
                     guild_members_in_report = len(friendly_names & guild_roster)
-                    
-                    if guild_members_in_report < 15:
-                        msg = f'Report {rid}: Only {guild_members_in_report} guild members - SKIPPED'
-                        yield f"data: {json.dumps({'stage': 'fights', 'message': msg})}\n\n"
-                        continue
-                    else:
-                        msg = f'Report {rid}: {guild_members_in_report} guild members - processing'
-                        yield f"data: {json.dumps({'stage': 'fights', 'message': msg})}\n\n"
+                    msg = f'Report {rid}: {guild_members_in_report} guild members - counting guild members only'
+                    yield f"data: {json.dumps({'stage': 'fights', 'message': msg})}\n\n"
                 
                 if not fights:
                     continue
                 
-                matching = analyze_fights(fights, fight_zone, difficulty)
+                matching = analyze_fights(fights, fight_zone, difficulty, selected_raid)
                 
                 for fight in matching:
                     fid = fight['id']
@@ -370,6 +373,8 @@ def analyze():
                             fight_parts.add(name)
                 
                 for p in fight_parts:
+                    if not is_guild_member(p):
+                        continue
                     main_char = get_main_character(p, character_groups)
                     pull_key = f"{rid}_{fid}"
                     pull_participation[main_char].add(pull_key)
@@ -380,6 +385,8 @@ def analyze():
                 
                 for ev in deaths_sorted_all:
                     target_name = normalize_character_name(ev.get("targetName", "Unknown"))
+                    if not is_guild_member(target_name):
+                        continue
                     original_char = target_name
                     main_char = get_main_character(target_name, character_groups)
                     target_id = ev.get("targetID")

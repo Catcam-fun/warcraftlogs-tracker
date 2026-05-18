@@ -134,15 +134,47 @@ def find_mass_death_start(cutoff_idx, deaths_list):
     return None
 
 
-def analyze_fights(fights, fight_zone, difficulty):
-    """Filter fights by zone and difficulty.
-    If fight_zone is 0, skip zone check (for multi-raid WCL zones like Midnight S1).
+# Authoritative WCL encounter IDs per raid (from worldData), keyed by the
+# frontend's `selectedRaid`. Midnight (Voidspire / Dreamrift / March on
+# Quel'Danas) all share WCL reportZone 46, so the only reliable way to
+# isolate one Midnight raid — e.g. count *only* March-on-Quel'Danas
+# pulls — is by its boss encounter IDs. This allowlist is also what keeps
+# Mythic+/dungeon bosses out of the raid charts entirely: a dungeon
+# encounter ID is never in any raid's set.
+RAID_ENCOUNTERS = {
+    # The War Within
+    'manaforge':    {3129, 3131, 3130, 3132, 3122, 3133, 3134, 3135},
+    'undermine':    {3009, 3010, 3011, 3012, 3013, 3014, 3015, 3016},
+    'nerubar':      {2902, 2917, 2898, 2918, 2919, 2920, 2921, 2922},
+    # Midnight S1 — all in WCL zone 46 "VS / DR / MQD"
+    'voidspire':    {3176, 3177, 3179, 3178, 3180, 3181},
+    'dreamrift':    {3306},
+    'queldanas':    {3182, 3183},  # Belo'ren + Midnight Falls (L'ura)
+    'midnight-all': {3176, 3177, 3178, 3179, 3180, 3181, 3306, 3182, 3183},
+}
+
+
+def analyze_fights(fights, fight_zone, difficulty, selected_raid=None):
+    """Keep only this raid's boss pulls at the chosen difficulty.
+
+    Primary guard is an explicit encounter-ID allowlist per raid
+    (`selected_raid`). This both isolates the chosen raid (critical for
+    Midnight, where 3 raids share one WCL zone) and excludes Mythic+/
+    dungeon bosses outright even when one log mixes raid + dungeons.
+    If the raid key is unknown, fall back to the older zone/difficulty
+    heuristic so nothing regresses.
     """
+    diff = int(difficulty)
+    allowed = RAID_ENCOUNTERS.get(selected_raid)
+    if allowed is not None:
+        return [f for f in fights
+                if f.get("boss") in allowed and f.get("difficulty") == diff]
+
     zone_filter = int(fight_zone)
     if zone_filter == 0:
-        return [f for f in fights if f.get("boss") and f.get("difficulty") == int(difficulty)]
-    return [f for f in fights if f.get("boss") and 
-            f.get("zoneID") == zone_filter and f.get("difficulty") == int(difficulty)]
+        return [f for f in fights if f.get("boss") and f.get("difficulty") == diff]
+    return [f for f in fights if f.get("boss") and
+            f.get("zoneID") == zone_filter and f.get("difficulty") == diff]
 
 
 # =============================================================================
