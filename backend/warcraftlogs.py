@@ -116,26 +116,31 @@ def get_access_token(client_id, client_secret):
         raise Exception(f"Failed to get access token: {str(e)}")
 
 
-def graphql_query(token, query, variables=None):
-    """Execute a GraphQL query against WarcraftLogs V2 API with retry logic"""
+def graphql_query(token, query, variables=None, timeout=120, max_retries=3):
+    """Execute a GraphQL query against WarcraftLogs V2 API with retry logic.
+
+    timeout/max_retries default to the original generous values (heavy
+    reports/fights/deaths queries need them); callers that are best-effort
+    and must not stall analysis (e.g. the guild roster) pass a tight
+    budget so a slow WCL endpoint degrades instead of hanging for minutes.
+    """
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json"
     }
-    
+
     payload = {"query": query}
     if variables:
         payload["variables"] = variables
-    
+
     try:
-        # Use retry logic with increased timeout
         response = make_request_with_retry(
             'post',
             GRAPHQL_ENDPOINT,
             json=payload,
             headers=headers,
-            timeout=120,  # Increased from 60 to 120 seconds
-            max_retries=3  # Retry up to 3 times with backoff
+            timeout=timeout,
+            max_retries=max_retries
         )
         
         data = response.json()
@@ -256,10 +261,14 @@ def get_guild_roster(token, guild_name, server, region):
         }
 
         try:
-            data = graphql_query(token, query, variables)
+            # Tight budget: WCL's guild.members endpoint is frequently
+            # very slow through the proxy. The roster is best-effort
+            # (analysis falls back to counting everyone), so never let it
+            # stall for minutes on the default 3x120s retry stack.
+            data = graphql_query(token, query, variables, timeout=40, max_retries=1)
         except Exception as e:
-            # graphql_query already retried with backoff. Don't nuke the
-            # roster we've collected — a partial roster still filters
+            # Don't nuke the roster we've collected — a partial roster
+            # still filters
             # correctly for everyone we did fetch; just stop here.
             print(f"Warning: roster page {page} failed ({e}); using {len(all_members)} members fetched so far")
             break
