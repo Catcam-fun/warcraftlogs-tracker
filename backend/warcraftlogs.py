@@ -243,53 +243,60 @@ def get_guild_roster(token, guild_name, server, region):
     
     all_members = set()
     page = 1
-    max_pages = 10  # Max 10 pages = 1000 members (safety limit)
-    
-    try:
-        while page <= max_pages:
-            variables = {
-                "guildName": guild_name,
-                "serverSlug": server.lower().replace(" ", "-").replace("'", ""),
-                "serverRegion": region.upper(),
-                "page": page
-            }
-            
+    PAGE_LIMIT = 100          # matches `members(limit: 100, ...)` in the query
+    MAX_PAGES = 25            # 2500-member safety cap
+    serverSlug = server.lower().replace(" ", "-").replace("'", "")
+
+    while page <= MAX_PAGES:
+        variables = {
+            "guildName": guild_name,
+            "serverSlug": serverSlug,
+            "serverRegion": region.upper(),
+            "page": page,
+        }
+
+        try:
             data = graphql_query(token, query, variables)
-            guild = data.get("guildData", {}).get("guild", {})
-            
-            if not guild:
-                if page == 1:
-                    print(f"Warning: Could not fetch guild roster for {guild_name}")
-                break
-            
-            members_response = guild.get("members", {})
-            members = members_response.get("data", [])
-            has_more = members_response.get("has_more_pages", False)
-            
-            # Add members from this page
-            for member in members:
-                name = normalize_character_name(member.get("name"))
-                if name:
-                    all_members.add(name.lower())
-            
-            print(f"Fetched page {page}: {len(members)} members (total so far: {len(all_members)})")
-            
-            # Stop if no more pages
-            if not has_more:
-                break
-            
-            page += 1
-        
-        if not all_members:
-            print(f"Warning: Guild {guild_name} has no members or roster not available")
-            return set()
-        
-        print(f"Successfully fetched {len(all_members)} guild members across {page} page(s)")
-        return all_members
-        
-    except Exception as e:
-        print(f"Warning: Failed to fetch guild roster: {str(e)}")
+        except Exception as e:
+            # graphql_query already retried with backoff. Don't nuke the
+            # roster we've collected — a partial roster still filters
+            # correctly for everyone we did fetch; just stop here.
+            print(f"Warning: roster page {page} failed ({e}); using {len(all_members)} members fetched so far")
+            break
+
+        guild = (data.get("guildData") or {}).get("guild") or {}
+        if not guild:
+            if page == 1:
+                print(f"Warning: Could not fetch guild roster for {guild_name}")
+            break
+
+        members_response = guild.get("members") or {}
+        members = members_response.get("data") or []
+        has_more = members_response.get("has_more_pages", False)
+
+        for member in members:
+            name = normalize_character_name(member.get("name"))
+            if name:
+                all_members.add(name.lower())
+
+        print(f"Fetched page {page}: {len(members)} members (total so far: {len(all_members)})")
+
+        # Keep going while WCL says there's more OR the page came back
+        # full (a full page almost always means another page exists —
+        # this is the backstop for when has_more_pages is unreliable,
+        # which was the original "can't get all pages" bug).
+        if not members:
+            break
+        if not has_more and len(members) < PAGE_LIMIT:
+            break
+        page += 1
+
+    if not all_members:
+        print(f"Warning: Guild {guild_name} has no members or roster not available")
         return set()
+
+    print(f"Successfully fetched {len(all_members)} guild members across {page} page(s)")
+    return all_members
 def get_fights(token, report_code):
     """Fetch fights for a report using V2 GraphQL API, including player class/spec info"""
     
