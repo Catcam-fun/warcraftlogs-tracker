@@ -30,7 +30,7 @@ from analysis import (
     get_report_deaths_bulk, get_main_character, get_raid_participants,
     analyze_fights, filter_mass_deaths, is_duplicate_pull,
     interval_overlap, WOW_CLASS_COLORS, MASS_DEATH_THRESHOLD,
-    find_mass_death_start
+    find_mass_death_start, resolve_report_window
 )
 from features import (
     CHEAT_DEATH_ABILITY_IDS, ALL_DEFENSIVE_ABILITY_IDS,
@@ -122,7 +122,6 @@ def analyze():
             guild_name = config.get('guildName')
             server = config.get('server')
             region = config.get('region')
-            report_zone = config.get('reportZone')
             fight_zone = config.get('fightZone')
             selected_raid = config.get('selectedRaid')
             difficulty = config.get('difficulty')
@@ -171,9 +170,12 @@ def analyze():
                     return True
                 return normalize_character_name(nm or "").lower() in guild_roster
 
-            # Get guild reports
+            # Get guild reports. The tier's hard date window scopes the fetch
+            # (user dates may narrow it but never widen past the tier); we no
+            # longer filter by zoneID, which dropped mixed raid+dungeon reports.
+            win_start, win_end = resolve_report_window(selected_raid, start_date, end_date)
             yield f"data: {json.dumps({'stage': 'reports', 'message': 'Fetching guild reports...'})}\n\n"
-            reports = get_guild_reports(token, guild_name, server, region, report_zone, start_date, end_date)
+            reports = get_guild_reports(token, guild_name, server, region, win_start, win_end)
             yield f"data: {json.dumps({'stage': 'reports', 'message': f'Found {len(reports)} reports'})}\n\n"
             
             # Filter by author
