@@ -154,6 +154,53 @@ RAID_ENCOUNTERS = {
 }
 
 
+# Hard date window per raid tier, used to scope guild-report fetching so we
+# don't paginate a guild's entire multi-year history. start = tier release
+# minus 5 days; end = the day the *next* tier's first raid opened (which
+# already covers the prepatch tail) plus 5 days. The +/-5d margin absorbs
+# the NA/EU regional release split. A None end means "current tier, still
+# open". Midnight's three raids opened on different days (Voidspire/Dreamrift
+# 2026-03-17, March on Quel'Danas 2026-03-31); per spec the whole Midnight
+# window uses the earliest (2026-03-17) and has no end yet.
+# These bounds are authoritative: user-supplied dates may narrow the window
+# but never widen it past the tier.
+RAID_DATE_WINDOWS = {
+    'nerubar':      ('2024-09-05', '2025-03-09'),  # Nerub-ar Palace, TWW S1
+    'undermine':    ('2025-02-27', '2025-08-17'),  # Liberation of Undermine, S2
+    'manaforge':    ('2025-08-07', '2026-03-22'),  # Manaforge Omega, S3
+    'voidspire':    ('2026-03-12', None),          # Midnight S1 (current)
+    'dreamrift':    ('2026-03-12', None),
+    'queldanas':    ('2026-03-12', None),
+    'midnight-all': ('2026-03-12', None),
+}
+
+
+def _parse_iso(d):
+    return datetime.strptime(d, "%Y-%m-%d") if d else None
+
+
+def resolve_report_window(selected_raid, user_start, user_end):
+    """Intersect any user-supplied date range with the tier's hard window.
+
+    Returns (start, end) as 'YYYY-MM-DD' strings (or None). The tier window
+    is the outer bound; user dates can only tighten it. If the raid key has
+    no known window, fall back to the user's dates unchanged.
+    """
+    tier_start, tier_end = RAID_DATE_WINDOWS.get(selected_raid, (None, None))
+
+    def clamp(user, tier, pick_later):
+        u, t = _parse_iso(user), _parse_iso(tier)
+        if u is None:
+            return tier
+        if t is None:
+            return user
+        return (max if pick_later else min)(u, t).strftime("%Y-%m-%d")
+
+    start = clamp(user_start, tier_start, pick_later=True)
+    end = clamp(user_end, tier_end, pick_later=False)
+    return start, end
+
+
 def analyze_fights(fights, fight_zone, difficulty, selected_raid=None):
     """Keep only this raid's boss pulls at the chosen difficulty.
 
