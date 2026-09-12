@@ -6,6 +6,7 @@ import Auth from './Auth';
 import Settings from './Settings';
 import LandingPage from './LandingPage';
 import AnalyzeConfig from './AnalyzeConfig';
+import { SEASON_TWO_RAIDS } from './seasonTwoRaids';
 import InfoModal from './InfoModal';
 import FpxRail from './FpxRail';
 import TermsOfService from './TermsOfService';
@@ -20,6 +21,8 @@ const API_URL = window.location.hostname === 'localhost'
 
 // Raid Zone Definitions
 const RAID_ZONES = {
+  ...Object.fromEntries(SEASON_TWO_RAIDS.map(({ key, name, reportZone, fightZone }) =>
+    [key, { name, reportZone, fightZone }])),
   // === MIDNIGHT SEASON 1 ===
   'voidspire': {
     name: 'The Voidspire',
@@ -61,6 +64,7 @@ const RAID_ZONES = {
 
 // Boss Ordering (Adventure Guide order)
 const BOSS_ORDER = {
+  ...Object.fromEntries(SEASON_TWO_RAIDS.map(({ key, bosses }) => [key, bosses])),
   // === MIDNIGHT SEASON 1 ===
   'voidspire': [
     'Imperator Averzian',

@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Play, LogIn, LogOut, Settings as SettingsIcon, ChevronRight,
-  Search, Loader2, AlertCircle, Info, KeyRound, ExternalLink,
+  Search, Loader2, AlertCircle, Info, KeyRound, ExternalLink, Skull,
 } from 'lucide-react';
 import FpxRail from './FpxRail';
+import { SEASON_TWO_RAIDS } from './seasonTwoRaids';
 
 /* Mirrors RAID_ZONES / BOSS_ORDER in App.js. Visual layer only — the
    key is what gets written to config.selectedRaid (handleRaidChange). */
@@ -17,6 +18,7 @@ const RAIDS = [
     bosses: ['Ulgrax the Devourer', 'The Bloodbound Horror', 'Sikran, Captain of the Sureki', "Rasha'nan", "Broodtwister Ovi'nax", "Nexus-Princess Ky'veza", 'The Silken Court', 'Queen Ansurek'] },
   { key: 'midnight-all', name: 'Midnight Season 1', exp: 'MIDNIGHT', final: "L'ura",
     bosses: ['Imperator Averzian', 'Vorasius', 'Fallen-King Salhadaar', 'Vaelgor & Ezzorak', 'Lightblinded Vanguard', 'Crown of the Cosmos', 'Chimaerus, the Undreamt God', "Belo'ren", "L'ura"] },
+  ...SEASON_TWO_RAIDS,
 ];
 const COUNCIL = new Set(['the-soul-hunters', 'vaelgor-ezzorak', 'cauldron-of-carnage', 'the-silken-court', 'lightblinded-vanguard']);
 const slug = (n) => n.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -29,6 +31,30 @@ export default function AnalyzeConfig({
   const navigate = useNavigate();
   const [railCollapsed, setRailCollapsed] = useState(false);
   const selected = RAIDS.find((r) => r.key === config.selectedRaid) || RAIDS[0];
+
+  const raidCard = (raid) => {
+    return (
+      <button key={raid.key} type="button"
+        aria-label={raid.name}
+        aria-pressed={config.selectedRaid === raid.key}
+        className={`fpx-raidcard${config.selectedRaid === raid.key ? ' on' : ''}`}
+        onClick={() => onRaidChange({ target: { name: 'selectedRaid', value: raid.key } })}>
+        {raid.emblem ? (
+          <div className={`rc-art rc-emblem ${raid.emblem}`} aria-hidden="true">
+            <Skull size={34} strokeWidth={1.4} />
+          </div>
+        ) : (
+          <div className="rc-art" style={{ backgroundImage: `url(${bossImg(raid.final)})` }} />
+        )}
+        <div className="rc-meta">
+          <span className="rc-exp">{raid.exp}</span>
+          <span className="rc-name">{raid.name}</span>
+          <span className="rc-cnt">{raid.bosses.length} {raid.bosses.length === 1 ? 'boss' : 'bosses'}</span>
+        </div>
+        {config.selectedRaid === raid.key && <span className="rc-tick" aria-hidden="true">✦</span>}
+      </button>
+    );
+  };
 
   const field = (label, name, type = 'text', hint = null, extra = null) => (
     <div className="fpx-field">
@@ -86,31 +112,26 @@ export default function AnalyzeConfig({
             </div>
 
             {/* RAID PICKER */}
-            <div className="fpx-slab fpx-rv"><h3>RAID</h3><span>select the tier to analyze</span><div className="rule" /></div>
-            <section className="fpx-raidgrid fpx-rv">
-              {RAIDS.map((r) => (
-                <button key={r.key} type="button"
-                  className={`fpx-raidcard${config.selectedRaid === r.key ? ' on' : ''}`}
-                  onClick={() => onRaidChange({ target: { name: 'selectedRaid', value: r.key } })}>
-                  <div className="rc-art" style={{ backgroundImage: `url(${bossImg(r.final)})` }} />
-                  <div className="rc-meta">
-                    <span className="rc-exp">{r.exp}</span>
-                    <span className="rc-name">{r.name}</span>
-                    <span className="rc-cnt">{r.bosses.length} {r.bosses.length === 1 ? 'boss' : 'bosses'}</span>
-                  </div>
-                  {config.selectedRaid === r.key && <span className="rc-tick">✦</span>}
-                </button>
-              ))}
+            <div className="fpx-slab fpx-rv">
+              <h3 id="raid-picker-heading">RAID</h3>
+              <span>select the tier to analyze</span><div className="rule" />
+            </div>
+            <section className="fpx-raidgrid fpx-rv" aria-labelledby="raid-picker-heading">
+              {RAIDS.map(raidCard)}
             </section>
 
             {/* selected raid's lineup */}
             <div className="fpx-slab fpx-rv" style={{ marginTop: 30 }}>
-              <h3>{selected.name.toUpperCase()}</h3><span>death-tracked encounters</span><div className="rule" /></div>
-            <section className="fpx-lineup fpx-rv">
+              <h3 id="selected-raid-heading">{selected.name.toUpperCase()}</h3><span>death-tracked encounters</span><div className="rule" /></div>
+            <section className="fpx-lineup fpx-rv" aria-labelledby="selected-raid-heading">
               {selected.bosses.map((b) => (
                 <div key={b} className={`fpx-boss${COUNCIL.has(slug(b)) ? ' council' : ''}`}
-                  style={{ '--img': `url(${bossImg(b)})` }}>
-                  <div className="art" />
+                  style={selected.emblem ? undefined : { '--img': `url(${bossImg(b)})` }}>
+                  {selected.emblem ? (
+                    <div className={`art boss-emblem ${selected.emblem}`} aria-hidden="true">
+                      <Skull size={42} strokeWidth={1.2} />
+                    </div>
+                  ) : <div className="art" />}
                   <div className="cap"><div className="nm">{b}</div></div>
                 </div>
               ))}

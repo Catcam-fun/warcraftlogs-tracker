@@ -142,6 +142,9 @@ def find_mass_death_start(cutoff_idx, deaths_list):
 # Mythic+/dungeon bosses out of the raid charts entirely: a dungeon
 # encounter ID is never in any raid's set.
 RAID_ENCOUNTERS = {
+    # Midnight S2. Instance IDs: Venomous Abyss 3004, Tidebound Grotto 2987.
+    # Encounter IDs: BigWigsMods/BigWigs TheVenomousAbyss and MidnightLairs.
+    'midnight-s2-all': {3470, 3445, 3497, 3455, 3420, 3421, 3429, 3492, 3379},
     # The War Within
     'manaforge':    {3129, 3131, 3130, 3132, 3122, 3133, 3134, 3135},
     'undermine':    {3009, 3010, 3011, 3012, 3013, 3014, 3015, 3016},
@@ -165,6 +168,9 @@ RAID_ENCOUNTERS = {
 # These bounds are authoritative: user-supplied dates may narrow the window
 # but never widen it past the tier.
 RAID_DATE_WINDOWS = {
+    # Both opened Normal/Heroic/Mythic on 2026-08-18; include the 5-day margin.
+    # https://worldofwarcraft.blizzard.com/en-us/news/24294369
+    'midnight-s2-all': ('2026-08-13', None),
     'nerubar':      ('2024-09-05', '2025-03-09'),  # Nerub-ar Palace, TWW S1
     'undermine':    ('2025-02-27', '2025-08-17'),  # Liberation of Undermine, S2
     'manaforge':    ('2025-08-07', '2026-03-22'),  # Manaforge Omega, S3
