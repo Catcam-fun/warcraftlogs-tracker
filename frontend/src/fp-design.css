@@ -308,6 +308,17 @@
   display:flex;flex-direction:column;height:118px;
   transition:.15s var(--fpx-ease);font-family:var(--fpx-sans);
 }
+.fpx-raidcard:focus-visible{outline:2px solid var(--fpx-kill);outline-offset:4px}
+.fpx-raidcard .rc-emblem,.fpx-boss .boss-emblem{
+  display:flex;align-items:center;justify-content:center;
+  background:radial-gradient(ellipse at center,rgba(101,163,13,.18),transparent 75%);
+  color:#b3cd6a;
+}
+.fpx-raidcard .rc-emblem.tide,.fpx-boss .boss-emblem.tide{
+  background:radial-gradient(ellipse at center,rgba(34,164,184,.2),transparent 75%);
+  color:#71c8d6;
+}
+.fpx-boss .boss-emblem{padding-bottom:30px}
 .fpx-raidcard:hover{transform:translateY(-2px);border-color:var(--fpx-line-strong)}
 .fpx-raidcard.on{border-color:var(--fpx-kill);
   box-shadow:0 0 0 1px var(--fpx-kill),0 10px 24px -14px rgba(255,138,31,.5)}
