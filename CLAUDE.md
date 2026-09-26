@@ -24,7 +24,9 @@ Apply these to any art update without being asked.
   - Downscale to 2200px wide.
   - JPEG quality 72, progressive.
   - Kebab-case filename named after the art, e.g. `curse-of-ulatek.jpg`.
-- Add the slug to `BACKGROUNDS` in `frontend/src/LandingPage.js`, current tier first. One is picked at random per page load.
+- Register the new tier's art in `CURRENT_TIER_BACKGROUNDS` in `frontend/src/LandingPage.js`, and move the previous tier's art down into `BACKGROUNDS`.
+  - The current tier's art shows on 50% of page loads (`CURRENT_TIER_CHANCE`).
+  - The other 50% is spread evenly across all older backgrounds.
 - Backgrounds stay on the landing page. Don't add them to the Analyze, Results or Saved pages.
 
 ### Boss strip (landing page)
@@ -33,8 +35,12 @@ Apply these to any art update without being asked.
   - Model IDs come from `wago.tools`; images come from `render.worldofwarcraft.com`.
   - Output is 300px-tall transparent `.webp` tiles in `frontend/public/art/bosses/`.
 - Every boss in the current tier gets a tile, including world bosses and lair bosses such as Nymrissa Wavecaller.
+- Boss art appears in two places, and both must be updated:
+  - The landing page strip (`BOSS_STRIP`).
+  - The Analyze page's raid card and lineup (`AnalyzeConfig.js`): a raid entry's `final` boss is the raid-card art, and its `bosses` list is the lineup.
+  - Never use placeholder icons instead of models.
 - The current tier goes first in `BOSS_STRIP`, with the correct zone label.
-- Multi-boss fights show every member on one tile: add the slug to `COUNCIL` in both `LandingPage.js` and the script.
+- Multi-boss fights show every member on one tile: add the slug to `COUNCIL` in `LandingPage.js`, `AnalyzeConfig.js` and the script.
 - **Look at every render before shipping.** If one is broken (a spell effect, duplicate models, a placeholder), pin a good display ID in `DISPLAY_OVERRIDE`.
 - Never ship a boss without art; a missing image shows as an empty tile.
 
