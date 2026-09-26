@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Play, LogIn, LogOut, Settings as SettingsIcon, ChevronRight,
+  LogIn, LogOut, Settings as SettingsIcon, ChevronRight,
   Search, Loader2, AlertCircle, Info, KeyRound, ExternalLink, Skull,
 } from 'lucide-react';
 import FpxRail from './FpxRail';
