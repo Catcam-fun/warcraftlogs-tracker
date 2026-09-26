@@ -10,11 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Import from other modules
 from warcraftlogs import graphql_query, normalize_character_name
-from features import (
-    CHEAT_DEATH_ABILITY_IDS, ALL_DEFENSIVE_ABILITY_IDS, DEFENSIVE_ABILITY_INFO,
-    get_all_healing_for_report_paginated, get_all_defensive_buffs_paginated,
-    calculate_defensive_data_from_bulk
-)
+from features import CHEAT_DEATH_ABILITY_IDS
 
 # =============================================================================
 # CONSTANTS
@@ -262,18 +258,18 @@ def _fetch_remaining_events(token, report_code, data_type, filter_expr, start_ti
     return events
 
 
-def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, enable_cheat_death=False, enable_defensive_tracking=False):
+def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, enable_cheat_death=False):
     """
     Get ALL player deaths for an entire report at once - MUCH faster than per-fight queries
-    Optionally detect cheat deaths AND defensive usage in the SAME query using GraphQL aliases
+    Optionally detect cheat deaths in the SAME query using GraphQL aliases
     
     OPTIMIZATION STRATEGY:
-    - 1 API call per report gets deaths + debuffs + defensives + healing (all optional)
+    - 1 API call per report gets deaths (+ cheat-death debuffs when enabled)
     - Uses GraphQL aliases to fetch multiple event types simultaneously
-    - Uses filterExpression for debuffs/defensives to avoid hitting 10k event limit
+    - Uses filterExpression for debuffs to avoid hitting 10k event limit
     - This is ~100x faster than querying each fight individually
     
-    For 35 reports with cheat death + defensive tracking: still just ~35 API calls total!
+    Defensive tracking is fetched separately by defensives.py.
     """
     
     if not fights:
@@ -291,119 +287,14 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
     start_time = min(f['start_time'] for f in fights)
     end_time = max(f['end_time'] for f in fights)
     
-    # Build query that gets deaths + optionally debuffs + optionally defensives/healing
+    # Build query that gets deaths + optionally cheat-death debuffs
     # Use GraphQL aliases to fetch multiple event types at once
     cheat_death_ids = ", ".join(str(id) for id in CHEAT_DEATH_ABILITY_IDS)
     cheat_filter = f"ability.id in ({cheat_death_ids})"
     
-    defensive_ids = ", ".join(str(id) for id in ALL_DEFENSIVE_ABILITY_IDS)
-    defensive_filter = f"ability.id in ({defensive_ids})"
     
     # Build query based on what's enabled
-    if enable_defensive_tracking and enable_cheat_death:
-        print(f"[ENABLED] Cheat death + defensive tracking ENABLED - querying deaths + debuffs + defensives...")
-        combined_query = """
-        query($code: String!, $startTime: Float!, $endTime: Float!, $cheatFilter: String, $defensiveFilter: String) {
-          reportData {
-            report(code: $code) {
-              deaths: events(
-                startTime: $startTime
-                endTime: $endTime
-                dataType: Deaths
-                limit: 10000
-              ) {
-                data
-                nextPageTimestamp
-              }
-              debuffs: events(
-                startTime: $startTime
-                endTime: $endTime
-                dataType: Debuffs
-                filterExpression: $cheatFilter
-                limit: 10000
-              ) {
-                data
-                nextPageTimestamp
-              }
-              defensiveCasts: events(
-                startTime: $startTime
-                endTime: $endTime
-                dataType: Casts
-                filterExpression: $defensiveFilter
-                limit: 10000
-              ) {
-                data
-                nextPageTimestamp
-              }
-              defensiveBuffs: events(
-                startTime: $startTime
-                endTime: $endTime
-                dataType: Buffs
-                filterExpression: $defensiveFilter
-                limit: 10000
-              ) {
-                data
-                nextPageTimestamp
-              }
-            }
-          }
-        }
-        """
-        
-        variables = {
-            "code": report_code,
-            "startTime": start_time,
-            "endTime": end_time,
-            "cheatFilter": cheat_filter,
-            "defensiveFilter": defensive_filter
-        }
-    elif enable_defensive_tracking:
-        print(f"[ENABLED] Defensive tracking ENABLED - querying deaths + defensives...")
-        combined_query = """
-        query($code: String!, $startTime: Float!, $endTime: Float!, $defensiveFilter: String) {
-          reportData {
-            report(code: $code) {
-              deaths: events(
-                startTime: $startTime
-                endTime: $endTime
-                dataType: Deaths
-                limit: 10000
-              ) {
-                data
-                nextPageTimestamp
-              }
-              defensiveCasts: events(
-                startTime: $startTime
-                endTime: $endTime
-                dataType: Casts
-                filterExpression: $defensiveFilter
-                limit: 10000
-              ) {
-                data
-                nextPageTimestamp
-              }
-              defensiveBuffs: events(
-                startTime: $startTime
-                endTime: $endTime
-                dataType: Buffs
-                filterExpression: $defensiveFilter
-                limit: 10000
-              ) {
-                data
-                nextPageTimestamp
-              }
-            }
-          }
-        }
-        """
-        
-        variables = {
-            "code": report_code,
-            "startTime": start_time,
-            "endTime": end_time,
-            "defensiveFilter": defensive_filter
-        }
-    elif enable_cheat_death:
+    if enable_cheat_death:
         print(f"[ENABLED] Cheat death detection ENABLED - querying deaths AND debuffs in one call...")
         combined_query = """
         query($code: String!, $startTime: Float!, $endTime: Float!, $cheatFilter: String) {
@@ -440,7 +331,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
             "cheatFilter": cheat_filter
         }
     else:
-        # Just deaths (no cheat death detection or defensive tracking)
+        # Just deaths (no cheat death detection)
         combined_query = """
         query($code: String!, $startTime: Float!, $endTime: Float!) {
           reportData {
@@ -475,8 +366,6 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
         for alias, data_type, filter_expr in (
             ("deaths", "Deaths", None),
             ("debuffs", "Debuffs", cheat_filter),
-            ("defensiveCasts", "Casts", defensive_filter),
-            ("defensiveBuffs", "Buffs", defensive_filter),
         ):
             block = report_data.get(alias)
             if block and block.get("nextPageTimestamp"):
@@ -498,16 +387,6 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
         print(f"  [DEBUG] Actual fight IDs in death events: {sorted(actual_death_fight_ids)[:5]}...")
         matching_fight_ids = expected_fight_ids & actual_death_fight_ids
         print(f"  [DEBUG] Matching fight IDs: {len(matching_fight_ids)} of {len(expected_fight_ids)}")
-        
-        # Extract defensive events (if defensive tracking enabled)
-        defensive_casts = []
-        defensive_buffs = []
-        if enable_defensive_tracking:
-            defensive_casts = report_data.get("defensiveCasts", {}).get("data", [])
-            defensive_buffs = report_data.get("defensiveBuffs", {}).get("data", [])
-            
-            print(f"  Found {len(defensive_casts)} defensive casts")
-            print(f"  Found {len(defensive_buffs)} defensive buff applications")
         
         # Extract debuff events (if cheat death enabled)
         cheat_death_events = []
