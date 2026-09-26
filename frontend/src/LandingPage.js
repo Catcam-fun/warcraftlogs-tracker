@@ -86,6 +86,9 @@ const CURRENT_TIER_BACKGROUNDS = [
 ];
 const CURRENT_TIER_CHANCE = 0.5;
 const BACKGROUNDS = [
+  // Patch 12.2 Eclipse concept art (BlizzCon 2026); move up to
+  // CURRENT_TIER_BACKGROUNDS when Eclipse launches.
+  'the-mantle-vault', 'the-worldcore', 'the-worldcore-entrance',
   'against-the-void', 'hope-shall-rise', 'darkness-devours', 'stand-as-one',
   'cinematic-1', 'cinematic-2', 'cinematic-3', 'cinematic-4', 'immolation-1',
   'supremacy-1', 'supremacy-2', 'supremacy-3', 'supremacy-4',
