@@ -183,7 +183,7 @@ function build() {
           const roll = rand();
           const major = name !== 'Feint' && name !== 'Fade';
           if (roll < 0.18) defensives.active.push({ name, kind: 'personal', major });
-          else if (roll < 0.62) defensives.available.push({ name, major });
+          else if (roll < 0.62) defensives.available.push(rand() < 0.25 ? { name, major, boostedBy: ['a talent'] } : { name, major });
           else defensives.cooldown.push({ name, major, usedAgo: 8 + Math.floor(rand() * 70), readyIn: 5 + Math.floor(rand() * 90) });
         });
         if (rand() < 0.2) defensives.active.push({ name: 'Pain Suppression', kind: 'external', by: 'Lightweaver' });
@@ -205,6 +205,8 @@ function build() {
           maxHp: 900000,
           wouldSave,
           allTogetherWouldSave: Object.values(wouldSave).some(Boolean) || rand() < 0.3,
+          ignoresReduction: rand() < 0.06,
+          ignoresImmunity: rand() < 0.04,
         };
         events[d.player].push({
           boss,

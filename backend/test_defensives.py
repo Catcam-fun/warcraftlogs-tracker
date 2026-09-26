@@ -184,7 +184,7 @@ def ready(*sids):
 
 
 SCHOOLS = {500: FROST, 600: PHYS}
-NAMES = {500: "Frost Bolt", 600: "Cleave"}
+NAMES = {500: "Frost Bolt", 600: "Cleave", 700: "Shadow Strike", 1: "Melee"}
 SHIELD_WALL, ASTRAL, DIVINE_SHIELD, EXHIL = 871, 108271, 642, 109304
 
 
@@ -243,6 +243,78 @@ class SurvivalTests(unittest.TestCase):
     def test_no_killing_blow_near_the_death(self):
         self.assertIsNone(defensives.assess_survival([hit(60_000, 900_000, 0, overkill=5)], 100_000,
                                                      [], [], NAMES, SCHOOLS))
+
+    def talent(self, sid, name):
+        """Trait entries of the talent `name` that modifies catalog ability `sid`."""
+        return next(m["entries"] for c in CATALOG[sid]["mitigation"] for m in c.get("mods", ()) if m["talent"] == name)
+
+    def test_talents_that_strengthen_a_defensive_count(self):
+        # 1.8M hit from full, 800k overkill.
+        kb = hit(100_000, 1_000_000, 0, overkill=800_000)
+        base = defensives.assess_survival([kb], 100_000, ready(ASTRAL), [], NAMES, SCHOOLS, talent_entries={})
+        self.assertFalse(base["wouldSave"]["Astral Shift"])          # 40% of 1.8M = 720k
+        talented = {e: 1 for e in self.talent(ASTRAL, "Astral Bulwark")}
+        r = defensives.assess_survival([kb], 100_000, ready(ASTRAL), [], NAMES, SCHOOLS, talent_entries=talented)
+        self.assertTrue(r["wouldSave"]["Astral Shift"])              # 60% with Astral Bulwark
+
+    def test_talent_rank_scales_the_bonus(self):
+        entry = CATALOG[22812]   # Barkskin: Reinforced Fur +10%
+        entries = self.talent(22812, "Reinforced Fur")
+        comps, boosted = defensives._resolve(entry, {e: 1 for e in entries}, {})
+        self.assertAlmostEqual(comps[0]["dr"], 0.30)
+        self.assertEqual(boosted, ["Reinforced Fur"])
+        comps, _ = defensives._resolve(entry, {e: 2 for e in entries}, {})
+        self.assertAlmostEqual(comps[0]["dr"], 0.40)
+
+    def test_elusiveness_adds_reduction_to_feint_against_single_target_hits(self):
+        kb = hit(100_000, 1_000_000, 0, overkill=150_000)             # not AoE
+        plain = defensives.assess_survival([kb], 100_000, ready(FEINT), [], NAMES, SCHOOLS, talent_entries={})
+        self.assertFalse(plain["wouldSave"]["Feint"])
+        talented = {e: 1 for e in self.talent(FEINT, "Elusiveness")}
+        r = defensives.assess_survival([kb], 100_000, ready(FEINT), [], NAMES, SCHOOLS, talent_entries=talented)
+        self.assertTrue(r["wouldSave"]["Feint"])                      # 20% of 1.15M = 230k
+
+    def test_evasion_dodges_melee_only(self):
+        melee = self.assess(hit(100_000, 1_000_000, 0, overkill=500_000, ability=1), available=[EVASION])
+        self.assertTrue(melee["wouldSave"]["Evasion"])
+        spell = self.assess(hit(100_000, 1_000_000, 0, overkill=500_000), available=[EVASION])
+        self.assertFalse(spell["wouldSave"]["Evasion"])
+
+    def test_hit_that_ignored_all_mitigation_ignores_reductions_not_shields(self):
+        kb = dict(hit(100_000, 1_000_000, 0, overkill=200_000), mitigated=0, unmitigatedAmount=1_200_000)
+        r = self.assess(kb, available=[SHIELD_WALL])
+        self.assertFalse(r["wouldSave"]["Shield Wall"])
+        self.assertTrue(r["ignoresReduction"])
+        shield = defensives.assess_survival([kb], 100_000, ready(11426), [], NAMES, SCHOOLS)   # Ice Barrier
+        self.assertTrue(shield["wouldSave"]["Ice Barrier"])
+
+    def test_spells_that_pierce_immunity(self):
+        from boss_spell_flags import IGNORES_IMMUNITY
+        piercing = min(IGNORES_IMMUNITY)
+        kb = hit(100_000, 1_000_000, 0, overkill=200_000, ability=piercing)
+        r = defensives.assess_survival([kb], 100_000, ready(DIVINE_SHIELD), [], NAMES, SCHOOLS)
+        self.assertFalse(r["wouldSave"]["Divine Shield"])
+        self.assertTrue(r["ignoresImmunity"])
+
+    def test_mixed_school_hits(self):
+        schools = {**SCHOOLS, 700: 33}                         # shadow + physical
+        kb = hit(100_000, 1_000_000, 0, overkill=200_000, ability=700)
+        r = defensives.assess_survival([kb], 100_000, ready(CLOAK, 48707), [], NAMES, schools)
+        self.assertFalse(r["wouldSave"]["Cloak of Shadows"])          # immunity needs every school covered
+        self.assertTrue(r["wouldSave"]["Anti-Magic Shell"])           # a magic shield still soaks it
+
+    def test_real_shield_size_from_the_log(self):
+        brew = 322507                                                 # Celestial Brew: no fixed size
+        kb = hit(100_000, 1_000_000, 0, overkill=200_000)
+        unknown = defensives.assess_survival([kb], 100_000, ready(brew), [], NAMES, SCHOOLS)
+        self.assertIsNone(unknown["wouldSave"]["Celestial Brew"])
+        seen = defensives.assess_survival([kb], 100_000, ready(brew), [], NAMES, SCHOOLS,
+                                          observed_absorbs={"Celestial Brew": 250_000})
+        self.assertTrue(seen["wouldSave"]["Celestial Brew"])
+
+    def test_leech_only_defensive_cannot_stop_a_hit(self):
+        r = self.assess(hit(100_000, 1_000_000, 0, overkill=10_000), available=[49039])   # Lichborne
+        self.assertFalse(r["wouldSave"]["Lichborne"])
 
     def test_unused_healthstone_only_if_carried(self):
         kb = [hit(300_000, 200_000, 0, overkill=100_000)]
