@@ -40,3 +40,5 @@ class LRUCache:
 # typically tens of KB, its deaths well under that.
 report_meta_cache = LRUCache(200)
 report_deaths_cache = LRUCache(400)
+# Casts, defensive buffs and talent loadouts, indexed by player.
+report_defensive_cache = LRUCache(200)
