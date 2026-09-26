@@ -54,11 +54,25 @@ class DefensiveAnalysisTests(unittest.TestCase):
         r = run("Druid", "Balance", talents=set())
         self.assertIn("Barkskin", names(r["available"]))
 
-    def test_short_cooldowns_not_tracked_but_shown_when_active(self):
+    def test_short_cooldowns_are_tracked_too(self):
         r = run("Rogue", "Assassination", talents=set(), auras=[])
-        self.assertNotIn("Feint", names(r["available"] + r["cooldown"]))
+        self.assertIn("Feint", names(r["available"]))
         r = run("Rogue", "Assassination", talents=set(), auras=[FEINT])
         self.assertIn("Feint", names(r["active"]))
+
+    def test_aura_events_give_exact_state_and_caster(self):
+        names_map = {sid: d["name"] for sid, d in CATALOG.items()}
+        names_map[999] = "Pain Suppression"
+        indexed = {"casts": {1: [(95_000, ICE_BLOCK)]}, "talents": {(7, 1): entries(ICE_BLOCK)},
+                   "buffs": {1: [(95_000, "applybuff", ICE_BLOCK, 1), (99_000, "applybuff", 999, 5),
+                                 (100_010, "removebuff", ICE_BLOCK, 1), (100_010, "removebuff", 999, 5)]}}
+        r = defensives.analyze_death(1, "Mage", "Frost", 7, 0, 100_000, indexed, names_map, {5: "Holypriest"})
+        self.assertIn("Ice Block", names(r["active"]))
+        self.assertIn({"name": "Pain Suppression", "kind": "external", "by": "Holypriest"}, r["active"])
+        # Removed well before death -> not active.
+        indexed["buffs"][1] = [(50_000, "applybuff", ICE_BLOCK, 1), (60_000, "removebuff", ICE_BLOCK, 1)]
+        r = defensives.analyze_death(1, "Mage", "Frost", 7, 0, 100_000, indexed, names_map, {})
+        self.assertNotIn("Ice Block", names(r["active"]))
 
     def test_used_ability_is_on_cooldown_with_timings(self):
         r = run("Mage", "Frost", talents=entries(ICE_BLOCK),
@@ -104,7 +118,7 @@ class DefensiveAnalysisTests(unittest.TestCase):
     def test_external_on_killing_blow(self):
         r = run("Mage", "Frost", talents=set(), auras=[999], ability_names={999: "Pain Suppression"})
         ext = [a for a in r["active"] if a["kind"] == "external"]
-        self.assertEqual(ext, [{"name": "Pain Suppression", "kind": "external"}])
+        self.assertEqual(ext, [{"name": "Pain Suppression", "kind": "external", "by": None}])
 
     def test_consumables_this_pull_only(self):
         r = run("Mage", "Frost", talents=set(),
