@@ -29,7 +29,6 @@ from analysis import (
     analyze_fights, is_duplicate_pull,
     find_mass_death_start, resolve_report_window
 )
-from analysis import _fetch_remaining_events
 import defensives
 from auth import require_user, verify_token, forget_token, _bearer_token
 from cache import (report_meta_cache, report_deaths_cache as deaths_lru,
@@ -263,9 +262,6 @@ def analyze():
                     ability_map = sample_fight_data['ability_map']
                     fights_list = [fd['fight'] for fd in report_fights]
                     
-                    start_time = min(f['start_time'] for f in fights_list)
-                    end_time = max(f['end_time'] for f in fights_list)
-                    
                     cache_key = (rid, tuple(sorted(f['id'] for f in fights_list)), bool(enable_cheat_death))
                     deaths = deaths_lru.get(cache_key) if report_finished.get(rid) else None
                     if deaths is None:
@@ -273,15 +269,13 @@ def analyze():
                         if report_finished.get(rid):
                             deaths_lru.set(cache_key, deaths)
                     
-                    # Defensive data. Shorter cooldowns can carry over from before
-                    # the first pull, so look back that far before it.
+                    # Defensive casts and talents for this report's boss pulls.
                     def_key = (rid, tuple(sorted(f['id'] for f in fights_list)))
                     def_data = defensive_lru.get(def_key) if report_finished.get(rid) else None
                     if def_data is None:
                         try:
                             def_data = defensives.fetch_defensive_events(
-                                token, rid, max(0, start_time - defensives.ENCOUNTER_RESET_MS), end_time,
-                                _fetch_remaining_events)
+                                token, rid, sorted(f['id'] for f in fights_list))
                             if report_finished.get(rid):
                                 defensive_lru.set(def_key, def_data)
                         except Exception as e:

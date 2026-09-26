@@ -1,7 +1,7 @@
 import React from 'react';
 
 /* Defensive picture for one death, as computed by backend/defensives.py:
-   { active: [{name, kind, by?, major}], available: [{name, major}],
+   { active: [{name, kind, major?}], activeKnown, available: [{name, major}],
      cooldown: [{name, major, usedAgo, readyIn}], talentsKnown,
      healthstone: {usedAgo|null}, potion: {usedAgo|null},
      survival?: { deathType: 'oneShot'|'wasLow', killingHit: {name, size, pctOfMax},
@@ -61,7 +61,11 @@ export function DeathDefensives({ d }) {
       <HowTheyDied s={s} />
       <div className="fpx-defs-row">
         <span className="lbl act">ACTIVE</span>
-        {personalActive.length === 0 && externals.length === 0 && <span className="none">Nothing active</span>}
+        {personalActive.length === 0 && externals.length === 0 && (
+          d.activeKnown === false
+            ? <span className="none" title="No recorded killing blow for this death, so its auras aren't known">Unknown (no recorded killing blow)</span>
+            : <span className="none">Nothing active</span>
+        )}
         {personalActive.map((a) => <span key={a.name} className="d act">{a.name}</span>)}
         {externals.map((a) => (
           <span key={`x-${a.name}`} className="d ext" title="Raid cooldown or external from another player">
