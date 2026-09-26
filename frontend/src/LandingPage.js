@@ -9,6 +9,16 @@ import FpxRail from './FpxRail';
 /* Real encounters from the live BOSS_ORDER catalog (App.js). Render
    art slots into the --img var per tile once boss renders land. */
 const BOSS_STRIP = [
+  // The Venomous Abyss + Tidebound Grotto (Midnight S2, current tier)
+  ["Nek'zali the Soulcoiler", 'THE VENOMOUS ABYSS'],
+  ['Entombed Sentinels', 'THE VENOMOUS ABYSS'],
+  ['The Lost Explorers', 'THE VENOMOUS ABYSS'],
+  ['Vashnik the Malignant', 'THE VENOMOUS ABYSS'],
+  ['Sszorak', 'THE VENOMOUS ABYSS'],
+  ['The Twin Fangs', 'THE VENOMOUS ABYSS'],
+  ['The Coiled Altar', 'THE VENOMOUS ABYSS'],
+  ["Ula'tek", 'THE VENOMOUS ABYSS'],
+  ['Nymrissa Wavecaller', 'TIDEBOUND GROTTO'],
   // Manaforge Omega
   ['Plexus Sentinel', 'MANAFORGE OMEGA'],
   ["Loom'ithar", 'MANAFORGE OMEGA'],
@@ -54,6 +64,7 @@ const BOSS_STRIP = [
 const COUNCIL = new Set([
   'the-soul-hunters', 'vaelgor-ezzorak', 'cauldron-of-carnage',
   'the-silken-court', 'lightblinded-vanguard',
+  'entombed-sentinels', 'the-twin-fangs', 'the-coiled-altar',
 ]);
 
 /* Only capabilities the app actually delivers today. */
@@ -75,6 +86,7 @@ const BACKGROUNDS = [
 ];
 
 const UPDATES = [
+  ['Midnight Season 2 support', "The Venomous Abyss and Nymrissa Wavecaller in the Tidebound Grotto are tracked as one combined tier.", 'AUG 18'],
   ['Midnight Season 1 support', "The Voidspire, The Dreamrift, and March on Quel'Danas are wired for raid-night review.", 'MAR 17'],
   ['Cheat Death detection', 'Signed-in accounts can isolate prevented lethal events with improved deduplication.', 'DEC 8'],
   ['The War Within coverage', 'Death tracking spans the full current raid catalog, Adventure-Guide ordered.', 'NOV 20'],

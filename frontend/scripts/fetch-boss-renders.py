@@ -1,8 +1,14 @@
-import csv, io, json, os, re, time, urllib.parse, urllib.request
+"""Fetch official Blizzard creature renders for the landing-page boss strip.
+
+Usage: python fetch-boss-renders.py ["Boss Name" ...]
+With names, only those bosses are (re)fetched; otherwise all of BOSSES.
+Writes public/art/bosses/<slug>.webp (300px tall, transparent) directly.
+"""
+import csv, io, json, os, re, sys, time, urllib.parse, urllib.request
 from PIL import Image, ImageDraw, ImageFilter
 
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36"
-OUT = "C:/tmp/bossren3"
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "public", "art", "bosses")
 os.makedirs(OUT, exist_ok=True)
 
 BOSSES = [
@@ -15,11 +21,22 @@ BOSSES = [
     "Mug'Zee, Heads of Security", "Chrome King Gallywix", "Imperator Averzian",
     "Vorasius", "Fallen-King Salhadaar", "Vaelgor & Ezzorak", "Lightblinded Vanguard",
     "Crown of the Cosmos", "Chimaerus, the Undreamt God", "Belo'ren", "L'ura",
+    # Midnight Season 2: The Venomous Abyss + Tidebound Grotto
+    "Nek'zali the Soulcoiler", "Entombed Sentinels", "The Lost Explorers",
+    "Vashnik the Malignant", "Sszorak", "The Twin Fangs", "The Coiled Altar",
+    "Ula'tek", "Nymrissa Wavecaller",
 ]
+if len(sys.argv) > 1:
+    BOSSES = [b for b in BOSSES if b in sys.argv[1:]]
 ENC_OVERRIDE = {"l'ura": "2740"}
+# Hand-picked display IDs where the journal's first creatures render badly
+# (The Lost Explorers: Mor'zahi renders as a spell effect and the other
+# three explorers share one ogre model).
+DISPLAY_OVERRIDE = {"the-lost-explorers": ["143082"]}
 COUNCIL = {"the-soul-hunters": 3, "vaelgor-ezzorak": 2,
            "cauldron-of-carnage": 2, "the-silken-court": 3,
-           "lightblinded-vanguard": 3}
+           "lightblinded-vanguard": 3, "entombed-sentinels": 2,
+           "the-twin-fangs": 2, "the-coiled-altar": 2}
 BG = (24, 24, 24)
 
 def slug(n): return re.sub(r'^-|-$', '', re.sub(r'[^a-z0-9]+', '-', n.lower()))
@@ -96,13 +113,14 @@ for boss in BOSSES:
             if d and d!="0" and d not in seen:
                 seen.add(d); disp.append(d)
                 if len(disp) >= want: break
+        disp = DISPLAY_OVERRIDE.get(sl, disp)
         if not disp:
             results[sl]={"boss":boss,"status":"no_disp","enc":enc}; print("MISS disp",boss); continue
         cuts = []
         for d in disp:
             try:
                 cuts.append(cutout(Image.open(io.BytesIO(get_img(
-                    f"https://render-us.worldofwarcraft.com/npcs/zoom/creature-display-{d}.jpg")))))
+                    f"https://render.worldofwarcraft.com/us/npcs/zoom/creature-display-{d}.jpg")))))
             except Exception as e:
                 print("  cut fail", d, e)
         if not cuts:
@@ -125,13 +143,15 @@ for boss in BOSSES:
             x += s.size[0] - overlap
         bb = canvas.split()[3].getbbox()
         if bb: canvas = canvas.crop(bb)
-        canvas.save(f"{OUT}/{sl}.png")
+        TILE_H = 300  # matches the existing tiles
+        canvas = canvas.resize((max(1, round(canvas.size[0] * TILE_H / canvas.size[1])), TILE_H), Image.LANCZOS)
+        canvas.save(f"{OUT}/{sl}.webp", "WEBP", quality=82, method=6)
         results[sl]={"boss":boss,"status":"ok","enc":enc,"models":len(cuts),"size":list(canvas.size)}
         print(f"OK   {boss:<32} enc={enc} models={len(cuts)} {canvas.size}")
     except Exception as e:
         results[sl]={"boss":boss,"status":f"err:{e}"}; print("ERR",boss,e)
     time.sleep(0.2)
 
-json.dump(results, open(f"{OUT}/_results.json","w"), indent=1)
+json.dump(results, open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "_boss_results.json"),"w"), indent=1)
 ok=sum(1 for v in results.values() if v["status"]=="ok")
 print(f"\n=== {ok}/{len(BOSSES)} ; misses:",[k for k,v in results.items() if v['status']!='ok'])
