@@ -234,6 +234,34 @@ def analyze_fights(fights, fight_zone, difficulty, selected_raid=None):
 # CORE DEATH ANALYSIS
 # =============================================================================
 
+def _fetch_remaining_events(token, report_code, data_type, filter_expr, start_time, end_time, max_pages=50):
+    """Follow WCL's nextPageTimestamp for one event type and return the extra events."""
+    query = """
+    query($code: String!, $startTime: Float!, $endTime: Float!, $filter: String) {
+      reportData {
+        report(code: $code) {
+          events(startTime: $startTime, endTime: $endTime, dataType: %s,
+                 filterExpression: $filter, limit: 10000) {
+            data
+            nextPageTimestamp
+          }
+        }
+      }
+    }
+    """ % data_type
+    events = []
+    next_ts = start_time
+    for _ in range(max_pages):
+        data = graphql_query(token, query, {"code": report_code, "startTime": next_ts,
+                                            "endTime": end_time, "filter": filter_expr})
+        block = ((data.get("reportData") or {}).get("report") or {}).get("events") or {}
+        events.extend(block.get("data") or [])
+        next_ts = block.get("nextPageTimestamp")
+        if not next_ts:
+            break
+    return events
+
+
 def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, enable_cheat_death=False, enable_defensive_tracking=False):
     """
     Get ALL player deaths for an entire report at once - MUCH faster than per-fight queries
@@ -285,6 +313,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
                 limit: 10000
               ) {
                 data
+                nextPageTimestamp
               }
               debuffs: events(
                 startTime: $startTime
@@ -294,6 +323,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
                 limit: 10000
               ) {
                 data
+                nextPageTimestamp
               }
               defensiveCasts: events(
                 startTime: $startTime
@@ -303,6 +333,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
                 limit: 10000
               ) {
                 data
+                nextPageTimestamp
               }
               defensiveBuffs: events(
                 startTime: $startTime
@@ -312,6 +343,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
                 limit: 10000
               ) {
                 data
+                nextPageTimestamp
               }
             }
           }
@@ -338,6 +370,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
                 limit: 10000
               ) {
                 data
+                nextPageTimestamp
               }
               defensiveCasts: events(
                 startTime: $startTime
@@ -347,6 +380,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
                 limit: 10000
               ) {
                 data
+                nextPageTimestamp
               }
               defensiveBuffs: events(
                 startTime: $startTime
@@ -356,6 +390,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
                 limit: 10000
               ) {
                 data
+                nextPageTimestamp
               }
             }
           }
@@ -381,6 +416,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
                 limit: 10000
               ) {
                 data
+                nextPageTimestamp
               }
               debuffs: events(
                 startTime: $startTime
@@ -390,6 +426,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
                 limit: 10000
               ) {
                 data
+                nextPageTimestamp
               }
             }
           }
@@ -415,6 +452,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
                 limit: 10000
               ) {
                 data
+                nextPageTimestamp
               }
             }
           }
@@ -430,7 +468,21 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
     try:
         # Single API call gets both deaths and debuffs (if enabled)
         combined_data = graphql_query(token, combined_query, variables)
-        report_data = combined_data.get("reportData", {}).get("report", {})
+        report_data = combined_data.get("reportData", {}).get("report", {}) or {}
+
+        # WCL pages event lists; follow nextPageTimestamp so long reports
+        # don't silently lose events past the first page.
+        for alias, data_type, filter_expr in (
+            ("deaths", "Deaths", None),
+            ("debuffs", "Debuffs", cheat_filter),
+            ("defensiveCasts", "Casts", defensive_filter),
+            ("defensiveBuffs", "Buffs", defensive_filter),
+        ):
+            block = report_data.get(alias)
+            if block and block.get("nextPageTimestamp"):
+                block["data"] = (block.get("data") or []) + _fetch_remaining_events(
+                    token, report_code, data_type, filter_expr,
+                    block["nextPageTimestamp"], end_time)
         
         # Extract death events
         events_data = report_data.get("deaths", {}).get("data", [])
@@ -665,5 +717,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
         return deaths_by_fight
     
     except Exception as e:
-        print(f"Error fetching deaths for report: {e}")
-        return {f['id']: [] for f in fights}
+        # Let the caller decide: it records the failure and, crucially,
+        # doesn't cache an empty result for a report that does have deaths.
+        print(f"Error fetching deaths for report {report_code}: {e}")
+        raise

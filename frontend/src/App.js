@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
-import { Search, AlertCircle, Loader2, Filter, ChevronDown, ChevronRight, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown, Share2, Copy, Check, LogOut, Settings as SettingsIcon, Info, X, Crosshair, BarChart3, LogIn } from 'lucide-react';
-import { supabase } from './supabaseClient';
+import { AlertCircle, Loader2, Filter, ChevronDown, ChevronRight, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown, Share2, Copy, Check, LogOut, Settings as SettingsIcon, Info, X, Crosshair, LogIn, Save } from 'lucide-react';
+import { supabase, sessionEndedByBrowserClose, setSessionOnly } from './supabaseClient';
 import Auth from './Auth';
 import Settings from './Settings';
 import LandingPage from './LandingPage';
@@ -12,11 +12,10 @@ import FpxRail from './FpxRail';
 import TermsOfService from './TermsOfService';
 import PrivacyPolicy from './PrivacyPolicy';
 import { MOCK_RESULTS, MOCK_CONFIG } from './mockResults';
+import { API_URL, apiFetch, stripSecrets } from './api';
+import SavedReports from './SavedReports';
+import SaveReportDialog from './SaveReportDialog';
 
-// Automatically detect if running locally or in production
-const API_URL = window.location.hostname === 'localhost' 
-  ? 'http://localhost:5000' 
-  : 'https://REDACTED';
 
 
 // Raid Zone Definitions
@@ -185,7 +184,6 @@ export default function WarcraftLogsApp() {
   
   // Authentication state
   const [user, setUser] = useState(null);
-  const [authLoading, setAuthLoading] = useState(true);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
 
@@ -232,23 +230,52 @@ export default function WarcraftLogsApp() {
   const [showInfoModal, setShowInfoModal] = useState(false);
   const [recentRuns, setRecentRuns] = useState([]);
   const [showRecentMenu, setShowRecentMenu] = useState(false);
-  // const [showSaveDialog, setShowSaveDialog] = useState(false); // DISABLED - Save Reports feature
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
 
 
-  // Check authentication status on mount
+  // Wake the backend as soon as the site opens. Render's free tier sleeps
+  // after ~15 idle minutes and the first request then takes 30-60s; this
+  // starts that warm-up while the user is still reading or filling the form.
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    fetch(`${API_URL}/api/health`).catch(() => {});
+  }, []);
+
+  // Check authentication status on mount. The page renders straight away;
+  // only the account controls wait on this, so a slow or unreachable
+  // Supabase can no longer hold the whole site on a spinner.
+  useEffect(() => {
+    let cancelled = false;
+    const finish = (session) => {
+      if (cancelled) return;
       setUser(session?.user ?? null);
-      setAuthLoading(false);
-    });
+    };
+
+    // "Stay logged in" unchecked: drop the session once the browser closes.
+    const init = sessionEndedByBrowserClose()
+      ? supabase.auth.signOut({ scope: 'local' }).then(() => {
+          setSessionOnly(false);
+          return { data: { session: null } };
+        })
+      : supabase.auth.getSession();
+
+    init
+      .then(({ data: { session } }) => finish(session))
+      .catch((err) => {
+        console.error('[Auth] Could not restore session:', err);
+        finish(null);
+      });
 
     // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user ?? null);
+      // Arriving from a password-reset email: open Settings to set a new one.
+      if (event === 'PASSWORD_RECOVERY') setShowSettings(true);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
   }, []);
 
   // Load API credentials when user logs in
@@ -256,65 +283,54 @@ export default function WarcraftLogsApp() {
     if (user) {
       loadAPICredentials();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   const loadSharedResults = async (shareId) => {
-    console.log('[Share] Loading shared results for ID:', shareId);
     setLoading(true);
     setLoadingStage('Loading shared results...');
     setError('');
 
     try {
-      const url = `${API_URL}/api/shared/${shareId}`;
-      console.log('[Share] Fetching from:', url);
-      
-      const response = await fetch(url);
-      console.log('[Share] Response status:', response.status);
-      
-      const result = await response.json();
-      console.log('[Share] Response data:', result);
-
-      if (!result.success) {
-        throw new Error(result.error || 'Shared results not found');
+      const { ok, body } = await apiFetch(`/api/shared/${encodeURIComponent(shareId)}`);
+      if (!ok || !body.success) {
+        throw new Error(body.error || 'Shared results not found');
       }
-
-      console.log('[Share] Successfully loaded data');
-      setData(result.data);
-      if (result.config) {
-        setConfig(prevConfig => ({
-          ...prevConfig,
-          ...result.config
-        }));
+      setData(body.data);
+      if (body.config) {
+        // Never let a shared config overwrite the viewer's own credentials.
+        setConfig((prevConfig) => ({ ...prevConfig, ...stripSecrets(body.config) }));
       }
-      setLoading(false);
-      setLoadingStage('');
+      if (location.pathname !== '/results') navigate(`/results${location.search}`, { replace: true });
     } catch (err) {
       console.error('[Share] Error loading shared results:', err);
       setError(`Failed to load shared results: ${err.message}`);
+    } finally {
       setLoading(false);
       setLoadingStage('');
     }
   };
 
-  // DISABLED - Save Reports feature
-  // const handleLoadSavedReport = (reportData) => {
-  //   console.log('[SavedReports] Loading saved report');
-  //   setData(reportData);
-  //   navigate('/');
-  // };
+  const handleLoadSavedReport = (saved) => {
+    setError('');
+    setExpandedPlayers(new Set());
+    setSortConfig({ key: null, direction: 'asc' });
+    if (saved.config) setConfig((prev) => ({ ...prev, ...stripSecrets(saved.config) }));
+    setData(saved.data);
+    navigate('/results');
+  };
 
-  // Load shared results when share parameter is present
+  // Load shared results when a ?share= param is present. Each share id is
+  // attempted once: a failed load must not loop, re-requesting forever.
+  const attemptedShareRef = useRef(null);
   useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const shareId = urlParams.get('share');
-    
-    console.log('[Share] URL changed, share param:', shareId, 'current data:', data ? 'exists' : 'none');
-    
-    if (shareId && !data && !loading) {  // Only load if we don't already have data and aren't already loading
-      console.log('[Share] Triggering load for:', shareId);
+    const shareId = new URLSearchParams(location.search).get('share');
+    if (shareId && attemptedShareRef.current !== shareId) {
+      attemptedShareRef.current = shareId;
       loadSharedResults(shareId);
     }
-  }, [location.search, data, loading]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search]);
 
   // Dev-only: ?mock=1 seeds the Results surface with a fixture so the
   // redesign can be iterated without a live WarcraftLogs run. Gated to
@@ -424,7 +440,8 @@ export default function WarcraftLogsApp() {
   const loadRecentRuns = async () => {
     try {
       const arr = await loadFromIndexedDB(RECENT_KEY);
-      return Array.isArray(arr) ? arr : [];
+      // Older versions stored API credentials alongside each run.
+      return Array.isArray(arr) ? arr.map((r) => ({ ...r, config: stripSecrets(r.config) })) : [];
     } catch {
       return [];
     }
@@ -438,7 +455,7 @@ export default function WarcraftLogsApp() {
         savedAt: new Date().toISOString(),
         title,
         sub,
-        config: { ...cfg },
+        config: stripSecrets(cfg),
         data: resultData,
       };
       const existing = await loadRecentRuns();
@@ -465,70 +482,58 @@ export default function WarcraftLogsApp() {
     setError('');
     setExpandedPlayers(new Set());
     setSortConfig({ key: null, direction: 'asc' });
-    setConfig((prev) => ({ ...prev, ...record.config }));
+    setConfig((prev) => ({ ...prev, ...stripSecrets(record.config) }));
     setData(record.data);
     if (location.pathname !== '/results') navigate('/results');
   };
 
-  // hydrate the recent-runs list once on mount
+  // hydrate the recent-runs list once on mount (re-saving it scrubs any
+  // credentials older versions stored there)
   useEffect(() => {
-    loadRecentRuns().then(setRecentRuns);
+    loadRecentRuns().then((runs) => {
+      setRecentRuns(runs);
+      if (runs.length) saveToIndexedDB(RECENT_KEY, runs).catch(() => {});
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Load from IndexedDB on initial mount
+  // Latest data/config for async callbacks that must not act on stale state.
+  const dataRef = useRef(data);
+  dataRef.current = data;
+  const configRef = useRef(config);
+  configRef.current = config;
+
+  // Restore the last analysis from IndexedDB on mount (refresh persistence).
+  // A ?share= link, or anything loaded while this read was in flight, wins.
   useEffect(() => {
-    // Only attempt to load if we don't have data yet
-    if (data || loading) return;
-    
-    const loadData = async () => {
-      try {
-        const savedData = await loadFromIndexedDB('sharedAnalysisData');
-        if (savedData) {
-          console.log('[Persistence] Loading data from IndexedDB');
-          
-          // If this came from SharedResults, it has a specific structure
-          if (savedData.data && savedData.config) {
-            setData(savedData.data);
-            setConfig(prevConfig => ({
-              ...prevConfig,
-              ...savedData.config
-            }));
-          } else {
-            // Otherwise it's just the raw data
-            setData(savedData);
-          }
-          
-          // Clean up the loadShared URL parameter if present
-          const urlParams = new URLSearchParams(window.location.search);
-          if (urlParams.get('loadShared') === 'true') {
-            navigate(location.pathname, { replace: true });
-          }
+    if (new URLSearchParams(window.location.search).get('share')) return;
+
+    loadFromIndexedDB('sharedAnalysisData')
+      .then((saved) => {
+        if (!saved || dataRef.current) return;
+        const restoredData = saved.data && saved.config ? saved.data : saved;
+        if (saved.config) {
+          setConfig((prev) => ({ ...prev, ...stripSecrets(saved.config) }));
         }
-      } catch (err) {
-        console.error('[Persistence] Error loading from IndexedDB:', err);
-      }
-    };
-    
-    loadData();
+        setData(restoredData);
+      })
+      .catch((err) => console.error('[Persistence] Error loading from IndexedDB:', err));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Run once on mount
 
-  // Save data to IndexedDB whenever it changes (for refresh persistence)
+  // Persist the analysis when it changes. Only on data changes: this used
+  // to also run on every config keystroke, rewriting the whole analysis
+  // to IndexedDB each time a form field changed.
   useEffect(() => {
-    if (data) {
-      const saveData = async () => {
-        try {
-          console.log('[Persistence] Saving data to IndexedDB');
-          await saveToIndexedDB('sharedAnalysisData', { data, config });
-          console.log('[Persistence] Data saved successfully');
-        } catch (err) {
-          console.error('[Persistence] Error saving to IndexedDB:', err);
-        }
-      };
-      
-      saveData();
-    }
-  }, [data, config]);
+    if (!data) return;
+    saveToIndexedDB('sharedAnalysisData', { data, config: stripSecrets(configRef.current) })
+      .catch((err) => console.error('[Persistence] Error saving to IndexedDB:', err));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+
+  // Credentials as last loaded from / written to Supabase, so a run only
+  // writes them back when they actually changed.
+  const storedCredsRef = useRef({ clientId: '', clientSecret: '' });
 
   const loadAPICredentials = async () => {
     try {
@@ -536,17 +541,15 @@ export default function WarcraftLogsApp() {
         .from('api_credentials')
         .select('client_id, client_secret')
         .eq('user_id', user.id)
-        .single();
+        .maybeSingle();
 
       if (error) {
-        // No credentials saved yet, that's okay
-        if (error.code !== 'PGRST116') {
-          console.error('Error loading credentials:', error);
-        }
+        console.error('Error loading credentials:', error);
         return;
       }
 
       if (data) {
+        storedCredsRef.current = { clientId: data.client_id || '', clientSecret: data.client_secret || '' };
         setConfig(prev => ({
           ...prev,
           clientId: data.client_id || '',
@@ -560,39 +563,27 @@ export default function WarcraftLogsApp() {
 
   const saveAPICredentials = async (clientId, clientSecret) => {
     if (!user) return;
+    const stored = storedCredsRef.current;
+    if (stored.clientId === clientId && stored.clientSecret === clientSecret) return;
 
     try {
-      // Check if credentials already exist
-      const { data: existing } = await supabase
+      const { data: existing, error: lookupError } = await supabase
         .from('api_credentials')
         .select('id')
         .eq('user_id', user.id)
-        .single();
+        .maybeSingle();
+      if (lookupError) throw lookupError;
 
-      if (existing) {
-        // Update existing credentials
-        const { error } = await supabase
+      const { error } = existing
+        ? await supabase
           .from('api_credentials')
-          .update({
-            client_id: clientId,
-            client_secret: clientSecret,
-            last_used: new Date().toISOString()
-          })
-          .eq('user_id', user.id);
-
-        if (error) throw error;
-      } else {
-        // Insert new credentials
-        const { error } = await supabase
+          .update({ client_id: clientId, client_secret: clientSecret, last_used: new Date().toISOString() })
+          .eq('user_id', user.id)
+        : await supabase
           .from('api_credentials')
-          .insert({
-            user_id: user.id,
-            client_id: clientId,
-            client_secret: clientSecret
-          });
-
-        if (error) throw error;
-      }
+          .insert({ user_id: user.id, client_id: clientId, client_secret: clientSecret });
+      if (error) throw error;
+      storedCredsRef.current = { clientId, clientSecret };
     } catch (err) {
       console.error('Error saving API credentials:', err);
     }
@@ -600,6 +591,8 @@ export default function WarcraftLogsApp() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
+    setSessionOnly(false);
+    storedCredsRef.current = { clientId: '', clientSecret: '' };
     setUser(null);
     setData(null); // Clear any loaded data
     setConfig(prev => ({ ...prev, enableCheatDeath: false })); // Disable cheat death for non-logged-in users
@@ -610,27 +603,21 @@ export default function WarcraftLogsApp() {
 
     setSharingData(true);
     try {
-      const response = await fetch(`${API_URL}/api/share`, {
+      const { ok, body } = await apiFetch('/api/share', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          data: data,
-          config: config
-        })
+        auth: user ? 'optional' : false,
+        // Credentials are stripped here and again on the server.
+        body: { data, config: stripSecrets(config) },
       });
-
-      const result = await response.json();
-
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to create shareable link');
+      if (!ok || !body.success) {
+        throw new Error(body.error || 'Failed to create shareable link');
       }
 
-      const shareUrl = `${window.location.origin}${window.location.pathname}?share=${result.shareId}`;
-      setShareLink(shareUrl);
+      setShareLink(`${window.location.origin}/results?share=${body.shareId}`);
       setShowShareModal(true);
-      setSharingData(false);
     } catch (err) {
       setError(`Failed to create shareable link: ${err.message}`);
+    } finally {
       setSharingData(false);
     }
   };
@@ -671,9 +658,10 @@ export default function WarcraftLogsApp() {
       return;
     }
 
-    // Save API credentials if user is logged in
+    // Remember API credentials for signed-in users. Not awaited: a slow
+    // Supabase shouldn't delay the analysis itself.
     if (user) {
-      await saveAPICredentials(config.clientId, config.clientSecret);
+      saveAPICredentials(config.clientId, config.clientSecret);
     }
 
     setLoading(true);
@@ -701,15 +689,22 @@ export default function WarcraftLogsApp() {
         characterGroups
       };
 
+      // Signed-in runs send the session so the server allows cheat-death detection.
+      const headers = { 'Content-Type': 'application/json' };
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) headers.Authorization = `Bearer ${session.access_token}`;
+
       const response = await fetch(`${API_URL}/api/analyze`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(payload),
         signal: controller.signal
       });
 
       if (!response.ok) {
-        throw new Error('Failed to connect to server');
+        let message = 'Failed to connect to server';
+        try { message = (await response.json()).error || message; } catch { /* not JSON */ }
+        throw new Error(message);
       }
 
       const reader = response.body.getReader();
@@ -737,6 +732,9 @@ export default function WarcraftLogsApp() {
             } else if (data.message) {
               setLoadingStage(data.message);
             } else if (data.result) {
+              if (typeof data.result.meta?.cheatDeathEnabled === 'boolean') {
+                setConfig((prev) => ({ ...prev, enableCheatDeath: data.result.meta.cheatDeathEnabled }));
+              }
               setData(data.result);
               
               // DEBUG: Expose data globally and log summary
@@ -960,7 +958,7 @@ export default function WarcraftLogsApp() {
     setHiddenPlayers(newHidden);
   };
 
-  const getFilteredStats = () => {
+  const computeFilteredStats = () => {
     if (!data) return [];
 
     const stats = [];
@@ -1164,7 +1162,7 @@ export default function WarcraftLogsApp() {
     return filteredStats.sort((a, b) => b.realRate - a.realRate || b.realDeaths - a.realDeaths);
   };
 
-  const getOverviewData = () => {
+  const computeOverviewData = () => {
     if (!data) return { bosses: [], players: [], grid: {} };
 
     // Filter bosses based on selection - use proper ordering
@@ -1363,6 +1361,22 @@ export default function WarcraftLogsApp() {
     return { bosses, players: filteredPlayers, grid };
   };
 
+  // Both tables are derived from the full analysis; recompute them only
+  // when an input changes, not on every render (e.g. each keystroke in
+  // the search box, or expanding a row).
+  /* eslint-disable react-hooks/exhaustive-deps */
+  const filteredStatsMemo = useMemo(computeFilteredStats, [
+    data, characterGroups, selectedBosses, cutoff, config.enableCheatDeath,
+    searchQuery, hiddenPlayers, minPulls,
+  ]);
+  const overviewDataMemo = useMemo(computeOverviewData, [
+    data, characterGroups, selectedBosses, cutoff, config.enableCheatDeath,
+    config.selectedRaid, hiddenPlayers, minPulls,
+  ]);
+  /* eslint-enable react-hooks/exhaustive-deps */
+  const getFilteredStats = () => filteredStatsMemo;
+  const getOverviewData = () => overviewDataMemo;
+
   const sortOverviewData = (bosses, players, grid, key) => {
     const sorted = [...players].sort((a, b) => {
       let aVal, bVal;
@@ -1481,15 +1495,6 @@ export default function WarcraftLogsApp() {
     }
   };
 
-  // Show loading while checking auth
-  if (authLoading) {
-    return (
-      <div className="fp-analysis analysis-shell" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Loader2 size={48} style={{ color: 'var(--color-gold-2)', animation: 'spin 1s linear infinite' }} />
-      </div>
-    );
-  }
-
   // Main app (works for both logged in and anonymous users)
   return (
     <div className="fp-analysis analysis-shell app-shell" style={{ minHeight: '100vh' }}>
@@ -1514,14 +1519,6 @@ export default function WarcraftLogsApp() {
           />
         } />
 
-        {/* DISABLED - Save Reports feature
-        <Route path="/saved-reports" element={
-          <SavedReports 
-            user={user}
-            onLoadReport={handleLoadSavedReport}
-          />
-        } />
-        */}
         
         <Route path="/*" element={
           <>
@@ -1658,7 +1655,7 @@ export default function WarcraftLogsApp() {
           <Route path="/" element={
             <LandingPage
               onRunAnalysis={() => navigate('/analyze')}
-              onSavedReports={null}  // DISABLED - Save Reports feature
+              onSavedReports={() => navigate('/saved')}
               user={user}
               onShowAuthModal={() => setShowAuthModal(true)}
               onShowSettings={() => setShowSettings(true)}
@@ -1731,6 +1728,11 @@ export default function WarcraftLogsApp() {
                           <button className="fpx-btn ghost sm" onClick={() => { setData(null); setError(''); setExpandedPlayers(new Set()); setSortConfig({ key: null, direction: 'asc' }); navigate('/analyze'); }}>
                             <Crosshair size={15} /> New Analysis
                           </button>
+                          {user && (
+                            <button className="fpx-btn ghost sm" onClick={() => setShowSaveDialog(true)}>
+                              <Save size={15} /> Save
+                            </button>
+                          )}
                           <button className="fpx-btn sm" onClick={handleShare} disabled={sharingData}
                             style={{ opacity: sharingData ? 0.7 : 1, cursor: sharingData ? 'not-allowed' : 'pointer' }}>
                             {sharingData ? <><Loader2 size={15} className="fpx-spin" /> Sharing…</> : <><Share2 size={15} /> Share</>}
@@ -2187,7 +2189,6 @@ export default function WarcraftLogsApp() {
               const filteredStats = getFilteredStats();
               // Calculate all percentage values for color scaling
               const allRealRates = filteredStats.map(s => s.realRate);
-              const allTotalRates = filteredStats.map(s => s.totalRate);
 
               return (
               <div className="fpx-plist fpx-rv">
@@ -2371,7 +2372,7 @@ export default function WarcraftLogsApp() {
                 <FpxRail
                   collapsed={resultsRailCollapsed}
                   onToggle={() => setResultsRailCollapsed((v) => !v)}
-                  active={null}
+                  active="saved"
                   onHome={() => navigate('/')}
                   onAnalyze={() => navigate('/analyze')}
                   onResults={() => navigate('/results')}
@@ -2390,13 +2391,11 @@ export default function WarcraftLogsApp() {
                       )}
                     </div>
                   </div>
-                  <div className="fpx-results-empty fpx-rv" style={{ minHeight: '64vh' }}>
-                    <BarChart3 size={34} />
-                    <p>Saved reports are coming soon — you'll be able to revisit past death reviews here.</p>
-                    <button className="fpx-btn" onClick={() => navigate('/analyze')}>
-                      <Crosshair size={17} /> Run an analysis <ChevronRight size={15} />
-                    </button>
-                  </div>
+                  <SavedReports
+                    user={user}
+                    onLoadReport={handleLoadSavedReport}
+                    onSignIn={() => setShowAuthModal(true)}
+                  />
                 </div>
               </div>
             </main>
@@ -2644,16 +2643,15 @@ export default function WarcraftLogsApp() {
         </div>
       )}
 
-      {/* DISABLED - Save Reports feature
       {showSaveDialog && user && data && (
         <SaveReportDialog
           analysisData={data}
-          user={user}
+          config={config}
           onClose={() => setShowSaveDialog(false)}
           onSaved={() => setShowSaveDialog(false)}
+          onViewSaved={() => { setShowSaveDialog(false); navigate('/saved'); }}
         />
       )}
-      */}
 
       <style>{`
         @keyframes spin {
