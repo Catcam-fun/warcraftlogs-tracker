@@ -159,7 +159,7 @@ export function DefensiveSummaryChip({ s }) {
         {s.preventable}/{s.assessed} preventable
       </span>
       {s.oneShots > 0 && (
-        <span className="fpx-pdef neutral" title="Killed by a single hit from 90%+ health">
+        <span className="fpx-pdef neutral" title="Killed by a single hit from 85%+ health">
           {s.oneShots} one-shot{s.oneShots !== 1 ? 's' : ''}
         </span>
       )}

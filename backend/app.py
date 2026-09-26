@@ -290,11 +290,12 @@ def analyze():
                             def_data = None
 
                     # Killing blows (one cheap request per report), for "would it have saved them".
-                    kb_key = (rid, start_time, end_time)
+                    fight_ids = sorted(f['id'] for f in fights_list)
+                    kb_key = (rid, tuple(fight_ids))
                     recaps = recap_lru.get(kb_key) if report_finished.get(rid) else None
                     if recaps is None:
                         try:
-                            recaps = defensives.fetch_killing_blows(token, rid, start_time, end_time)
+                            recaps = defensives.fetch_killing_blows(token, rid, fight_ids)
                             if report_finished.get(rid):
                                 recap_lru.set(kb_key, recaps)
                         except Exception as e:
