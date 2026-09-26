@@ -16,6 +16,7 @@ generated from game data by scripts/build_defensive_catalog.py.
 
 from collections import defaultdict
 
+from boss_spell_flags import IGNORES_IMMUNITY
 from defensive_catalog import CATALOG
 from warcraftlogs import graphql_query
 
@@ -108,16 +109,17 @@ def index_defensive_events(raw):
         sid = e.get("abilityGameID")
         if e.get("type") == "cast" and sid in CATALOG and e.get("sourceID") is not None:
             casts[e["sourceID"]].append((e["timestamp"], sid))
-    buffs = defaultdict(list)           # targetID -> [(ts, type, abilityGameID, sourceID)]
+    buffs = defaultdict(list)           # targetID -> [(ts, type, abilityGameID, sourceID, shield size)]
     for e in raw.get("buffs", []):
         if e.get("targetID") is not None:
-            buffs[e["targetID"]].append((e["timestamp"], e.get("type"), e.get("abilityGameID"), e.get("sourceID")))
-    talents = {}                        # (fightID, sourceID) -> set(trait node entry IDs)
+            buffs[e["targetID"]].append((e["timestamp"], e.get("type"), e.get("abilityGameID"),
+                                         e.get("sourceID"), e.get("absorb") or 0))
+    talents = {}                        # (fightID, sourceID) -> {trait node entry ID: rank}
     for e in raw.get("combatants", []):
         tree = e.get("talentTree")
         if tree is None or e.get("sourceID") is None:
             continue
-        talents[(e.get("fight"), e["sourceID"])] = {t.get("id") for t in tree if t.get("id")}
+        talents[(e.get("fight"), e["sourceID"])] = {t["id"]: t.get("rank") or 1 for t in tree if t.get("id")}
     for lst in casts.values():
         lst.sort()
     for lst in buffs.values():
@@ -130,6 +132,8 @@ def index_defensive_events(raw):
 # =============================================================================
 
 def _has_ability(sid, entry, player_class, spec, talent_entries, cast_ids_in_report, pressed_this_pull=()):
+    if talent_entries is not None:
+        talent_entries = set(talent_entries)
     if entry["class"] != player_class:
         return False
     if sid in pressed_this_pull:
@@ -176,7 +180,7 @@ def _charges_at(death_ts, casts_in_window, charges, recharge_ms):
 def _buffs_active_at(death_ts, buff_events):
     """abilityGameID -> sourceID for auras that were up when the player died."""
     up = {}
-    for ts, typ, aid, src in buff_events:
+    for ts, typ, aid, src, *_ in buff_events:
         if ts > death_ts:
             break
         if typ in ("applybuff", "refreshbuff", "applybuffstack"):
@@ -276,9 +280,24 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
             if carried:
                 unused_consumables.append(CONSUMABLE[carried[-1]])
 
+    # Real shield sizes this player got from their own shields in this log
+    # (latest before the death, else any): exact, gear and talents included.
+    observed = {}
+    for ts, typ, aid, src, amount in (e + (0,) * (5 - len(e)) for e in (buff_events or {}).get(player_id, [])):
+        name = ability_names.get(aid)
+        if amount and src == player_id and typ in ("applybuff", "refreshbuff") and name in NAME_TO_ID:
+            if ts <= death_ts or name not in observed:
+                observed[name] = amount
+
+    boosts = {e["name"]: _resolve(e, talent_entries, observed)[1] for e in ready_entries}
+    for a in result["available"]:
+        if boosts.get(a["name"]):
+            a["boostedBy"] = boosts[a["name"]]
+
     if killing_blows is not None:
         result["survival"] = assess_survival(killing_blows, death_ts, ready_entries, unused_consumables,
-                                             ability_names, ability_schools or {})
+                                             ability_names, ability_schools or {},
+                                             talent_entries=talent_entries, observed_absorbs=observed)
 
     for key in ("active", "available", "cooldown"):
         result[key].sort(key=lambda d: (not d.get("major", True), d["name"]))
@@ -342,17 +361,83 @@ def index_killing_blows(events):
     return dict(idx)
 
 
-def _school_applies(school, hit, ability_schools):
+MELEE_SWING = 1             # WCL's ability ID for auto-attacks ("Melee")
+
+
+def _school_applies(school, hit, ability_schools, immunity=False):
+    """Does an effect limited to `school` apply to this hit?
+
+    Reductions and absorbs limited to magic apply when any school of the hit
+    is magic; an immunity only when every school is (the game's rules for
+    mixed-school hits such as shadow + physical).
+    """
     if school in (None, "all"):
         return True
     if school == "aoe":
         return bool(hit.get("isAoE"))
+    if school == "melee":
+        return hit.get("abilityGameID") == MELEE_SWING
     mask = ability_schools.get(hit.get("abilityGameID"), 0)
     if school == "magic":
-        return mask not in (0, PHYSICAL)
+        if immunity:
+            return mask != 0 and not mask & PHYSICAL
+        return bool(mask & ~PHYSICAL)
     if school == "physical":
-        return mask == PHYSICAL
+        return mask == PHYSICAL if immunity else bool(mask & PHYSICAL)
     return True
+
+
+def _ignores_reduction(hit):
+    """Nothing at all was mitigated (not even versatility): the hit ignores damage reduction.
+
+    WCL leaves `mitigated` out when it's 0; `unmitigatedAmount` shows the log has the data.
+    """
+    return not hit.get("mitigated") and (hit.get("unmitigatedAmount") or 0) > 0
+
+
+def _rank(talent_entries, entries):
+    if not talent_entries:
+        return 0
+    if isinstance(talent_entries, dict):
+        return max((talent_entries.get(e, 0) for e in entries), default=0)
+    return 1 if set(entries) & set(talent_entries) else 0
+
+
+def _resolve(entry, talent_entries, observed_absorbs):
+    """This player's version of an ability's effect: talents applied, real shield sizes.
+
+    Returns (components or None if it can't be scored, [talents that changed it]).
+    Each component: {"dr" | "absorb" (fraction of max health) | "absorb_amount" |
+    "hp" | "heal" | "immune": value, "school"?}.
+    """
+    comps = entry.get("mitigation")
+    if comps is None:
+        return None, []
+    if isinstance(comps, dict):          # older catalog shape
+        comps = [comps]
+    out, boosted = [], []
+    for c in comps:
+        field = next(f for f in ("immune", "dr", "absorb", "hp", "heal") if f in c)
+        value = c[field]
+        if field == "absorb" and c.get("observed") and observed_absorbs.get(entry["name"]):
+            out.append({"absorb_amount": observed_absorbs[entry["name"]], "school": c.get("school")})
+            continue
+        if value is None:
+            return None, []              # only scored from a real shield size, and none was seen
+        for m in c.get("mods", ()):
+            rank = _rank(talent_entries, m["entries"])
+            if not rank:
+                continue
+            if "add" in m:
+                value = value + m["add"] * rank
+            else:
+                value = value * (1 + (m["mult"] - 1) * rank)
+            boosted.append(m["talent"])
+        if field == "dr":
+            value = min(value, 1.0)
+        if value:
+            out.append({field: value, "school": c.get("school")})
+    return out, boosted
 
 
 def _full_hit(hit):
@@ -361,24 +446,35 @@ def _full_hit(hit):
 
 
 def _prevented(options, hit, max_hp, missing_hp, ability_schools):
-    """Damage the given defensives would have prevented (or healed) against the killing blow."""
+    """Damage the given defensives would have prevented (or healed) against the killing blow.
+
+    `options`: resolved components (see _resolve). Reductions apply first, then
+    shields soak what's left, as in the game. Reductions are skipped for a hit
+    that ignored them, and immunities for spells that pierce them.
+    """
     dmg = _full_hit(hit)
     keep, absorb = 1.0, 0.0
+    no_reduction = _ignores_reduction(hit)
+    pierces = hit.get("abilityGameID") in IGNORES_IMMUNITY
     for m in options:
-        if not _school_applies(m.get("school"), hit, ability_schools):
+        immune = bool(m.get("immune"))
+        if not _school_applies(m.get("school"), hit, ability_schools, immunity=immune):
             continue
-        if m.get("immune"):
-            keep = 0.0
+        if immune:
+            if not pierces:
+                keep = 0.0
         elif m.get("dr"):
-            keep *= 1 - m["dr"]
-        absorb += m.get("absorb", 0)
+            if not no_reduction:
+                keep *= 1 - m["dr"]
+        absorb += m.get("absorb", 0) * max_hp + m.get("absorb_amount", 0)
     extra_hp = sum(m.get("hp", 0) for m in options)
     # A heal only helps up to the health they were missing before the killing blow.
     heal = min(sum(m.get("heal", 0) for m in options) * max_hp, missing_hp)
-    return dmg * (1 - keep) + (absorb + extra_hp) * max_hp + heal
+    return min(dmg, dmg * (1 - keep) + absorb) + extra_hp * max_hp + heal
 
 
-def assess_survival(killing_blows, death_ts, available, consumables, ability_names, ability_schools):
+def assess_survival(killing_blows, death_ts, available, consumables, ability_names, ability_schools,
+                    talent_entries=None, observed_absorbs=None):
     """How they died, and whether the defensives they had ready would have saved them.
 
     `killing_blows`: this player's hits with overkill (any time); the one at
@@ -400,16 +496,13 @@ def assess_survival(killing_blows, death_ts, available, consumables, ability_nam
     missing_hp = max(max_hp - hp_before, 0)
 
     def verdict(options):
-        if not options:
-            return None
         return _prevented(options, killing, max_hp, missing_hp, ability_schools) > overkill
 
     per_button, scored = {}, []
     for entry in list(available) + list(consumables):
-        m = entry.get("mitigation")
-        per_button[entry["name"]] = verdict([m]) if m else None
-        if m:
-            scored.append(m)
+        comps, _ = _resolve(entry, talent_entries, observed_absorbs or {})
+        per_button[entry["name"]] = None if comps is None else verdict(comps)
+        scored += comps or []
 
     return {
         "deathType": "oneShot" if hp_before >= FULL_HEALTH * max_hp else "wasLow",
@@ -422,5 +515,8 @@ def assess_survival(killing_blows, death_ts, available, consumables, ability_nam
         "overkill": overkill,
         "maxHp": max_hp,
         "wouldSave": per_button,               # name -> True / False / None (can't estimate)
-        "allTogetherWouldSave": verdict(scored),
+        "allTogetherWouldSave": verdict(scored) if scored else None,
+        # Why a defensive might not help against this particular hit.
+        "ignoresReduction": _ignores_reduction(killing),
+        "ignoresImmunity": killing.get("abilityGameID") in IGNORES_IMMUNITY,
     }

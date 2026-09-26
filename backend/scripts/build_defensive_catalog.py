@@ -164,12 +164,106 @@ MITIGATION = {
     "Die by the Sword": {"dr": .30, "dur": 8}, "Enraged Regeneration": {"dr": .30, "dur": 8},
     "Last Stand": {"hp": .30, "heal": .30, "dur": 8}, "Shield Wall": {"dr": .40, "dur": 8},
     "Spell Reflection": {"dr": .20, "school": "magic", "dur": 5},
+    # Dodges melee swings (the boss's "Melee" ability) only; Elusiveness adds a
+    # damage reduction on top (see EFFECTS).
+    "Evasion": {"immune": True, "school": "melee", "dur": 10},
+    "Greater Invisibility": {"dr": .60, "dur": 3},
+    "Frenzied Regeneration": {"heal": .24},        # 8% of max health per second for 3s
+    # Shields whose size depends on stats or resources: scored only from the
+    # player's real shield size seen in the log (absorb=None).
+    "Celestial Brew": {"absorb": None}, "Tombstone": {"absorb": None},
+    "Stone Bulwark Totem": {"absorb": None},
+    # Leech and immunity to charm/fear only: can't stop a hit.
+    "Lichborne": {},
     # Consumables: medians measured across real Midnight logs.
     "Healthstone": {"heal": .25}, "Demonic Healthstone": {"heal": .60},
     "Silvermoon Health Potion": {"heal": .26}, "Concentrated Silvermoon Health Potion": {"heal": .44},
     "Potent Healing Potion": {"heal": .24}, "Invigorating Healing Potion": {"heal": .25},
     "Algari Healing Potion": {"heal": .25},
 }
+
+# Where each value lives in the game data: (field, spell carrying the effect,
+# effect index[, ticks]). Talents that modify exactly that effect (SpellEffect
+# aura 107 flat / 108 percent modifiers whose class mask covers the spell) are
+# attached to the catalog entry and applied at analysis time to players who
+# have them (scaled by rank). A second component with a 0 base (Feint's and
+# Evasion's all-damage reduction) exists only for players with the talent
+# that fills it in (Elusiveness).
+EFFECTS = {
+    "Icebound Fortitude": [("dr", 48792, 2)], "Rune Tap": [("dr", 194679, 0)],
+    "Vampiric Blood": [("hp", 55233, 2)], "Death Pact": [("heal", 48743, 0)],
+    "Anti-Magic Shell": [("absorb", 48707, 0)],
+    "Blur": [("dr", 212800, 2)], "Metamorphosis": [("hp", 187827, 1)],
+    "Fiery Brand": [("dr", 207771, 0)],
+    "Barkskin": [("dr", 22812, 0)], "Survival Instincts": [("dr", 50322, 0)],
+    "Renewal": [("heal", 108238, 0)], "Frenzied Regeneration": [("heal", 22842, 0, 3)],
+    "Obsidian Scales": [("dr", 363916, 0)],
+    "Aspect of the Turtle": [("dr", 186265, 3)], "Exhilaration": [("heal", 109304, 0)],
+    "Survival of the Fittest": [("dr", 264735, 0)],
+    "Ice Cold": [("dr", 414658, 7)], "Greater Invisibility": [("dr", 113862, 0)],
+    "Blazing Barrier": [("absorb", 235313, 0)], "Ice Barrier": [("absorb", 11426, 0)],
+    "Prismatic Barrier": [("absorb", 235450, 0)],
+    "Diffuse Magic": [("dr", 122783, 0)], "Touch of Karma": [("absorb", 122470, 1)],
+    "Celestial Brew": [("absorb", 322507, 0)], "Zen Meditation": [("dr", 115176, 1)],
+    "Ardent Defender": [("dr", 31850, 0)], "Divine Protection": [("dr", 498, 0)],
+    "Guardian of Ancient Kings": [("dr", 86659, 2)], "Lay on Hands": [("heal", 633, 1)],
+    "Shield of Vengeance": [("absorb", 184662, 0)],
+    "Desperate Prayer": [("hp", 19236, 0), ("heal", 19236, 1)],
+    "Dispersion": [("dr", 47585, 0)], "Fade": [("dr", 586, 3)],
+    "Crimson Vial": [("heal", 185311, 0, 4)],
+    "Feint": [("dr", 1966, 0), ("dr", 1966, 1)], "Evasion": [("immune", 5277, 0), ("dr", 5277, 1)],
+    "Astral Shift": [("dr", 108271, 0)], "Stone Bulwark Totem": [("absorb", 114893, 0)],
+    "Dark Pact": [("absorb", 108416, 0)], "Unending Resolve": [("dr", 104773, 2)],
+    "Die by the Sword": [("dr", 118038, 1)], "Enraged Regeneration": [("dr", 184364, 0)],
+    "Last Stand": [("hp", 12975, 0), ("heal", 12975, 1)], "Shield Wall": [("dr", 871, 0)],
+    "Spell Reflection": [("dr", 385391, 0)], "Tombstone": [("absorb", 219809, 0)],
+    "Healthstone": [("heal", 6262, 0)],
+}
+
+# SpellModOp values that change one effect's value -> that effect's index.
+MOD_OP_EFFECT_INDEX = {3: 0, 12: 1, 23: 2, 32: 3, 33: 4}
+MOD_OP_ALL = 0          # percent modifier on all of a spell's healing / absorb amounts
+FIELDS = ("immune", "dr", "absorb", "hp", "heal")
+
+
+def components(name, values, effects, mods_for):
+    """Split a MITIGATION entry into one component per effect, with talent modifiers.
+
+    A component: {<field>: value, "school"?, "observed"?, "mods"?: [...]} where
+    field is dr / absorb / hp / heal (fractions of damage or of max health) or
+    immune. Absorbs are "observed": the player's real shield size from the log
+    wins over the estimate. Returns None when the ability can't be scored.
+    """
+    if values is None:
+        return None
+    out, used = [], set()
+    for eff in effects or [(f, None, None) for f in FIELDS if f in values]:
+        field, spell, index = eff[:3]
+        ticks = eff[3] if len(eff) > 3 else 1
+        comp = {}
+        if field in values and field not in used:
+            comp[field] = values[field]
+            if values.get("school") not in (None, "all"):
+                comp["school"] = values["school"]
+            used.add(field)
+        else:
+            comp[field] = 0.0          # filled in only by a talent
+        if field == "absorb":
+            comp["observed"] = True
+        if spell is not None:
+            mods = mods_for(spell, index, field, ticks)
+            if mods:
+                comp["mods"] = mods
+        if comp[field] or comp.get("mods") or comp.get("observed"):
+            out.append(comp)
+    for field in FIELDS:           # values without a mapped effect (e.g. Fortifying Brew)
+        if field in values and field not in used:
+            comp = {field: values[field]}
+            if values.get("school") not in (None, "all"):
+                comp["school"] = values["school"]
+            out.append(comp)
+    return out
+
 
 # Cooldowns the game data stores elsewhere (seconds).
 COOLDOWN_FALLBACK = {196555: 180, 374348: 90, 184662: 90}
@@ -186,6 +280,51 @@ def table(name):
     return list(csv.DictReader(io.StringIO(urllib.request.urlopen(req, timeout=300).read().decode("utf-8"))))
 
 
+def talent_modifiers(names, def_spell_plain):
+    """Return mods_for(spell, effect_index, field, ticks) -> talent modifiers of that value."""
+    effects = {}
+    for r in table("SpellEffect"):
+        if r["DifficultyID"] == "0" and r["EffectAura"] in ("107", "108"):
+            effects.setdefault(int(r["SpellID"]), []).append(r)
+    family = {int(r["SpellID"]): (int(r["SpellClassSet"]), [int(r[f"SpellClassMask_{i}"]) & 0xffffffff for i in range(4)])
+              for r in table("SpellClassOptions")}
+    entries_for_def = {}
+    for r in table("TraitNodeEntry"):
+        entries_for_def.setdefault(int(r["TraitDefinitionID"]), set()).add(int(r["ID"]))
+    talent_entries = {}    # talent spell -> trait node entries that grant it
+    for d, sid in def_spell_plain.items():
+        talent_entries.setdefault(sid, set()).update(entries_for_def.get(d, ()))
+
+    def mods_for(spell, index, field, ticks):
+        fam, mask = family.get(spell, (None, [0] * 4))
+        found = []
+        for tsid, entries in sorted(talent_entries.items()):
+            if not entries or family.get(tsid, (None,))[0] != fam:
+                continue
+            for r in effects.get(tsid, ()):
+                m = [int(r[f"EffectSpellClassMask_{i}"]) & 0xffffffff for i in range(4)]
+                if not any(a & b for a, b in zip(m, mask)):
+                    continue
+                op, pct = int(r["EffectMiscValue_0"]), r["EffectAura"] == "108"
+                value = float(r["EffectBasePointsF"])
+                if not value:
+                    continue
+                if MOD_OP_EFFECT_INDEX.get(op) != index and not (
+                        op == MOD_OP_ALL and pct and field in ("heal", "absorb")):
+                    continue
+                if field == "immune" or (field == "absorb" and not pct):
+                    continue   # absorbs scale with stats: only percent changes apply
+                mod = {"talent": names.get(tsid), "entries": sorted(entries)}
+                if pct:
+                    mod["mult"] = round(1 + value / 100, 4)
+                else:
+                    # Reductions are negative in the data; heals/health are % of max health.
+                    mod["add"] = round((-value if field == "dr" else value) / 100 * ticks, 4)
+                found.append(mod)
+        return found
+    return mods_for
+
+
 def main():
     names = {int(r["ID"]): r["Name_lang"] for r in table("SpellName")}
     cooldowns = {int(r["SpellID"]): max(int(r["RecoveryTime"]), int(r["CategoryRecoveryTime"]))
@@ -195,10 +334,13 @@ def main():
     charges = {int(r["ID"]): (int(r["MaxCharges"]), int(r["ChargeRecoveryTime"])) for r in table("SpellCategory")}
     curated_by_name = {name: sid for sid, name, _, _, _ in CURATED if name in NAME_ALIAS_OK}
     def_spell = {}
+    def_spell_plain = {}   # TraitDefinition -> its own SpellID (no name aliases)
     replaced_by_def = {}   # spell -> talent definitions that replace it (Ice Cold replaces Ice Block)
     for r in table("TraitDefinition"):
         if r.get("OverridesSpellID") and r["OverridesSpellID"] != "0":
             replaced_by_def.setdefault(int(r["OverridesSpellID"]), set()).add(int(r["ID"]))
+        if r.get("SpellID") and r["SpellID"] != "0":
+            def_spell_plain[int(r["ID"])] = int(r["SpellID"])
         for k in ("SpellID", "VisibleSpellID"):
             if r.get(k) and r[k] != "0":
                 sid = int(r[k])
@@ -208,6 +350,7 @@ def main():
                 alias = curated_by_name.get(names.get(sid))
                 if alias:
                     def_spell[int(r["ID"])].add(alias)
+    mods_for = talent_modifiers(names, def_spell_plain)
     entries_for_spell, entries_for_def = {}, {}
     for r in table("TraitNodeEntry"):
         entries_for_def.setdefault(int(r["TraitDefinitionID"]), set()).add(int(r["ID"]))
@@ -236,7 +379,7 @@ def main():
             "cooldown_ms": cd_ms, "charges": max(max_charges, 1),
             "major": cd_ms >= MAJOR_COOLDOWN_S * 1000, "talent_entries": entries,
             "replaced_by_entries": replaced_by,
-            "mitigation": MITIGATION.get(name),
+            "mitigation": components(name, MITIGATION.get(name), EFFECTS.get(name), mods_for),
         }
     if problems:
         raise SystemExit("Spell names changed; update CURATED:\n  " + "\n  ".join(problems))
