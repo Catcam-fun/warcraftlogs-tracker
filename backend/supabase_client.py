@@ -252,6 +252,123 @@ def get_share(share_id):
 
 
 # =============================================================================
+# SHARED REPORT CACHE (finished WarcraftLogs reports, any user)
+# =============================================================================
+#
+# Rows in `report_cache` (backend/migrations/002_report_cache.sql). Values are
+# encoded so dicts with int / tuple keys, tuples and sets come back exactly as
+# they were stored, then compressed like saves. The table is kept under
+# REPORT_CACHE_BUDGET_BYTES by dropping the least recently used rows. Every
+# call is best-effort: any failure (table missing, network) is a cache miss.
+
+REPORT_CACHE_BUDGET_BYTES = 200 * 1024 * 1024
+REPORT_CACHE_MAX_ROW_BYTES = 4 * 1024 * 1024
+_EVICT_EVERY = 20                  # writes between size checks
+_cache_writes = 0
+_cache_lock = threading.Lock()
+_cache_disabled_until = 0.0        # back off after errors (e.g. table not created yet)
+
+
+def _enc(obj):
+    if isinstance(obj, dict):
+        if all(isinstance(k, str) and not k.startswith("__") for k in obj):
+            return {k: _enc(v) for k, v in obj.items()}
+        return {"__d": [[_enc(k), _enc(v)] for k, v in obj.items()]}
+    if isinstance(obj, tuple):
+        return {"__t": [_enc(v) for v in obj]}
+    if isinstance(obj, (set, frozenset)):
+        return {"__s": [_enc(v) for v in obj]}
+    if isinstance(obj, list):
+        return [_enc(v) for v in obj]
+    return obj
+
+
+def _dec(obj):
+    if isinstance(obj, list):
+        return [_dec(v) for v in obj]
+    if isinstance(obj, dict):
+        if len(obj) == 1:
+            (tag, val), = obj.items()
+            if tag == "__d":
+                return {_dec(k): _dec(v) for k, v in val}
+            if tag == "__t":
+                return tuple(_dec(v) for v in val)
+            if tag == "__s":
+                return {_dec(v) for v in val}
+        return {k: _dec(v) for k, v in obj.items()}
+    return obj
+
+
+def _cache_available():
+    return db is not None and time.time() >= _cache_disabled_until
+
+
+def _cache_failed(what, e):
+    global _cache_disabled_until
+    _cache_disabled_until = time.time() + 300
+    print(f"[ReportCache] {what} failed, skipping the shared cache for 5 min: {e}")
+
+
+def cache_get(key):
+    """The cached value for `key`, or None."""
+    if not _cache_available():
+        return None
+    try:
+        result = db.table('report_cache').select('payload').eq('key', key).limit(1).execute()
+        if not result.data:
+            return None
+        value = _dec(unpack(result.data[0]['payload']))
+    except Exception as e:
+        _cache_failed("read", e)
+        return None
+    try:
+        db.table('report_cache').update({'last_used_at': _now().isoformat()}).eq('key', key).execute()
+    except Exception as e:
+        print(f"[ReportCache] last-used update failed: {e}")
+    return value
+
+
+def cache_put(key, value):
+    """Store `value` under `key` (best-effort), then keep the table under budget."""
+    global _cache_writes
+    if not _cache_available():
+        return
+    try:
+        blob = pack(_enc(value))
+        if len(blob) > REPORT_CACHE_MAX_ROW_BYTES:
+            return
+        now = _now().isoformat()
+        db.table('report_cache').upsert({'key': key, 'payload': blob, 'size_bytes': len(blob),
+                                         'created_at': now, 'last_used_at': now}).execute()
+    except Exception as e:
+        _cache_failed("write", e)
+        return
+    with _cache_lock:
+        _cache_writes += 1
+        due = _cache_writes % _EVICT_EVERY == 0
+    if due:
+        evict_report_cache()
+
+
+def evict_report_cache(budget=None):
+    """Delete least recently used rows until the table fits the budget."""
+    budget = REPORT_CACHE_BUDGET_BYTES if budget is None else budget
+    try:
+        rows = db.table('report_cache').select('key, size_bytes').order('last_used_at', desc=True).execute().data or []
+        total, drop = 0, []
+        for row in rows:
+            total += row.get('size_bytes') or 0
+            if total > budget:
+                drop.append(row['key'])
+        for i in range(0, len(drop), 100):
+            db.table('report_cache').delete().in_('key', drop[i:i + 100]).execute()
+        if drop:
+            print(f"[ReportCache] evicted {len(drop)} rows to stay under {budget // (1024 * 1024)} MB")
+    except Exception as e:
+        print(f"[ReportCache] eviction failed: {e}")
+
+
+# =============================================================================
 # ACCOUNT DELETION
 # =============================================================================
 

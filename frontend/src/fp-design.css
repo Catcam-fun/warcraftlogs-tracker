@@ -726,16 +726,39 @@ table.fpx-mtx{width:100%;border-collapse:collapse;font-size:12px;
 .fpx-wcl{display:inline-flex;align-items:center;gap:5px;color:var(--fpx-kill);
   text-decoration:none;font-size:11px;font-weight:600;white-space:nowrap}
 .fpx-wcl:hover{filter:brightness(1.14)}
-.fpx-defs{margin-top:2px;padding:7px 10px;border-radius:8px;
-  background:rgba(125,108,255,.07);border-left:2px solid var(--fpx-glow)}
-.fpx-defs-row{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
-.fpx-defs .lbl{color:var(--fpx-ember);font-size:10px;font-weight:700;
-  letter-spacing:.06em;margin-right:3px}
-.fpx-defs .d{color:var(--fpx-ink-dim);font-size:10px;padding:2px 7px;border-radius:5px;
+.fpx-defs{margin-top:2px;padding:7px 10px;border-radius:8px;display:flex;flex-direction:column;gap:5px;
+  background:rgba(125,108,255,.06);border-left:2px solid var(--fpx-glow)}
+.fpx-defs-row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.fpx-defs .lbl{font-size:9.5px;font-weight:700;letter-spacing:.07em;min-width:118px;color:var(--fpx-ink-faint)}
+.fpx-defs .lbl.act{color:var(--fpx-best)}
+.fpx-defs .lbl.avail{color:var(--fpx-kill)}
+.fpx-defs .d{color:var(--fpx-ink-dim);font-size:10.5px;padding:2px 7px;border-radius:5px;
   background:rgba(255,255,255,.04);border:1px solid var(--fpx-line)}
-.fpx-defs .none{color:var(--fpx-regress);font-size:10px;font-style:italic}
-.fpx-defs .heal{margin-top:5px;font-size:10px;color:var(--fpx-ink-faint)}
-.fpx-defs .heal b{color:var(--fpx-best);font-weight:700}
+.fpx-defs .d.act{color:#bff0cf;background:rgba(84,211,106,.12);border-color:rgba(84,211,106,.32)}
+.fpx-defs .d.ext{color:#d9d2ff;background:rgba(125,108,255,.14);border-color:rgba(125,108,255,.34)}
+.fpx-defs .d.avail{color:#ffd9a6;background:rgba(255,174,59,.12);border-color:rgba(255,174,59,.36);font-weight:600}
+.fpx-defs .d.avail.minor{font-weight:400;opacity:.7}
+.fpx-defs .d.cd small{color:var(--fpx-ink-faint);font-size:9.5px;margin-left:3px}
+.fpx-defs .none{color:var(--fpx-ink-faint);font-size:10.5px;font-style:italic}
+.fpx-defs .consumables{font-size:10.5px;color:var(--fpx-ink-faint);gap:14px}
+.fpx-defs .cons.used{color:var(--fpx-best)}
+.fpx-defs .note{font-style:italic}
+.fpx-defs .how .txt{color:var(--fpx-ink);font-size:11px}
+.fpx-defs .how .txt small{color:var(--fpx-ink-faint);font-size:10px}
+.fpx-defs .how .txt small.warn{color:var(--fpx-warn,#e0a040)}
+.fpx-defs .d.avail small{opacity:.7;font-size:9px;margin-left:3px}
+.fpx-defs .lbl.one{color:#ff8a80}
+.fpx-defs .lbl.low{color:var(--fpx-ink-dim)}
+.fpx-defs .d.avail.save{color:#bff0cf;background:rgba(84,211,106,.14);border-color:rgba(84,211,106,.45)}
+.fpx-defs .d.avail.short{opacity:.62;font-weight:500}
+.fpx-defs .combo{font-size:10px;color:#bff0cf;font-style:italic}
+.fpx-defs .cons.save{color:#ffd9a6}
+.fpx-pdef.neutral{color:var(--fpx-ink-dim);background:rgba(255,255,255,.04)}
+.fpx-pdef{font-size:11px;font-weight:600;padding:1px 7px;border-radius:5px;margin-left:4px;
+  border:1px solid var(--fpx-line)}
+.fpx-pdef.good{color:var(--fpx-best);background:rgba(84,211,106,.1)}
+.fpx-pdef.warn{color:var(--fpx-kill);background:rgba(255,174,59,.1)}
+.fpx-pdef.bad{color:#ff8a80;background:rgba(226,73,63,.12)}
 
 /* ============================================================
    ANALYSIS LOADER — L'ura model as the spinner

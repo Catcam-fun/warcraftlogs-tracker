@@ -15,6 +15,7 @@ import { MOCK_RESULTS, MOCK_CONFIG } from './mockResults';
 import { API_URL, apiFetch, stripSecrets } from './api';
 import SavedReports from './SavedReports';
 import SaveReportDialog from './SaveReportDialog';
+import { DeathDefensives, DefensiveSummaryChip, DefensiveTopUnused, summarizeDefensives } from './DefensivePanel';
 
 
 
@@ -202,8 +203,7 @@ export default function WarcraftLogsApp() {
     endDate: '',  // Optional: leave blank to include all reports
     authorFilters: '',
     characterGroups: '',
-    enableCheatDeath: false,  // Optional cheat death detection (slower)
-    enableDefensiveTracking: false  // Optional defensive ability tracking
+    enableCheatDeath: false  // Optional cheat death detection (slower)
   });
 
   const [loading, setLoading] = useState(false);
@@ -1150,7 +1150,8 @@ export default function WarcraftLogsApp() {
         totalDeathsByBoss,
         topAbilitiesByBoss,
         class: playerClass,
-        spec: playerSpec
+        spec: playerSpec,
+        defensiveSummary: summarizeDefensives(realDeaths)
       });
     }
 
@@ -2192,7 +2193,7 @@ export default function WarcraftLogsApp() {
 
               return (
               <div className="fpx-plist fpx-rv">
-                {filteredStats.map(({ player, realDeaths, totalDeaths, cheatDeaths, pulls, realRate, totalRate, hasCheatDeaths, deathsByBoss, cheatDeathsByBoss, totalDeathsByBoss, topAbilitiesByBoss, class: playerClass, spec: playerSpec }) => {
+                {filteredStats.map(({ player, realDeaths, totalDeaths, cheatDeaths, pulls, realRate, totalRate, hasCheatDeaths, deathsByBoss, cheatDeathsByBoss, totalDeathsByBoss, topAbilitiesByBoss, class: playerClass, spec: playerSpec, defensiveSummary }) => {
                   const isExpanded = expandedPlayers.has(player);
                   const showBothStats = hasCheatDeaths && cheatDeaths > 0;
 
@@ -2211,6 +2212,7 @@ export default function WarcraftLogsApp() {
                             {realRate.toFixed(1)}%
                           </span>
                           {showBothStats && <span className="fpx-pcheat">(+{cheatDeaths} cheat)</span>}
+                          <DefensiveSummaryChip s={defensiveSummary} />
                         </div>
                         <button
                           onClick={(e) => {
@@ -2226,6 +2228,7 @@ export default function WarcraftLogsApp() {
 
                       {isExpanded && (
                         <div className="fpx-pbody">
+                          <DefensiveTopUnused s={defensiveSummary} />
                           {sortBossesByOrder(Object.keys(deathsByBoss), config.selectedRaid).map(boss => {
                             const bossDeaths = deathsByBoss[boss];
                             const bossPulls = data.bossParticipation[boss]?.[player]?.length || 0;
@@ -2288,28 +2291,7 @@ export default function WarcraftLogsApp() {
                                       </a>
                                     </div>
 
-                                    {/* Defensive Abilities Display */}
-                                    {config.enableDefensiveTracking && death.defensives && (
-                                      <div className="fpx-defs">
-                                        <div className="fpx-defs-row">
-                                          <span className="lbl">ACTIVE BUFFS</span>
-                                          {death.defensives.abilities && death.defensives.abilities.length > 0 ? (
-                                            death.defensives.abilities.map((def, defIdx) => (
-                                              <span key={defIdx} className="d">
-                                                {def.name} ({def.count}×)
-                                              </span>
-                                            ))
-                                          ) : (
-                                            <span className="none">None active</span>
-                                          )}
-                                        </div>
-                                        {death.defensives.healing !== undefined && (
-                                          <div className="heal">
-                                            Healing received: <b>{death.defensives.healing.toLocaleString()}</b>
-                                          </div>
-                                        )}
-                                      </div>
-                                    )}
+                                    <DeathDefensives d={death.defensives} />
                                   </div>
                                 ))}
                               </div>
