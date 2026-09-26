@@ -190,6 +190,22 @@ function build() {
         if (rand() < 0.12) defensives.active.push({ name: 'Rallying Cry', kind: 'external', by: 'Stonefist' });
         defensives.healthstone = { usedAgo: rand() < 0.35 ? 3 + Math.floor(rand() * 40) : null };
         defensives.potion = { usedAgo: rand() < 0.25 ? 5 + Math.floor(rand() * 60) : null };
+        // Sample killing-blow verdict (same shape the backend produces).
+        const oneShot = rand() < 0.3;
+        const hpBeforePct = oneShot ? 92 + Math.floor(rand() * 9) : 5 + Math.floor(rand() * 40);
+        const pctOfMax = oneShot ? 100 + Math.floor(rand() * 80) : hpBeforePct + 5 + Math.floor(rand() * 40);
+        const wouldSave = {};
+        defensives.available.forEach((a) => { wouldSave[a.name] = rand() < 0.45 ? true : rand() < 0.85 ? false : null; });
+        if (defensives.healthstone.usedAgo == null && rand() < 0.5) wouldSave.Healthstone = !oneShot && rand() < 0.6;
+        defensives.survival = {
+          deathType: oneShot ? 'oneShot' : 'wasLow',
+          killingHit: { name: d.abilityName === 'Unknown' ? 'Melee' : d.abilityName, size: pctOfMax * 9000, pctOfMax },
+          hpBeforePct,
+          overkill: (pctOfMax - hpBeforePct) * 9000,
+          maxHp: 900000,
+          wouldSave,
+          allTogetherWouldSave: Object.values(wouldSave).some(Boolean) || rand() < 0.3,
+        };
         events[d.player].push({
           boss,
           reportId,

@@ -171,8 +171,12 @@ def _buffs_active_at(death_ts, buff_events):
 
 
 def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts,
-                  indexed, ability_names, actor_names):
-    """Defensive picture for one death. All timestamps are report-relative ms."""
+                  indexed, ability_names, actor_names, killing_blows=None, ability_schools=None):
+    """Defensive picture for one death. All timestamps are report-relative ms.
+
+    With `killing_blows` (the player's overkill hits in this log) it also
+    estimates whether the defensives they had ready would have saved them.
+    """
     own_casts = indexed["casts"].get(player_id, [])
     casts_by_spell = defaultdict(list)
     for t, sid in own_casts:
@@ -189,6 +193,7 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
             active_names[name] = src
 
     result = {"active": [], "available": [], "cooldown": [], "talentsKnown": talent_entries is not None}
+    ready_entries = []
 
     pressed_this_pull = {sid for t, sid in own_casts if fight_start <= t <= death_ts}
     for sid, entry in PERSONAL.items():
@@ -205,6 +210,7 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
         left, ready_in = _charges_at(death_ts, window, entry["charges"], recharge)
         if left > 0:
             result["available"].append({"name": name, "major": entry["major"]})
+            ready_entries.append(entry)
         else:
             result["cooldown"].append({
                 "name": name, "major": entry["major"],
@@ -216,11 +222,149 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
             result["active"].append({"name": name, "kind": "external",
                                      "by": actor_names.get(src) if src != player_id else None})
 
+    unused_consumables = []
     for kind in ("healthstone", "potion"):
         used = [t for t, sid in own_casts
                 if CONSUMABLE.get(sid, {}).get("kind") == kind and fight_start <= t <= death_ts]
         result[kind] = {"usedAgo": round((death_ts - used[-1]) / 1000)} if used else {"usedAgo": None}
+        if not used:
+            # Only assume they carry one if they used that kind somewhere in this log.
+            carried = [sid for _, sid in own_casts if CONSUMABLE.get(sid, {}).get("kind") == kind]
+            if carried:
+                unused_consumables.append(CONSUMABLE[carried[-1]])
+
+    if killing_blows is not None:
+        result["survival"] = assess_survival(killing_blows, death_ts, ready_entries, unused_consumables,
+                                             ability_names, ability_schools or {})
 
     for key in ("active", "available", "cooldown"):
         result[key].sort(key=lambda d: (not d.get("major", True), d["name"]))
     return result
+
+
+# =============================================================================
+# WOULD A DEFENSIVE HAVE SAVED THEM?
+# =============================================================================
+#
+# Uses only the killing blow of each death: WCL returns every hit with
+# overkill for a whole report in one cheap request, with the player's health
+# and max health attached. Fetching the seconds before every death costs about
+# one API point per pull, which would use up a user's hourly WCL allowance on
+# one big analysis. From the killing blow we know:
+#   - how they died: one-shot from near full health, or already low
+#   - how big the hit was and how much it overkilled by
+#   - whether each defensive they had ready would have covered that hit
+#     (reductions/immunities applied to it, absorbs, extra max health, and
+#     heals up to the health they were missing).
+# It is deliberately cautious: a defensive is only credited against the
+# killing blow, not the hits before it.
+
+FULL_HEALTH = 0.90           # at or above this before the killing blow = one-shot
+PHYSICAL = 1
+KILLING_BLOW_FILTER = "overkill > 0"
+
+
+def fetch_killing_blows(token, report_code, start_time, end_time):
+    """Every hit on a player with overkill in the window, with health values."""
+    query = """query($c: String!, $s: Float!, $e: Float!, $f: String) { reportData { report(code: $c) {
+        events(startTime: $s, endTime: $e, dataType: DamageTaken, filterExpression: $f,
+               includeResources: true, limit: 10000) { data nextPageTimestamp } } } }"""
+    events, start = [], start_time
+    for _ in range(50):
+        data = graphql_query(token, query, {"c": report_code, "s": start, "e": end_time, "f": KILLING_BLOW_FILTER})
+        block = ((data.get("reportData") or {}).get("report") or {}).get("events") or {}
+        events += block.get("data") or []
+        start = block.get("nextPageTimestamp")
+        if not start:
+            break
+    return index_killing_blows(events)
+
+
+def index_killing_blows(events):
+    """{targetID: [killing hits sorted by time]}"""
+    idx = defaultdict(list)
+    for e in events:
+        if e.get("type") == "damage" and e.get("targetID") is not None and (e.get("overkill") or 0) > 0:
+            idx[e["targetID"]].append(e)
+    for hits in idx.values():
+        hits.sort(key=lambda e: e["timestamp"])
+    return dict(idx)
+
+
+def _school_applies(school, hit, ability_schools):
+    if school in (None, "all"):
+        return True
+    if school == "aoe":
+        return bool(hit.get("isAoE"))
+    mask = ability_schools.get(hit.get("abilityGameID"), 0)
+    if school == "magic":
+        return mask not in (0, PHYSICAL)
+    if school == "physical":
+        return mask == PHYSICAL
+    return True
+
+
+def _prevented(options, hit, max_hp, missing_hp, ability_schools):
+    """Damage the given defensives would have prevented (or healed) against the killing blow."""
+    dmg = (hit.get("amount") or 0) + (hit.get("absorbed") or 0)
+    keep, absorb = 1.0, 0.0
+    for m in options:
+        if not _school_applies(m.get("school"), hit, ability_schools):
+            continue
+        if m.get("immune"):
+            keep = 0.0
+        elif m.get("dr"):
+            keep *= 1 - m["dr"]
+        absorb += m.get("absorb", 0)
+    extra_hp = sum(m.get("hp", 0) for m in options)
+    # A heal only helps up to the health they were missing before the killing blow.
+    heal = min(sum(m.get("heal", 0) for m in options) * max_hp, missing_hp)
+    return dmg * (1 - keep) + (absorb + extra_hp) * max_hp + heal
+
+
+def assess_survival(killing_blows, death_ts, available, consumables, ability_names, ability_schools):
+    """How they died, and whether the defensives they had ready would have saved them.
+
+    `killing_blows`: this player's hits with overkill (any time); the one at
+    this death is matched by time. `available` / `consumables`: catalog
+    entries ready at death (consumables only if carried and unused this pull).
+    """
+    killing = None
+    for h in killing_blows:
+        if death_ts - 2_000 <= h["timestamp"] <= death_ts + 50:
+            killing = h
+    if killing is None or killing.get("resourceActor") != 2:
+        return None   # no recorded killing blow with health data (instant-kill mechanic, etc.)
+    max_hp = killing.get("maxHitPoints") or 0
+    if not max_hp:
+        return None
+    overkill = killing.get("overkill") or 0
+    hp_before = max((killing.get("amount") or 0) - overkill, 0)
+    hit_size = (killing.get("amount") or 0) + (killing.get("absorbed") or 0)
+    missing_hp = max(max_hp - hp_before, 0)
+
+    def verdict(options):
+        if not options:
+            return None
+        return _prevented(options, killing, max_hp, missing_hp, ability_schools) > overkill
+
+    per_button, scored = {}, []
+    for entry in list(available) + list(consumables):
+        m = entry.get("mitigation")
+        per_button[entry["name"]] = verdict([m]) if m else None
+        if m:
+            scored.append(m)
+
+    return {
+        "deathType": "oneShot" if hp_before >= FULL_HEALTH * max_hp else "wasLow",
+        "killingHit": {
+            "name": ability_names.get(killing.get("abilityGameID"), "Unknown"),
+            "size": hit_size,
+            "pctOfMax": round(100 * hit_size / max_hp),
+        },
+        "hpBeforePct": round(100 * hp_before / max_hp),
+        "overkill": overkill,
+        "maxHp": max_hp,
+        "wouldSave": per_button,               # name -> True / False / None (can't estimate)
+        "allTogetherWouldSave": verdict(scored),
+    }

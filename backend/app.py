@@ -32,7 +32,8 @@ from analysis import (
 from analysis import _fetch_remaining_events
 import defensives
 from auth import require_user, verify_token, forget_token, _bearer_token
-from cache import report_meta_cache, report_deaths_cache as deaths_lru, report_defensive_cache as defensive_lru
+from cache import (report_meta_cache, report_deaths_cache as deaths_lru,
+                   report_defensive_cache as defensive_lru, report_recap_cache as recap_lru)
 from ratelimit import RateLimiter, limit
 import supabase_client
 
@@ -94,7 +95,8 @@ def analyze():
             fight_zone = config.get('fightZone')
             selected_raid = config.get('selectedRaid')
             difficulty = config.get('difficulty')
-            max_cutoff = int(config.get('maxCutoff', 5))
+            # Deaths per pull that count.
+            max_cutoff = min(max(int(config.get('maxCutoff', 5) or 5), 1), 10)
             start_date = config.get('startDate')
             if start_date == "" or start_date is None:
                 start_date = None
@@ -206,6 +208,7 @@ def analyze():
                             'report_abs_start': report_abs_start,
                             'friendlies': friendlies,
                             'ability_map': ability_map,
+                            'ability_schools': fights_data.get("ability_schools", {}),
                             'player_details': player_details
                         })
 
@@ -286,17 +289,30 @@ def analyze():
                             print(f"[WARN] Defensive data unavailable for report {rid}: {e}")
                             def_data = None
 
-                    return rid, deaths, def_data, None
+                    # Killing blows (one cheap request per report), for "would it have saved them".
+                    kb_key = (rid, start_time, end_time)
+                    recaps = recap_lru.get(kb_key) if report_finished.get(rid) else None
+                    if recaps is None:
+                        try:
+                            recaps = defensives.fetch_killing_blows(token, rid, start_time, end_time)
+                            if report_finished.get(rid):
+                                recap_lru.set(kb_key, recaps)
+                        except Exception as e:
+                            print(f"[WARN] Killing blows unavailable for report {rid}: {e}")
+                            recaps = None
+
+                    return rid, deaths, def_data, recaps, None
                 except Exception as e:
                     print(f"[ERROR] Error fetching data for report {rid}: {str(e)}")
                     fights_list = [fd['fight'] for fd in report_fights]
-                    return rid, {f['id']: [] for f in fights_list}, None, str(e)
+                    return rid, {f['id']: [] for f in fights_list}, None, None, str(e)
             
             total_reports = len(fights_by_report)
             completed = 0
             failed_reports = []
             
             report_defensive_data = {}
+            report_recaps = {}
             
             with ThreadPoolExecutor(max_workers=8) as executor:
                 future_to_rid = {
@@ -305,11 +321,12 @@ def analyze():
                 }
                 
                 for future in as_completed(future_to_rid):
-                    rid, deaths, def_data, error = future.result()
+                    rid, deaths, def_data, recaps, error = future.result()
                     if error:
                         failed_reports.append(rid)
                     report_deaths_cache[rid] = deaths
                     report_defensive_data[rid] = def_data
+                    report_recaps[rid] = recaps
                     completed += 1
                     
                     if completed % 5 == 0 or completed == total_reports:
@@ -317,6 +334,12 @@ def analyze():
             
             if failed_reports:
                 yield f"data: {json.dumps({'stage': 'deaths', 'message': f'Warning: {len(failed_reports)} report(s) could not be read; results may be incomplete'})}\n\n"
+            partial = [r for r in fights_by_report
+                       if r not in failed_reports and (report_defensive_data.get(r) is None or report_recaps.get(r) is None)]
+            if partial:
+                msg = (f'Warning: defensive details missing for {len(partial)} report(s); '
+                       'WarcraftLogs may be rate-limiting this API key. Try again in a while.')
+                yield f"data: {json.dumps({'stage': 'deaths', 'message': msg})}\n\n"
             yield f"data: {json.dumps({'stage': 'processing', 'message': f'Processing {len(all_fights_deduped)} fights...'})}\n\n"
             
             total_deaths = 0
@@ -414,6 +437,9 @@ def analyze():
                             indexed=def_data,
                             ability_names=fight_data['ability_map'],
                             actor_names=friendly_names_by_id,
+                            killing_blows=(report_recaps.get(rid) or {}).get(target_id, [])
+                            if report_recaps.get(rid) is not None else None,
+                            ability_schools=fight_data.get('ability_schools', {}),
                         )
 
                     counted_death_events[main_char].append(death_event)

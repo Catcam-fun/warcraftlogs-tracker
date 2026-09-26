@@ -42,3 +42,5 @@ report_meta_cache = LRUCache(200)
 report_deaths_cache = LRUCache(400)
 # Casts, defensive buffs and talent loadouts, indexed by player.
 report_defensive_cache = LRUCache(200)
+# Killing blows (hits with overkill) per report, indexed by player.
+report_recap_cache = LRUCache(200)
