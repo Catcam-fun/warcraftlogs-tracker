@@ -51,19 +51,19 @@ const BOSS_ABILITIES = {
 };
 
 const DEFENSIVES_BY_CLASS = {
-  Warrior: ['Shield Wall', 'Die by the Sword', 'Rallying Cry'],
-  Paladin: ['Divine Shield', 'Blessing of Sacrifice', 'Ardent Defender'],
-  Hunter: ['Aspect of the Turtle', 'Survival of the Fittest'],
+  Warrior: ['Shield Wall', 'Die by the Sword', 'Spell Reflection'],
+  Paladin: ['Divine Shield', 'Divine Protection', 'Lay on Hands'],
+  Hunter: ['Aspect of the Turtle', 'Survival of the Fittest', 'Exhilaration'],
   Rogue: ['Cloak of Shadows', 'Evasion', 'Feint'],
-  Priest: ['Pain Suppression', 'Desperate Prayer', 'Dispersion'],
-  DeathKnight: ['Anti-Magic Shell', 'Icebound Fortitude', 'Vampiric Blood'],
-  Shaman: ['Astral Shift', 'Earth Elemental'],
-  Mage: ['Ice Block', 'Greater Invisibility', 'Alter Time'],
+  Priest: ['Desperate Prayer', 'Dispersion', 'Fade'],
+  DeathKnight: ['Anti-Magic Shell', 'Icebound Fortitude', 'Death Pact'],
+  Shaman: ['Astral Shift'],
+  Mage: ['Ice Block', 'Greater Invisibility', 'Mirror Image'],
   Warlock: ['Unending Resolve', 'Dark Pact'],
-  Monk: ['Fortifying Brew', 'Touch of Karma', 'Diffuse Magic'],
+  Monk: ['Fortifying Brew', 'Diffuse Magic', 'Dampen Harm'],
   Druid: ['Survival Instincts', 'Barkskin', 'Renewal'],
-  DemonHunter: ['Blur', 'Netherwalk', 'Darkness'],
-  Evoker: ['Obsidian Scales', 'Renewing Blaze', 'Zephyr'],
+  DemonHunter: ['Blur', 'Netherwalk'],
+  Evoker: ['Obsidian Scales', 'Renewing Blaze'],
 };
 
 // 22-person mythic roster, realistic class/spec spread + a couple of alts
@@ -176,8 +176,20 @@ function build() {
       pullCutoffTimestamps[pullKey] = cuts;
 
       deaths.forEach((d) => {
+        // Sample defensive picture (same shape the backend produces).
         const defs = DEFENSIVES_BY_CLASS[d.class] || [];
-        const active = defs.filter(() => rand() < 0.4).map((name) => ({ name, count: 1 + Math.floor(rand() * 2) }));
+        const defensives = { active: [], available: [], cooldown: [], talentsKnown: true };
+        defs.forEach((name) => {
+          const roll = rand();
+          const major = name !== 'Feint' && name !== 'Fade';
+          if (roll < 0.18) defensives.active.push({ name, kind: 'personal', major });
+          else if (roll < 0.62) defensives.available.push({ name, major });
+          else defensives.cooldown.push({ name, major, usedAgo: 8 + Math.floor(rand() * 70), readyIn: 5 + Math.floor(rand() * 90) });
+        });
+        if (rand() < 0.2) defensives.active.push({ name: 'Pain Suppression', kind: 'external', by: 'Lightweaver' });
+        if (rand() < 0.12) defensives.active.push({ name: 'Rallying Cry', kind: 'external', by: 'Stonefist' });
+        defensives.healthstone = { usedAgo: rand() < 0.35 ? 3 + Math.floor(rand() * 40) : null };
+        defensives.potion = { usedAgo: rand() < 0.25 ? 5 + Math.floor(rand() * 60) : null };
         events[d.player].push({
           boss,
           reportId,
@@ -189,7 +201,7 @@ function build() {
           abilityName: d.abilityName,
           class: d.class,
           spec: d.spec,
-          defensives: { abilities: active, healing: Math.floor(rand() * 850000) },
+          defensives: d.isCheatDeath ? undefined : defensives,
         });
       });
     }
@@ -213,5 +225,5 @@ export const MOCK_CONFIG = {
   reportZone: '44', fightZone: '2810',
   difficulty: '5', maxCutoff: '5',
   startDate: '', endDate: '', authorFilters: '', characterGroups: '',
-  enableCheatDeath: true, enableDefensiveTracking: true,
+  enableCheatDeath: true,
 };
