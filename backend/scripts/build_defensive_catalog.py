@@ -191,7 +191,7 @@ MITIGATION = {
 # that fills it in (Elusiveness).
 EFFECTS = {
     "Icebound Fortitude": [("dr", 48792, 2)], "Rune Tap": [("dr", 194679, 0)],
-    "Vampiric Blood": [("hp", 55233, 2)], "Death Pact": [("heal", 48743, 0)],
+    "Vampiric Blood": [("hp", 55233, 3)],   # effect 2 is absorbs received, not max health "Death Pact": [("heal", 48743, 0)],
     "Anti-Magic Shell": [("absorb", 48707, 0)],
     "Blur": [("dr", 212800, 2)], "Metamorphosis": [("hp", 187827, 1)],
     "Fiery Brand": [("dr", 207771, 0)],
@@ -219,6 +219,9 @@ EFFECTS = {
     "Spell Reflection": [("dr", 385391, 0)], "Tombstone": [("absorb", 219809, 0)],
     "Healthstone": [("heal", 6262, 0)],
 }
+
+# talent -> catalog spell whose modifier it copies onto potions and Healthstones.
+ALSO_CONSUMABLES = {"Iron Stomach": 185311}
 
 # SpellModOp values that change one effect's value -> that effect's index.
 MOD_OP_EFFECT_INDEX = {3: 0, 12: 1, 23: 2, 32: 3, 33: 4}
@@ -381,6 +384,21 @@ def main():
             "replaced_by_entries": replaced_by,
             "mitigation": components(name, MITIGATION.get(name), EFFECTS.get(name), mods_for),
         }
+    # Talents that also reach consumables (item spells share no class mask with
+    # the talent, so the game data can't link them): Iron Stomach boosts
+    # healing potions and Healthstones too, per its tooltip.
+    for sid, entry in catalog.items():
+        if entry["kind"] not in ("healthstone", "potion") or not entry["mitigation"]:
+            continue
+        for talent, source in ALSO_CONSUMABLES.items():
+            mod = next((m for c in catalog[source]["mitigation"] or [] for m in c.get("mods", ())
+                        if m["talent"] == talent), None)
+            if mod is None:
+                problems.append(f"{talent} no longer modifies {catalog[source]['name']}; check ALSO_CONSUMABLES")
+                continue
+            for comp in entry["mitigation"]:
+                if "heal" in comp:
+                    comp.setdefault("mods", []).append(dict(mod))
     if problems:
         raise SystemExit("Spell names changed; update CURATED:\n  " + "\n  ".join(problems))
 
