@@ -215,7 +215,9 @@ class AnalyzeFlowTests(unittest.TestCase):
                 mock.patch.object(app_module, 'get_fights', autospec=True, side_effect=self._fights) as fights, \
                 mock.patch.object(app_module, 'get_report_deaths_bulk', autospec=True, return_value=deaths) as bulk, \
                 mock.patch.object(app_module.defensives, 'fetch_defensive_events', autospec=True,
-                                  return_value={"casts": {}, "buffs": {}, "talents": {}}):
+                                  return_value={"casts": {}, "buffs": {}, "talents": {}}), \
+                mock.patch.object(app_module.defensives, 'fetch_killing_blows', autospec=True,
+                                  return_value={}):
             resp = app_module.app.test_client().post('/api/analyze', json={
                 "clientId": "a", "clientSecret": "b", "guildName": "G", "server": "S",
                 "region": "US", "fightZone": 0, "selectedRaid": raid, "difficulty": 5, **extra})
@@ -229,6 +231,7 @@ class AnalyzeFlowTests(unittest.TestCase):
         app_module.report_meta_cache._data.clear()
         app_module.deaths_lru._data.clear()
         app_module.defensive_lru._data.clear()
+        app_module.recap_lru._data.clear()
         result, fights_calls, bulk_calls = self._run()
         self.assertEqual(len(result["events"]["Bob"]), 2)  # one death in each report
         self.assertNotIn("Amy", result["events"])
@@ -246,6 +249,7 @@ class AnalyzeFlowTests(unittest.TestCase):
         app_module.report_meta_cache._data.clear()
         app_module.deaths_lru._data.clear()
         app_module.defensive_lru._data.clear()
+        app_module.recap_lru._data.clear()
         result, _, _ = self._run(enableCheatDeath=True)
         self.assertFalse(result["meta"]["cheatDeathEnabled"])
         with mock.patch.object(app_module, 'verify_token', return_value='user-1'):
