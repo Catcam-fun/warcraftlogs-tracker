@@ -81,6 +81,9 @@ def analyze():
     config = request.get_json(silent=True)
     if not isinstance(config, dict):
         return jsonify({"error": "Invalid request"}), 400
+    # Cheat-death detection is a signed-in feature; the checkbox in the UI
+    # isn't enough, since a shared config or a direct call can set the flag.
+    signed_in = bool(verify_token(_bearer_token()))
 
     def generate():
         try:
@@ -102,7 +105,7 @@ def analyze():
                 end_date = None
             author_filters = config.get('authorFilters', [])
             character_groups = config.get('characterGroups', {})
-            enable_cheat_death = config.get('enableCheatDeath', False)
+            enable_cheat_death = bool(config.get('enableCheatDeath', False)) and signed_in
             enable_defensive_tracking = config.get('enableDefensiveTracking', False)
             
             # Validate required fields
@@ -110,6 +113,9 @@ def analyze():
                 yield f"data: {json.dumps({'error': 'Missing required fields'})}\n\n"
                 return
             
+            if config.get('enableCheatDeath') and not signed_in:
+                yield f"data: {json.dumps({'stage': 'auth', 'message': 'Cheat-death detection needs a signed-in account; skipping it'})}\n\n"
+
             # Get OAuth2 token
             yield f"data: {json.dumps({'stage': 'auth', 'message': 'Authenticating with WarcraftLogs...'})}\n\n"
             try:
@@ -444,6 +450,7 @@ def analyze():
                     "generatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "characterGroups": character_groups,
                     "reportCount": len(reports),
+                    "cheatDeathEnabled": enable_cheat_death,
                     "failedReports": failed_reports,
                 },
                 "events": counted_death_events,
