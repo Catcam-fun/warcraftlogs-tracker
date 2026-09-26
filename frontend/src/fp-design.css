@@ -745,6 +745,8 @@ table.fpx-mtx{width:100%;border-collapse:collapse;font-size:12px;
 .fpx-defs .note{font-style:italic}
 .fpx-defs .how .txt{color:var(--fpx-ink);font-size:11px}
 .fpx-defs .how .txt small{color:var(--fpx-ink-faint);font-size:10px}
+.fpx-defs .how .txt small.warn{color:var(--fpx-warn,#e0a040)}
+.fpx-defs .d.avail small{opacity:.7;font-size:9px;margin-left:3px}
 .fpx-defs .lbl.one{color:#ff8a80}
 .fpx-defs .lbl.low{color:var(--fpx-ink-dim)}
 .fpx-defs .d.avail.save{color:#bff0cf;background:rgba(84,211,106,.14);border-color:rgba(84,211,106,.45)}

@@ -5,8 +5,9 @@ import React from 'react';
      cooldown: [{name, major, usedAgo, readyIn}], talentsKnown,
      healthstone: {usedAgo|null}, potion: {usedAgo|null},
      survival?: { deathType: 'oneShot'|'wasLow', killingHit: {name, size, pctOfMax},
-                  hpBeforePct, overkill, maxHp,
-                  wouldSave: {name: true|false|null}, allTogetherWouldSave } } */
+                  hpBeforePct, overkill, maxHp, ignoresReduction, ignoresImmunity,
+                  wouldSave: {name: true|false|null}, allTogetherWouldSave } }
+   Available entries may carry boostedBy: [talent names that strengthen it]. */
 
 // Saved reports and shares from before this feature carry an older shape; skip them.
 const isCurrentShape = (d) => d && Array.isArray(d.active) && Array.isArray(d.available);
@@ -32,6 +33,16 @@ function HowTheyDied({ s }) {
           ? `One-shot from ${s.hpBeforePct}% health: ${hit}`
           : `At ${s.hpBeforePct}% health when ${hit}`}
         <small> · died by {fmt(s.overkill)}</small>
+        {s.ignoresReduction && (
+          <small className="warn" title="Nothing about this hit was mitigated, not even by versatility, so damage reduction doesn't work on it (shields and heals still do)">
+            {' '}· ignores damage reduction
+          </small>
+        )}
+        {s.ignoresImmunity && (
+          <small className="warn" title="The game data flags this spell as unaffected by immunities such as Ice Block or Divine Shield">
+            {' '}· hits through immunities
+          </small>
+        )}
       </span>
     </div>
   );
@@ -78,11 +89,13 @@ export function DeathDefensives({ d }) {
           <span className="lbl avail">AVAILABLE, UNUSED</span>
           {d.available.map((a) => {
             const v = saves(a.name);
+            const base = s ? SAVE_TITLES[String(v ?? null)] : 'Off cooldown when they died';
+            const boosted = a.boostedBy?.length ? ` (strengthened by ${a.boostedBy.join(', ')})` : '';
             return (
               <span key={a.name}
                 className={`d avail${a.major ? '' : ' minor'}${v === true ? ' save' : ''}${v === false ? ' short' : ''}`}
-                title={s ? SAVE_TITLES[String(v ?? null)] : 'Off cooldown when they died'}>
-                {v === true && '✓ '}{a.name}
+                title={base + boosted}>
+                {v === true && '✓ '}{a.name}{a.boostedBy?.length ? <small> +talent</small> : null}
               </span>
             );
           })}
