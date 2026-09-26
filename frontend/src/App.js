@@ -689,9 +689,14 @@ export default function WarcraftLogsApp() {
         characterGroups
       };
 
+      // Signed-in runs send the session so the server allows cheat-death detection.
+      const headers = { 'Content-Type': 'application/json' };
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) headers.Authorization = `Bearer ${session.access_token}`;
+
       const response = await fetch(`${API_URL}/api/analyze`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(payload),
         signal: controller.signal
       });
@@ -727,6 +732,9 @@ export default function WarcraftLogsApp() {
             } else if (data.message) {
               setLoadingStage(data.message);
             } else if (data.result) {
+              if (typeof data.result.meta?.cheatDeathEnabled === 'boolean') {
+                setConfig((prev) => ({ ...prev, enableCheatDeath: data.result.meta.cheatDeathEnabled }));
+              }
               setData(data.result);
               
               // DEBUG: Expose data globally and log summary

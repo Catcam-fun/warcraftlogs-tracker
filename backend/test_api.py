@@ -202,7 +202,7 @@ class AnalyzeFlowTests(unittest.TestCase):
             "abilities": {},
         }
 
-    def _run(self):
+    def _run(self, **extra):
         from analysis import RAID_ENCOUNTERS
         raid = next(k for k, v in RAID_ENCOUNTERS.items() if 3129 in v)
         deaths = {1: [{"timestamp": 5_000, "targetName": "Bob", "targetID": 10,
@@ -216,7 +216,7 @@ class AnalyzeFlowTests(unittest.TestCase):
                 mock.patch.object(app_module, 'get_report_deaths_bulk', return_value=deaths) as bulk:
             resp = app_module.app.test_client().post('/api/analyze', json={
                 "clientId": "a", "clientSecret": "b", "guildName": "G", "server": "S",
-                "region": "US", "fightZone": 0, "selectedRaid": raid, "difficulty": 5})
+                "region": "US", "fightZone": 0, "selectedRaid": raid, "difficulty": 5, **extra})
             body = resp.get_data(as_text=True)
         results = [l for l in body.split("\n\n") if '"result"' in l]
         self.assertEqual(len(results), 1, body)
@@ -237,6 +237,15 @@ class AnalyzeFlowTests(unittest.TestCase):
         # Old reports are finished, so a second run is served from cache.
         _, fights_calls, bulk_calls = self._run()
         self.assertEqual((fights_calls, bulk_calls), (0, 0))
+
+    def test_cheat_death_requires_sign_in(self):
+        app_module.report_meta_cache._data.clear()
+        app_module.deaths_lru._data.clear()
+        result, _, _ = self._run(enableCheatDeath=True)
+        self.assertFalse(result["meta"]["cheatDeathEnabled"])
+        with mock.patch.object(app_module, 'verify_token', return_value='user-1'):
+            result, _, _ = self._run(enableCheatDeath=True)
+        self.assertTrue(result["meta"]["cheatDeathEnabled"])
 
 
 if __name__ == '__main__':
