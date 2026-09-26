@@ -213,7 +213,9 @@ class AnalyzeFlowTests(unittest.TestCase):
                 mock.patch.object(app_module, 'get_guild_roster', return_value={'bob', 'amy'}), \
                 mock.patch.object(app_module, 'get_guild_reports', return_value=reports), \
                 mock.patch.object(app_module, 'get_fights', side_effect=self._fights) as fights, \
-                mock.patch.object(app_module, 'get_report_deaths_bulk', return_value=deaths) as bulk:
+                mock.patch.object(app_module, 'get_report_deaths_bulk', return_value=deaths) as bulk, \
+                mock.patch.object(app_module.defensives, 'fetch_defensive_events',
+                                  return_value={"casts": {}, "buffs": {}, "talents": {}}):
             resp = app_module.app.test_client().post('/api/analyze', json={
                 "clientId": "a", "clientSecret": "b", "guildName": "G", "server": "S",
                 "region": "US", "fightZone": 0, "selectedRaid": raid, "difficulty": 5, **extra})
@@ -226,12 +228,14 @@ class AnalyzeFlowTests(unittest.TestCase):
     def test_analysis_counts_deaths_and_caches_finished_reports(self):
         app_module.report_meta_cache._data.clear()
         app_module.deaths_lru._data.clear()
+        app_module.defensive_lru._data.clear()
         result, fights_calls, bulk_calls = self._run()
         self.assertEqual(len(result["events"]["Bob"]), 2)  # one death in each report
         self.assertNotIn("Amy", result["events"])
         self.assertEqual(len(result["pullParticipation"]["Amy"]), 2)
         self.assertNotIn("characterBreakdown", result)
         self.assertEqual(result["meta"]["failedReports"], [])
+        self.assertIn("defensives", result["events"]["Bob"][0])
         self.assertEqual((fights_calls, bulk_calls), (2, 2))
 
         # Old reports are finished, so a second run is served from cache.
@@ -241,6 +245,7 @@ class AnalyzeFlowTests(unittest.TestCase):
     def test_cheat_death_requires_sign_in(self):
         app_module.report_meta_cache._data.clear()
         app_module.deaths_lru._data.clear()
+        app_module.defensive_lru._data.clear()
         result, _, _ = self._run(enableCheatDeath=True)
         self.assertFalse(result["meta"]["cheatDeathEnabled"])
         with mock.patch.object(app_module, 'verify_token', return_value='user-1'):

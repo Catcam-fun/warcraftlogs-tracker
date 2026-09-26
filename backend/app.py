@@ -29,12 +29,10 @@ from analysis import (
     analyze_fights, is_duplicate_pull,
     find_mass_death_start, resolve_report_window
 )
-from features import (
-    get_all_healing_for_report_paginated, get_all_defensive_buffs_paginated,
-    calculate_defensive_data_from_bulk
-)
+from analysis import _fetch_remaining_events
+import defensives
 from auth import require_user, verify_token, forget_token, _bearer_token
-from cache import report_meta_cache, report_deaths_cache as deaths_lru
+from cache import report_meta_cache, report_deaths_cache as deaths_lru, report_defensive_cache as defensive_lru
 from ratelimit import RateLimiter, limit
 import supabase_client
 
@@ -106,7 +104,6 @@ def analyze():
             author_filters = config.get('authorFilters', [])
             character_groups = config.get('characterGroups', {})
             enable_cheat_death = bool(config.get('enableCheatDeath', False)) and signed_in
-            enable_defensive_tracking = config.get('enableDefensiveTracking', False)
             
             # Validate required fields
             if not all([client_id, client_secret, guild_name, server, region]):
@@ -256,7 +253,7 @@ def analyze():
             report_deaths_cache = {}
             
             def fetch_report_deaths(rid, report_fights):
-                """Fetch deaths AND bulk defensive/healing data for a single report"""
+                """Fetch deaths and defensive data (casts, buffs, talents) for one report"""
                 try:
                     sample_fight_data = report_fights[0]
                     friendlies = sample_fight_data['friendlies']
@@ -273,25 +270,33 @@ def analyze():
                         if report_finished.get(rid):
                             deaths_lru.set(cache_key, deaths)
                     
-                    healing_data = []
-                    defensive_buffs_data = []
-                    
-                    if enable_defensive_tracking:
-                        defensive_buffs_data = get_all_defensive_buffs_paginated(token, rid, start_time, end_time)
-                        healing_data = get_all_healing_for_report_paginated(token, rid, start_time, end_time)
-                    
-                    return rid, deaths, healing_data, defensive_buffs_data, None
+                    # Defensive data. Shorter cooldowns can carry over from before
+                    # the first pull, so look back that far before it.
+                    def_key = (rid, tuple(sorted(f['id'] for f in fights_list)))
+                    def_data = defensive_lru.get(def_key) if report_finished.get(rid) else None
+                    if def_data is None:
+                        try:
+                            def_data = defensives.fetch_defensive_events(
+                                token, rid, max(0, start_time - defensives.ENCOUNTER_RESET_MS), end_time,
+                                _fetch_remaining_events)
+                            if report_finished.get(rid):
+                                defensive_lru.set(def_key, def_data)
+                        except Exception as e:
+                            # Deaths still count; this report just lacks defensive detail.
+                            print(f"[WARN] Defensive data unavailable for report {rid}: {e}")
+                            def_data = None
+
+                    return rid, deaths, def_data, None
                 except Exception as e:
                     print(f"[ERROR] Error fetching data for report {rid}: {str(e)}")
                     fights_list = [fd['fight'] for fd in report_fights]
-                    return rid, {f['id']: [] for f in fights_list}, [], [], str(e)
+                    return rid, {f['id']: [] for f in fights_list}, None, str(e)
             
             total_reports = len(fights_by_report)
             completed = 0
             failed_reports = []
             
-            report_healing_cache = {}
-            report_defensive_cache = {}
+            report_defensive_data = {}
             
             with ThreadPoolExecutor(max_workers=8) as executor:
                 future_to_rid = {
@@ -300,12 +305,11 @@ def analyze():
                 }
                 
                 for future in as_completed(future_to_rid):
-                    rid, deaths, healing_data, defensive_data, error = future.result()
+                    rid, deaths, def_data, error = future.result()
                     if error:
                         failed_reports.append(rid)
                     report_deaths_cache[rid] = deaths
-                    report_healing_cache[rid] = healing_data
-                    report_defensive_cache[rid] = defensive_data
+                    report_defensive_data[rid] = def_data
                     completed += 1
                     
                     if completed % 5 == 0 or completed == total_reports:
@@ -330,6 +334,8 @@ def analyze():
                 report_abs_start = fight_data['report_abs_start']
                 friendlies = fight_data['friendlies']
                 player_details = fight_data.get("player_details", {})
+                friendly_class = {f.get("id"): f.get("type") for f in friendlies}
+                friendly_names_by_id = {f.get("id"): f.get("name") for f in friendlies}
                 
                 pull_counter_by_boss[boss_id] += 1
                 seq_no = pull_counter_by_boss[boss_id]
@@ -396,18 +402,20 @@ def analyze():
                         "spec": player_spec
                     }
                     
-                    if enable_defensive_tracking and target_id:
-                        healing_data = report_healing_cache.get(rid, [])
-                        defensive_data = report_defensive_cache.get(rid, [])
-                        
-                        if healing_data or defensive_data:
-                            death_event['defensives'] = calculate_defensive_data_from_bulk(
-                                ev["timestamp"],
-                                target_id,
-                                defensive_data,
-                                healing_data
-                            )
-                    
+                    def_data = report_defensive_data.get(rid)
+                    if def_data and target_id and not death_event["isCheatDeath"]:
+                        death_event['defensives'] = defensives.analyze_death(
+                            player_id=target_id,
+                            player_class=friendly_class.get(target_id),
+                            spec=player_spec,
+                            fight_id=fid,
+                            fight_start=fight['start_time'],
+                            death_ts=ev["timestamp"],
+                            indexed=def_data,
+                            ability_names=fight_data['ability_map'],
+                            actor_names=friendly_names_by_id,
+                        )
+
                     counted_death_events[main_char].append(death_event)
                     total_deaths += 1
                 
