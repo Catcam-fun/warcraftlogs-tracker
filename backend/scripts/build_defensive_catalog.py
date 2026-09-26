@@ -27,7 +27,7 @@ CURATED = [
     (219809, "Tombstone", "DeathKnight", ["Blood"], "personal"),
     (51052, "Anti-Magic Zone", "DeathKnight", None, "external"),
     # Demon Hunter
-    (198589, "Blur", "DemonHunter", ["Havoc"], "personal"),
+    (198589, "Blur", "DemonHunter", ["Havoc", "Devourer"], "personal"),
     (196555, "Netherwalk", "DemonHunter", ["Havoc"], "personal"),
     (187827, "Metamorphosis", "DemonHunter", ["Vengeance"], "personal"),
     (204021, "Fiery Brand", "DemonHunter", ["Vengeance"], "personal"),
@@ -113,8 +113,18 @@ CURATED = [
     (431416, "Algari Healing Potion", None, None, "potion"),
 ]
 
-# Not in any talent tree, but every player of the class/spec has them.
-BASELINE = {198589, 187827, 22812, 186265, 109304, 642, 498, 47585, 1966, 185311, 104773}
+# Every player of the class/spec has these, whether or not a talent entry
+# exists. Anti-Magic Shell and Touch of Karma have talent entries but are
+# pressed in real Midnight logs by players without them.
+BASELINE = {198589, 187827, 22812, 186265, 109304, 642, 498, 47585, 1966, 185311, 104773,
+            48707, 122470}
+
+# Talents that grant the button through a differently numbered spell of the
+# same name. Only these are matched by name: in Midnight several same-named
+# talent spells are automatic or pet versions (Shield of Vengeance 1261562,
+# Diffuse Magic 1243287, Survival of the Fittest 203965), not the button.
+# Verified against real logs (players with the entry press the button).
+NAME_ALIAS_OK = {"Fortifying Brew"}
 
 # Cooldowns the game data stores elsewhere (seconds).
 COOLDOWN_FALLBACK = {196555: 180, 374348: 90, 184662: 90}
@@ -138,7 +148,7 @@ def main():
     charge_cat = {int(r["SpellID"]): int(r["ChargeCategory"])
                   for r in table("SpellCategories") if r["DifficultyID"] == "0"}
     charges = {int(r["ID"]): (int(r["MaxCharges"]), int(r["ChargeRecoveryTime"])) for r in table("SpellCategory")}
-    curated_by_name = {name: sid for sid, name, _, _, _ in CURATED if sid not in BASELINE}
+    curated_by_name = {name: sid for sid, name, _, _, _ in CURATED if name in NAME_ALIAS_OK}
     def_spell = {}
     replaced_by_def = {}   # spell -> talent definitions that replace it (Ice Cold replaces Ice Block)
     for r in table("TraitDefinition"):
@@ -173,7 +183,7 @@ def main():
         replaced_by = sorted({e for d in replaced_by_def.get(sid, ()) for e in entries_for_def.get(d, ())}
                              - set(entries))
         if kind in ("personal", "external"):
-            known = "talent" if entries else ("baseline" if sid in BASELINE else "evidence")
+            known = "baseline" if sid in BASELINE else ("talent" if entries else "evidence")
         else:
             known = "baseline"
         catalog[sid] = {

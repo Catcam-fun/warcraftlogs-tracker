@@ -107,6 +107,11 @@ class DefensiveAnalysisTests(unittest.TestCase):
         self.assertIn("Mirror Image", names(r["available"] + r["cooldown"]))
         self.assertNotIn("Ice Block", names(r["available"]))  # talent ability, never pressed
 
+    def test_pressing_it_this_pull_proves_ownership(self):
+        # Talent record lacks Mirror Image, but they pressed it this pull.
+        r = run("Mage", "Frost", talents=entries(ICE_BLOCK), casts=[(20_000, MIRROR)], death=100_000)
+        self.assertIn("Mirror Image", names(r["cooldown"]))
+
     def test_charges_recover_one_at_a_time(self):
         left, ready = defensives._charges_at(30_000, [0, 1_000], charges=2, recharge_ms=25_000)
         self.assertEqual((left, ready), (1, 20_000))  # 2nd charge starts after the 1st returns
