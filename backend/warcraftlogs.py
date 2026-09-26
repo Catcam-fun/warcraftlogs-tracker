@@ -348,6 +348,7 @@ def get_fights(token, report_code):
             abilities {
               gameID
               name
+              type
             }
           }
           playerDetails(startTime: 0, endTime: 999999999999)
@@ -355,7 +356,8 @@ def get_fights(token, report_code):
       }
     }
     """
-    empty = {"report_start": 0, "fights": [], "friendlies": [], "player_details": {}, "abilities": {}}
+    empty = {"report_start": 0, "fights": [], "friendlies": [], "player_details": {}, "abilities": {},
+             "ability_schools": {}}
 
     try:
         data = graphql_query(token, query, {"code": report_code})
@@ -384,6 +386,13 @@ def get_fights(token, report_code):
 
         abilities = {a["gameID"]: a["name"] for a in master.get("abilities") or []
                      if a.get("gameID") and a.get("name")}
+        # Spell school bitmask (1 = physical, anything else includes magic).
+        ability_schools = {}
+        for a in master.get("abilities") or []:
+            try:
+                ability_schools[a["gameID"]] = int(a.get("type") or 0)
+            except (TypeError, ValueError):
+                pass
 
         # playerDetails: { data: { playerDetails: { tanks: [], healers: [], dps: [] } } }
         player_spec_map = {}
@@ -406,6 +415,7 @@ def get_fights(token, report_code):
             "friendlies": friendlies,
             "player_details": player_spec_map,
             "abilities": abilities,
+            "ability_schools": ability_schools,
         }
     except Exception as e:
         print(f"Error fetching fights for {report_code}: {e}")

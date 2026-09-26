@@ -126,6 +126,51 @@ BASELINE = {198589, 187827, 22812, 186265, 109304, 642, 498, 47585, 1966, 185311
 # Verified against real logs (players with the entry press the button).
 NAME_ALIAS_OK = {"Fortifying Brew"}
 
+# How much each ability would have helped, used for "would it have saved
+# them". Values come from the game data (SpellEffect: aura 87 damage-taken
+# modifiers, aura 39 immunities, effect 136 %-of-max-health heals, durations
+# from SpellMisc/SpellDuration, following triggered spells such as Blur ->
+# 212800) or, for consumables, from medians measured across real logs.
+# Fields: dr = damage reduction (0-1), school = all | magic | physical | aoe,
+# immune = True, absorb / heal / hp = fraction of max health, dur = seconds.
+# Abilities missing here (or None) are listed but not scored: their effect
+# isn't described well enough in the data to estimate honestly.
+MITIGATION = {
+    "Icebound Fortitude": {"dr": .30, "dur": 8}, "Rune Tap": {"dr": .20, "dur": 4},
+    "Vampiric Blood": {"hp": .30, "dur": 10}, "Death Pact": {"heal": .50},
+    "Anti-Magic Shell": {"absorb": .30, "school": "magic", "dur": 5},
+    "Blur": {"dr": .25, "dur": 10}, "Metamorphosis": {"hp": .40, "dur": 15},
+    "Fiery Brand": {"dr": .40, "dur": 10}, "Netherwalk": {"immune": True, "dur": 2},
+    "Barkskin": {"dr": .20, "dur": 8}, "Survival Instincts": {"dr": .50, "dur": 6},
+    "Renewal": {"heal": .30},
+    "Obsidian Scales": {"dr": .30, "dur": 12},
+    "Aspect of the Turtle": {"dr": .30, "dur": 8}, "Exhilaration": {"heal": .30},
+    "Survival of the Fittest": {"dr": .30, "dur": 6},
+    "Ice Block": {"immune": True, "dur": 10}, "Ice Cold": {"dr": .70, "dur": 6},
+    "Blazing Barrier": {"absorb": .30, "dur": 60}, "Ice Barrier": {"absorb": .35, "dur": 60},
+    "Prismatic Barrier": {"absorb": .30, "dur": 60},
+    "Fortifying Brew": {"dr": .20, "hp": .20, "dur": 15}, "Dampen Harm": {"dr": .20, "dur": 10},
+    "Diffuse Magic": {"dr": .60, "school": "magic", "dur": 6}, "Touch of Karma": {"absorb": .50, "dur": 10},
+    "Zen Meditation": {"dr": .60, "dur": 8},
+    "Ardent Defender": {"dr": .30, "dur": 12}, "Divine Protection": {"dr": .20, "dur": 8},
+    "Divine Shield": {"immune": True, "dur": 8}, "Guardian of Ancient Kings": {"dr": .50, "dur": 8},
+    "Lay on Hands": {"heal": 1.0}, "Shield of Vengeance": {"absorb": .30, "dur": 10},
+    "Desperate Prayer": {"heal": .25, "hp": .25, "dur": 10}, "Dispersion": {"dr": .75, "dur": 6},
+    "Fade": {"dr": .10, "dur": 10},
+    "Cloak of Shadows": {"immune": True, "school": "magic", "dur": 5},
+    "Crimson Vial": {"heal": .20}, "Feint": {"dr": .40, "school": "aoe", "dur": 6},
+    "Astral Shift": {"dr": .40, "dur": 12},
+    "Dark Pact": {"absorb": .40, "dur": 20}, "Unending Resolve": {"dr": .25, "dur": 8},
+    "Die by the Sword": {"dr": .30, "dur": 8}, "Enraged Regeneration": {"dr": .30, "dur": 8},
+    "Last Stand": {"hp": .30, "heal": .30, "dur": 8}, "Shield Wall": {"dr": .40, "dur": 8},
+    "Spell Reflection": {"dr": .20, "school": "magic", "dur": 5},
+    # Consumables: medians measured across real Midnight logs.
+    "Healthstone": {"heal": .25}, "Demonic Healthstone": {"heal": .60},
+    "Silvermoon Health Potion": {"heal": .26}, "Concentrated Silvermoon Health Potion": {"heal": .44},
+    "Potent Healing Potion": {"heal": .24}, "Invigorating Healing Potion": {"heal": .25},
+    "Algari Healing Potion": {"heal": .25},
+}
+
 # Cooldowns the game data stores elsewhere (seconds).
 COOLDOWN_FALLBACK = {196555: 180, 374348: 90, 184662: 90}
 
@@ -191,6 +236,7 @@ def main():
             "cooldown_ms": cd_ms, "charges": max(max_charges, 1),
             "major": cd_ms >= MAJOR_COOLDOWN_S * 1000, "talent_entries": entries,
             "replaced_by_entries": replaced_by,
+            "mitigation": MITIGATION.get(name),
         }
     if problems:
         raise SystemExit("Spell names changed; update CURATED:\n  " + "\n  ".join(problems))

@@ -119,3 +119,92 @@ class DefensiveAnalysisTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+MAX = 1_000_000
+FROST, PHYS = 16, 1
+
+
+def hit(ts, amount, hp_after, overkill=0, absorbed=0, ability=500, aoe=False):
+    return {"timestamp": ts, "type": "damage", "targetID": 1, "abilityGameID": ability,
+            "amount": amount, "absorbed": absorbed, "overkill": overkill, "isAoE": aoe,
+            "hitPoints": hp_after, "maxHitPoints": MAX, "resourceActor": 2}
+
+
+def ready(*sids):
+    return [CATALOG[s] for s in sids]
+
+
+SCHOOLS = {500: FROST, 600: PHYS}
+NAMES = {500: "Frost Bolt", 600: "Cleave"}
+SHIELD_WALL, ASTRAL, DIVINE_SHIELD, EXHIL = 871, 108271, 642, 109304
+
+
+class SurvivalTests(unittest.TestCase):
+    def assess(self, killing, available=(), consumables=()):
+        return defensives.assess_survival([killing], 100_000, ready(*available), ready(*consumables), NAMES, SCHOOLS)
+
+    def test_one_shot_from_full_health(self):
+        # 1.3M hit on a full 1M-health player: 300k overkill.
+        r = self.assess(hit(100_000, 1_300_000, 0, overkill=300_000), available=[SHIELD_WALL])
+        self.assertEqual(r["deathType"], "oneShot")
+        self.assertEqual(r["hpBeforePct"], 100)
+        self.assertEqual(r["killingHit"]["pctOfMax"], 130)
+        self.assertTrue(r["wouldSave"]["Shield Wall"])      # 40% of 1.3M = 520k > 300k
+
+    def test_was_low_before_the_killing_blow(self):
+        r = self.assess(hit(100_000, 400_000, 0, overkill=250_000))
+        self.assertEqual(r["deathType"], "wasLow")
+        self.assertEqual(r["hpBeforePct"], 15)
+
+    def test_small_reduction_not_enough_for_huge_overkill(self):
+        r = self.assess(hit(100_000, 2_000_000, 0, overkill=1_000_000), available=[DIVINE_PROTECTION])
+        self.assertFalse(r["wouldSave"]["Divine Protection"])
+
+    def test_immunity_saves_any_hit(self):
+        r = self.assess(hit(100_000, 5_000_000, 0, overkill=4_000_000), available=[DIVINE_SHIELD])
+        self.assertTrue(r["wouldSave"]["Divine Shield"])
+
+    def test_heal_limited_to_missing_health(self):
+        full = self.assess(hit(100_000, 1_100_000, 0, overkill=100_000), available=[EXHIL])
+        self.assertFalse(full["wouldSave"]["Exhilaration"])   # nothing missing to heal
+        low = self.assess(hit(100_000, 300_000, 0, overkill=100_000), available=[EXHIL])
+        self.assertTrue(low["wouldSave"]["Exhilaration"])     # 30% heal > 100k overkill
+
+    def test_magic_only_defensive_ignores_physical_hits(self):
+        phys = self.assess(hit(100_000, 1_200_000, 0, overkill=200_000, ability=600), available=[CLOAK])
+        self.assertFalse(phys["wouldSave"]["Cloak of Shadows"])
+        magic = self.assess(hit(100_000, 1_200_000, 0, overkill=200_000, ability=500), available=[CLOAK])
+        self.assertTrue(magic["wouldSave"]["Cloak of Shadows"])
+
+    def test_combined_can_save_when_each_alone_cannot(self):
+        # 1.9M hit from full, 900k overkill. Astral Shift (40%) prevents 760k and
+        # Unending Resolve (25%) 475k: neither alone, but together 55% = 1.045M.
+        r = self.assess(hit(100_000, 1_900_000, 0, overkill=900_000), available=[ASTRAL, UNENDING])
+        self.assertFalse(r["wouldSave"]["Astral Shift"])
+        self.assertFalse(r["wouldSave"]["Unending Resolve"])
+        self.assertTrue(r["allTogetherWouldSave"])
+
+    def test_unscored_ability_reports_unknown(self):
+        r = self.assess(hit(100_000, 1_200_000, 0, overkill=200_000), available=[MIRROR])
+        self.assertIsNone(r["wouldSave"]["Mirror Image"])
+
+    def test_no_killing_blow_near_the_death(self):
+        self.assertIsNone(defensives.assess_survival([hit(60_000, 900_000, 0, overkill=5)], 100_000,
+                                                     [], [], NAMES, SCHOOLS))
+
+    def test_unused_healthstone_only_if_carried(self):
+        kb = [hit(300_000, 300_000, 0, overkill=100_000)]
+        carried = defensives.analyze_death(
+            1, "Mage", "Frost", 7, 200_000, 300_000,
+            {"casts": {1: [(10_000, HEALTHSTONE)]}, "buffs": {}, "talents": {(7, 1): set()}},
+            NAMES, {}, killing_blows=kb, ability_schools=SCHOOLS)
+        self.assertTrue(carried["survival"]["wouldSave"]["Healthstone"])
+        not_carried = defensives.analyze_death(
+            1, "Mage", "Frost", 7, 200_000, 300_000,
+            {"casts": {}, "buffs": {}, "talents": {(7, 1): set()}},
+            NAMES, {}, killing_blows=kb, ability_schools=SCHOOLS)
+        self.assertNotIn("Healthstone", not_carried["survival"]["wouldSave"])
+
+
+DIVINE_PROTECTION, UNENDING = 498, 104773
