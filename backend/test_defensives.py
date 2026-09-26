@@ -141,6 +141,29 @@ class DefensiveAnalysisTests(unittest.TestCase):
         left, ready = defensives._charges_at(30_000, [0, 1_000], charges=2, recharge_ms=25_000)
         self.assertEqual((left, ready), (1, 20_000))  # 2nd charge starts after the 1st returns
 
+    def test_fetch_keeps_only_dead_players_without_player_filters(self):
+        # WCL returns nothing for source.id / target.id filters on Casts and
+        # Buffs, so the queries must not use them; filtering happens here.
+        seen = []
+
+        def fake_paged(_tok, _code, data_type, flt, **_kw):
+            seen.append(flt or "")
+            if data_type == "Casts":
+                return [{"type": "cast", "abilityGameID": FEINT, "sourceID": s, "timestamp": 5} for s in (1, 2)]
+            if data_type == "Buffs":
+                return [{"type": "applybuff", "abilityGameID": FEINT, "targetID": t, "timestamp": 5} for t in (1, 2)]
+            return []
+
+        orig = defensives._paged
+        defensives._paged = fake_paged
+        try:
+            out = defensives.fetch_defensive_events("t", "R", [7], 0, 10, {1})
+        finally:
+            defensives._paged = orig
+        self.assertFalse(any("source.id" in f or "target.id" in f for f in seen))
+        self.assertEqual(set(out["casts"]), {1})
+        self.assertEqual(set(out["buffs"]), {1})
+
 
 if __name__ == "__main__":
     unittest.main()

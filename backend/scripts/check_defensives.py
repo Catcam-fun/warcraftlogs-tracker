@@ -10,7 +10,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-from analysis import _fetch_remaining_events, get_report_deaths_bulk  # noqa: E402
+from analysis import get_report_deaths_bulk  # noqa: E402
 from defensive_catalog import CATALOG  # noqa: E402
 import defensives  # noqa: E402
 from warcraftlogs import get_access_token, get_fights  # noqa: E402
@@ -26,8 +26,9 @@ def main():
     if not fights:
         raise SystemExit("No boss fights found in that report.")
     start, end = min(f["start_time"] for f in fights), max(f["end_time"] for f in fights)
-    indexed = defensives.fetch_defensive_events(
-        token, code, max(0, start - defensives.ENCOUNTER_RESET_MS), end, _fetch_remaining_events)
+    deaths = get_report_deaths_bulk(token, code, fights, meta["friendlies"], meta["abilities"])
+    dead = {d["targetID"] for ds in deaths.values() for d in ds if d.get("targetID")}
+    indexed = defensives.fetch_defensive_events(token, code, [f["id"] for f in fights], start, end, dead)
 
     talents = indexed["talents"]
     all_entries = {e for d in CATALOG.values() for e in d["talent_entries"]}
@@ -38,7 +39,6 @@ def main():
     print(f"Defensive casts: {sum(len(v) for v in indexed['casts'].values())}, "
           f"buff events: {sum(len(v) for v in indexed['buffs'].values())}\n")
 
-    deaths = get_report_deaths_bulk(token, code, fights, meta["friendlies"], meta["abilities"])
     cls = {f["id"]: f["type"] for f in meta["friendlies"]}
     names = {f["id"]: f["name"] for f in meta["friendlies"]}
     for f in fights:

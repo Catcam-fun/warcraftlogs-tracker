@@ -78,23 +78,25 @@ def fetch_defensive_events(token, report_code, fight_ids, start_time, end_time, 
 
     - Casts and auras cover the whole time range (trash and time between pulls
       included, from 3 minutes before the first pull) so a defensive pressed
-      just before a pull counts, but only for `player_ids` (the players who
-      died; nobody else is analyzed), which keeps the cost down without
-      changing any result.
+      just before a pull counts. They're kept only for `player_ids` (the
+      players who died; nobody else is analyzed). That filtering happens
+      here, not in the query: WCL returns nothing for `source.id in (...)` /
+      `target.id in (...)` on Casts and Buffs (verified on a live log), and
+      the unfiltered query costs fewer points anyway.
     - Talent loadouts are only recorded at pull start, so they're scoped to
       the boss pulls.
     """
-    ids = ", ".join(str(p) for p in sorted(player_ids))
-    if not ids:
+    players = set(player_ids)
+    if not players:
         return {"casts": {}, "buffs": {}, "talents": {}}
     lookback = max(0, start_time - ENCOUNTER_RESET_MS)
-    cast_filter = (f"type = \"cast\" and source.id in ({ids}) "
-                   f"and ability.id in ({', '.join(map(str, CAST_IDS))})")
-    buff_filter = (f"target.id in ({ids}) and ability.name in ("
-                   + ", ".join(f'"{n}"' for n in BUFF_NAMES) + ")")
+    cast_filter = f"type = \"cast\" and ability.id in ({', '.join(map(str, CAST_IDS))})"
+    buff_filter = "ability.name in (" + ", ".join(f'"{n}"' for n in BUFF_NAMES) + ")"
+    casts = _paged(token, report_code, "Casts", cast_filter, start_time=lookback, end_time=end_time)
+    buffs = _paged(token, report_code, "Buffs", buff_filter, start_time=lookback, end_time=end_time)
     return index_defensive_events({
-        "casts": _paged(token, report_code, "Casts", cast_filter, start_time=lookback, end_time=end_time),
-        "buffs": _paged(token, report_code, "Buffs", buff_filter, start_time=lookback, end_time=end_time),
+        "casts": [e for e in casts if e.get("sourceID") in players],
+        "buffs": [e for e in buffs if e.get("targetID") in players],
         "combatants": _paged(token, report_code, "CombatantInfo", None, fight_ids=fight_ids),
     })
 
