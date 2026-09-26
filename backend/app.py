@@ -1,22 +1,20 @@
 #!/usr/bin/env python3
 """
 app.py - Flask API routes for Floor Pov Death Tracker
-Imports from: warcraftlogs, analysis, features, supabase_client
-VERSION: 3.1 COMPLETE - All endpoints + delete account + short share URLs
+Imports from: warcraftlogs, analysis, features, supabase_client, auth
 """
 
-from flask import Flask, request, jsonify, Response
+from flask import Flask, request, jsonify, Response, g
 from flask_cors import CORS
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
-import uuid
-import brotli  # Kept for future saved reports feature
-import base64
 import os
+import re
+import secrets
+import time
 from dotenv import load_dotenv
-from supabase import create_client, Client
 
 # Load environment variables
 load_dotenv()
@@ -24,98 +22,68 @@ load_dotenv()
 # Import from modules
 from warcraftlogs import (
     get_access_token, get_guild_reports, get_guild_roster,
-    get_fights, get_abilities_map, normalize_character_name
+    get_fights, normalize_character_name
 )
 from analysis import (
-    get_report_deaths_bulk, get_main_character, get_raid_participants,
-    analyze_fights, filter_mass_deaths, is_duplicate_pull,
-    interval_overlap, WOW_CLASS_COLORS, MASS_DEATH_THRESHOLD,
+    get_report_deaths_bulk, get_main_character,
+    analyze_fights, is_duplicate_pull,
     find_mass_death_start, resolve_report_window
 )
 from features import (
-    CHEAT_DEATH_ABILITY_IDS, ALL_DEFENSIVE_ABILITY_IDS,
     get_all_healing_for_report_paginated, get_all_defensive_buffs_paginated,
     calculate_defensive_data_from_bulk
 )
+from auth import require_user, verify_token, forget_token, _bearer_token
+from cache import report_meta_cache, report_deaths_cache as deaths_lru
+from ratelimit import RateLimiter, limit
 import supabase_client
 
-# =============================================================================
-# SUPABASE INITIALIZATION
-# =============================================================================
+# A report whose last event is older than this is treated as finished and
+# its fights/deaths are cached; anything newer may still be live-logging.
+REPORT_CACHE_MIN_AGE_MS = 2 * 60 * 60 * 1000
 
-SUPABASE_URL = os.environ.get('SUPABASE_URL')
-SUPABASE_KEY = os.environ.get('SUPABASE_KEY')
-SUPABASE_SERVICE_ROLE_KEY = os.environ.get('SUPABASE_SERVICE_ROLE_KEY')
+# Parallel WCL requests per analysis. WCL's own rate limit is per API key,
+# so this stays modest.
+REPORT_FETCH_WORKERS = 6
 
-# Regular client (anon key)
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
-
-# Admin client (service role key - bypasses RLS)
-supabase_admin: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY else None
-
-print(f"[Startup] Supabase configured: {supabase is not None}")
-print(f"[Startup] Supabase Admin configured: {supabase_admin is not None}")
-
-# =============================================================================
-# IN-MEMORY SHARE STORAGE (temporary, 72hr expiration)
-# =============================================================================
-
-share_storage = {}  # {share_id: {"data": {...}, "config": {...}, "created_at": datetime}}
-
-def cleanup_expired_shares():
-    """Remove shares older than 72 hours"""
-    now = datetime.now()
-    expired = [
-        share_id for share_id, share_data in share_storage.items()
-        if (now - share_data["created_at"]).total_seconds() > 72 * 3600
-    ]
-    for share_id in expired:
-        del share_storage[share_id]
-    if expired:
-        print(f"[Share Cleanup] Removed {len(expired)} expired shares")
+share_limiter = RateLimiter(max_calls=20, per_seconds=3600)
+analyze_limiter = RateLimiter(max_calls=60, per_seconds=3600)
+save_limiter = RateLimiter(max_calls=30, per_seconds=3600)
 
 # =============================================================================
 # FLASK SETUP
 # =============================================================================
 
 app = Flask(__name__)
-CORS(app, 
-     resources={r"/api/*": {"origins": "*"}},
-     supports_credentials=True,
+# Bodies are compressed analyses; anything larger than this is abuse.
+app.config['MAX_CONTENT_LENGTH'] = 25 * 1024 * 1024
+
+# Comma-separated list of allowed site origins, e.g.
+# "https://floorpov.com,https://www.floorpov.com". Defaults to any origin
+# (requests are authenticated with bearer tokens, not cookies).
+_origins = [o.strip() for o in os.environ.get('ALLOWED_ORIGINS', '*').split(',') if o.strip()]
+CORS(app,
+     resources={r"/api/*": {"origins": _origins}},
      allow_headers=["Content-Type", "Authorization"],
-     methods=["GET", "POST", "DELETE", "OPTIONS", "PUT"])
+     methods=["GET", "POST", "DELETE", "OPTIONS"])
 
 
 # =============================================================================
-# MAIN ANALYSIS ENDPOINT (UNCHANGED FROM YOUR ORIGINAL)
+# MAIN ANALYSIS ENDPOINT
 # =============================================================================
 
-@app.route('/api/analyze', methods=['POST', 'OPTIONS'])
+@app.route('/api/analyze', methods=['POST'])
+@limit(analyze_limiter, "Too many analyses from this network in the last hour. Please wait a bit.")
 def analyze():
     """Main API endpoint for analyzing WarcraftLogs data using V2 API with SSE progress"""
-    
-    # Handle preflight CORS
-    if request.method == 'OPTIONS':
-        response = jsonify({'status': 'ok'})
-        response.headers.add('Access-Control-Allow-Origin', '*')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
-        response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
-        return response, 200
-    
+
     # Extract config BEFORE the generator to avoid request context issues
-    try:
-        config = request.json
-    except Exception as e:
-        resp = jsonify({"error": f"Invalid request: {str(e)}"})
-        resp.headers.add('Access-Control-Allow-Origin', '*')
-        return resp, 400
-    
+    config = request.get_json(silent=True)
+    if not isinstance(config, dict):
+        return jsonify({"error": "Invalid request"}), 400
+
     def generate():
         try:
-            print("\n" + "="*70)
-            print("FLOOR POV BACKEND - VERSION 3.1 (COMPLETE)")
-            print("="*70 + "\n")
-            
             # Extract configuration
             client_id = config.get('clientId')
             client_secret = config.get('clientSecret')
@@ -187,59 +155,57 @@ def analyze():
                 yield f"data: {json.dumps({'error': 'No reports found matching criteria'})}\n\n"
                 return
             
-            # Collect all fights
+            # Collect all fights. Reports are fetched in parallel (one
+            # GraphQL call each); finished reports come from the cache.
             yield f"data: {json.dumps({'stage': 'fights', 'message': 'Collecting fights from reports...'})}\n\n"
             all_fights_raw = []
-            report_ability_maps = {}
-            
-            for i, rep in enumerate(reports, 1):
+            finished_before = int(time.time() * 1000) - REPORT_CACHE_MIN_AGE_MS
+            report_finished = {rep["id"]: bool(rep.get("end")) and rep["end"] < finished_before
+                               for rep in reports}
+
+            def fetch_report_meta(rep):
                 rid = rep["id"]
-                yield f"data: {json.dumps({'stage': 'fights', 'message': f'Processing report {i}/{len(reports)}: {rid}'})}\n\n"
-                
-                if rid not in report_ability_maps:
-                    report_ability_maps[rid] = get_abilities_map(token, rid)
-                
-                fights_data = get_fights(token, rid)
-                fights = fights_data.get("fights", [])
-                report_abs_start = fights_data.get("report_start", rep["start"])
-                friendlies = fights_data.get("friendlies", [])
-                player_details = fights_data.get("player_details", {})
-                
-                # Process every guild report. Non-guild members in the raid
-                # are filtered out per-player below (only roster members count).
-                if guild_roster:
-                    friendly_names = {normalize_character_name(f.get("name", "")).lower() for f in friendlies if f.get("name")}
-                    guild_members_in_report = len(friendly_names & guild_roster)
-                    msg = f'Report {rid}: {guild_members_in_report} guild members - counting guild members only'
-                    yield f"data: {json.dumps({'stage': 'fights', 'message': msg})}\n\n"
-                
-                if not fights:
-                    continue
-                
-                matching = analyze_fights(fights, fight_zone, difficulty, selected_raid)
-                
-                for fight in matching:
-                    fid = fight['id']
-                    boss_name = fight.get('name', 'Unknown')
-                    boss_id = fight.get('boss', 0)
-                    is_kill = bool(fight.get('kill'))
-                    rel_start, rel_end = fight['start_time'], fight['end_time']
-                    abs_start, abs_end = report_abs_start + rel_start, report_abs_start + rel_end
-                    
-                    all_fights_raw.append({
-                        'reportId': rid,
-                        'fight': fight,
-                        'boss_name': boss_name,
-                        'boss_id': boss_id,
-                        'is_kill': is_kill,
-                        'abs_start': abs_start,
-                        'abs_end': abs_end,
-                        'report_abs_start': report_abs_start,
-                        'friendlies': friendlies,
-                        'ability_map': report_ability_maps[rid],
-                        'player_details': player_details
-                    })
-            
+                if report_finished[rid]:
+                    cached = report_meta_cache.get(rid)
+                    if cached is not None:
+                        return rep, cached
+                meta = get_fights(token, rid)
+                if report_finished[rid] and meta.get("fights"):
+                    report_meta_cache.set(rid, meta)
+                return rep, meta
+
+            with ThreadPoolExecutor(max_workers=REPORT_FETCH_WORKERS) as executor:
+                futures = [executor.submit(fetch_report_meta, rep) for rep in reports]
+                for done, future in enumerate(as_completed(futures), 1):
+                    rep, fights_data = future.result()
+                    rid = rep["id"]
+                    yield f"data: {json.dumps({'stage': 'fights', 'message': f'Read report {done}/{len(reports)}'})}\n\n"
+
+                    fights = fights_data.get("fights", [])
+                    if not fights:
+                        continue
+                    report_abs_start = fights_data.get("report_start") or rep["start"]
+                    friendlies = fights_data.get("friendlies", [])
+                    player_details = fights_data.get("player_details", {})
+                    ability_map = fights_data.get("abilities", {})
+
+                    # Non-guild members in the raid are filtered out
+                    # per-player below (only roster members count).
+                    for fight in analyze_fights(fights, fight_zone, difficulty, selected_raid):
+                        all_fights_raw.append({
+                            'reportId': rid,
+                            'fight': fight,
+                            'boss_name': fight.get('name', 'Unknown'),
+                            'boss_id': fight.get('boss', 0),
+                            'is_kill': bool(fight.get('kill')),
+                            'abs_start': report_abs_start + fight['start_time'],
+                            'abs_end': report_abs_start + fight['end_time'],
+                            'report_abs_start': report_abs_start,
+                            'friendlies': friendlies,
+                            'ability_map': ability_map,
+                            'player_details': player_details
+                        })
+
             all_fights_raw.sort(key=lambda x: x['abs_start'])
             yield f"data: {json.dumps({'stage': 'fights', 'message': f'Collected {len(all_fights_raw)} total fights'})}\n\n"
             
@@ -272,7 +238,6 @@ def analyze():
             counted_death_events = defaultdict(list)
             pull_participation = defaultdict(set)
             boss_participation = defaultdict(lambda: defaultdict(set))
-            character_breakdown = defaultdict(lambda: defaultdict(list))
             pull_counter_by_boss = defaultdict(int)
             
             # Group fights by report
@@ -295,7 +260,12 @@ def analyze():
                     start_time = min(f['start_time'] for f in fights_list)
                     end_time = max(f['end_time'] for f in fights_list)
                     
-                    deaths = get_report_deaths_bulk(token, rid, fights_list, friendlies, ability_map, enable_cheat_death, False)
+                    cache_key = (rid, tuple(sorted(f['id'] for f in fights_list)), bool(enable_cheat_death))
+                    deaths = deaths_lru.get(cache_key) if report_finished.get(rid) else None
+                    if deaths is None:
+                        deaths = get_report_deaths_bulk(token, rid, fights_list, friendlies, ability_map, enable_cheat_death, False)
+                        if report_finished.get(rid):
+                            deaths_lru.set(cache_key, deaths)
                     
                     healing_data = []
                     defensive_buffs_data = []
@@ -307,13 +277,12 @@ def analyze():
                     return rid, deaths, healing_data, defensive_buffs_data, None
                 except Exception as e:
                     print(f"[ERROR] Error fetching data for report {rid}: {str(e)}")
-                    import traceback
-                    traceback.print_exc()
                     fights_list = [fd['fight'] for fd in report_fights]
                     return rid, {f['id']: [] for f in fights_list}, [], [], str(e)
             
             total_reports = len(fights_by_report)
             completed = 0
+            failed_reports = []
             
             report_healing_cache = {}
             report_defensive_cache = {}
@@ -326,6 +295,8 @@ def analyze():
                 
                 for future in as_completed(future_to_rid):
                     rid, deaths, healing_data, defensive_data, error = future.result()
+                    if error:
+                        failed_reports.append(rid)
                     report_deaths_cache[rid] = deaths
                     report_healing_cache[rid] = healing_data
                     report_defensive_cache[rid] = defensive_data
@@ -334,6 +305,8 @@ def analyze():
                     if completed % 5 == 0 or completed == total_reports:
                         yield f"data: {json.dumps({'stage': 'deaths', 'message': f'Fetching deaths from report {completed}/{total_reports}'})}\n\n"
             
+            if failed_reports:
+                yield f"data: {json.dumps({'stage': 'deaths', 'message': f'Warning: {len(failed_reports)} report(s) could not be read; results may be incomplete'})}\n\n"
             yield f"data: {json.dumps({'stage': 'processing', 'message': f'Processing {len(all_fights_deduped)} fights...'})}\n\n"
             
             total_deaths = 0
@@ -430,7 +403,6 @@ def analyze():
                             )
                     
                     counted_death_events[main_char].append(death_event)
-                    character_breakdown[main_char][original_char].append(death_event)
                     total_deaths += 1
                 
                 pull_key = f"{rid}_{fid}"
@@ -459,10 +431,6 @@ def analyze():
                 b: {p: list(s2) for p, s2 in players.items()}
                 for b, players in boss_participation.items()
             }
-            character_breakdown_json = {
-                main: {char: evs for char, evs in chars.items()}
-                for main, chars in character_breakdown.items()
-            }
             
             response = {
                 "meta": {
@@ -476,11 +444,11 @@ def analyze():
                     "generatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "characterGroups": character_groups,
                     "reportCount": len(reports),
+                    "failedReports": failed_reports,
                 },
                 "events": counted_death_events,
                 "pullParticipation": pull_participation_json,
                 "bossParticipation": boss_participation_json,
-                "characterBreakdown": character_breakdown_json,
                 "pullCutoffTimestamps": pullCutoffTimestamps,
             }
             
@@ -493,200 +461,124 @@ def analyze():
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
     
     return Response(generate(), mimetype='text/event-stream', headers={
-        'Access-Control-Allow-Origin': '*',
         'Cache-Control': 'no-cache',
         'X-Accel-Buffering': 'no'
     })
 
 
 # =============================================================================
-# SHARING ENDPOINTS - SIMPLE IN-MEMORY (SHORT URLs)
+# SHARING (72h links, stored compressed in Supabase)
 # =============================================================================
 
+SHARE_ID_RE = re.compile(r'^[A-Za-z0-9_-]{6,32}$')
+SAVED_ID_RE = re.compile(r'^[0-9a-fA-F-]{36}$')
+
+
+def _looks_like_analysis(data):
+    return isinstance(data, dict) and isinstance(data.get('events'), dict)
+
+
 @app.route('/api/share', methods=['POST'])
+@limit(share_limiter, "Too many share links from this network in the last hour. Please wait a bit.")
 def share_results():
-    """Create a shareable link with short ID (stored in memory for 72hrs)"""
-    try:
-        data = request.json
-        
-        # Generate short 8-character ID
-        share_id = str(uuid.uuid4())[:8]
-        
-        # Store in memory with timestamp
-        share_storage[share_id] = {
-            "data": data.get("data"),
-            "config": data.get("config"),
-            "created_at": datetime.now()
-        }
-        
-        # Cleanup old shares
-        cleanup_expired_shares()
-        
-        print(f"[Share] Created share ID: {share_id} (Total shares: {len(share_storage)})")
-        
-        return jsonify({
-            "success": True,
-            "shareId": share_id
-        })
-    except Exception as e:
-        print(f"[Share] Error: {str(e)}")
-        return jsonify({"success": False, "error": str(e)}), 500
+    """Create a short share link. Credentials are stripped server-side."""
+    body = request.get_json(silent=True) or {}
+    data = body.get('data')
+    if not _looks_like_analysis(data):
+        return jsonify({"success": False, "error": "Nothing to share"}), 400
+
+    user_id = verify_token(_bearer_token())  # optional: lets account deletion remove it
+    share_id = secrets.token_urlsafe(9)
+    result = supabase_client.store_share(share_id, data, body.get('config'), user_id)
+    if "error" in result:
+        return jsonify({"success": False, "error": result["error"]}), 413
+    return jsonify({"success": True, "shareId": share_id, "expiresAt": result["expires_at"]})
 
 
 @app.route('/api/shared/<share_id>', methods=['GET'])
 def get_shared(share_id):
-    """Retrieve shared data by short ID"""
-    try:
-        # Cleanup expired shares first
-        cleanup_expired_shares()
-        
-        share_data = share_storage.get(share_id)
-        
-        if not share_data:
-            print(f"[Share] Share ID not found: {share_id}")
-            return jsonify({
-                "success": False, 
-                "error": "Share not found or expired"
-            }), 404
-        
-        # Check if expired (72 hours)
-        age = (datetime.now() - share_data["created_at"]).total_seconds()
-        if age > 72 * 3600:
-            del share_storage[share_id]
-            print(f"[Share] Share expired: {share_id}")
-            return jsonify({
-                "success": False,
-                "error": "Share has expired (72 hours)"
-            }), 404
-        
-        print(f"[Share] Retrieved share ID: {share_id}")
-        
-        return jsonify({
-            "success": True,
-            "data": share_data["data"],
-            "config": share_data["config"],
-            "timestamp": share_data["created_at"].isoformat()
-        })
-    except Exception as e:
-        print(f"[Share] Error retrieving: {str(e)}")
-        return jsonify({"success": False, "error": str(e)}), 500
+    if not SHARE_ID_RE.match(share_id or ''):
+        return jsonify({"success": False, "error": "Share not found or expired"}), 404
+    share = supabase_client.get_share(share_id)
+    if not share:
+        return jsonify({"success": False, "error": "Share not found or expired (links last 72 hours)"}), 404
+    return jsonify({"success": True, "data": share["data"], "config": share["config"],
+                    "timestamp": share["created_at"]})
 
 
 # =============================================================================
-# ANALYSIS STORAGE ENDPOINTS (UNCHANGED FROM YOUR ORIGINAL)
+# SAVED ANALYSES (signed-in users, max 5 each)
 # =============================================================================
 
-@app.route('/api/save-analysis', methods=['POST'])
-def save_analysis():
-    if not supabase_client.is_configured():
-        return jsonify({"error": "Database not configured"}), 500
-    try:
-        data = request.json
-        result = supabase_client.save_analysis(
-            user_id=data.get('userId'),
-            analysis_name=data.get('analysisName'),
-            guild_name=data.get('guildName'),
-            analysis_data=data.get('analysisData'),
-            retention_days=data.get('retentionDays', 30)
-        )
-        if "error" in result:
-            return jsonify(result), 500
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+def _storage_response(result, ok_status=200):
+    if "error" not in result:
+        return jsonify(result), ok_status
+    status = {"limit": 409, "too_large": 413, "not_found": 404}.get(result.get("code"), 500)
+    return jsonify({"success": False, **result}), status
 
 
-@app.route('/api/load-analysis/<analysis_id>', methods=['GET'])
-def load_analysis(analysis_id):
-    result = supabase_client.load_analysis(analysis_id)
-    if "error" in result:
-        return jsonify(result), 404 if "not found" in result["error"].lower() else 500
-    return jsonify(result)
+@app.route('/api/saved', methods=['GET'])
+@require_user
+def list_saved():
+    return _storage_response(supabase_client.get_user_analyses(g.user_id))
 
 
-@app.route('/api/user-analyses/<user_id>', methods=['GET'])
-def get_user_analyses(user_id):
-    result = supabase_client.get_user_analyses(user_id)
-    if "error" in result:
-        return jsonify(result), 500
-    return jsonify(result)
+@app.route('/api/saved', methods=['POST'])
+@require_user
+@limit(save_limiter, "Too many saves in the last hour. Please wait a bit.")
+def create_saved():
+    body = request.get_json(silent=True) or {}
+    data = body.get('data')
+    if not _looks_like_analysis(data):
+        return jsonify({"success": False, "error": "Nothing to save"}), 400
+    return _storage_response(supabase_client.save_analysis(
+        user_id=g.user_id,
+        analysis_name=body.get('name'),
+        guild_name=(data.get('meta') or {}).get('guild_name'),
+        analysis_data=data,
+        config=body.get('config'),
+        retention_days=body.get('retentionDays', 30),
+    ), 201)
 
 
-@app.route('/api/delete-analysis/<analysis_id>', methods=['DELETE'])
-def delete_analysis(analysis_id):
-    result = supabase_client.delete_analysis(analysis_id)
-    if "error" in result:
-        return jsonify(result), 500
-    return jsonify(result)
+@app.route('/api/saved/<analysis_id>', methods=['GET'])
+@require_user
+def get_saved(analysis_id):
+    if not SAVED_ID_RE.match(analysis_id or ''):
+        return jsonify({"success": False, "error": "Report not found"}), 404
+    return _storage_response(supabase_client.load_analysis(analysis_id, g.user_id))
 
 
-@app.route('/api/delete-all-analyses/<user_id>', methods=['DELETE'])
-def delete_all_analyses(user_id):
-    result = supabase_client.delete_all_analyses(user_id)
-    if "error" in result:
-        return jsonify(result), 500
-    return jsonify(result)
+@app.route('/api/saved/<analysis_id>', methods=['DELETE'])
+@require_user
+def delete_saved(analysis_id):
+    if not SAVED_ID_RE.match(analysis_id or ''):
+        return jsonify({"success": False, "error": "Report not found"}), 404
+    return _storage_response(supabase_client.delete_analysis(analysis_id, g.user_id))
 
 
-# =============================================================================
-# USER ACCOUNT ENDPOINTS (UNCHANGED FROM YOUR ORIGINAL)
-# =============================================================================
-
-@app.route('/api/delete-user-account/<user_id>', methods=['DELETE', 'OPTIONS'])
-def delete_user_account(user_id):
-    """Delete user account and all associated data"""
-    
-    # Handle preflight OPTIONS request
-    if request.method == 'OPTIONS':
-        response = jsonify({'status': 'ok'})
-        response.headers.add('Access-Control-Allow-Origin', '*')
-        response.headers.add('Access-Control-Allow-Methods', 'DELETE, OPTIONS')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-        return response, 204
-    
-    if not supabase_admin:
-        return jsonify({'error': 'Admin database client not configured'}), 500
-    
-    try:
-        print(f"[Delete Account] Starting deletion for user_id: {user_id}")
-        
-        try:
-            saved_result = supabase_admin.table('saved_analyses').delete().eq('user_id', user_id).execute()
-            print(f"[Delete Account] Deleted {len(saved_result.data) if saved_result.data else 0} saved analyses")
-        except Exception as e:
-            print(f"[Delete Account] Error deleting saved analyses: {str(e)}")
-        
-        try:
-            shared_result = supabase_admin.table('shared_analyses').delete().eq('user_id', user_id).execute()
-            print(f"[Delete Account] Deleted {len(shared_result.data) if shared_result.data else 0} shared analyses")
-        except Exception as e:
-            print(f"[Delete Account] Note: Could not delete shared analyses: {str(e)}")
-        
-        try:
-            creds_result = supabase_admin.table('api_credentials').delete().eq('user_id', user_id).execute()
-            print(f"[Delete Account] Deleted {len(creds_result.data) if creds_result.data else 0} API credentials")
-        except Exception as e:
-            print(f"[Delete Account] Error deleting API credentials: {str(e)}")
-        
-        try:
-            supabase_admin.auth.admin.delete_user(user_id)
-            print(f"[Delete Account] Deleted auth user account")
-        except Exception as e:
-            print(f"[Delete Account] Error deleting auth user: {str(e)}")
-        
-        print(f"[Delete Account] Successfully completed deletion")
-        
-        return jsonify({'success': True, 'message': 'User data deleted successfully'}), 200
-        
-    except Exception as e:
-        print(f"[Delete Account] Fatal error: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+@app.route('/api/saved', methods=['DELETE'])
+@require_user
+def delete_all_saved():
+    return _storage_response(supabase_client.delete_all_analyses(g.user_id))
 
 
 # =============================================================================
-# HEALTH & STATUS (UNCHANGED FROM YOUR ORIGINAL)
+# ACCOUNT
+# =============================================================================
+
+@app.route('/api/account', methods=['DELETE'])
+@require_user
+def delete_account():
+    """Delete the signed-in user's data and auth account."""
+    result = supabase_client.delete_user_account(g.user_id)
+    if "error" not in result:
+        forget_token(_bearer_token())
+    return _storage_response(result)
+
+
+# =============================================================================
+# HEALTH & STATUS
 # =============================================================================
 
 @app.route('/api/health', methods=['GET'])
@@ -696,14 +588,10 @@ def health():
 
 @app.route('/', methods=['GET'])
 def root():
-    return jsonify({"service": "Floor Pov API", "version": "3.1.0-complete", "status": "running"})
+    return jsonify({"service": "Floor Pov API", "status": "running"})
 
-
-# =============================================================================
-# MAIN
-# =============================================================================
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    print(f"Starting Floor Pov API v3.1.0 (complete + short share URLs) on port {port}...")
-    app.run(host='0.0.0.0', port=port, debug=False)
+    print(f"Starting Floor Pov API on port {port}...")
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
