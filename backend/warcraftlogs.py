@@ -3,10 +3,11 @@ warcraftlogs.py - WarcraftLogs API interactions (token, GraphQL, reports, fights
 """
 
 import time
-import json
 import requests
 import unicodedata
 import base64
+import hashlib
+import threading
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -19,13 +20,19 @@ MAX_RETRIES = 3
 RETRY_BACKOFF_BASE = 1
 RETRY_BACKOFF_MAX = 10
 
-# Token cache
-_token_cache = {"token": None, "expires_at": 0}
+# Token cache, keyed per client credential. A single shared slot would hand
+# one user's token (and WCL rate-limit quota) to the next user, and let
+# wrong credentials "work" as long as someone else's token was cached.
+_token_cache = {}  # sha256(client_id:client_secret) -> {"token", "expires_at"}
+_token_lock = threading.Lock()
 
 
 def make_request_with_retry(method, url, max_retries=MAX_RETRIES, timeout=120, **kwargs):
-    """Make HTTP request with exponential backoff retry."""
-    import time
+    """Make HTTP request with exponential backoff retry.
+
+    Client errors (bad credentials, bad query, unknown guild) fail straight
+    away since retrying can't fix them; 429 and 5xx/network errors back off.
+    """
     last_exception = None
     for attempt in range(max_retries + 1):
         try:
@@ -35,18 +42,25 @@ def make_request_with_retry(method, url, max_retries=MAX_RETRIES, timeout=120, *
                 response = requests.get(url, timeout=timeout, **kwargs)
             response.raise_for_status()
             return response
-        except requests.exceptions.Timeout as e:
+        except requests.exceptions.HTTPError as e:
             last_exception = e
+            status = e.response.status_code if e.response is not None else 0
+            if 400 <= status < 500 and status != 429:
+                break
             if attempt < max_retries:
-                backoff = min(RETRY_BACKOFF_BASE * (2 ** attempt), RETRY_BACKOFF_MAX)
-                print(f"[Retry] Timeout attempt {attempt + 1}, waiting {backoff}s")
-                time.sleep(backoff)
+                retry_after = e.response.headers.get('Retry-After') if e.response is not None else None
+                try:
+                    backoff = min(float(retry_after), RETRY_BACKOFF_MAX * 3) if retry_after else None
+                except ValueError:
+                    backoff = None
+                time.sleep(backoff or min(RETRY_BACKOFF_BASE * (2 ** attempt), RETRY_BACKOFF_MAX))
         except requests.exceptions.RequestException as e:
             last_exception = e
             if attempt < max_retries:
-                backoff = min(RETRY_BACKOFF_BASE * (1.5 ** attempt), RETRY_BACKOFF_MAX)
+                backoff = min(RETRY_BACKOFF_BASE * (2 ** attempt), RETRY_BACKOFF_MAX)
+                print(f"[Retry] {type(e).__name__} attempt {attempt + 1}, waiting {backoff}s")
                 time.sleep(backoff)
-    raise Exception(f"Request failed after {max_retries + 1} attempts: {last_exception}")
+    raise Exception(f"Request failed after {attempt + 1} attempt(s): {last_exception}")
 
 def normalize_character_name(name):
     """
@@ -76,12 +90,12 @@ def normalize_character_name(name):
 
 def get_access_token(client_id, client_secret):
     """Get OAuth2 access token for V2 API"""
-    global _token_cache
-    
-    # Check if we have a valid cached token
-    if _token_cache["token"] and time.time() < _token_cache["expires_at"]:
-        return _token_cache["token"]
-    
+    cache_key = hashlib.sha256(f"{client_id}:{client_secret}".encode()).hexdigest()
+    with _token_lock:
+        cached = _token_cache.get(cache_key)
+        if cached and time.time() < cached["expires_at"]:
+            return cached["token"]
+
     # Request new token using Authorization header (required by Cloudflare Worker)
     # Encode credentials as Basic auth
     credentials = f"{client_id}:{client_secret}"
@@ -108,11 +122,17 @@ def get_access_token(client_id, client_secret):
         
         token_data = response.json()
         
-        _token_cache["token"] = token_data["access_token"]
-        # Cache expires 60 seconds before actual expiry for safety
-        _token_cache["expires_at"] = time.time() + token_data.get("expires_in", 3600) - 60
-        
-        return _token_cache["token"]
+        token = token_data["access_token"]
+        with _token_lock:
+            now = time.time()
+            for k in [k for k, v in _token_cache.items() if v["expires_at"] <= now]:
+                del _token_cache[k]
+            # Expire 60 seconds before WCL does, for safety
+            _token_cache[cache_key] = {
+                "token": token,
+                "expires_at": now + token_data.get("expires_in", 3600) - 60,
+            }
+        return token
     except Exception as e:
         raise Exception(f"Failed to get access token: {str(e)}")
 
@@ -293,8 +313,13 @@ def get_guild_roster(token, guild_name, server, region):
     print(f"Successfully fetched {len(all_members)} guild members across {pages_fetched} page(s)")
     return all_members
 def get_fights(token, report_code):
-    """Fetch fights for a report using V2 GraphQL API, including player class/spec info"""
-    
+    """Fetch a report's fights, players (with class/spec), and ability names.
+
+    One GraphQL round-trip per report: ability names used to be a second,
+    separate query. Returns
+      {"report_start", "fights", "friendlies", "player_details", "abilities"}
+    or the same shape with empty values if the report can't be read.
+    """
     query = """
     query($code: String!) {
       reportData {
@@ -320,163 +345,68 @@ def get_fights(token, report_code):
               type
               subType
             }
+            abilities {
+              gameID
+              name
+            }
           }
           playerDetails(startTime: 0, endTime: 999999999999)
         }
       }
     }
     """
-    
-    variables = {"code": report_code}
-    
+    empty = {"report_start": 0, "fights": [], "friendlies": [], "player_details": {}, "abilities": {}}
+
     try:
-        data = graphql_query(token, query, variables)
-        report = data.get("reportData", {}).get("report", {})
-        
+        data = graphql_query(token, query, {"code": report_code})
+        report = (data.get("reportData") or {}).get("report") or {}
         if not report:
-            return {"report_start": 0, "fights": [], "friendlies": [], "player_details": {}}
-        
-        fights = report.get("fights", [])
-        actors = report.get("masterData", {}).get("actors", [])
-        report_start = report.get("startTime", 0)
-        player_details_data = report.get("playerDetails", {})
-        
-        # DEBUG: Check if playerDetails was returned and show its structure
-        print(f"Report {report_code}: Found {len(fights)} fights, {len(actors)} actors")
-        print(f"  DEBUG: playerDetails type: {type(player_details_data)}")
-        if player_details_data:
-            if isinstance(player_details_data, dict):
-                print(f"  DEBUG: playerDetails keys: {list(player_details_data.keys())}")
-                # Show first few characters of the data
-                import json
-                preview = json.dumps(player_details_data)[:500]
-                print(f"  DEBUG: playerDetails preview: {preview}...")
-            else:
-                print(f"  DEBUG: playerDetails is not a dict: {player_details_data}")
-        else:
-            print(f"  [WARN] playerDetails is empty/None!")
-        
-        # Convert to format compatible with existing code
-        formatted_fights = []
-        for fight in fights:
-            formatted_fights.append({
-                "id": fight.get("id"),
-                "start_time": fight.get("startTime"),
-                "end_time": fight.get("endTime"),
-                "name": fight.get("name"),
-                "boss": fight.get("encounterID"),
-                "difficulty": fight.get("difficulty"),
-                "kill": fight.get("kill"),
-                "zoneID": fight.get("gameZone", {}).get("id") if fight.get("gameZone") else None,
-                "friendlyPlayers": fight.get("friendlyPlayers", [])  # IDs of players in THIS fight
-            })
-        
-        # Format friendlies
-        formatted_friendlies = []
-        for actor in actors:
-            if actor.get("type") == "Player":
-                formatted_friendlies.append({
-                    "id": actor.get("id"),
-                    "name": normalize_character_name(actor.get("name")),
-                    "type": actor.get("subType")  # Class name
-                })
-        
-        # Parse player details to get class/spec info
-        # playerDetails structure: { data: { playerDetails: { tanks: [], healers: [], dps: [] } } }
-        player_spec_map = {}  # actor_id -> {class, spec, role}
-        
-        if player_details_data and isinstance(player_details_data, dict):
-            # Navigate through the nested structure: data -> playerDetails -> roles
-            data_section = player_details_data.get("data", {})
-            player_details_section = data_section.get("playerDetails", {})
-            
-            if not player_details_section:
-                print(f"  [WARN] playerDetails.data.playerDetails is empty or missing!")
-            
-            # Combine all roles
-            all_players = []
-            tanks = player_details_section.get("tanks", [])
-            healers = player_details_section.get("healers", [])
-            dps = player_details_section.get("dps", [])
-            
-            print(f"  Player counts - Tanks: {len(tanks)}, Healers: {len(healers)}, DPS: {len(dps)}")
-            
-            all_players.extend(tanks)
-            all_players.extend(healers)
-            all_players.extend(dps)
-            
-            for player in all_players:
+            return empty
+
+        master = report.get("masterData") or {}
+        fights = [{
+            "id": f.get("id"),
+            "start_time": f.get("startTime"),
+            "end_time": f.get("endTime"),
+            "name": f.get("name"),
+            "boss": f.get("encounterID"),
+            "difficulty": f.get("difficulty"),
+            "kill": f.get("kill"),
+            "zoneID": (f.get("gameZone") or {}).get("id"),
+            "friendlyPlayers": f.get("friendlyPlayers") or [],  # IDs of players in THIS fight
+        } for f in report.get("fights") or []]
+
+        friendlies = [{
+            "id": a.get("id"),
+            "name": normalize_character_name(a.get("name")),
+            "type": a.get("subType"),  # class name
+        } for a in master.get("actors") or [] if a.get("type") == "Player"]
+
+        abilities = {a["gameID"]: a["name"] for a in master.get("abilities") or []
+                     if a.get("gameID") and a.get("name")}
+
+        # playerDetails: { data: { playerDetails: { tanks: [], healers: [], dps: [] } } }
+        player_spec_map = {}
+        details = ((report.get("playerDetails") or {}).get("data") or {}).get("playerDetails") or {}
+        for role in ("tanks", "healers", "dps"):
+            for player in details.get(role) or []:
                 actor_id = player.get("id")
-                player_name = normalize_character_name(player.get("name", ""))
-                player_type = player.get("type", "")  # Class name like "Druid", "Mage"
-                
-                # Get the first spec (most commonly used spec)
-                specs = player.get("specs", [])
-                # specs is a list of dicts like [{"spec": "Brewmaster", "count": 31}]
-                # Extract just the spec name from the first entry
-                player_spec = specs[0].get("spec", "Unknown") if specs else "Unknown"
-                
-                if actor_id:
-                    player_spec_map[actor_id] = {
-                        "class": player_type,
-                        "spec": player_spec,
-                        "name": player_name
-                    }
-            
-            print(f"  [OK] Extracted class/spec info for {len(player_spec_map)} players")
-            if player_spec_map:
-                # Show sample
-                sample_id = next(iter(player_spec_map))
-                sample = player_spec_map[sample_id]
-                print(f"    Sample: {sample['name']} (ID: {sample_id}) - {sample['spec']} {sample['class']}")
-        else:
-            print(f"  [WARN] playerDetails is None or not a dict: {type(player_details_data)}")
-        
-        print(f"Formatted {len(formatted_friendlies)} friendly players")
-        if len(formatted_friendlies) > 0:
-            print(f"Sample player: {formatted_friendlies[0]}")
-        
+                if not actor_id:
+                    continue
+                specs = player.get("specs") or []  # [{"spec": "Brewmaster", "count": 31}]
+                player_spec_map[actor_id] = {
+                    "class": player.get("type", ""),
+                    "spec": specs[0].get("spec", "Unknown") if specs else "Unknown",
+                    "name": normalize_character_name(player.get("name", "")),
+                }
+
         return {
-            "report_start": report_start,
-            "fights": formatted_fights,
-            "friendlies": formatted_friendlies,
-            "player_details": player_spec_map
+            "report_start": report.get("startTime", 0),
+            "fights": fights,
+            "friendlies": friendlies,
+            "player_details": player_spec_map,
+            "abilities": abilities,
         }
     except Exception as e:
         print(f"Error fetching fights for {report_code}: {e}")
-        import traceback
-        traceback.print_exc()
-        return {"report_start": 0, "fights": [], "friendlies": [], "player_details": {}}
-
-
-def get_abilities_map(token, report_code):
-    """Get ability ID to name mapping for a report - ONCE per report"""
-    abilities_query = """
-    query($code: String!) {
-      reportData {
-        report(code: $code) {
-          masterData {
-            abilities {
-              gameID
-              name
-            }
-          }
-        }
-      }
-    }
-    """
-    
-    ability_id_to_name = {}
-    try:
-        abilities_data = graphql_query(token, abilities_query, {"code": report_code})
-        abilities = abilities_data.get("reportData", {}).get("report", {}).get("masterData", {}).get("abilities", [])
-        for ability in abilities:
-            ability_id = ability.get("gameID")
-            ability_name = ability.get("name")
-            if ability_id and ability_name:
-                ability_id_to_name[ability_id] = ability_name
-        print(f"Loaded {len(ability_id_to_name)} abilities for report {report_code}")
-    except Exception as e:
-        print(f"Warning: Could not fetch ability names: {e}")
-    
-    return ability_id_to_name
+        return empty
