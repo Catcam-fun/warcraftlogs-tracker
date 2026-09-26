@@ -212,9 +212,9 @@ class AnalyzeFlowTests(unittest.TestCase):
         with mock.patch.object(app_module, 'get_access_token', return_value='t'), \
                 mock.patch.object(app_module, 'get_guild_roster', return_value={'bob', 'amy'}), \
                 mock.patch.object(app_module, 'get_guild_reports', return_value=reports), \
-                mock.patch.object(app_module, 'get_fights', side_effect=self._fights) as fights, \
-                mock.patch.object(app_module, 'get_report_deaths_bulk', return_value=deaths) as bulk, \
-                mock.patch.object(app_module.defensives, 'fetch_defensive_events',
+                mock.patch.object(app_module, 'get_fights', autospec=True, side_effect=self._fights) as fights, \
+                mock.patch.object(app_module, 'get_report_deaths_bulk', autospec=True, return_value=deaths) as bulk, \
+                mock.patch.object(app_module.defensives, 'fetch_defensive_events', autospec=True,
                                   return_value={"casts": {}, "buffs": {}, "talents": {}}):
             resp = app_module.app.test_client().post('/api/analyze', json={
                 "clientId": "a", "clientSecret": "b", "guildName": "G", "server": "S",

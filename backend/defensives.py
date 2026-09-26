@@ -113,9 +113,11 @@ def index_defensive_events(raw):
 # PER-DEATH ANALYSIS
 # =============================================================================
 
-def _has_ability(sid, entry, player_class, spec, talent_entries, cast_ids_in_report):
+def _has_ability(sid, entry, player_class, spec, talent_entries, cast_ids_in_report, pressed_this_pull=()):
     if entry["class"] != player_class:
         return False
+    if sid in pressed_this_pull:
+        return True    # pressing it this pull proves they have it, whatever the talent record says
     if entry["specs"] and spec and spec not in entry["specs"]:
         return False
     if talent_entries and talent_entries & set(entry.get("replaced_by_entries", ())):
@@ -188,8 +190,9 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
 
     result = {"active": [], "available": [], "cooldown": [], "talentsKnown": talent_entries is not None}
 
+    pressed_this_pull = {sid for t, sid in own_casts if fight_start <= t <= death_ts}
     for sid, entry in PERSONAL.items():
-        if not _has_ability(sid, entry, player_class, spec, talent_entries, casts_by_spell):
+        if not _has_ability(sid, entry, player_class, spec, talent_entries, casts_by_spell, pressed_this_pull):
             continue
         name = entry["name"]
         if name in active_names:
