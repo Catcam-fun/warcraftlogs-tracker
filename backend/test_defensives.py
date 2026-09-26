@@ -74,6 +74,28 @@ class DefensiveAnalysisTests(unittest.TestCase):
         r = defensives.analyze_death(1, "Mage", "Frost", 7, 0, 100_000, indexed, names_map, {})
         self.assertNotIn("Ice Block", names(r["active"]))
 
+    def test_missing_aura_removal_is_capped_by_duration(self):
+        # The log never recorded Ice Block (10s) ending; 60s later it isn't still up.
+        indexed = {"casts": {1: [(40_000, ICE_BLOCK)]}, "talents": {(7, 1): entries(ICE_BLOCK)},
+                   "buffs": {1: [(40_000, "applybuff", ICE_BLOCK, 1)]}}
+        names_map = {sid: d["name"] for sid, d in CATALOG.items()}
+        r = defensives.analyze_death(1, "Mage", "Frost", 7, 0, 100_000, indexed, names_map, {})
+        self.assertNotIn("Ice Block", names(r["active"]))
+        r = defensives.analyze_death(1, "Mage", "Frost", 7, 0, 45_000, indexed, names_map, {})
+        self.assertIn("Ice Block", names(r["active"]))
+
+    def test_killing_blow_snapshot_decides_what_was_up(self):
+        names_map = {sid: d["name"] for sid, d in CATALOG.items()}
+        names_map[999] = "Pain Suppression"
+        indexed = {"casts": {}, "talents": {(7, 1): entries(ICE_BLOCK)},
+                   "buffs": {1: [(99_000, "applybuff", ICE_BLOCK, 1), (99_500, "applybuff", 999, 5)]}}
+        # Events say Ice Block is up, but the killing blow's aura list only has Pain Suppression.
+        kb = [{"timestamp": 100_000, "type": "damage", "targetID": 1, "amount": 1, "overkill": 1, "buffs": "999."}]
+        r = defensives.analyze_death(1, "Mage", "Frost", 7, 0, 100_000, indexed, names_map, {5: "Holypriest"},
+                                     killing_blows=kb)
+        self.assertNotIn("Ice Block", names(r["active"]))
+        self.assertIn({"name": "Pain Suppression", "kind": "external", "by": "Holypriest"}, r["active"])
+
     def test_used_ability_is_on_cooldown_with_timings(self):
         r = run("Mage", "Frost", talents=entries(ICE_BLOCK),
                 casts=[(40_000, ICE_BLOCK)], fight_start=0, death=100_000)

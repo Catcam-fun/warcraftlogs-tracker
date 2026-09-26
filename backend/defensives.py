@@ -53,6 +53,12 @@ CATALOG_FINGERPRINT = hashlib.sha1(repr((CAST_IDS, BUFF_NAMES, sorted(RELEVANT_T
 # Death strips auras at (or a few ms after) the death event; an aura removed
 # this close to the death was still up when they died.
 DEATH_AURA_GRACE_MS = 250
+
+# Logs sometimes miss an aura's "removed" event (the player died, moved out of
+# range...). An aura is never treated as still up past its longest duration
+# from game data (catalog aura_ms) times this, plus a second, which leaves room
+# for talents that extend it (Anti-Magic Barrier +40%, Improved Barkskin +4s).
+AURA_DURATION_HEADROOM = 1.5
 NAME_TO_ID = {}
 for _sid, _d in list(PERSONAL.items()) + list(EXTERNAL.items()):
     NAME_TO_ID.setdefault(_d["name"], _sid)
@@ -191,17 +197,27 @@ def _charges_at(death_ts, casts_in_window, charges, recharge_ms):
     return have, (recharge_done - death_ts if recharge_done is not None else 0)
 
 
-def _buffs_active_at(death_ts, buff_events):
-    """abilityGameID -> sourceID for auras that were up when the player died."""
+def _buffs_active_at(death_ts, buff_events, max_ms=None):
+    """abilityGameID -> sourceID for auras that were up when the player died.
+
+    `max_ms(abilityGameID)`: longest the aura can last (None = unknown), so an
+    aura whose removal the log missed isn't counted as up forever.
+    """
     up = {}
     for ts, typ, aid, src, *_ in buff_events:
         if ts > death_ts:
             break
         if typ in ("applybuff", "refreshbuff", "applybuffstack"):
-            up[aid] = src
+            up[aid] = (src, ts)
         elif typ == "removebuff" and ts < death_ts - DEATH_AURA_GRACE_MS:
             up.pop(aid, None)
-    return up
+    active = {}
+    for aid, (src, since) in up.items():
+        longest = max_ms(aid) if max_ms else None
+        if longest and death_ts - since > longest * AURA_DURATION_HEADROOM + 1_000:
+            continue
+        active[aid] = src
+    return active
 
 
 def _killing_blow(killing_blows, death_ts):
@@ -232,19 +248,35 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
     talent_entries = indexed["talents"].get((fight_id, player_id))
 
     # Auras on the player at death, matched to the catalog by name (aura IDs
-    # often differ from the button's spell ID) -> who applied them. From the
-    # aura events when we have them; otherwise from the killing blow's aura list.
+    # often differ from the button's spell ID) -> who applied them.
+    # The killing blow's aura list is the game's snapshot at the moment of the
+    # hit (verified on live logs: no list means no auras), so it decides what
+    # was up; the aura events add who cast externals. Without a killing blow,
+    # the aura events decide, capped by each aura's duration.
     killing = _killing_blow(killing_blows, death_ts)
     active = {}
     buff_events = indexed.get("buffs")
-    if buff_events is not None:
-        for aid, src in _buffs_active_at(death_ts, buff_events.get(player_id, [])).items():
+    own_events = (buff_events or {}).get(player_id, [])
+
+    def max_ms(aid):
+        sid = NAME_TO_ID.get(ability_names.get(aid))
+        return CATALOG[sid].get("aura_ms") if sid else None
+
+    if killing is not None:
+        casters = {}
+        for ts, typ, aid, src, *_ in own_events:
+            if ts > death_ts:
+                break
+            if typ in ("applybuff", "refreshbuff", "applybuffstack"):
+                casters[ability_names.get(aid)] = src
+        for aid in _auras(killing):
+            name = ability_names.get(aid)
+            if name in NAME_TO_ID:
+                active[name] = casters.get(name)
+    elif buff_events is not None:
+        for aid, src in _buffs_active_at(death_ts, own_events, max_ms).items():
             if ability_names.get(aid) in NAME_TO_ID:
                 active[ability_names.get(aid)] = src
-    elif killing:
-        for aid in _auras(killing):
-            if ability_names.get(aid) in NAME_TO_ID:
-                active[ability_names.get(aid)] = None
     active_names = set(active)
 
     result = {"active": [], "available": [], "cooldown": [], "talentsKnown": talent_entries is not None,
