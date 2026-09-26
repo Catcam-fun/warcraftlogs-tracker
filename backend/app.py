@@ -269,13 +269,16 @@ def analyze():
                         if report_finished.get(rid):
                             deaths_lru.set(cache_key, deaths)
                     
-                    # Defensive casts and talents for this report's boss pulls.
-                    def_key = (rid, tuple(sorted(f['id'] for f in fights_list)))
+                    # Defensive casts, auras and talents for the players who died.
+                    dead = {d.get("targetID") for ds in deaths.values() for d in ds if d.get("targetID")}
+                    def_key = (rid, tuple(sorted(f['id'] for f in fights_list)), tuple(sorted(dead)))
                     def_data = defensive_lru.get(def_key) if report_finished.get(rid) else None
                     if def_data is None:
                         try:
                             def_data = defensives.fetch_defensive_events(
-                                token, rid, sorted(f['id'] for f in fights_list))
+                                token, rid, sorted(f['id'] for f in fights_list),
+                                min(f['start_time'] for f in fights_list),
+                                max(f['end_time'] for f in fights_list), dead)
                             if report_finished.get(rid):
                                 defensive_lru.set(def_key, def_data)
                         except Exception as e:

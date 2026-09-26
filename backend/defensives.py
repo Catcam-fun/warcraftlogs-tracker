@@ -1,8 +1,8 @@
 """
 defensives.py - What defensive options a player had when they died.
 
-For every death this answers, per major defensive the player actually had:
-  - active:     its aura was on them when they died (read from the killing blow)
+For every death this answers, per defensive the player actually had:
+  - active:     its aura was on them when they died
   - available:  they had it and it was off cooldown, but it wasn't pressed
   - cooldown:   it was pressed earlier and hadn't come back yet
 plus whether they used a Healthstone / health potion this pull, and which raid
@@ -31,12 +31,15 @@ PERSONAL = {sid: d for sid, d in CATALOG.items() if d["kind"] == "personal"}
 EXTERNAL = {sid: d for sid, d in CATALOG.items() if d["kind"] == "external"}
 CONSUMABLE = {sid: d for sid, d in CATALOG.items() if d["kind"] in ("healthstone", "potion")}
 
-# Availability is tracked for major defensives (60s+ cooldown) only. The short
-# ones (Feint, mage barriers, Rune Tap...) are pressed constantly: tracking
-# their casts cost ~16x more WCL points per report, and they aren't scored.
-# They still show when their aura was up at death.
-TRACKED = {sid: d for sid, d in PERSONAL.items() if d["major"]}
+# Every personal defensive is tracked (accuracy over API cost, the owner's
+# call); the per-player summary counts only major (60s+) ones.
+TRACKED = PERSONAL
 CAST_IDS = sorted(set(TRACKED) | set(CONSUMABLE))
+BUFF_NAMES = sorted({d["name"] for d in list(PERSONAL.values()) + list(EXTERNAL.values())})
+
+# Death strips auras at (or a few ms after) the death event; an aura removed
+# this close to the death was still up when they died.
+DEATH_AURA_GRACE_MS = 250
 NAME_TO_ID = {}
 for _sid, _d in list(PERSONAL.items()) + list(EXTERNAL.items()):
     NAME_TO_ID.setdefault(_d["name"], _sid)
@@ -46,15 +49,22 @@ for _sid, _d in list(PERSONAL.items()) + list(EXTERNAL.items()):
 # FETCHING (one report)
 # =============================================================================
 
-def _paged(token, report_code, fight_ids, data_type, flt):
-    query = """query($c: String!, $ids: [Int], $f: String, $s: Float) { reportData { report(code: $c) {
-        events(fightIDs: $ids, startTime: $s, dataType: %s, filterExpression: $f, limit: 10000)
-        { data nextPageTimestamp } } } }""" % data_type
-    events, start = [], None
+def _paged(token, report_code, data_type, flt, fight_ids=None, start_time=None, end_time=None):
+    """All pages of one event query, scoped either to boss pulls or to a time range."""
+    events, start = [], start_time
     for _ in range(50):
-        variables = {"c": report_code, "ids": list(fight_ids), "f": flt}
-        if start:
-            variables["s"] = start
+        args, decl, variables = [], ["$c: String!"], {"c": report_code}
+        if fight_ids is not None:
+            args.append("fightIDs: $ids"); decl.append("$ids: [Int]"); variables["ids"] = list(fight_ids)
+        if start is not None:
+            args.append("startTime: $s"); decl.append("$s: Float"); variables["s"] = start
+        if end_time is not None:
+            args.append("endTime: $e"); decl.append("$e: Float"); variables["e"] = end_time
+        if flt:
+            args.append("filterExpression: $f"); decl.append("$f: String"); variables["f"] = flt
+        query = (f"query({', '.join(decl)}) {{ reportData {{ report(code: $c) {{ "
+                 f"events({', '.join(args)}, dataType: {data_type}, limit: 10000) "
+                 f"{{ data nextPageTimestamp }} }} }} }}")
         block = ((graphql_query(token, query, variables).get("reportData") or {}).get("report") or {}).get("events") or {}
         events += block.get("data") or []
         start = block.get("nextPageTimestamp")
@@ -63,17 +73,29 @@ def _paged(token, report_code, fight_ids, data_type, flt):
     return events
 
 
-def fetch_defensive_events(token, report_code, fight_ids):
-    """Defensive casts and talent loadouts for the given boss pulls.
+def fetch_defensive_events(token, report_code, fight_ids, start_time, end_time, player_ids):
+    """Defensive casts, defensive auras and talent loadouts for one report.
 
-    Scoped with fightIDs (WCL then scans only the pulls, not trash or
-    downtime). Measured on a 54-pull live log: ~2 points, versus ~52 for the
-    earlier whole-report version that also fetched every buff event.
+    - Casts and auras cover the whole time range (trash and time between pulls
+      included, from 3 minutes before the first pull) so a defensive pressed
+      just before a pull counts, but only for `player_ids` (the players who
+      died; nobody else is analyzed), which keeps the cost down without
+      changing any result.
+    - Talent loadouts are only recorded at pull start, so they're scoped to
+      the boss pulls.
     """
-    cast_filter = f"type = \"cast\" and ability.id in ({', '.join(map(str, CAST_IDS))})"
+    ids = ", ".join(str(p) for p in sorted(player_ids))
+    if not ids:
+        return {"casts": {}, "buffs": {}, "talents": {}}
+    lookback = max(0, start_time - ENCOUNTER_RESET_MS)
+    cast_filter = (f"type = \"cast\" and source.id in ({ids}) "
+                   f"and ability.id in ({', '.join(map(str, CAST_IDS))})")
+    buff_filter = (f"target.id in ({ids}) and ability.name in ("
+                   + ", ".join(f'"{n}"' for n in BUFF_NAMES) + ")")
     return index_defensive_events({
-        "casts": _paged(token, report_code, fight_ids, "Casts", cast_filter),
-        "combatants": _paged(token, report_code, fight_ids, "CombatantInfo", None),
+        "casts": _paged(token, report_code, "Casts", cast_filter, start_time=lookback, end_time=end_time),
+        "buffs": _paged(token, report_code, "Buffs", buff_filter, start_time=lookback, end_time=end_time),
+        "combatants": _paged(token, report_code, "CombatantInfo", None, fight_ids=fight_ids),
     })
 
 
@@ -84,6 +106,10 @@ def index_defensive_events(raw):
         sid = e.get("abilityGameID")
         if e.get("type") == "cast" and sid in CATALOG and e.get("sourceID") is not None:
             casts[e["sourceID"]].append((e["timestamp"], sid))
+    buffs = defaultdict(list)           # targetID -> [(ts, type, abilityGameID, sourceID)]
+    for e in raw.get("buffs", []):
+        if e.get("targetID") is not None:
+            buffs[e["targetID"]].append((e["timestamp"], e.get("type"), e.get("abilityGameID"), e.get("sourceID")))
     talents = {}                        # (fightID, sourceID) -> set(trait node entry IDs)
     for e in raw.get("combatants", []):
         tree = e.get("talentTree")
@@ -92,7 +118,9 @@ def index_defensive_events(raw):
         talents[(e.get("fight"), e["sourceID"])] = {t.get("id") for t in tree if t.get("id")}
     for lst in casts.values():
         lst.sort()
-    return {"casts": dict(casts), "talents": talents}
+    for lst in buffs.values():
+        lst.sort(key=lambda x: x[0])
+    return {"casts": dict(casts), "buffs": dict(buffs), "talents": talents}
 
 
 # =============================================================================
@@ -143,6 +171,19 @@ def _charges_at(death_ts, casts_in_window, charges, recharge_ms):
     return have, (recharge_done - death_ts if recharge_done is not None else 0)
 
 
+def _buffs_active_at(death_ts, buff_events):
+    """abilityGameID -> sourceID for auras that were up when the player died."""
+    up = {}
+    for ts, typ, aid, src in buff_events:
+        if ts > death_ts:
+            break
+        if typ in ("applybuff", "refreshbuff", "applybuffstack"):
+            up[aid] = src
+        elif typ == "removebuff" and ts < death_ts - DEATH_AURA_GRACE_MS:
+            up.pop(aid, None)
+    return up
+
+
 def _killing_blow(killing_blows, death_ts):
     """The player's overkill hit that caused this death, if one was recorded."""
     found = None
@@ -170,13 +211,24 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
         casts_by_spell[sid].append(t)
     talent_entries = indexed["talents"].get((fight_id, player_id))
 
-    # Auras on the player at death, from the killing blow, matched to the
-    # catalog by name (aura IDs often differ from the button's spell ID).
+    # Auras on the player at death, matched to the catalog by name (aura IDs
+    # often differ from the button's spell ID) -> who applied them. From the
+    # aura events when we have them; otherwise from the killing blow's aura list.
     killing = _killing_blow(killing_blows, death_ts)
-    active_names = {ability_names.get(a) for a in _auras(killing)} & set(NAME_TO_ID) if killing else set()
+    active = {}
+    buff_events = indexed.get("buffs")
+    if buff_events is not None:
+        for aid, src in _buffs_active_at(death_ts, buff_events.get(player_id, [])).items():
+            if ability_names.get(aid) in NAME_TO_ID:
+                active[ability_names.get(aid)] = src
+    elif killing:
+        for aid in _auras(killing):
+            if ability_names.get(aid) in NAME_TO_ID:
+                active[ability_names.get(aid)] = None
+    active_names = set(active)
 
     result = {"active": [], "available": [], "cooldown": [], "talentsKnown": talent_entries is not None,
-              "activeKnown": killing is not None}
+              "activeKnown": buff_events is not None or killing is not None}
     ready_entries = []
 
     pressed_this_pull = {sid for t, sid in own_casts if fight_start <= t <= death_ts}
@@ -205,7 +257,9 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
     for name in sorted(active_names - shown):
         entry = CATALOG[NAME_TO_ID[name]]
         if entry["kind"] == "external":
-            result["active"].append({"name": name, "kind": "external"})
+            src = active.get(name)
+            result["active"].append({"name": name, "kind": "external",
+                                     "by": actor_names.get(src) if src not in (None, player_id) else None})
         elif entry["class"] == player_class:   # a short-cooldown personal that was up
             result["active"].append({"name": name, "kind": "personal", "major": entry["major"]})
 
