@@ -266,7 +266,7 @@ def analyze():
                     cache_key = (rid, tuple(sorted(f['id'] for f in fights_list)), bool(enable_cheat_death))
                     deaths = deaths_lru.get(cache_key) if report_finished.get(rid) else None
                     if deaths is None:
-                        deaths = get_report_deaths_bulk(token, rid, fights_list, friendlies, ability_map, enable_cheat_death, False)
+                        deaths = get_report_deaths_bulk(token, rid, fights_list, friendlies, ability_map, enable_cheat_death)
                         if report_finished.get(rid):
                             deaths_lru.set(cache_key, deaths)
                     
