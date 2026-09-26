@@ -215,7 +215,7 @@ class AnalyzeFlowTests(unittest.TestCase):
                 mock.patch.object(app_module, 'get_fights', autospec=True, side_effect=self._fights) as fights, \
                 mock.patch.object(app_module, 'get_report_deaths_bulk', autospec=True, return_value=deaths) as bulk, \
                 mock.patch.object(app_module.defensives, 'fetch_defensive_events', autospec=True,
-                                  return_value={"casts": {}, "talents": {}}), \
+                                  return_value={"casts": {}, "buffs": {}, "talents": {}}), \
                 mock.patch.object(app_module.defensives, 'fetch_killing_blows', autospec=True,
                                   return_value={}):
             resp = app_module.app.test_client().post('/api/analyze', json={
