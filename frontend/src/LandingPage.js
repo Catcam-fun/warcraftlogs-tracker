@@ -78,9 +78,14 @@ const FEATURES = [
 ];
 
 /* Official Midnight key art + cinematic stills (press kit), self-hosted
-   and web-optimized. One is chosen at random per page load. */
+   and web-optimized. One is chosen per page load: the current tier's art
+   half the time, otherwise any of the earlier backgrounds. When a new tier
+   ships, move its predecessor's art down into BACKGROUNDS. */
+const CURRENT_TIER_BACKGROUNDS = [
+  'curse-of-ulatek', // Patch 12.1 key art (Midnight Season 2)
+];
+const CURRENT_TIER_CHANCE = 0.5;
 const BACKGROUNDS = [
-  'curse-of-ulatek', // Patch 12.1 key art (current tier)
   'against-the-void', 'hope-shall-rise', 'darkness-devours', 'stand-as-one',
   'cinematic-1', 'cinematic-2', 'cinematic-3', 'cinematic-4', 'immolation-1',
   'supremacy-1', 'supremacy-2', 'supremacy-3', 'supremacy-4',
@@ -100,7 +105,12 @@ export default function LandingPage({
   const navigate = useNavigate();
   const [railCollapsed, setRailCollapsed] = useState(false);
   const bg = useMemo(
-    () => BACKGROUNDS[Math.floor(Math.random() * BACKGROUNDS.length)],
+    () => {
+      const pool = CURRENT_TIER_BACKGROUNDS.length && Math.random() < CURRENT_TIER_CHANCE
+        ? CURRENT_TIER_BACKGROUNDS
+        : BACKGROUNDS;
+      return pool[Math.floor(Math.random() * pool.length)];
+    },
     [],
   );
   return (
