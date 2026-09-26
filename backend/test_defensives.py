@@ -12,16 +12,21 @@ def entries(*spell_ids):
     return {e for sid in spell_ids for e in CATALOG[sid]["talent_entries"]}
 
 
-def run(player_class, spec, casts=(), buffs=(), talents=None, fight_start=0, death=100_000,
+def run(player_class, spec, casts=(), auras=None, talents=None, fight_start=0, death=100_000,
         ability_names=None, actors=None):
+    """`auras`: aura IDs listed on the killing blow (None = no killing blow recorded)."""
     indexed = {
         "casts": {1: sorted(casts)},
-        "buffs": {1: sorted(buffs, key=lambda b: b[0])},
         "talents": {} if talents is None else {(7, 1): talents},
     }
     names = {sid: d["name"] for sid, d in CATALOG.items()}
     names.update(ability_names or {})
-    return defensives.analyze_death(1, player_class, spec, 7, fight_start, death, indexed, names, actors or {})
+    kb = None
+    if auras is not None:
+        kb = [{"timestamp": death, "type": "damage", "targetID": 1, "amount": 1, "overkill": 1,
+               "buffs": "".join(f"{a}." for a in auras)}]
+    return defensives.analyze_death(1, player_class, spec, 7, fight_start, death, indexed, names, actors or {},
+                                    killing_blows=kb)
 
 
 def names(items):
@@ -46,8 +51,14 @@ class DefensiveAnalysisTests(unittest.TestCase):
         self.assertNotIn("Cloak of Shadows", names(r["available"]))
 
     def test_baseline_abilities_need_no_talent(self):
-        r = run("Rogue", "Assassination", talents=set())
-        self.assertIn("Feint", names(r["available"]))
+        r = run("Druid", "Balance", talents=set())
+        self.assertIn("Barkskin", names(r["available"]))
+
+    def test_short_cooldowns_not_tracked_but_shown_when_active(self):
+        r = run("Rogue", "Assassination", talents=set(), auras=[])
+        self.assertNotIn("Feint", names(r["available"] + r["cooldown"]))
+        r = run("Rogue", "Assassination", talents=set(), auras=[FEINT])
+        self.assertIn("Feint", names(r["active"]))
 
     def test_used_ability_is_on_cooldown_with_timings(self):
         r = run("Mage", "Frost", talents=entries(ICE_BLOCK),
@@ -74,26 +85,26 @@ class DefensiveAnalysisTests(unittest.TestCase):
                 casts=[(0, EVASION), (80_000, EVASION)], death=165_000 + 1)
         self.assertIn("Evasion", names(r["available"]))
 
-    def test_active_buff_at_death(self):
-        r = run("Mage", "Frost", talents=entries(ICE_BLOCK),
-                casts=[(95_000, ICE_BLOCK)],
-                buffs=[(95_000, "applybuff", ICE_BLOCK, 1), (100_010, "removebuff", ICE_BLOCK, 1)])
+    def test_active_aura_on_killing_blow(self):
+        r = run("Mage", "Frost", talents=entries(ICE_BLOCK), casts=[(95_000, ICE_BLOCK)], auras=[ICE_BLOCK])
         self.assertIn("Ice Block", names(r["active"]))
         self.assertNotIn("Ice Block", names(r["cooldown"]))
+        self.assertTrue(r["activeKnown"])
 
-    def test_buff_that_expired_before_death_is_not_active(self):
-        r = run("Mage", "Frost", talents=entries(ICE_BLOCK),
-                casts=[(50_000, ICE_BLOCK)],
-                buffs=[(50_000, "applybuff", ICE_BLOCK, 1), (60_000, "removebuff", ICE_BLOCK, 1)])
+    def test_aura_gone_before_death_is_not_active(self):
+        r = run("Mage", "Frost", talents=entries(ICE_BLOCK), casts=[(50_000, ICE_BLOCK)], auras=[])
         self.assertNotIn("Ice Block", names(r["active"]))
         self.assertIn("Ice Block", names(r["cooldown"]))
 
-    def test_external_shows_who_cast_it(self):
-        r = run("Mage", "Frost", talents=set(),
-                buffs=[(90_000, "applybuff", 999, 5)],
-                ability_names={999: "Pain Suppression"}, actors={5: "Holypriest"})
+    def test_no_killing_blow_means_active_unknown(self):
+        r = run("Mage", "Frost", talents=entries(ICE_BLOCK), auras=None)
+        self.assertFalse(r["activeKnown"])
+        self.assertEqual(r["active"], [])
+
+    def test_external_on_killing_blow(self):
+        r = run("Mage", "Frost", talents=set(), auras=[999], ability_names={999: "Pain Suppression"})
         ext = [a for a in r["active"] if a["kind"] == "external"]
-        self.assertEqual(ext, [{"name": "Pain Suppression", "kind": "external", "by": "Holypriest"}])
+        self.assertEqual(ext, [{"name": "Pain Suppression", "kind": "external"}])
 
     def test_consumables_this_pull_only(self):
         r = run("Mage", "Frost", talents=set(),
@@ -200,12 +211,12 @@ class SurvivalTests(unittest.TestCase):
         kb = [hit(300_000, 200_000, 0, overkill=100_000)]
         carried = defensives.analyze_death(
             1, "Mage", "Frost", 7, 200_000, 300_000,
-            {"casts": {1: [(10_000, HEALTHSTONE)]}, "buffs": {}, "talents": {(7, 1): set()}},
+            {"casts": {1: [(10_000, HEALTHSTONE)]}, "talents": {(7, 1): set()}},
             NAMES, {}, killing_blows=kb, ability_schools=SCHOOLS)
         self.assertTrue(carried["survival"]["wouldSave"]["Healthstone"])
         not_carried = defensives.analyze_death(
             1, "Mage", "Frost", 7, 200_000, 300_000,
-            {"casts": {}, "buffs": {}, "talents": {(7, 1): set()}},
+            {"casts": {}, "talents": {(7, 1): set()}},
             NAMES, {}, killing_blows=kb, ability_schools=SCHOOLS)
         self.assertNotIn("Healthstone", not_carried["survival"]["wouldSave"])
 

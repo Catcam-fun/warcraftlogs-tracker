@@ -1,8 +1,8 @@
 """
 defensives.py - What defensive options a player had when they died.
 
-For every death this answers, per defensive the player actually had:
-  - active:     its buff was on them when they died
+For every death this answers, per major defensive the player actually had:
+  - active:     its aura was on them when they died (read from the killing blow)
   - available:  they had it and it was off cooldown, but it wasn't pressed
   - cooldown:   it was pressed earlier and hadn't come back yet
 plus whether they used a Healthstone / health potion this pull, and which raid
@@ -23,10 +23,6 @@ from warcraftlogs import graphql_query
 # presses during the pull count. Shorter ones can carry over from before it.
 ENCOUNTER_RESET_MS = 180_000
 
-# Death strips auras at (or a few ms after) the death event; a buff removed
-# this close to the death was still up when they died.
-DEATH_AURA_GRACE_MS = 250
-
 # A single-charge ability recast this much faster than its base cooldown
 # means talents shortened it; trust the observed interval instead.
 CDR_TOLERANCE_MS = 1_000
@@ -35,8 +31,12 @@ PERSONAL = {sid: d for sid, d in CATALOG.items() if d["kind"] == "personal"}
 EXTERNAL = {sid: d for sid, d in CATALOG.items() if d["kind"] == "external"}
 CONSUMABLE = {sid: d for sid, d in CATALOG.items() if d["kind"] in ("healthstone", "potion")}
 
-CAST_IDS = sorted(set(PERSONAL) | set(CONSUMABLE))
-BUFF_NAMES = sorted({d["name"] for d in list(PERSONAL.values()) + list(EXTERNAL.values())})
+# Availability is tracked for major defensives (60s+ cooldown) only. The short
+# ones (Feint, mage barriers, Rune Tap...) are pressed constantly: tracking
+# their casts cost ~16x more WCL points per report, and they aren't scored.
+# They still show when their aura was up at death.
+TRACKED = {sid: d for sid, d in PERSONAL.items() if d["major"]}
+CAST_IDS = sorted(set(TRACKED) | set(CONSUMABLE))
 NAME_TO_ID = {}
 for _sid, _d in list(PERSONAL.items()) + list(EXTERNAL.items()):
     NAME_TO_ID.setdefault(_d["name"], _sid)
@@ -46,43 +46,35 @@ for _sid, _d in list(PERSONAL.items()) + list(EXTERNAL.items()):
 # FETCHING (one report)
 # =============================================================================
 
-def _events_query(alias, data_type, filter_var):
-    flt = f"filterExpression: ${filter_var}" if filter_var else ""
-    return f"""
-      {alias}: events(startTime: $startTime, endTime: $endTime, dataType: {data_type},
-                      {flt} limit: 10000) {{ data nextPageTimestamp }}"""
+def _paged(token, report_code, fight_ids, data_type, flt):
+    query = """query($c: String!, $ids: [Int], $f: String, $s: Float) { reportData { report(code: $c) {
+        events(fightIDs: $ids, startTime: $s, dataType: %s, filterExpression: $f, limit: 10000)
+        { data nextPageTimestamp } } } }""" % data_type
+    events, start = [], None
+    for _ in range(50):
+        variables = {"c": report_code, "ids": list(fight_ids), "f": flt}
+        if start:
+            variables["s"] = start
+        block = ((graphql_query(token, query, variables).get("reportData") or {}).get("report") or {}).get("events") or {}
+        events += block.get("data") or []
+        start = block.get("nextPageTimestamp")
+        if not start:
+            break
+    return events
 
 
-def fetch_defensive_events(token, report_code, start_time, end_time, fetch_remaining):
-    """Casts, defensive buffs and talent loadouts for one report, in one request.
+def fetch_defensive_events(token, report_code, fight_ids):
+    """Defensive casts and talent loadouts for the given boss pulls.
 
-    `fetch_remaining(token, code, data_type, filter, next_ts, end)` follows WCL
-    pagination for any list that came back partial.
+    Scoped with fightIDs (WCL then scans only the pulls, not trash or
+    downtime). Measured on a 54-pull live log: ~2 points, versus ~52 for the
+    earlier whole-report version that also fetched every buff event.
     """
     cast_filter = f"type = \"cast\" and ability.id in ({', '.join(map(str, CAST_IDS))})"
-    buff_filter = "ability.name in (" + ", ".join(f'"{n}"' for n in BUFF_NAMES) + ")"
-    query = """
-    query($code: String!, $startTime: Float!, $endTime: Float!, $castFilter: String, $buffFilter: String) {
-      reportData { report(code: $code) {""" + \
-        _events_query("casts", "Casts", "castFilter") + \
-        _events_query("buffs", "Buffs", "buffFilter") + \
-        _events_query("combatants", "CombatantInfo", None) + """
-      } }
-    }"""
-    data = graphql_query(token, query, {
-        "code": report_code, "startTime": start_time, "endTime": end_time,
-        "castFilter": cast_filter, "buffFilter": buff_filter,
+    return index_defensive_events({
+        "casts": _paged(token, report_code, fight_ids, "Casts", cast_filter),
+        "combatants": _paged(token, report_code, fight_ids, "CombatantInfo", None),
     })
-    report = (data.get("reportData") or {}).get("report") or {}
-    out = {}
-    for alias, data_type, flt in (("casts", "Casts", cast_filter), ("buffs", "Buffs", buff_filter),
-                                  ("combatants", "CombatantInfo", None)):
-        block = report.get(alias) or {}
-        events = list(block.get("data") or [])
-        if block.get("nextPageTimestamp"):
-            events += fetch_remaining(token, report_code, data_type, flt, block["nextPageTimestamp"], end_time)
-        out[alias] = events
-    return index_defensive_events(out)
 
 
 def index_defensive_events(raw):
@@ -92,10 +84,6 @@ def index_defensive_events(raw):
         sid = e.get("abilityGameID")
         if e.get("type") == "cast" and sid in CATALOG and e.get("sourceID") is not None:
             casts[e["sourceID"]].append((e["timestamp"], sid))
-    buffs = defaultdict(list)           # targetID -> [(ts, type, abilityGameID, sourceID)]
-    for e in raw.get("buffs", []):
-        if e.get("targetID") is not None:
-            buffs[e["targetID"]].append((e["timestamp"], e.get("type"), e.get("abilityGameID"), e.get("sourceID")))
     talents = {}                        # (fightID, sourceID) -> set(trait node entry IDs)
     for e in raw.get("combatants", []):
         tree = e.get("talentTree")
@@ -104,9 +92,7 @@ def index_defensive_events(raw):
         talents[(e.get("fight"), e["sourceID"])] = {t.get("id") for t in tree if t.get("id")}
     for lst in casts.values():
         lst.sort()
-    for lst in buffs.values():
-        lst.sort(key=lambda x: x[0])
-    return {"casts": dict(casts), "buffs": dict(buffs), "talents": talents}
+    return {"casts": dict(casts), "talents": talents}
 
 
 # =============================================================================
@@ -157,17 +143,18 @@ def _charges_at(death_ts, casts_in_window, charges, recharge_ms):
     return have, (recharge_done - death_ts if recharge_done is not None else 0)
 
 
-def _buffs_active_at(death_ts, buff_events):
-    """abilityGameID -> sourceID for auras that were up when the player died."""
-    up = {}
-    for ts, typ, aid, src in buff_events:
-        if ts > death_ts:
-            break
-        if typ in ("applybuff", "refreshbuff", "applybuffstack"):
-            up[aid] = src
-        elif typ == "removebuff" and ts < death_ts - DEATH_AURA_GRACE_MS:
-            up.pop(aid, None)
-    return up
+def _killing_blow(killing_blows, death_ts):
+    """The player's overkill hit that caused this death, if one was recorded."""
+    found = None
+    for h in killing_blows or ():
+        if death_ts - 2_000 <= h["timestamp"] <= death_ts + 50:
+            found = h
+    return found
+
+
+def _auras(hit):
+    """Aura IDs WCL lists on a damage event ("108416.1022." -> {108416, 1022})."""
+    return {int(a) for a in str(hit.get("buffs") or "").split(".") if a.isdigit()}
 
 
 def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts,
@@ -183,20 +170,17 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
         casts_by_spell[sid].append(t)
     talent_entries = indexed["talents"].get((fight_id, player_id))
 
-    # Auras on the player at death, matched to the catalog by name (buff IDs
-    # often differ from the button's spell ID).
-    up = _buffs_active_at(death_ts, indexed["buffs"].get(player_id, []))
-    active_names = {}
-    for aid, src in up.items():
-        name = ability_names.get(aid)
-        if name in NAME_TO_ID:
-            active_names[name] = src
+    # Auras on the player at death, from the killing blow, matched to the
+    # catalog by name (aura IDs often differ from the button's spell ID).
+    killing = _killing_blow(killing_blows, death_ts)
+    active_names = {ability_names.get(a) for a in _auras(killing)} & set(NAME_TO_ID) if killing else set()
 
-    result = {"active": [], "available": [], "cooldown": [], "talentsKnown": talent_entries is not None}
+    result = {"active": [], "available": [], "cooldown": [], "talentsKnown": talent_entries is not None,
+              "activeKnown": killing is not None}
     ready_entries = []
 
     pressed_this_pull = {sid for t, sid in own_casts if fight_start <= t <= death_ts}
-    for sid, entry in PERSONAL.items():
+    for sid, entry in TRACKED.items():
         if not _has_ability(sid, entry, player_class, spec, talent_entries, casts_by_spell, pressed_this_pull):
             continue
         name = entry["name"]
@@ -217,10 +201,13 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
                 "readyIn": round(ready_in / 1000), "usedAgo": round((death_ts - window[-1]) / 1000),
             })
 
-    for name, src in active_names.items():
-        if EXTERNAL.get(NAME_TO_ID[name]):
-            result["active"].append({"name": name, "kind": "external",
-                                     "by": actor_names.get(src) if src != player_id else None})
+    shown = {a["name"] for a in result["active"]}
+    for name in sorted(active_names - shown):
+        entry = CATALOG[NAME_TO_ID[name]]
+        if entry["kind"] == "external":
+            result["active"].append({"name": name, "kind": "external"})
+        elif entry["class"] == player_class:   # a short-cooldown personal that was up
+            result["active"].append({"name": name, "kind": "personal", "major": entry["major"]})
 
     unused_consumables = []
     for kind in ("healthstone", "potion"):
@@ -342,10 +329,7 @@ def assess_survival(killing_blows, death_ts, available, consumables, ability_nam
     this death is matched by time. `available` / `consumables`: catalog
     entries ready at death (consumables only if carried and unused this pull).
     """
-    killing = None
-    for h in killing_blows:
-        if death_ts - 2_000 <= h["timestamp"] <= death_ts + 50:
-            killing = h
+    killing = _killing_blow(killing_blows, death_ts)
     if killing is None or killing.get("resourceActor") != 2:
         return None   # no recorded killing blow with health data (instant-kill mechanic, etc.)
     max_hp = killing.get("maxHitPoints") or 0
