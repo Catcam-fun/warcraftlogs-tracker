@@ -21,3 +21,4 @@ backend/check_zones.py
 __pycache__/
 *.pyc
 .pytest_cache/
+CLAUDE.md
