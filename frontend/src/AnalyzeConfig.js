@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   LogIn, LogOut, Settings as SettingsIcon, ChevronRight,
-  Search, Loader2, AlertCircle, Info, KeyRound, ExternalLink, Skull,
+  Search, Loader2, AlertCircle, Info, KeyRound, ExternalLink,
 } from 'lucide-react';
 import FpxRail from './FpxRail';
 import { SEASON_TWO_RAIDS } from './seasonTwoRaids';
@@ -20,7 +20,8 @@ const RAIDS = [
     bosses: ['Imperator Averzian', 'Vorasius', 'Fallen-King Salhadaar', 'Vaelgor & Ezzorak', 'Lightblinded Vanguard', 'Crown of the Cosmos', 'Chimaerus, the Undreamt God', "Belo'ren", "L'ura"] },
   ...SEASON_TWO_RAIDS,
 ];
-const COUNCIL = new Set(['the-soul-hunters', 'vaelgor-ezzorak', 'cauldron-of-carnage', 'the-silken-court', 'lightblinded-vanguard']);
+const COUNCIL = new Set(['the-soul-hunters', 'vaelgor-ezzorak', 'cauldron-of-carnage', 'the-silken-court', 'lightblinded-vanguard',
+  'entombed-sentinels', 'the-twin-fangs', 'the-coiled-altar']);
 const slug = (n) => n.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 const bossImg = (n) => `${process.env.PUBLIC_URL}/art/bosses/${slug(n)}.webp`;
 
@@ -39,13 +40,7 @@ export default function AnalyzeConfig({
         aria-pressed={config.selectedRaid === raid.key}
         className={`fpx-raidcard${config.selectedRaid === raid.key ? ' on' : ''}`}
         onClick={() => onRaidChange({ target: { name: 'selectedRaid', value: raid.key } })}>
-        {raid.emblem ? (
-          <div className={`rc-art rc-emblem ${raid.emblem}`} aria-hidden="true">
-            <Skull size={34} strokeWidth={1.4} />
-          </div>
-        ) : (
-          <div className="rc-art" style={{ backgroundImage: `url(${bossImg(raid.final)})` }} />
-        )}
+        <div className="rc-art" style={{ backgroundImage: `url(${bossImg(raid.final)})` }} />
         <div className="rc-meta">
           <span className="rc-exp">{raid.exp}</span>
           <span className="rc-name">{raid.name}</span>
@@ -126,12 +121,8 @@ export default function AnalyzeConfig({
             <section className="fpx-lineup fpx-rv" aria-labelledby="selected-raid-heading">
               {selected.bosses.map((b) => (
                 <div key={b} className={`fpx-boss${COUNCIL.has(slug(b)) ? ' council' : ''}`}
-                  style={selected.emblem ? undefined : { '--img': `url(${bossImg(b)})` }}>
-                  {selected.emblem ? (
-                    <div className={`art boss-emblem ${selected.emblem}`} aria-hidden="true">
-                      <Skull size={42} strokeWidth={1.2} />
-                    </div>
-                  ) : <div className="art" />}
+                  style={{ '--img': `url(${bossImg(b)})` }}>
+                  <div className="art" />
                   <div className="cap"><div className="nm">{b}</div></div>
                 </div>
               ))}

@@ -10,7 +10,7 @@ export const SEASON_TWO_RAIDS = [
     exp: 'MIDNIGHT',
     reportZone: null,
     fightZone: '0', // Combined tier: Venomous Abyss (3004) and Tidebound Grotto (2987).
-    emblem: 'venom',
+    final: "Ula'tek", // raid card art on the Analyze page
     bosses: [
       "Nek'zali the Soulcoiler",
       'Entombed Sentinels',
