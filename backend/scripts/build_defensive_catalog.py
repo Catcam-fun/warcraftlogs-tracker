@@ -220,6 +220,35 @@ EFFECTS = {
     "Healthstone": [("heal", 6262, 0)],
 }
 
+# Buffs that live on a spell the button doesn't point to in the game data.
+AURA_SPELLS = {"Fortifying Brew": [120954], "Rallying Cry": [97463], "Renewing Blaze": [374349]}
+
+
+def aura_durations(names):
+    """name -> longest base duration (ms) of that ability's aura, from SpellMisc/SpellDuration.
+
+    Logs sometimes miss the "aura removed" event (the player died, moved out
+    of range...), so the analysis never treats an aura as still up much past
+    this. Looks at the button, the spells it triggers, and the effect spells.
+    """
+    triggers = {}
+    for r in table("SpellEffect"):
+        if r["DifficultyID"] == "0" and int(r["EffectTriggerSpell"] or 0):
+            triggers.setdefault(int(r["SpellID"]), set()).add(int(r["EffectTriggerSpell"]))
+    index = {int(r["SpellID"]): int(r["DurationIndex"]) for r in table("SpellMisc") if r["DifficultyID"] == "0"}
+    length = {int(r["ID"]): int(r["MaxDuration"]) for r in table("SpellDuration")}
+
+    def duration(sid, name):
+        spells, frontier = {sid}, {sid}
+        for _ in range(2):
+            frontier = {t for s in frontier for t in triggers.get(s, ())}
+            spells |= frontier
+        spells |= {e[1] for e in EFFECTS.get(name, ())} | set(AURA_SPELLS.get(name, ()))
+        found = [length.get(index.get(s, 0), 0) for s in spells if names.get(s) == name]
+        return max(found, default=0) or None
+    return duration
+
+
 # talent -> catalog spell whose modifier it copies onto potions and Healthstones.
 ALSO_CONSUMABLES = {"Iron Stomach": 185311}
 
@@ -354,6 +383,7 @@ def main():
                 if alias:
                     def_spell[int(r["ID"])].add(alias)
     mods_for = talent_modifiers(names, def_spell_plain)
+    aura_ms = aura_durations(names)
     entries_for_spell, entries_for_def = {}, {}
     for r in table("TraitNodeEntry"):
         entries_for_def.setdefault(int(r["TraitDefinitionID"]), set()).add(int(r["ID"]))
@@ -383,6 +413,7 @@ def main():
             "major": cd_ms >= MAJOR_COOLDOWN_S * 1000, "talent_entries": entries,
             "replaced_by_entries": replaced_by,
             "mitigation": components(name, MITIGATION.get(name), EFFECTS.get(name), mods_for),
+            "aura_ms": aura_ms(sid, name) if kind in ("personal", "external") else None,
         }
     # Talents that also reach consumables (item spells share no class mask with
     # the talent, so the game data can't link them): Iron Stomach boosts
