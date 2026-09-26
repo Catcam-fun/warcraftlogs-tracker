@@ -80,6 +80,7 @@ const FEATURES = [
 /* Official Midnight key art + cinematic stills (press kit), self-hosted
    and web-optimized. One is chosen at random per page load. */
 const BACKGROUNDS = [
+  'curse-of-ulatek', // Patch 12.1 key art (current tier)
   'against-the-void', 'hope-shall-rise', 'darkness-devours', 'stand-as-one',
   'cinematic-1', 'cinematic-2', 'cinematic-3', 'cinematic-4', 'immolation-1',
   'supremacy-1', 'supremacy-2', 'supremacy-3', 'supremacy-4',
