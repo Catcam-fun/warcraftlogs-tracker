@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from './supabaseClient';
+import { supabase, setSessionOnly } from './supabaseClient';
 import { X } from 'lucide-react';
+
+const TURNSTILE_SITE_KEY = '0x4AAAAAACCS9WN5tgUaGBvQ';
 
 export default function Auth({ onClose }) {
   const navigate = useNavigate();
@@ -9,6 +11,7 @@ export default function Auth({ onClose }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
+  const [isReset, setIsReset] = useState(false);
   const [message, setMessage] = useState('');
   const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
@@ -16,33 +19,93 @@ export default function Auth({ onClose }) {
   const [captchaToken, setCaptchaToken] = useState('');
   const turnstileRef = useRef(null);
 
-  // Load Cloudflare Turnstile script and set up callback
+  // Cloudflare Turnstile, rendered explicitly into our container. The
+  // implicit auto-render only scans the page once when the script first
+  // loads, so reopening this modal used to show no CAPTCHA at all.
+  const widgetIdRef = useRef(null);
   useEffect(() => {
-    // Set up global callback function for Turnstile
-    window.onTurnstileSuccess = (token) => {
-      console.log('Turnstile token received:', token ? 'YES' : 'NO');
-      setCaptchaToken(token);
+    let cancelled = false;
+
+    const render = () => {
+      if (cancelled || !window.turnstile || !turnstileRef.current || widgetIdRef.current !== null) return;
+      widgetIdRef.current = window.turnstile.render(turnstileRef.current, {
+        sitekey: TURNSTILE_SITE_KEY,
+        theme: 'dark',
+        callback: (token) => setCaptchaToken(token),
+        'expired-callback': () => setCaptchaToken(''),
+        'error-callback': () => setCaptchaToken(''),
+      });
     };
 
-    if (!document.getElementById('turnstile-script')) {
-      const script = document.createElement('script');
-      script.id = 'turnstile-script';
-      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js';
-      script.async = true;
-      script.defer = true;
-      document.body.appendChild(script);
+    if (window.turnstile) {
+      render();
+    } else {
+      let script = document.getElementById('turnstile-script');
+      if (!script) {
+        script = document.createElement('script');
+        script.id = 'turnstile-script';
+        script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+        script.async = true;
+        document.body.appendChild(script);
+      }
+      script.addEventListener('load', render);
     }
 
-    // Cleanup
     return () => {
-      delete window.onTurnstileSuccess;
+      cancelled = true;
+      document.getElementById('turnstile-script')?.removeEventListener('load', render);
+      if (widgetIdRef.current !== null && window.turnstile) {
+        window.turnstile.remove(widgetIdRef.current);
+      }
+      widgetIdRef.current = null;
     };
   }, []);
 
+  // A Turnstile token is single-use: get a fresh one after every attempt.
+  const resetCaptcha = () => {
+    setCaptchaToken('');
+    if (window.turnstile && widgetIdRef.current !== null) {
+      window.turnstile.reset(widgetIdRef.current);
+    }
+  };
+
+  const verifyCaptcha = async () => {
+    const verifyResponse = await fetch('https://wcl-proxy.catcam-fun.workers.dev/verify-turnstile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: captchaToken })
+    });
+    const verifyData = await verifyResponse.json().catch(() => ({}));
+    if (!verifyResponse.ok || !verifyData.success) {
+      throw new Error('CAPTCHA verification failed. Please try again.');
+    }
+  };
+
+  const handleReset = async (e) => {
+    e.preventDefault();
+    if (!captchaToken) {
+      setMessage('Please complete the CAPTCHA verification.');
+      return;
+    }
+    setLoading(true);
+    setMessage('');
+    try {
+      await verifyCaptcha();
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin,
+      });
+      if (error) throw error;
+      setMessage('Success! If that email has an account, a reset link is on its way.');
+    } catch (error) {
+      setMessage(error.message || 'An error occurred');
+    } finally {
+      setLoading(false);
+      resetCaptcha();
+    }
+  };
+
   const handleAuth = async (e) => {
     e.preventDefault();
-
-    console.log('handleAuth called, captchaToken:', captchaToken);
 
     // Validate checkboxes for sign-up
     if (isSignUp) {
@@ -66,48 +129,16 @@ export default function Auth({ onClose }) {
     setMessage('');
 
     try {
-      console.log('Verifying CAPTCHA...');
-      // Verify Turnstile token on backend
-      const verifyResponse = await fetch('https://wcl-proxy.catcam-fun.workers.dev/verify-turnstile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: captchaToken })
-      });
-
-      const verifyData = await verifyResponse.json();
-      console.log('CAPTCHA verification response:', verifyData);
-
-      if (!verifyResponse.ok || !verifyData.success) {
-        throw new Error('CAPTCHA verification failed. Please try again.');
-      }
+      await verifyCaptcha();
 
       if (isSignUp) {
-        // Sign up
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password,
-        });
+        const { error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
         setMessage('Success! Check your email for confirmation link.');
       } else {
-        // Sign in with session persistence based on stayLoggedIn
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-          options: {
-            persistSession: stayLoggedIn
-          }
-        });
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-
-        // If not staying logged in, set session to expire when browser closes
-        if (!stayLoggedIn) {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session) {
-            sessionStorage.setItem('supabase.auth.token', JSON.stringify(session));
-            localStorage.removeItem('supabase.auth.token');
-          }
-        }
+        setSessionOnly(!stayLoggedIn);
 
         setMessage('Logged in successfully!');
         setTimeout(() => {
@@ -119,6 +150,7 @@ export default function Auth({ onClose }) {
       setMessage(error.message || 'An error occurred');
     } finally {
       setLoading(false);
+      resetCaptcha();
     }
   };
 
@@ -127,29 +159,28 @@ export default function Auth({ onClose }) {
     setMessage('');
     setAgeConfirmed(false);
     setTermsAccepted(false);
-    setCaptchaToken('');
-    // Reset Turnstile widget if it exists
-    if (window.turnstile && turnstileRef.current) {
-      window.turnstile.reset(turnstileRef.current);
-    }
+    setIsReset(false);
+    resetCaptcha();
   };
 
   return (
     <div className="fpx-mov" onClick={onClose}>
       <div className="fpx-mcard" onClick={(e) => e.stopPropagation()}>
         <div className="fpx-mhead">
-          <h2>{isSignUp ? 'Create account' : 'Sign in'}</h2>
+          <h2>{isReset ? 'Reset password' : isSignUp ? 'Create account' : 'Sign in'}</h2>
           <button className="fpx-mclose" onClick={onClose} aria-label="Close"><X size={18} /></button>
         </div>
 
         <div className="fpx-mbody">
           <p className="lead">
-            {isSignUp
-              ? 'Create an account to save your API credentials and analysis history.'
-              : 'Sign in to access your saved credentials and analysis history.'}
+            {isReset
+              ? "Enter your account email and we'll send you a link to choose a new password."
+              : isSignUp
+                ? 'Create an account to save your API credentials and analysis history.'
+                : 'Sign in to access your saved credentials and analysis history.'}
           </p>
 
-          <form className="fpx-mform" onSubmit={handleAuth}>
+          <form className="fpx-mform" onSubmit={isReset ? handleReset : handleAuth}>
             <div className="f">
               <label>Email</label>
               <input
@@ -160,17 +191,27 @@ export default function Auth({ onClose }) {
               />
             </div>
 
-            <div className="f">
-              <label>Password</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                minLength={6}
-              />
-              {isSignUp && <p className="hint">Must be at least 6 characters</p>}
-            </div>
+            {!isReset && (
+              <div className="f">
+                <label>Password</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  minLength={6}
+                />
+                {isSignUp
+                  ? <p className="hint">Must be at least 6 characters</p>
+                  : (
+                    <p className="hint">
+                      <button type="button" className="fpx-link" onClick={() => { setIsReset(true); setMessage(''); }}>
+                        Forgot password?
+                      </button>
+                    </p>
+                  )}
+              </div>
+            )}
 
             {/* Age Confirmation - Only for Sign Up */}
             {isSignUp && (
@@ -215,17 +256,11 @@ export default function Auth({ onClose }) {
 
             {/* Turnstile CAPTCHA - For both Sign In and Sign Up */}
             <div className="turnstile">
-              <div
-                ref={turnstileRef}
-                className="cf-turnstile"
-                data-sitekey="0x4AAAAAACCS9WN5tgUaGBvQ"
-                data-callback="onTurnstileSuccess"
-                data-theme="dark"
-              />
+              <div ref={turnstileRef} />
             </div>
 
             {/* Stay Logged In - Only for Sign In */}
-            {!isSignUp && (
+            {!isSignUp && !isReset && (
               <label className="fpx-mcheck">
                 <input
                   type="checkbox"
@@ -242,7 +277,7 @@ export default function Auth({ onClose }) {
               className="fpx-btn"
               style={{ opacity: loading ? 0.7 : 1, cursor: loading ? 'not-allowed' : 'pointer' }}
             >
-              {loading ? 'Loading…' : (isSignUp ? 'Sign up' : 'Sign in')}
+              {loading ? 'Loading…' : isReset ? 'Send reset link' : (isSignUp ? 'Sign up' : 'Sign in')}
             </button>
           </form>
 
@@ -256,10 +291,18 @@ export default function Auth({ onClose }) {
           )}
 
           <p className="fpx-mfoot">
-            {isSignUp ? 'Already have an account?' : "Don't have an account?"}{' '}
-            <button type="button" className="fpx-link" onClick={handleToggleMode}>
-              {isSignUp ? 'Sign in' : 'Sign up'}
-            </button>
+            {isReset ? (
+              <button type="button" className="fpx-link" onClick={() => { setIsReset(false); setMessage(''); }}>
+                Back to sign in
+              </button>
+            ) : (
+              <>
+                {isSignUp ? 'Already have an account?' : "Don't have an account?"}{' '}
+                <button type="button" className="fpx-link" onClick={handleToggleMode}>
+                  {isSignUp ? 'Sign in' : 'Sign up'}
+                </button>
+              </>
+            )}
           </p>
         </div>
       </div>

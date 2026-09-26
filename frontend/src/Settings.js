@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
+import { apiFetch } from './api';
 import { X, Save, Eye, EyeOff, Key, Mail, Trash2 } from 'lucide-react';
 
 export default function Settings({ user, onClose, onCredentialsUpdate, onShowPrivacy }) {
@@ -40,9 +41,9 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
         .from('api_credentials')
         .select('client_id, client_secret')
         .eq('user_id', user.id)
-        .single();
+        .maybeSingle();
 
-      if (error && error.code !== 'PGRST116') {
+      if (error) {
         console.error('Error loading credentials:', error);
         return;
       }
@@ -71,7 +72,7 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
         .from('api_credentials')
         .select('id')
         .eq('user_id', user.id)
-        .single();
+        .maybeSingle();
 
       if (existing) {
         // Update existing
@@ -193,48 +194,18 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
     setDeleteMessage('');
 
     try {
-      // Automatically detect if running locally or in production
-      const API_BASE = window.location.hostname === 'localhost' 
-        ? 'http://localhost:5000' 
-        : 'https://floorpov-backend.onrender.com';
-      
-      console.log(`[Delete Account] Environment: ${window.location.hostname === 'localhost' ? 'LOCAL' : 'PRODUCTION'}`);
-      console.log(`[Delete Account] Calling ${API_BASE}/api/delete-user-account/${user.id}`);
-      
-      // Call the backend to delete user data from database
-      const response = await fetch(`${API_BASE}/api/delete-user-account/${user.id}`, {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
-
-      console.log('[Delete Account] Response status:', response.status);
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to delete user data from backend');
+      // The server identifies the account from the session token, deletes
+      // its saved reports, shares, stored credentials, and the login itself.
+      const { ok, body } = await apiFetch('/api/account', { method: 'DELETE', auth: true });
+      if (!ok) {
+        throw new Error(body.error || 'Failed to delete account');
       }
 
-      const result = await response.json();
-      console.log('[Delete Account] Backend deletion successful:', result);
-
-      // Now delete the user account from Supabase Auth using the correct method
-      // This requires the user to be currently logged in
-      const { error: deleteUserError } = await supabase.auth.updateUser({
-        data: { deleted: true }
-      });
-      
-      // Actually, we should sign out which effectively "deletes" their session
-      // Supabase doesn't allow users to delete their own accounts from the client
-      // So we sign them out after deleting their data
-      await supabase.auth.signOut();
-
-      // Success - close modal and user will be logged out
-      setDeleteMessage('Account data deleted successfully');
+      await supabase.auth.signOut({ scope: 'local' });
+      setDeleteMessage('Account deleted successfully');
       setTimeout(() => {
         onClose();
-        window.location.reload(); // Refresh to update UI
+        window.location.assign('/');
       }, 1000);
     } catch (err) {
       console.error('[Delete Account] Error:', err);

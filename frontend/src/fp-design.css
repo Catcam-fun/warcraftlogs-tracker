@@ -465,13 +465,15 @@
   color:var(--fpx-ink-dim);margin-bottom:7px;letter-spacing:.02em}
 .fpx-mform input[type=email],
 .fpx-mform input[type=password],
+.fpx-mform select,
 .fpx-mform input[type=text]{width:100%;padding:11px 13px;border-radius:9px!important;
   font-family:var(--fpx-sans);font-size:13.5px;color:var(--fpx-ink)!important;
   background:rgba(255,255,255,.055)!important;
   border:1px solid rgba(255,255,255,.22)!important;outline:none;
   box-sizing:border-box;transition:.15s var(--fpx-ease)}
-.fpx-mform input:hover{border-color:rgba(255,255,255,.34)!important}
-.fpx-mform input:focus{border-color:var(--fpx-kill)!important;
+.fpx-mform select option{background:#141a26;color:#f3f4f6}
+.fpx-mform select:hover,.fpx-mform input:hover{border-color:rgba(255,255,255,.34)!important}
+.fpx-mform select:focus,.fpx-mform input:focus{border-color:var(--fpx-kill)!important;
   background:rgba(255,255,255,.08)!important;box-shadow:0 0 0 3px rgba(255,174,59,.16)}
 .fpx-mform .f .hint{margin:6px 0 0;font-size:11px;color:var(--fpx-ink-faint);line-height:1.5}
 .fpx-mcheck{display:flex;align-items:flex-start;gap:9px;font-size:13px;
