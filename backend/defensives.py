@@ -14,6 +14,7 @@ The ability list, cooldowns and talent mappings come from defensive_catalog.py,
 generated from game data by scripts/build_defensive_catalog.py.
 """
 
+import hashlib
 from collections import defaultdict
 
 from boss_spell_flags import IGNORES_IMMUNITY
@@ -37,6 +38,17 @@ CONSUMABLE = {sid: d for sid, d in CATALOG.items() if d["kind"] in ("healthstone
 TRACKED = PERSONAL
 CAST_IDS = sorted(set(TRACKED) | set(CONSUMABLE))
 BUFF_NAMES = sorted({d["name"] for d in list(PERSONAL.values()) + list(EXTERNAL.values())})
+
+# Talent entries the analysis ever looks at: granting, replacing or modifying a
+# tracked ability. Loadouts are trimmed to these (nothing else is read).
+RELEVANT_TALENT_ENTRIES = frozenset(
+    e for d in CATALOG.values()
+    for e in list(d["talent_entries"]) + list(d.get("replaced_by_entries", ()))
+    + [x for c in (d.get("mitigation") or []) if isinstance(c, dict) for m in c.get("mods", ()) for x in m["entries"]])
+
+# Changes whenever what gets fetched or kept for defensives changes, so cached
+# data from an older catalog is never reused.
+CATALOG_FINGERPRINT = hashlib.sha1(repr((CAST_IDS, BUFF_NAMES, sorted(RELEVANT_TALENT_ENTRIES))).encode()).hexdigest()[:12]
 
 # Death strips auras at (or a few ms after) the death event; an aura removed
 # this close to the death was still up when they died.
@@ -98,7 +110,8 @@ def fetch_defensive_events(token, report_code, fight_ids, start_time, end_time, 
     return index_defensive_events({
         "casts": [e for e in casts if e.get("sourceID") in players],
         "buffs": [e for e in buffs if e.get("targetID") in players],
-        "combatants": _paged(token, report_code, "CombatantInfo", None, fight_ids=fight_ids),
+        "combatants": [e for e in _paged(token, report_code, "CombatantInfo", None, fight_ids=fight_ids)
+                       if e.get("sourceID") in players],
     })
 
 
@@ -119,7 +132,8 @@ def index_defensive_events(raw):
         tree = e.get("talentTree")
         if tree is None or e.get("sourceID") is None:
             continue
-        talents[(e.get("fight"), e["sourceID"])] = {t["id"]: t.get("rank") or 1 for t in tree if t.get("id")}
+        talents[(e.get("fight"), e["sourceID"])] = {t["id"]: t.get("rank") or 1 for t in tree
+                                                     if t.get("id") in RELEVANT_TALENT_ENTRIES}
     for lst in casts.values():
         lst.sort()
     for lst in buffs.values():
@@ -350,12 +364,19 @@ def fetch_killing_blows(token, report_code, fight_ids):
     return index_killing_blows(events)
 
 
+# Everything the survival assessment reads from a killing blow (the rest,
+# like positions and stats, is dropped so cached reports stay small).
+KILLING_BLOW_FIELDS = ("timestamp", "type", "sourceID", "targetID", "abilityGameID", "fight", "buffs",
+                       "hitType", "amount", "overkill", "absorbed", "mitigated", "unmitigatedAmount",
+                       "isAoE", "resourceActor", "hitPoints", "maxHitPoints")
+
+
 def index_killing_blows(events):
     """{targetID: [killing hits sorted by time]}"""
     idx = defaultdict(list)
     for e in events:
         if e.get("type") == "damage" and e.get("targetID") is not None and (e.get("overkill") or 0) > 0:
-            idx[e["targetID"]].append(e)
+            idx[e["targetID"]].append({k: e[k] for k in KILLING_BLOW_FIELDS if k in e})
     for hits in idx.values():
         hits.sort(key=lambda e: e["timestamp"])
     return dict(idx)

@@ -271,7 +271,8 @@ def analyze():
                     
                     # Defensive casts, auras and talents for the players who died.
                     dead = {d.get("targetID") for ds in deaths.values() for d in ds if d.get("targetID")}
-                    def_key = (rid, tuple(sorted(f['id'] for f in fights_list)), tuple(sorted(dead)))
+                    def_key = (rid, tuple(sorted(f['id'] for f in fights_list)), tuple(sorted(dead)),
+                               defensives.CATALOG_FINGERPRINT)
                     def_data = defensive_lru.get(def_key) if report_finished.get(rid) else None
                     if def_data is None:
                         try:
