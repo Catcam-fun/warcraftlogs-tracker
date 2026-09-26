@@ -246,11 +246,11 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
 # WOULD A DEFENSIVE HAVE SAVED THEM?
 # =============================================================================
 #
-# Uses only the killing blow of each death: WCL returns every hit with
-# overkill for a whole report in one cheap request, with the player's health
-# and max health attached. Fetching the seconds before every death costs about
-# one API point per pull, which would use up a user's hourly WCL allowance on
-# one big analysis. From the killing blow we know:
+# Uses only the killing blow of each death: one request per report returns
+# every hit with overkill in its boss pulls, with the player's health and max
+# health attached (about 1 WCL point per pull; fetching the seconds before
+# every death costs more and returns far more data). From the killing blow
+# we know:
 #   - how they died: one-shot from near full health, or already low
 #   - how big the hit was and how much it overkilled by
 #   - whether each defensive they had ready would have covered that hit
@@ -259,19 +259,27 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
 # It is deliberately cautious: a defensive is only credited against the
 # killing blow, not the hits before it.
 
-FULL_HEALTH = 0.90           # at or above this before the killing blow = one-shot
+FULL_HEALTH = 0.85           # at or above this before the killing blow = one-shot (88% reads as full)
 PHYSICAL = 1
 KILLING_BLOW_FILTER = "overkill > 0"
 
 
-def fetch_killing_blows(token, report_code, start_time, end_time):
-    """Every hit on a player with overkill in the window, with health values."""
-    query = """query($c: String!, $s: Float!, $e: Float!, $f: String) { reportData { report(code: $c) {
-        events(startTime: $s, endTime: $e, dataType: DamageTaken, filterExpression: $f,
+def fetch_killing_blows(token, report_code, fight_ids):
+    """Every hit on a player with overkill in the given pulls, with health values.
+
+    Scoped with fightIDs so WCL only scans boss pulls (not trash or downtime);
+    a filtered query over a whole report pages through mostly-empty time
+    chunks. Cost measured on live logs: about 1 API point per pull.
+    """
+    query = """query($c: String!, $ids: [Int], $f: String, $s: Float) { reportData { report(code: $c) {
+        events(fightIDs: $ids, startTime: $s, dataType: DamageTaken, filterExpression: $f,
                includeResources: true, limit: 10000) { data nextPageTimestamp } } } }"""
-    events, start = [], start_time
+    events, start = [], None
     for _ in range(50):
-        data = graphql_query(token, query, {"c": report_code, "s": start, "e": end_time, "f": KILLING_BLOW_FILTER})
+        variables = {"c": report_code, "ids": list(fight_ids), "f": KILLING_BLOW_FILTER}
+        if start:
+            variables["s"] = start
+        data = graphql_query(token, query, variables)
         block = ((data.get("reportData") or {}).get("report") or {}).get("events") or {}
         events += block.get("data") or []
         start = block.get("nextPageTimestamp")
@@ -304,9 +312,14 @@ def _school_applies(school, hit, ability_schools):
     return True
 
 
+def _full_hit(hit):
+    """Whole killing blow: WCL's `amount` is only the health it took (the rest is `overkill`)."""
+    return (hit.get("amount") or 0) + (hit.get("overkill") or 0) + (hit.get("absorbed") or 0)
+
+
 def _prevented(options, hit, max_hp, missing_hp, ability_schools):
     """Damage the given defensives would have prevented (or healed) against the killing blow."""
-    dmg = (hit.get("amount") or 0) + (hit.get("absorbed") or 0)
+    dmg = _full_hit(hit)
     keep, absorb = 1.0, 0.0
     for m in options:
         if not _school_applies(m.get("school"), hit, ability_schools):
@@ -339,8 +352,11 @@ def assess_survival(killing_blows, death_ts, available, consumables, ability_nam
     if not max_hp:
         return None
     overkill = killing.get("overkill") or 0
-    hp_before = max((killing.get("amount") or 0) - overkill, 0)
-    hit_size = (killing.get("amount") or 0) + (killing.get("absorbed") or 0)
+    # Verified on live logs: the killing blow's `amount` equals the health the
+    # player had left (matches the previous hit's recorded health), and
+    # `overkill` is the damage beyond that.
+    hp_before = killing.get("amount") or 0
+    hit_size = _full_hit(killing)
     missing_hp = max(max_hp - hp_before, 0)
 
     def verdict(options):
