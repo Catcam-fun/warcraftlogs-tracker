@@ -613,6 +613,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
                     "fightId": fight_id,
                     "bossName": fight_obj.get('name', 'Unknown') if fight_obj else 'Unknown',
                     "abilityName": cheat_event["abilityName"],
+                    "abilityId": cheat_event["abilityGameID"],
                     "isCheatDeath": True,
                 }
                 
