@@ -116,6 +116,43 @@ def is_in_mass_death(death_index, deaths_list):
     return False, None
 
 
+def _in_mass_window(ts, real_ts):
+    """Is a moment at `ts` inside a wipe? Same windows as is_in_mass_death:
+    each starts at a real death and counts only real deaths."""
+    if len(real_ts) < MASS_DEATH_THRESHOLD:
+        return False
+    for start in real_ts:
+        if start <= ts <= start + MASS_DEATH_WINDOW and \
+                sum(1 for t in real_ts if start <= t <= start + MASS_DEATH_WINDOW) >= MASS_DEATH_THRESHOLD:
+            return True
+    return False
+
+
+def rank_pull_deaths(deaths_sorted):
+    """Where each death in one pull falls for the "first X deaths" count.
+
+    `deaths_sorted`: every death in the pull (all players, cheat deaths
+    included) in log order. Returns [(slot, in_wipe)] in the same order:
+      - real death: slot = which death of the pull it was (1 = first). A
+        player who dies, is battle-rezzed and dies again takes two slots.
+        Simultaneous deaths keep the combat log's order.
+      - cheat death: slot = real deaths so far + 1. Cheat deaths never take
+        a slot from real deaths.
+      - in_wipe: inside a mass death. Only real deaths make a wipe.
+    A death counts for "first X" when slot <= X and not in_wipe.
+    """
+    real_ts = [d["timestamp"] for d in deaths_sorted if not d.get("isCheatDeath")]
+    real_so_far, out = 0, []
+    for d in deaths_sorted:
+        if d.get("isCheatDeath"):
+            slot = real_so_far + 1
+        else:
+            real_so_far += 1
+            slot = real_so_far
+        out.append((slot, _in_mass_window(d["timestamp"], real_ts)))
+    return out
+
+
 def find_mass_death_start(cutoff_idx, deaths_list):
     """
     Find the start timestamp of the mass death window that contains the death at cutoff_idx.

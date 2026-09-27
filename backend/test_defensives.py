@@ -353,3 +353,92 @@ class SurvivalTests(unittest.TestCase):
 
 
 DIVINE_PROTECTION, UNENDING = 498, 104773
+
+
+BLUR = 198589
+
+
+class PatchCatalogTests(unittest.TestCase):
+    def test_report_uses_the_patch_live_when_it_was_logged(self):
+        from datetime import datetime, timezone
+        from defensive_catalog import PATCHES
+        first_day, first_patch = PATCHES[0]
+        ms = lambda d: datetime.fromisoformat(d).replace(tzinfo=timezone.utc).timestamp() * 1000
+        self.assertEqual(defensives.catalog_for(ms(first_day)).patch, first_patch)
+        self.assertEqual(defensives.catalog_for(ms("2099-01-01")).patch, PATCHES[-1][1])
+        self.assertEqual(defensives.catalog_for(None).patch, PATCHES[-1][1])
+        for day, patch in PATCHES[1:]:
+            self.assertEqual(defensives.catalog_for(ms(day) + 3_600_000).patch, patch)
+
+    def test_talent_that_adds_a_charge(self):
+        mod = next(m for m in CATALOG[BLUR].get("charge_mods", ()) if m["talent"] == "Demonic Resilience")
+        cast = [(90_000, BLUR)]
+        plain = run("DemonHunter", "Havoc", casts=cast, talents={})
+        self.assertIn("Blur", names(plain["cooldown"]))
+        extra = run("DemonHunter", "Havoc", casts=cast, talents={e: 1 for e in mod["entries"]})
+        self.assertIn("Blur", names(extra["available"]))
+
+    def test_spec_passive_that_shortens_a_cooldown(self):
+        brew = CATALOG[115203]     # Fortifying Brew: 6 min, 2 min for Windwalker and Mistweaver
+        self.assertTrue(any(m.get("specs") == ["Windwalker"] for m in brew.get("cooldown_mods", ())))
+        self.assertLess(defensives._talented_cooldown(brew, {}, "Windwalker"), brew["cooldown_ms"])
+        self.assertEqual(defensives._talented_cooldown(brew, {}, "Brewmaster"), brew["cooldown_ms"])
+
+
+class ConsumableEstimateTests(unittest.TestCase):
+    cat = defensives.catalog_for(None)
+
+    def test_healthstone_uses_the_players_own_share_of_max_health(self):
+        heals = [(1, HEALTHSTONE, 325_000, 1_000_000, 1.3)]         # buffs don't change Healthstones
+        e = defensives.consumable_estimate(HEALTHSTONE, self.cat, heals, 1.0, {}, "Frost")
+        self.assertEqual(e["mitigation"], [{"heal": 0.325}])
+        self.assertEqual(e["source"], "log")
+
+    def test_healthstone_without_a_use_in_the_log_comes_from_game_data(self):
+        e = defensives.consumable_estimate(HEALTHSTONE, self.cat, [], 1.0, {}, "Frost")
+        self.assertEqual(e["source"], "gameData")
+        self.assertAlmostEqual(e["mitigation"][0]["heal"], 0.25)
+
+    def test_potion_takes_buffs_out_of_past_heals_and_puts_death_buffs_in(self):
+        heals = [(1, POTION, 240_000, 900_000, 1.2), (2, POTION, 200_000, 900_000, 1.0),
+                 (3, POTION, 200_000, 900_000, 1.0)]
+        e = defensives.consumable_estimate(POTION, self.cat, heals, 1.3, {}, "Frost")
+        self.assertAlmostEqual(e["mitigation"][0]["heal_amount"], 260_000)
+
+    def test_potion_without_a_use_in_the_log_uses_the_typical_heal(self):
+        e = defensives.consumable_estimate(POTION, self.cat, [], 1.0, {}, "Frost")
+        self.assertEqual(e["source"], "typical")
+        self.assertGreater(e["mitigation"][0]["heal_amount"], 0)
+
+    def test_heals_are_indexed_per_player_with_the_buffs_multiplier(self):
+        aura = next(iter(self.cat.heal_auras))
+        out = defensives.index_defensive_events({"heals": [
+            {"type": "heal", "timestamp": 5, "sourceID": 1, "targetID": 1, "abilityGameID": POTION,
+             "amount": 150_000, "overheal": 50_000, "maxHitPoints": 900_000, "buffs": f"{aura}."},
+            {"type": "heal", "timestamp": 6, "sourceID": 3, "targetID": 1, "abilityGameID": POTION, "amount": 9},
+        ]}, self.cat)
+        self.assertEqual(out["heals"][1], [(5, POTION, 200_000, 900_000, self.cat.heal_auras[aura])])
+
+
+class OlderLogTests(unittest.TestCase):
+    def test_feint_is_unknown_when_the_log_does_not_mark_aoe_hits(self):
+        kb = dict(hit(100_000, 1_000_000, 0, overkill=300_000), isAoE=False)   # 40% of 1.3M would save
+        marked = defensives.assess_survival([kb], 100_000, ready(FEINT), [], NAMES, SCHOOLS, talent_entries={})
+        self.assertFalse(marked["wouldSave"]["Feint"])                      # a single-target hit
+        unmarked = defensives.assess_survival([kb], 100_000, ready(FEINT), [], NAMES, SCHOOLS, talent_entries={},
+                                              aoe_known=False)
+        self.assertIsNone(unmarked["wouldSave"]["Feint"])
+
+    def test_report_marks_aoe_only_if_some_hit_is_aoe(self):
+        self.assertFalse(defensives.logs_mark_aoe({1: [{"isAoE": False}], 2: [{"isAoE": False}]}))
+        self.assertTrue(defensives.logs_mark_aoe({1: [{"isAoE": False}], 2: [{"isAoE": True}]}))
+
+
+class StandardPotionTests(unittest.TestCase):
+    def test_potion_without_a_typical_heal_uses_the_tiers_standard_potion(self):
+        cat = defensives.catalog_for(1_756_857_344_578)                      # Manaforge Omega, 11.2.0
+        delight = next(sid for sid, d in cat.consumable.items() if d["name"] == "Cavedweller's Delight")
+        e = defensives.consumable_estimate(delight, cat, [], 1.0, {}, "Frost")
+        standard = cat.all[cat.standard_potion]
+        self.assertEqual(standard["name"], "Invigorating Healing Potion")
+        self.assertEqual(e["mitigation"][0]["heal_amount"], standard["mitigation"][0]["heal_amount"])
