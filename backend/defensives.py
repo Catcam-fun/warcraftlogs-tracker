@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 
 from boss_spell_flags import IGNORES_IMMUNITY
 from defensive_catalog import CATALOGS, HEALING_TAKEN, LATEST, PATCHES
+from spell_icons import ICONS as CATALOG_ICONS
 from warcraftlogs import graphql_query
 
 # Cooldowns at or above this length reset when a boss pull ends, so only
@@ -110,6 +111,32 @@ def catalog_for(report_start_ms=None):
     day = datetime.fromtimestamp(report_start_ms / 1000, tz=timezone.utc).date().isoformat()
     live = [p for first, p in PATCHES if first <= day]
     return _CATALOGS[live[-1] if live else PATCHES[0][1]]
+
+
+def icon_name(name, report_icons=None):
+    """Icon file name of an ability (render.worldofwarcraft.com/us/icons/56/<icon>.jpg).
+
+    Catalog abilities use the game data's icon (spell_icons.py); anything else
+    (boss abilities) the report's own, which WCL spells with "-" for spaces.
+    """
+    if name in CATALOG_ICONS:
+        return CATALOG_ICONS[name]
+    icon = (report_icons or {}).get(name)
+    return icon.rsplit(".", 1)[0].replace("-", "").lower() if icon else None
+
+
+def ability_info(cat, name):
+    """What a catalog ability does in general (no talents), for the results page tooltips."""
+    entry = next((d for d in cat.all.values() if d["name"] == name), None)
+    if entry is None:
+        return None
+    comps = None if entry["kind"] == "potion" else _resolve(entry, None, {}, None)[0]
+    typical = next((c.get("heal_amount") for c in entry.get("mitigation") or () if c.get("heal_amount")), None)
+    return {"kind": entry["kind"], "cooldownMs": entry.get("cooldown_ms"), "auraMs": entry.get("aura_ms"),
+            "charges": entry.get("charges", 1),
+            "effect": [{k: (round(v, 3) if isinstance(v, float) else v) for k, v in c.items() if v is not None}
+                       for c in comps or ()],
+            **({"typicalHeal": typical} if typical else {})}
 
 
 # Changes whenever what gets fetched or kept for defensives changes, so cached
@@ -441,9 +468,10 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
 
     unused_consumables = []
     for kind in ("healthstone", "potion"):
-        used = [t for t, sid in own_casts
+        used = [(t, sid) for t, sid in own_casts
                 if cat.consumable.get(sid, {}).get("kind") == kind and fight_start <= t <= death_ts]
-        result[kind] = {"usedAgo": round((death_ts - used[-1]) / 1000)} if used else {"usedAgo": None}
+        result[kind] = ({"usedAgo": round((death_ts - used[-1][0]) / 1000), "name": cat.all[used[-1][1]]["name"]}
+                        if used else {"usedAgo": None})
         if not used:
             # Only assume they carry one if they used that kind somewhere in this log.
             carried = [sid for _, sid in own_casts if cat.consumable.get(sid, {}).get("kind") == kind]
@@ -593,13 +621,15 @@ def _rank(talent_entries, entries):
     return 1 if set(entries) & set(talent_entries) else 0
 
 
-def _resolve(entry, talent_entries, observed_absorbs, spec=None):
+def _resolve(entry, talent_entries, observed_absorbs, spec=None, applied=None):
     """This player's version of an ability's effect: talents applied, real shield sizes.
 
     Returns (components or None if it can't be scored, [talents that changed it]).
     Each component: {"dr" | "absorb" (fraction of max health) | "absorb_amount" |
     "hp" | "heal" | "heal_amount" | "immune": value, "school"?}.
     Consumables arrive already estimated (consumable_estimate).
+    `applied`: a list that gets each talent change, for the results page:
+    {"talent", "field", "add" | "mult", "rank"}.
     """
     if entry.get("estimated"):
         return entry["mitigation"], entry.get("boostedBy", [])
@@ -626,6 +656,9 @@ def _resolve(entry, talent_entries, observed_absorbs, spec=None):
             else:
                 value = value * (1 + (m["mult"] - 1) * rank)
             boosted.append(m["talent"])
+            if applied is not None:
+                applied.append({"talent": m["talent"], "field": field, "rank": rank,
+                                **({"add": m["add"]} if "add" in m else {"mult": m["mult"]})})
         if field == "dr":
             value = min(value, 1.0)
         if value:
@@ -661,7 +694,8 @@ def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec):
             out["mitigation"] = [{"heal": cat.demonic_healthstone}] + (extra or [])
             out["source"] = "typical"
         else:
-            out["mitigation"], out["boostedBy"] = _resolve(entry, talent_entries, {}, spec)
+            out["applied"] = []
+            out["mitigation"], out["boostedBy"] = _resolve(entry, talent_entries, {}, spec, out["applied"])
             out["source"] = "gameData"
         return out
     if own:
@@ -678,13 +712,15 @@ def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec):
     if typical is None:
         out["mitigation"] = None
         return out
-    talent_mult = 1.0
+    talent_mult, applied = 1.0, []
     for m in cat.heal_talents:
         rank = _mod_rank(m, talent_entries, spec)
         if rank:
             talent_mult *= 1 + (m["mult"] - 1) * rank
             boosted.append(m["talent"])
+            applied.append({"talent": m["talent"], "field": "heal_amount", "rank": rank, "mult": m["mult"]})
     out["mitigation"] = [{"heal_amount": typical * talent_mult * death_mult}]
+    out["applied"], out["typical"] = applied, typical
     out["boostedBy"], out["source"] = boosted, "typical"
     return out
 
@@ -723,6 +759,49 @@ def _prevented(options, hit, max_hp, missing_hp, ability_schools):
     return min(dmg, dmg * (1 - keep) + absorb) + extra_hp * max_hp + heal
 
 
+def _explain(entry, comps, applied, hit, max_hp, missing_hp, ability_schools):
+    """The numbers behind one button's verdict, for the results page.
+
+    {"amount": damage it would have prevented or healed against the killing
+     blow (more than the overkill: they live), "why": when it prevents
+     nothing, the reason}. When talents changed it, or for an estimated
+    consumable: "effect", this player's version of it, and "talents", the
+    changes. Consumables also carry where their heal came from ("source":
+    log / typical / gameData) and, for a typical potion, the untalented heal.
+    The general effect of each ability is sent once per result (ability_info).
+    """
+    amount = _prevented(comps, hit, max_hp, missing_hp, ability_schools)
+    out = {"amount": round(amount)}
+    talents = applied or entry.get("applied") or []
+    if talents or entry.get("estimated"):
+        out["effect"] = [{k: (round(v, 3) if isinstance(v, float) else v) for k, v in c.items() if v is not None}
+                         for c in comps]
+        if talents:
+            out["talents"] = talents
+    if entry.get("estimated"):
+        out["source"] = entry.get("source")
+        if entry.get("typical"):
+            out["typical"] = round(entry["typical"])
+    if amount <= 0:
+        for m in comps:
+            immune = bool(m.get("immune"))
+            applies = _school_applies(m.get("school"), hit, ability_schools, immunity=immune)
+            if applies is None:
+                out["why"] = "aoeUnknown"
+            elif not applies:
+                out["why"], out["school"] = "school", m.get("school")
+            elif immune and hit.get("abilityGameID") in IGNORES_IMMUNITY:
+                out["why"] = "pierces"
+            elif m.get("dr") and _ignores_reduction(hit):
+                out["why"] = "noReduction"
+            elif ("heal" in m or "heal_amount" in m) and missing_hp <= 0:
+                out["why"] = "fullHealth"
+            else:
+                continue
+            break
+    return out
+
+
 def assess_survival(killing_blows, death_ts, available, consumables, ability_names, ability_schools,
                     talent_entries=None, observed_absorbs=None, spec=None, aoe_known=True):
     """How they died, and whether the defensives they had ready would have saved them.
@@ -755,11 +834,15 @@ def assess_survival(killing_blows, death_ts, available, consumables, ability_nam
         unknown = any(_school_applies(m.get("school"), killing, ability_schools) is None for m in options)
         return None if unknown else False
 
-    per_button, scored = {}, []
+    per_button, scored, details = {}, [], {}
     for entry in list(available) + list(consumables):
-        comps, _ = _resolve(entry, talent_entries, observed_absorbs or {}, spec)
+        applied = []
+        comps, _ = _resolve(entry, talent_entries, observed_absorbs or {}, spec, applied)
         per_button[entry["name"]] = None if comps is None else verdict(comps)
         scored += comps or []
+        if comps is not None:
+            details[entry["name"]] = _explain(entry, comps, applied, killing, max_hp, missing_hp,
+                                              ability_schools)
 
     return {
         "deathType": "oneShot" if hp_before >= FULL_HEALTH * max_hp else "wasLow",
@@ -767,11 +850,13 @@ def assess_survival(killing_blows, death_ts, available, consumables, ability_nam
             "name": ability_names.get(killing.get("abilityGameID"), "Unknown"),
             "size": hit_size,
             "pctOfMax": round(100 * hit_size / max_hp),
+            "school": ability_schools.get(killing.get("abilityGameID")),
         },
         "hpBeforePct": round(100 * hp_before / max_hp),
         "overkill": overkill,
         "maxHp": max_hp,
         "wouldSave": per_button,               # name -> True / False / None (can't estimate)
+        "details": details,                    # name -> the numbers behind each verdict (_explain)
         # Which scored names are the Healthstone / potion they carry.
         "consumables": {e["name"]: e["kind"] for e in consumables},
         "allTogetherWouldSave": verdict(scored) if scored else None,
