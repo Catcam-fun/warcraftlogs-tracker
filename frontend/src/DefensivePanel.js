@@ -1,6 +1,7 @@
 import React from 'react';
 
-/* Defensive picture for one death, as computed by backend/defensives.py:
+/* Per-player defensive summaries. Each death's own row is DeathRow.js.
+   Defensive picture for one death, as computed by backend/defensives.py:
    { active: [{name, kind, major?}], activeKnown, available: [{name, major}],
      cooldown: [{name, major, usedAgo, readyIn}], talentsKnown,
      healthstone: {usedAgo|null}, potion: {usedAgo|null},
@@ -11,130 +12,6 @@ import React from 'react';
 
 // Saved reports and shares from before this feature carry an older shape; skip them.
 const isCurrentShape = (d) => d && Array.isArray(d.active) && Array.isArray(d.available);
-
-const fmt = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : `${n}`);
-
-const SAVE_TITLES = {
-  true: 'Pressed in time, this alone would have kept them alive through the killing blow',
-  false: 'Would not have been enough on its own against the killing blow',
-  null: "Can't estimate this one (its effect isn't simple damage reduction, absorb or healing)",
-};
-
-function HowTheyDied({ s }) {
-  if (!s) return null;
-  const hit = `${s.killingHit.name} hit for ${s.killingHit.pctOfMax}% of max health`;
-  return (
-    <div className="fpx-defs-row how">
-      <span className={`lbl ${s.deathType === 'oneShot' ? 'one' : 'low'}`}>
-        {s.deathType === 'oneShot' ? 'ONE-SHOT' : 'WAS LOW'}
-      </span>
-      <span className="txt">
-        {s.deathType === 'oneShot'
-          ? `One-shot from ${s.hpBeforePct}% health: ${hit}`
-          : `At ${s.hpBeforePct}% health when ${hit}`}
-        <small> · died by {fmt(s.overkill)}</small>
-        {s.ignoresReduction && (
-          <small className="warn" title="Nothing about this hit was mitigated, not even by versatility, so damage reduction doesn't work on it (shields and heals still do)">
-            {' '}· ignores damage reduction
-          </small>
-        )}
-        {s.ignoresImmunity && (
-          <small className="warn" title="The game data flags this spell as unaffected by immunities such as Ice Block or Divine Shield">
-            {' '}· hits through immunities
-          </small>
-        )}
-      </span>
-    </div>
-  );
-}
-
-export function DeathDefensives({ d }) {
-  if (!isCurrentShape(d)) return null;
-  const s = d.survival;
-  const saves = (name) => (s ? s.wouldSave?.[name] : undefined);
-  const personalActive = d.active.filter((a) => a.kind !== 'external');
-  const externals = d.active.filter((a) => a.kind === 'external');
-  const noneSavesAlone = s && !Object.values(s.wouldSave || {}).some((v) => v === true);
-
-  const consumable = (label, c) => {
-    const used = c?.usedAgo != null;
-    const couldSave = !used && saves(label === 'Healthstone' ? healthstoneName(s) : potionName(s));
-    return (
-      <span className={`cons${used ? ' used' : ''}${couldSave ? ' save' : ''}`}>
-        {label}: {used ? `used ${c.usedAgo}s before` : 'not used'}
-        {couldSave ? ' (would have saved them)' : ''}
-      </span>
-    );
-  };
-
-  return (
-    <div className="fpx-defs">
-      <HowTheyDied s={s} />
-      <div className="fpx-defs-row">
-        <span className="lbl act">ACTIVE</span>
-        {personalActive.length === 0 && externals.length === 0 && (
-          d.activeKnown === false
-            ? <span className="none" title="No recorded killing blow for this death, so its auras aren't known">Unknown (no recorded killing blow)</span>
-            : <span className="none">Nothing active</span>
-        )}
-        {personalActive.map((a) => <span key={a.name} className="d act">{a.name}</span>)}
-        {externals.map((a) => (
-          <span key={`x-${a.name}`} className="d ext" title="Raid cooldown or external from another player">
-            {a.name}{a.by ? ` · ${a.by}` : ''}
-          </span>
-        ))}
-      </div>
-      {d.available.length > 0 && (
-        <div className="fpx-defs-row">
-          <span className="lbl avail">AVAILABLE, UNUSED</span>
-          {d.available.map((a) => {
-            const v = saves(a.name);
-            const base = s ? SAVE_TITLES[String(v ?? null)] : 'Off cooldown when they died';
-            const boosted = a.boostedBy?.length ? ` (strengthened by ${a.boostedBy.join(', ')})` : '';
-            return (
-              <span key={a.name}
-                className={`d avail${a.major ? '' : ' minor'}${v === true ? ' save' : ''}${v === false ? ' short' : ''}`}
-                title={base + boosted}>
-                {v === true && '✓ '}{a.name}{a.boostedBy?.length ? <small> +talent</small> : null}
-              </span>
-            );
-          })}
-          {noneSavesAlone && s.allTogetherWouldSave && (
-            <span className="combo">all of these together would have saved them</span>
-          )}
-        </div>
-      )}
-      {d.cooldown.length > 0 && (
-        <div className="fpx-defs-row">
-          <span className="lbl cd">ON COOLDOWN</span>
-          {d.cooldown.map((a) => (
-            <span key={a.name} className="d cd" title={`Pressed ${a.usedAgo}s before death; back ${a.readyIn}s after`}>
-              {a.name} <small>used {a.usedAgo}s ago · back in {a.readyIn}s</small>
-            </span>
-          ))}
-        </div>
-      )}
-      <div className="fpx-defs-row consumables">
-        {consumable('Healthstone', d.healthstone)}
-        {consumable('Health potion', d.potion)}
-        {!d.talentsKnown && (
-          <span className="note" title="No talent data for this pull: abilities count only if pressed somewhere in the log">
-            talents not recorded; based on abilities pressed
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// The consumable the backend scored (it names the specific Healthstone / potion they carry).
-const HEALTHSTONES = ['Healthstone', 'Demonic Healthstone'];
-const consumableName = (s, kind, fallback) => {
-  const named = Object.entries(s?.consumables || {}).find(([, k]) => k === kind);
-  return named ? named[0] : Object.keys(s?.wouldSave || {}).find(fallback);
-};
-const healthstoneName = (s) => consumableName(s, 'healthstone', (n) => HEALTHSTONES.includes(n));
-const potionName = (s) => consumableName(s, 'potion', (n) => /Potion/.test(n));
 
 /* Per-player rollup over the deaths that count toward their death rate. */
 export function summarizeDefensives(deaths) {
