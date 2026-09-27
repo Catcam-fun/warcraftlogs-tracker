@@ -120,8 +120,19 @@ function whyText(d, hitName) {
 }
 
 const TALENT_TEXT = (t) => ('add' in t ? `+${pct(t.add * t.rank)}` : `×${Math.round((1 + (t.mult - 1) * t.rank) * 100) / 100}`);
+/* What their own potions / Healthstones healed in these boss pulls. */
+function ownUsesText(sm, info) {
+  const what = info?.kind === 'healthstone' ? 'Healthstone' : 'potion';
+  const range = sm.min != null
+    ? (sm.min === sm.max ? fmt(sm.min) : `${fmt(sm.min)} to ${fmt(sm.max)}`)
+    : (sm.minShare === sm.maxShare ? `${pct(sm.minShare)} of max health`
+      : `${pct(sm.minShare)} to ${pct(sm.maxShare)} of max health`);
+  const cd = info?.cooldownMs ? ` ${secs(info.cooldownMs)} cooldown.` : '';
+  return `Their ${sm.n} ${what}${sm.n === 1 ? '' : 's'} in these boss pulls healed ${range}.${cd}`;
+}
+
 const SOURCE_TEXT = {
-  log: 'From their own heals from it in these boss pulls.',
+  log: 'Estimate: the middle of their own heals from it, with healing buffs taken out, then the ones up when they died put back (crits left out).',
   typical: "None of theirs in these boss pulls, so the tier's typical heal is used.",
   gameData: 'From the game data.',
 };
@@ -220,7 +231,8 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
     return (
       <>
         <TipHead name={name} icons={icons} sub={inf?.kind === 'external' ? 'External' : null} />
-        <p>{effectText(inf ? inf.effect : effect, inf)}</p>
+        <p>{det?.source === 'log' && det.samples ? ownUsesText(det.samples, inf)
+          : effectText(inf ? inf.effect : effect, inf)}</p>
         {talents.map((t) => <Row key={t.talent} a={t.talent} b={TALENT_TEXT(t)} cls="tal" />)}
         {det?.hot && (
           <Row a={`Heals over ${secs(info(name)?.auraMs || 0)}`}

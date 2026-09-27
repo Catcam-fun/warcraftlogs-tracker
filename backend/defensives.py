@@ -147,7 +147,7 @@ def ability_info(cat, name):
 # Changes whenever what gets fetched or kept for defensives changes, so cached
 # data from an older catalog is never reused. Bump DATA_SHAPE when the
 # indexed layout changes.
-DATA_SHAPE = 2
+DATA_SHAPE = 3
 CATALOG_FINGERPRINT = hashlib.sha1(repr((DATA_SHAPE, [
     (c.patch, c.cast_ids, c.buff_names, sorted(c.relevant_talent_entries)) for c in _CATALOGS.values()
 ])).encode()).hexdigest()[:12]
@@ -253,14 +253,14 @@ def index_defensive_events(raw, cat=None):
             continue
         talents[(e.get("fight"), e["sourceID"])] = {t["id"]: t.get("rank") or 1 for t in tree
                                                      if t.get("id") in cat.relevant_talent_entries}
-    # targetID -> [(ts, spellID, healed incl. overheal, max health, healing-taken buffs multiplier)]
+    # targetID -> [(ts, spellID, healed incl. overheal, max health, healing-taken buffs multiplier, crit)]
     heals = defaultdict(list)
     for e in raw.get("heals", []):
         full = (e.get("amount") or 0) + (e.get("overheal") or 0) + (e.get("absorbed") or 0)
         if e.get("type") == "heal" and not e.get("tick") and full > 0 and e.get("targetID") is not None \
                 and e.get("sourceID") == e.get("targetID"):
             heals[e["targetID"]].append((e["timestamp"], e.get("abilityGameID"), full, e.get("maxHitPoints") or 0,
-                                         round(_heal_taken_mult(_auras(e), cat), 4)))
+                                         round(_heal_taken_mult(_auras(e), cat), 4), e.get("hitType") == 2))
     for lst in casts.values():
         lst.sort()
     for lst in buffs.values():
@@ -790,14 +790,17 @@ def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec):
     """
     entry = cat.all[sid]
     own = [h for h in own_heals if h[1] == sid]
+    # A crit isn't something to count on: left out unless every use was one.
+    own = [h for h in own if not (len(h) > 5 and h[5])] or own
     out = {"name": entry["name"], "kind": entry["kind"], "estimated": True, "boostedBy": []}
     if entry["kind"] == "healthstone":
-        shares = [full / max_hp for _, _, full, max_hp, _ in own if max_hp]
+        shares = [h[2] / h[3] for h in own if h[3]]
         extra = [c for c in (entry.get("mitigation") or []) if "hp" in c]     # Soulburn: Healthstone
         extra, boosted = _resolve({"mitigation": extra, "name": entry["name"]}, talent_entries, {}, spec)
         if shares:
             out["mitigation"] = [{"heal": statistics.median(shares)}] + (extra or [])
             out["source"] = "log"
+            out["samples"] = {"n": len(shares), "minShare": round(min(shares), 3), "maxShare": round(max(shares), 3)}
         elif entry["name"] == "Demonic Healthstone" and cat.demonic_healthstone:
             out["mitigation"] = [{"heal": cat.demonic_healthstone}] + (extra or [])
             out["source"] = "typical"
@@ -807,9 +810,12 @@ def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec):
             out["source"] = "gameData"
         return out
     if own:
-        amount = statistics.median(full / (mult or 1.0) for _, _, full, _, mult in own) * death_mult
+        heals = [h[2] / (h[4] or 1.0) for h in own]
+        amount = statistics.median(heals) * death_mult
         out["mitigation"] = [{"heal_amount": amount}]
         out["source"] = "log"
+        # What their own potions healed (healing-taken buffs taken out), for the tooltip.
+        out["samples"] = {"n": len(heals), "min": round(min(heals)), "max": round(max(heals))}
         return out
     comps, boosted = _resolve(entry, talent_entries, {}, spec)
     typical = next((c["heal_amount"] for c in comps or () if "heal_amount" in c), None)
@@ -888,6 +894,8 @@ def _explain(entry, comps, applied, hit, max_hp, missing_hp, ability_schools):
             out["talents"] = talents
     if entry.get("estimated"):
         out["source"] = entry.get("source")
+        if entry.get("samples"):
+            out["samples"] = entry["samples"]
         if entry.get("typical"):
             out["typical"] = round(entry["typical"])
     if amount <= 0:

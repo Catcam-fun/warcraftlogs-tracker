@@ -428,7 +428,17 @@ class ConsumableEstimateTests(unittest.TestCase):
              "amount": 150_000, "overheal": 50_000, "maxHitPoints": 900_000, "buffs": f"{aura}."},
             {"type": "heal", "timestamp": 6, "sourceID": 3, "targetID": 1, "abilityGameID": POTION, "amount": 9},
         ]}, self.cat)
-        self.assertEqual(out["heals"][1], [(5, POTION, 200_000, 900_000, self.cat.heal_auras[aura])])
+        self.assertEqual(out["heals"][1], [(5, POTION, 200_000, 900_000, self.cat.heal_auras[aura], False)])
+
+    def test_potion_crits_are_left_out(self):
+        # Tonyst-style: steady ~450k heals; one crit would pull a small sample's median up.
+        heals = [(1, POTION, 450_000, 950_000, 1.0, False), (2, POTION, 900_000, 950_000, 1.0, True)]
+        e = defensives.consumable_estimate(POTION, self.cat, heals, 1.0, {}, "Frost")
+        self.assertAlmostEqual(e["mitigation"][0]["heal_amount"], 450_000)
+        self.assertEqual(e["samples"], {"n": 1, "min": 450_000, "max": 450_000})
+        crits_only = [(2, POTION, 900_000, 950_000, 1.0, True)]
+        self.assertAlmostEqual(defensives.consumable_estimate(POTION, self.cat, crits_only, 1.0, {}, "Frost")
+                               ["mitigation"][0]["heal_amount"], 900_000)
 
 
 class OlderLogTests(unittest.TestCase):
