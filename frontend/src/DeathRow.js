@@ -238,8 +238,8 @@ function Icon({ name, icons, icon: given, className = '', quality }) {
   return <span className="fpx-qualwrap">{img}<img className="fpx-qual" src={quality} alt="" /></span>;
 }
 
-const TipHead = ({ name, icons, icon, sub }) => (
-  <div className="th"><Icon name={name} icons={icons} icon={icon} /><div><b>{name}</b>{sub && <small>{sub}</small>}</div></div>
+const TipHead = ({ name, icons, icon, sub, glyph }) => (
+  <div className="th"><Icon name={glyph || name} icons={icons} icon={icon} /><div><b>{name}</b>{sub && <small>{sub}</small>}</div></div>
 );
 const Row = ({ a, b, cls }) => <div className="r"><span className={cls}>{a}</span><span>{b}</span></div>;
 
@@ -249,7 +249,9 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
   const d = death.defensives;
   const current = isCurrentShape(d);
   const s = current ? d.survival : null;
-  const hitName = death.abilityName === 'Unknown' ? 'Unknown ability' : death.abilityName;
+  // WarcraftLogs gives no killing ability when the log has no hit or instant kill for the death.
+  const notLogged = death.abilityName === 'Unknown';
+  const hitName = notLogged ? 'Killing blow not in the log' : death.abilityName;
   const kills = killCounts?.[`${death.boss}|${death.abilityName}`];
   const info = (n) => abilityInfo?.[n];
   // Killing blows by spell ID: names aren't unique (a boss's Tempest isn't the Shaman's).
@@ -258,6 +260,7 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
 
   const instakill = s?.deathType === 'instakill';
   const ctx = death.isCheatDeath ? 'prevented death (cheat death)'
+    : notLogged ? 'the log has no hit for this death'
     : !s ? (current ? 'no killing blow recorded' : '')
     : instakill ? 'instant kill: the mechanic killed them outright, with no damage'
     : s.deathType === 'oneShot'
@@ -266,17 +269,18 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
 
   const killTip = () => (
     <>
-      <TipHead name={hitName} icon={kbIcon}
+      <TipHead name={hitName} glyph={notLogged ? '?' : null} icon={kbIcon}
         sub={<>{death.boss}{schoolName(kbSchool) && <> · <School mask={kbSchool}>{schoolName(kbSchool)}</School></>}</>} />
       {abilityText?.[death.abilityId] && <p>{schoolText(abilityText[death.abilityId])}</p>}
       {s && !instakill && <Row a="This hit" b={`${fmt(s.killingHit.size)} (${s.killingHit.pctOfMax.toLocaleString()}% of max health)`} />}
       {s && !instakill && <Row a="Health before it" b={`${s.hpBeforePct}% (${fmt(s.maxHp * s.hpBeforePct / 100)})`} />}
       {s && !instakill && <Row a="They died by" b={fmt(s.overkill)} />}
       {instakill && <div className="note warn">Instant kill: the game killed them outright, with no damage to reduce, absorb or heal. Only avoiding the mechanic prevents it.</div>}
-      {kills > 0 && <Row a="Killed in these pulls" b={`${kills} raider${kills === 1 ? '' : 's'}`} />}
+      {kills > 0 && !notLogged && <Row a="Killed in these pulls" b={`${kills} raider${kills === 1 ? '' : 's'}`} />}
       {s?.ignoresImmunity && <div className="note warn">Goes through immunities (Ice Block, Divine Shield…)</div>}
       {s?.ignoresReduction && <div className="note warn">Nothing reduced this hit, so damage reduction doesn't work on it (shields and heals still do)</div>}
-      {!s && current && <p>No hit with health data was recorded for this death, so defensives can't be checked against it.</p>}
+      {notLogged && <p>WarcraftLogs recorded no hit or instant kill for this death, so what killed them isn't known and defensives can't be checked against it.</p>}
+      {!s && current && !notLogged && <p>No hit with health data was recorded for this death, so defensives can't be checked against it.</p>}
     </>
   );
 
@@ -385,7 +389,7 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
   return (
     <div className={`fpx-drow${death.isCheatDeath ? ' cheat' : ''}`}>
       <Tip className="kb" content={killTip}>
-        <Icon name={death.abilityName} icon={kbIcon} className="big" />
+        <Icon name={notLogged ? '?' : death.abilityName} icon={kbIcon} className="big" />
         <span className="kbt">
           <span className="an">#{death.pullNo} · {hitName}{death.isCheatDeath && <span className="fpx-cheatbadge">CHEAT</span>}</span>
           {ctx && <span className="cx">{ctx}{s?.ignoresImmunity ? <em> · through immunities</em> : null}</span>}
