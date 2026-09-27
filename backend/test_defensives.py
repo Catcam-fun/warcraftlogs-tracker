@@ -1,4 +1,6 @@
 import unittest
+import os
+import sys
 
 import defensives
 from defensive_catalog import CATALOG
@@ -145,8 +147,17 @@ class DefensiveAnalysisTests(unittest.TestCase):
     def test_consumables_this_pull_only(self):
         r = run("Mage", "Frost", talents=set(),
                 casts=[(150_000, POTION), (270_000, HEALTHSTONE)], fight_start=200_000, death=300_000)
-        self.assertEqual(r["healthstone"], {"usedAgo": 30, "name": "Healthstone"})
+        self.assertEqual(r["healthstone"], {"usedAgo": 30, "name": "Healthstone", "readyIn": 30})
         self.assertEqual(r["potion"], {"usedAgo": None})
+
+    def test_consumables_come_back_after_their_cooldown(self):
+        # Healthstone 60s, health potion 5 min, from the last use this pull (measured on live logs).
+        r = run("Mage", "Frost", talents=set(),
+                casts=[(210_000, HEALTHSTONE), (220_000, POTION)], fight_start=200_000, death=300_000)
+        self.assertEqual(r["healthstone"], {"usedAgo": None, "lastUsedAgo": 90})
+        self.assertEqual(r["potion"]["readyIn"], 220)
+        r = run("Mage", "Frost", talents=set(), casts=[(220_000, POTION)], fight_start=200_000, death=530_000)
+        self.assertEqual(r["potion"], {"usedAgo": None, "lastUsedAgo": 310})
 
     def test_missing_talent_data_falls_back_to_log_evidence(self):
         r = run("Mage", "Frost", talents=None, casts=[(10_000, MIRROR)], death=200_000)
@@ -499,3 +510,80 @@ class ResultsPageInfoTests(unittest.TestCase):
         self.assertEqual(info["effect"], [{"immune": True, "school": "magic"}])
         self.assertEqual((info["cooldownMs"], info["auraMs"]), (120_000, 5_000))
         self.assertIsNone(defensives.ability_info(defensives._LATEST, "Not A Spell"))
+        # Externals carry no effect numbers in the catalog; their game description explains them.
+        self.assertIn("20%", defensives.ability_info(defensives._LATEST, "Ironbark")["description"])
+
+
+class InstakillTests(unittest.TestCase):
+    """A mechanic that kills outright (Eternal Venom at max stacks) deals no damage."""
+
+    def instakill(self, ts=99_990):
+        return {"timestamp": ts, "type": "instakill", "targetID": 1, "abilityGameID": 1292348, "fight": 31}
+
+    def test_instant_kills_are_indexed_with_the_hits(self):
+        idx = defensives.index_killing_blows([self.instakill(), hit(50_000, 100, 0, overkill=10)])
+        self.assertEqual([e["type"] for e in idx[1]], ["damage", "instakill"])
+
+    def test_nothing_saves_from_an_instant_kill(self):
+        r = defensives.assess_survival([self.instakill()], 100_000, ready(DIVINE_SHIELD, SHIELD_WALL), [],
+                                       {1292348: "Eternal Venom"}, SCHOOLS)
+        self.assertEqual(r["deathType"], "instakill")
+        self.assertEqual(r["killingHit"]["name"], "Eternal Venom")
+        self.assertEqual(r["wouldSave"], {"Divine Shield": False, "Shield Wall": False})
+        self.assertEqual(r["details"]["Shield Wall"]["why"], "instakill")
+        self.assertFalse(r["allTogetherWouldSave"])
+
+
+class HealOverTimeTests(unittest.TestCase):
+    """Frenzied Regeneration / Crimson Vial heal over their duration, not at once."""
+
+    def test_tick_counts_match_the_catalog_build(self):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
+        import build_defensive_catalog as build
+        ticks = {n: e[3] for n, effs in build.EFFECTS.items() for e in effs if len(e) > 3 and e[3] > 1}
+        self.assertEqual(ticks, defensives.HEAL_OVER_TIME)
+
+    def test_ticks_only_fill_missing_health(self):
+        # 24% over 3 ticks of a 1M bar, ticking ~98s, ~99s, ~100s. At 90% for the first two ticks,
+        # then a big hit to 20%: tick 1 fills 8%, tick 2 only 2% more (capped at max), tick 3 +8%.
+        timeline = [(96_000, 900_000, 1_000_000), (99_500, 200_000, 1_000_000)]
+        landed, ticks = defensives._hot_landed(240_000, 3, 3_000, 100_000, 0, timeline, 1_000_000, 200_000)
+        self.assertEqual(ticks, 3)
+        self.assertAlmostEqual(landed, 180_000, delta=1)
+
+    def test_real_heals_topping_them_up_waste_the_extra(self):
+        # Low when it ticks, but healed back to full by a healer before the hit, then hit from full.
+        timeline = [(96_000, 300_000, 1_000_000), (99_000, 1_000_000, 1_000_000)]
+        landed, _ = defensives._hot_landed(240_000, 3, 3_000, 100_000, 0, timeline, 1_000_000, 1_000_000)
+        self.assertEqual(landed, 0)
+
+    def test_cannot_press_before_it_was_ready(self):
+        # Came off cooldown 1.5s before the hit: only the tick 1s after pressing lands.
+        timeline = [(90_000, 100_000, 1_000_000)]
+        landed, ticks = defensives._hot_landed(240_000, 3, 3_000, 100_000, 98_500, timeline, 1_000_000, 100_000)
+        self.assertEqual(ticks, 1)
+        self.assertAlmostEqual(landed, 80_000, delta=1)
+
+    def test_bear_form_keeps_health_shares(self):
+        # A form change mid-window changes max health; shares of the bar are what count.
+        timeline = [(96_000, 500_000, 1_000_000), (97_500, 650_000, 1_300_000)]
+        landed, _ = defensives._hot_landed(240_000, 3, 3_000, 100_000, 0, timeline, 1_000_000, 500_000)
+        self.assertAlmostEqual(landed, 240_000, delta=1)
+
+    def test_ready_since(self):
+        # One charge, 36s cooldown, pressed at 10s: ready again at 46s.
+        self.assertEqual(defensives._ready_since(100_000, [10_000], 1, 36_000), 46_000)
+        self.assertIsNone(defensives._ready_since(100_000, [], 1, 36_000))
+
+    def test_verdict_waits_for_the_health_before_the_hit(self):
+        frenzied = next(sid for sid, d in CATALOG.items() if d["name"] == "Frenzied Regeneration")
+        kb = hit(100_000, 200_000, 0, overkill=50_000)
+        r = defensives.assess_survival([kb], 100_000, ready(frenzied), [], NAMES, SCHOOLS,
+                                       aura_ms={"Frenzied Regeneration": 3_000})
+        self.assertIsNone(r["wouldSave"]["Frenzied Regeneration"])
+        self.assertTrue(defensives.needs_hp_timeline({"survival": r}))
+        timeline = [(96_000, 200_000, MAX)]
+        r = defensives.assess_survival([kb], 100_000, ready(frenzied), [], NAMES, SCHOOLS, hp_timeline=timeline,
+                                       aura_ms={"Frenzied Regeneration": 3_000})
+        self.assertTrue(r["wouldSave"]["Frenzied Regeneration"])          # 24% of 1M lands > 50k overkill
+        self.assertEqual(r["details"]["Frenzied Regeneration"]["hot"]["ticks"], 3)
