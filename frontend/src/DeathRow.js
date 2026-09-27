@@ -163,7 +163,7 @@ function PotionRank({ rank, ranks }) {
         <Row key={r.rank} a={`${cap(r.rank)} rank tooltip`} b={r.heal.toLocaleString()} cls={known && rank.rank === r.rank ? 'tal' : undefined} />
       ))}
       <div className="src">
-        {rank && `Their potions healed ${rank.raw.toLocaleString()} (middle of ${rank.n}); without their ${rank.vers}% Versatility, healing buffs and talents that's ${rank.base.toLocaleString()}. `}
+        {rank && `Their potions healed ${rank.raw.toLocaleString()}${rank.n > 1 ? ` (middle of ${rank.n})` : ''}; without their ${rank.vers}% Versatility, healing buffs and talents that's ${rank.base.toLocaleString()}. `}
         {known && `That reaches the ${rank.rank} tooltip${rank.rank !== all[all.length - 1].rank ? ` but not the ${all[all.length - 1].rank} one` : ''}; the ${rank.bonus}% over it comes from their class and spec healing bonuses. `}
         {rank && !known && `This tier's ranks are only ${rank.unknown}% apart, less than the healing bonuses players carry from their class and spec (up to 16%), so the log can't show which one they drank. `}
         Potions heal more than the tooltip: Versatility, raid buffs such as Mark of the Wild, and healing-received talents raise it, so the heal changes from pull to pull.
