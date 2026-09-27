@@ -124,7 +124,8 @@ def report_heals(api, code, spell_ids):
         data = api("""query($c: String!, $f: String, $s: Float) { reportData { report(code: $c) {
             startTime masterData { actors(type: "Player") { id name server } }
             events(killType: Encounters, dataType: Healing, filterExpression: $f, includeResources: true,
-                   startTime: $s, limit: 10000) { data nextPageTimestamp } } } }""", {"c": code, "f": flt, "s": start})
+                   startTime: $s, endTime: 1e13, limit: 10000) { data nextPageTimestamp } } } }""",
+                   {"c": code, "f": flt, "s": start or 0})
         report = (data.get("reportData") or {}).get("report") or {}
         out["start"] = report.get("startTime")
         who = {a["id"]: f"{a['name']}-{a.get('server') or ''}" for a in (report.get("masterData") or {}).get("actors") or []}
