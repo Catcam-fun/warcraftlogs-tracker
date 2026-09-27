@@ -11,6 +11,7 @@ import { createPortal } from 'react-dom';
        source?, typical?} (defensives._explain).
      icons:       {abilityName: icon file name} for render.worldofwarcraft.com.
      abilityInfo: {name: {kind, cooldownMs, auraMs, charges, effect, typicalHeal?}}.
+     abilityText: {spell ID: in-game description} for killing blows (death.abilityId).
      killCounts:  {"boss|ability": counted deaths to it in these results}. */
 
 const ICON_URL = (icon) => `https://render.worldofwarcraft.com/us/icons/56/${icon}.jpg`;
@@ -128,7 +129,7 @@ const Row = ({ a, b, cls }) => <div className="r"><span className={cls}>{a}</spa
 
 /* ---------- the row ---------- */
 
-export function DeathRow({ death, icons, abilityInfo, killCounts, logHref, timeLabel }) {
+export function DeathRow({ death, icons, abilityInfo, abilityText, killCounts, logHref, timeLabel }) {
   const d = death.defensives;
   const current = isCurrentShape(d);
   const s = current ? d.survival : null;
@@ -145,6 +146,7 @@ export function DeathRow({ death, icons, abilityInfo, killCounts, logHref, timeL
   const killTip = () => (
     <>
       <TipHead name={hitName} icons={icons} sub={[death.boss, s && schoolName(s.killingHit.school)].filter(Boolean).join(' · ')} />
+      {abilityText?.[death.abilityId] && <p>{abilityText[death.abilityId]}</p>}
       {s && <Row a="This hit" b={`${fmt(s.killingHit.size)} (${s.killingHit.pctOfMax.toLocaleString()}% of max health)`} />}
       {s && <Row a="Health before it" b={`${s.hpBeforePct}% (${fmt(s.maxHp * s.hpBeforePct / 100)})`} />}
       {s && <Row a="They died by" b={fmt(s.overkill)} />}
