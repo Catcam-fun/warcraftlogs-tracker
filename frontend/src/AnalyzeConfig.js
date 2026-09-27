@@ -196,10 +196,10 @@ export default function AnalyzeConfig({
                     <input type="checkbox" checked={config.enableCheatDeath}
                       disabled={!user}
                       onChange={(e) => user && setConfig({ ...config, enableCheatDeath: e.target.checked })} />
-                    <span>Detect prevented lethal events <em>(+20–30s)</em></span>
+                    <span>Calculate Cheat Deaths <em>(+20–30s)</em></span>
                   </label>
                   <p className="hint">
-                    {user ? 'Cauterize, Spirit of Redemption, Cheat Death, etc.'
+                    {user ? 'Saves from a lethal hit: Cheat Death, Cauterize, Purgatory, Last Resort, Defy Fate, Restitution, Kill or Be Killed, Guardian Spirit, Ardent Defender'
                       : <>Account required — <button className="fpx-link" onClick={onShowAuth}>sign in</button></>}
                   </p>
                 </div>
