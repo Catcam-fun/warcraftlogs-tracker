@@ -382,6 +382,7 @@ def get_fights(token, report_code):
         friendlies = [{
             "id": a.get("id"),
             "name": normalize_character_name(a.get("name")),
+            "logName": a.get("name"),  # as in the log, for filter expressions
             "type": a.get("subType"),  # class name
         } for a in master.get("actors") or [] if a.get("type") == "Player"]
 
