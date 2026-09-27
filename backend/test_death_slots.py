@@ -42,6 +42,13 @@ class DeathSlotTests(unittest.TestCase):
                  [death(50_005, "R", True)] + [death(50_010 + i, f"V{i}") for i in range(4)]
         self.assertEqual(counted(deaths, 2), ["A"])
 
+    def test_cheat_death_just_before_a_wipe_does_not_count(self):
+        # Pull 19 of H8gCzVa7Y4JDf61X: Squidfear dies at 0:52; Xanq's Cheat Death
+        # procs at 1:42.115, a few ms before the wipe's first death (1:42.123).
+        deaths = [death(52_356, "Squidfear"), death(102_115, "Xanq", True)] + \
+                 [death(102_123 + i * 300, f"W{i}") for i in range(10)]
+        self.assertEqual(counted(deaths, 2), ["Squidfear"])
+
 
 if __name__ == "__main__":
     unittest.main()
