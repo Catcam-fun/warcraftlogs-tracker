@@ -355,27 +355,6 @@ POTION_TYPICAL = {
 # How many ranks a potion has differs by tier (The War Within: 3, Midnight: 2).
 POTION_SCALING_COLUMN = {-9: "DamageSecondaryF", -8: "DamageReplaceStatF", -2: "EpicF_0", -1: "EpicF_0"}
 RANK_NAMES = {2: ["silver", "gold"], 3: ["bronze", "silver", "gold"]}
-
-# What every potion heals over its rank's tooltip in a patch, before the
-# drinker's Versatility, buffs and talents (a server-side factor the data
-# files don't carry): measured by scripts/measure_potion_factor.py from real
-# boss-pull heals, where players land exactly on factor x a rank's tooltip.
-# (patch, factor); a patch without its own measurement uses the nearest
-# earlier one, else the nearest later one.
-# The War Within isn't listed: its three ranks are evenly spaced (4.3% apart),
-# so "bronze x f" and "silver x f/1.043" fit its heals equally well and the
-# factor can't be pinned down; no rank is claimed there.
-POTION_RANK_FACTOR = {
-    "Silvermoon Health Potion": [("12.0.7", 1.15), ("12.1.0", 1.02)],
-    "Concentrated Silvermoon Health Potion": [("12.1.0", 1.02)],
-}
-
-
-def rank_factor(name, patch):
-    rows = sorted(POTION_RANK_FACTOR.get(name, ()), key=lambda r: [int(x) for x in r[0].split(".")])
-    key = [int(x) for x in patch.split(".")]
-    earlier = [f for p, f in rows if [int(x) for x in p.split(".")] <= key]
-    return earlier[-1] if earlier else (rows[0][1] if rows else None)
 HEAL_EFFECT = "10"
 
 # Buttons the game only allows in a form (SpellShapeshift), and the talent that
@@ -894,7 +873,6 @@ def unreviewed_talents(gd, build, catalog, mods):
 
 def build_catalog(build):
     """The catalog for one game build. Returns (catalog, healing-taken info, problems)."""
-    patch = ".".join(build.split(".")[:3])
     gd = GameData(build)
     mods = Modifiers(gd)
     names = gd.names
@@ -965,9 +943,6 @@ def build_catalog(build):
             entry["mitigation"] = [{"heal_amount": POTION_TYPICAL[name], "observed": True}]
         if kind == "potion" and ranks.get(sid):
             entry["ranks"] = ranks[sid]
-            factor = rank_factor(name, patch)
-            if factor:
-                entry["rank_factor"] = factor
         if name == "Bear Form":
             # Shifting replaces the form they're in: its armor bonus (Moonkin Form +125%)
             # comes off before Bear Form's goes on (checked on live logs: no form 1,173,

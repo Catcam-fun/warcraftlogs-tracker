@@ -891,22 +891,27 @@ def _heal_talent_mult(entry, cat, talent_entries, spec):
     return mult, applied
 
 
-# A heal's match to a rank: within this share of that rank's tooltip (times the
-# tier's factor) once Versatility, buffs and talents are out. Measured heals
-# land within 0.5%; ranks are at least 4% apart.
-RANK_MATCH = 0.02
+# A heal a hair under a rank's tooltip still reaches it (rounding).
+RANK_TOLERANCE = 0.005
+# Potions are the drinker's own heal, so their class and spec healing bonuses
+# raise it too, by up to this much for players who reach silver (measured on
+# live Midnight logs, Versatility and buffs taken out: never above 16%). A rank
+# is only claimed when the rank below heals at least this much less, so no
+# bonus could make a lower rank look like it (Midnight: 17% apart; The War
+# Within's ranks are 4% apart, so its ranks can't be told apart).
+RANK_BONUS_MAX = 0.16
 
 
 def potion_rank(sid, cat, own_heals, talent_entries, spec):
     """The quality rank of a potion this player drinks, from their own heals with it.
 
-    A potion heals its rank's tooltip amount times (1 + the drinker's
-    Versatility), their healing-taken buffs and talents, and a factor every
-    potion of the tier shares (measured: The War Within 1.18, Midnight 1.02;
-    catalog "rank_factor"). The log carries all but the rank: with the rest
-    taken out, the middle of their heals lands on one rank's tooltip. None
-    when the potion has no ranks in this patch, they didn't drink it in these
-    boss pulls, or their heals match no rank.
+    A potion heals at least its rank's tooltip amount: Versatility (on each
+    heal event), healing-taken buffs, talents and class healing bonuses only
+    raise it. With Versatility, buffs and known talents taken out, the middle
+    of their heals reaches the tooltip of the rank they drink and no higher
+    one. Returns the rank; {"unknown": ...} when the ranks are too close to
+    tell apart; None when the potion has no ranks in this patch, they didn't
+    drink it in these boss pulls, or their heals are under every tooltip.
     """
     entry = cat.all.get(sid) or {}
     ranks = entry.get("ranks")
@@ -916,17 +921,17 @@ def potion_rank(sid, cat, own_heals, talent_entries, spec):
     talent_mult, applied = _heal_talent_mult(entry, cat, talent_entries, spec)
     vers = [(h[5] if len(h) > 5 and h[5] is not None else 0) / 10_000 for h in own]
     base = statistics.median(h[2] / (h[4] or 1.0) / (1 + v) for h, v in zip(own, vers)) / talent_mult
-    factor = entry.get("rank_factor")
-    if not factor:
-        return None                      # this tier's factor isn't known (The War Within): no rank claimed
-    pick = min(ranks, key=lambda r: abs(base / (factor * r["heal"]) - 1))
-    if abs(base / (factor * pick["heal"]) - 1) > RANK_MATCH:
-        return None
-    return {"rank": pick["rank"], "heal": pick["heal"], "of": len(ranks),
-            "ranks": [{"rank": r["rank"], "heal": r["heal"]} for r in ranks],
-            "n": len(own), "base": round(base), "factor": factor,
-            "raw": round(statistics.median(h[2] for h in own)),
+    reached = [i for i, r in enumerate(ranks) if base >= r["heal"] * (1 - RANK_TOLERANCE)]
+    info = {"of": len(ranks), "ranks": [{"rank": r["rank"], "heal": r["heal"]} for r in ranks], "n": len(own),
+            "base": round(base), "raw": round(statistics.median(h[2] for h in own)),
             "vers": round(statistics.median(vers) * 100, 1), **({"talents": applied} if applied else {})}
+    if not reached:
+        return None
+    i = reached[-1]
+    if i > 0 and ranks[i]["heal"] < ranks[i - 1]["heal"] * (1 + RANK_BONUS_MAX):
+        return {**info, "unknown": round((ranks[i]["heal"] / ranks[i - 1]["heal"] - 1) * 100, 1)}
+    return {**info, "rank": ranks[i]["rank"], "heal": ranks[i]["heal"],
+            "bonus": round((base / ranks[i]["heal"] - 1) * 100, 1)}
 
 
 def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec):
@@ -976,9 +981,6 @@ def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec):
         rank = potion_rank(sid, cat, own_heals, talent_entries, spec)
         if rank:
             out["rank"] = rank
-        elif entry.get("ranks"):
-            out["ranks"] = [{"rank": r["rank"], "heal": r["heal"]} for r in entry["ranks"]]
-            out["rankUnknown"] = not entry.get("rank_factor")
         return out
     comps, boosted = _resolve(entry, talent_entries, {}, spec)
     typical = next((c["heal_amount"] for c in comps or () if "heal_amount" in c), None)
@@ -1097,8 +1099,6 @@ def _explain(entry, comps, applied, hit, max_hp, missing_hp, ability_schools):
             out["rank"] = entry["rank"]
         elif entry.get("ranks"):
             out["ranks"] = entry["ranks"]
-            if entry.get("rankUnknown"):
-                out["rankUnknown"] = True
     if amount <= 0:
         for m in comps:
             immune = bool(m.get("immune"))
