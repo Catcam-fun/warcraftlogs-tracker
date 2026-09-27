@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Import from other modules
 from warcraftlogs import graphql_query, normalize_character_name
-from features import CHEAT_DEATH_ABILITY_IDS
+from features import CHEAT_DEATH_DEBUFF_IDS, CHEAT_DEATH_HEAL_IDS
 
 # =============================================================================
 # CONSTANTS
@@ -328,15 +328,17 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
     
     # Build query that gets deaths + optionally cheat-death debuffs
     # Use GraphQL aliases to fetch multiple event types at once
-    cheat_death_ids = ", ".join(str(id) for id in CHEAT_DEATH_ABILITY_IDS)
-    cheat_filter = f"ability.id in ({cheat_death_ids})"
+    cheat_filter = f"ability.id in ({', '.join(map(str, sorted(CHEAT_DEATH_DEBUFF_IDS)))})"
+    # Saves that show only as a heal on the saved player (Guardian Spirit, Ardent Defender).
+    cheat_heal_filter = (f"type = \"heal\" and ability.id in "
+                         f"({', '.join(map(str, sorted(CHEAT_DEATH_HEAL_IDS)))})")
     
     
     # Build query based on what's enabled
     if enable_cheat_death:
         print(f"[ENABLED] Cheat death detection ENABLED - querying deaths AND debuffs in one call...")
         combined_query = """
-        query($code: String!, $startTime: Float!, $endTime: Float!, $cheatFilter: String) {
+        query($code: String!, $startTime: Float!, $endTime: Float!, $cheatFilter: String, $cheatHealFilter: String) {
           reportData {
             report(code: $code) {
               deaths: events(
@@ -358,6 +360,16 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
                 data
                 nextPageTimestamp
               }
+              saveHeals: events(
+                startTime: $startTime
+                endTime: $endTime
+                dataType: Healing
+                filterExpression: $cheatHealFilter
+                limit: 10000
+              ) {
+                data
+                nextPageTimestamp
+              }
             }
           }
         }
@@ -367,7 +379,8 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
             "code": report_code,
             "startTime": start_time,
             "endTime": end_time,
-            "cheatFilter": cheat_filter
+            "cheatFilter": cheat_filter,
+            "cheatHealFilter": cheat_heal_filter,
         }
     else:
         # Just deaths (no cheat death detection)
@@ -405,6 +418,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
         for alias, data_type, filter_expr in (
             ("deaths", "Deaths", None),
             ("debuffs", "Debuffs", cheat_filter),
+            ("saveHeals", "Healing", cheat_heal_filter),
         ):
             block = report_data.get(alias)
             if block and block.get("nextPageTimestamp"):
@@ -430,7 +444,8 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
         # Extract debuff events (if cheat death enabled)
         cheat_death_events = []
         if enable_cheat_death:
-            debuff_events = report_data.get("debuffs", {}).get("data", [])
+            debuff_events = (report_data.get("debuffs") or {}).get("data", []) + \
+                (report_data.get("saveHeals") or {}).get("data", [])
             
             print(f"  Found {len(debuff_events)} cheat death debuff events (filtered query)")
             
@@ -456,7 +471,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
                 ability_id = event.get("abilityGameID")
                 event_type = event.get("type")
                 
-                if event_type == "applydebuff":
+                if event_type == "applydebuff" or (event_type == "heal" and ability_id in CHEAT_DEATH_HEAL_IDS):
                     target_id = event.get("targetID")
                     timestamp = event.get("timestamp")
                     fight_id = event.get("fight")

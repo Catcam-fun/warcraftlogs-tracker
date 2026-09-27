@@ -283,7 +283,9 @@ def analyze():
                     ability_map = sample_fight_data['ability_map']
                     fights_list = [fd['fight'] for fd in report_fights]
                     
-                    cache_key = (rid, tuple(sorted(f['id'] for f in fights_list)), bool(enable_cheat_death))
+                    # With cheat deaths on, the list of effects is part of the key, so adding one refetches.
+                    cache_key = (rid, tuple(sorted(f['id'] for f in fights_list)), bool(enable_cheat_death),
+                                 tuple(sorted(CHEAT_DEATH_ABILITY_IDS)) if enable_cheat_death else None)
                     deaths = deaths_lru.get(cache_key) if report_finished.get(rid) else None
                     if deaths is None:
                         deaths = get_report_deaths_bulk(token, rid, fights_list, friendlies, ability_map, enable_cheat_death)
