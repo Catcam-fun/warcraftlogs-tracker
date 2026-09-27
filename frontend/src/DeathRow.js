@@ -132,7 +132,7 @@ function ownUsesText(sm, info) {
 }
 
 const SOURCE_TEXT = {
-  log: 'Estimate: the middle of their own heals from it, with healing buffs taken out, then the ones up when they died put back (crits left out).',
+  log: 'Estimate: the middle of their own heals from it (which shows the potion rank they drink), with healing buffs taken out, then the ones up when they died put back.',
   typical: "None of theirs in these boss pulls, so the tier's typical heal is used.",
   gameData: 'From the game data.',
 };
