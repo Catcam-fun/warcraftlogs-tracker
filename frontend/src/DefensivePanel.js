@@ -129,8 +129,12 @@ export function DeathDefensives({ d }) {
 
 // The consumable the backend scored (it names the specific Healthstone / potion they carry).
 const HEALTHSTONES = ['Healthstone', 'Demonic Healthstone'];
-const healthstoneName = (s) => Object.keys(s?.wouldSave || {}).find((n) => HEALTHSTONES.includes(n));
-const potionName = (s) => Object.keys(s?.wouldSave || {}).find((n) => /Potion/.test(n));
+const consumableName = (s, kind, fallback) => {
+  const named = Object.entries(s?.consumables || {}).find(([, k]) => k === kind);
+  return named ? named[0] : Object.keys(s?.wouldSave || {}).find(fallback);
+};
+const healthstoneName = (s) => consumableName(s, 'healthstone', (n) => HEALTHSTONES.includes(n));
+const potionName = (s) => consumableName(s, 'potion', (n) => /Potion/.test(n));
 
 /* Per-player rollup over the deaths that count toward their death rate. */
 export function summarizeDefensives(deaths) {
