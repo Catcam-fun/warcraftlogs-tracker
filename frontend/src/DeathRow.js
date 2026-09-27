@@ -82,7 +82,7 @@ function effectText(effect, info) {
     return info.description + cd;
   }
   const parts = (effect || []).map((c) => {
-    const scope = typeof c.school === 'number' ? `${(schoolName(c.school) || 'magic').toLowerCase()} ` : SCOPE[c.school] || '';
+    const scope = typeof c.school === 'number' ? `${schoolScope(c.school)} ` : SCOPE[c.school] || '';
     const over = c.over_ms ? ` over ${secs(c.over_ms)}` : '';
     if (c.immune) return c.school === 'melee' ? 'Dodges all melee attacks' : `Immune to ${scope}damage`;
     if (c.dr) return `Reduces ${scope}damage taken by ${pct(c.dr)}`;
@@ -125,6 +125,14 @@ function whyText(d, hitName) {
   }
 }
 
+// Which damage an effect limited to some schools covers, in words.
+const schoolScope = (school) => {
+  if (school === 'magic' || school === 126) return 'magic';
+  if (school === 62) return 'magic except arcane';
+  if (typeof school === 'number') return (schoolName(school) || 'magic').toLowerCase();
+  return { physical: 'physical', aoe: 'area damage', melee: 'melee' }[school] || school;
+};
+
 // What a talent-added effect adds, by the field it fills (defensives._resolve).
 const ADDS_WHAT = {
   dr: 'damage reduction', dr_missing: 'damage reduction at low health', armor: 'armor', hp: 'max health',
@@ -133,7 +141,8 @@ const ADDS_WHAT = {
 const TALENT_TEXT = (t) => {
   if ('adds' in t) {
     if (t.field === 'absorb' && t.adds > 1) return `adds a ${fmt(t.adds)} shield`;
-    return `adds ${pct(t.adds * t.rank)}${t.field === 'absorb' ? ' of max health as a' : ''} ${ADDS_WHAT[t.field] || ''}`.trim();
+    const vs = t.school ? ` vs ${schoolScope(t.school)}` : '';
+    return `adds ${pct(t.adds * t.rank)}${t.field === 'absorb' ? ' of max health as a' : ''} ${ADDS_WHAT[t.field] || ''}${vs}`.trim();
   }
   return 'add' in t ? `+${pct(t.add * t.rank)}` : `×${Math.round((1 + (t.mult - 1) * t.rank) * 100) / 100}`;
 };
@@ -149,31 +158,36 @@ function ownUsesText(sm, info) {
 }
 
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-/* The potion rank a player drinks (defensives.potion_rank): their heals, with
-   Versatility, healing buffs and talents taken out, reach that rank's tooltip
-   and no higher one. `ranks` alone: none of theirs in these boss pulls. */
-function PotionRank({ rank, ranks }) {
-  const all = rank?.ranks || ranks;
-  if (!all?.length) return null;
-  const known = rank && rank.rank;
+// The game's own quality overlays for potions in the bags (UI atlas crops in
+// public/art/quality): The War Within's three ranks, Midnight's two.
+const QUALITY_ART = { 3: ['tww-1', 'tww-2', 'tww-3'], 2: ['midnight-1', 'midnight-2'] };
+export const qualityArt = (rank) => {
+  if (!rank?.rank || !rank.ranks) return null;
+  const i = rank.ranks.findIndex((r) => r.rank === rank.rank);
+  const art = QUALITY_ART[rank.ranks.length]?.[i];
+  return art ? `/art/quality/${art}.png` : null;
+};
+
+/* The potion rank a player most likely drinks (defensives.potion_rank). */
+function PotionRank({ rank }) {
+  if (!rank) return null;
+  const art = qualityArt(rank);
   return (
     <>
-      {known && <Row a="Potion rank" b={cap(rank.rank)} cls="tal" />}
-      {all.map((r) => (
-        <Row key={r.rank} a={`${cap(r.rank)} rank tooltip`} b={r.heal.toLocaleString()} cls={known && rank.rank === r.rank ? 'tal' : undefined} />
-      ))}
+      {rank.rank
+        ? <Row a="Likely drinking" b={<>{art && <img className="fpx-qual-inline" src={art} alt="" />}{cap(rank.rank)} rank</>} cls="tal" />
+        : <Row a="Likely drinking" b="can't tell" />}
       <div className="src">
-        {rank && `Their potions healed ${rank.raw.toLocaleString()}${rank.n > 1 ? ` (middle of ${rank.n})` : ''}; without their ${rank.vers}% Versatility, healing buffs and talents that's ${rank.base.toLocaleString()}. `}
-        {known && `That reaches the ${rank.rank} tooltip${rank.rank !== all[all.length - 1].rank ? ` but not the ${all[all.length - 1].rank} one` : ''}; the ${rank.bonus}% over it comes from their class and spec healing bonuses. `}
-        {rank && !known && `This tier's ranks are only ${rank.unknown}% apart, less than the healing bonuses players carry from their class and spec (up to 16%), so the log can't show which one they drank. `}
-        Potions heal more than the tooltip: Versatility, raid buffs such as Mark of the Wild, and healing-received talents raise it, so the heal changes from pull to pull.
+        {rank.rank
+          ? `From ${rank.n > 1 ? `the middle of their ${rank.n} potion heals` : 'their potion heal'} in these pulls, with Versatility and healing buffs taken out: it reaches the ${rank.rank} tooltip.`
+          : `This tier's ranks heal within ${rank.unknown}% of each other, less than players' own healing bonuses, so the log can't show which one they drink.`}
       </div>
     </>
   );
 }
 
 const SOURCE_TEXT = {
-  log: 'Estimate: the middle of their own heals from it (which shows the potion rank they drink), with healing buffs taken out, then the ones up when they died put back.',
+  log: 'Estimate: the middle of their own heals from it, with the healing buffs they had when they died.',
   typical: "None of theirs in these boss pulls, so the tier's typical heal is used.",
   gameData: 'From the game data.',
 };
@@ -212,12 +226,16 @@ export function Tip({ content, className, children }) {
 // Blizzard's icon server doesn't have every new icon; WarcraftLogs hosts them all.
 const ICON_FALLBACK = (icon) => `https://assets.rpglogs.com/img/warcraft/abilities/${icon}.jpg`;
 
-function Icon({ name, icons, icon: given, className = '' }) {
+function Icon({ name, icons, icon: given, className = '', quality }) {
   const icon = given || icons?.[name];
   const [tries, setTries] = useState(0);
-  if (!icon || tries > 1) return <span className={`fpx-ico none ${className}`}>{(name || '?').charAt(0)}</span>;
-  return <img className={`fpx-ico ${className}`} src={(tries ? ICON_FALLBACK : ICON_URL)(icon)} alt="" loading="lazy"
-    onError={() => setTries((t) => t + 1)} />;
+  const img = !icon || tries > 1
+    ? <span className={`fpx-ico none ${className}`}>{(name || '?').charAt(0)}</span>
+    : <img className={`fpx-ico ${className}`} src={(tries ? ICON_FALLBACK : ICON_URL)(icon)} alt="" loading="lazy"
+      onError={() => setTries((t) => t + 1)} />;
+  if (!quality) return img;
+  // The potion's rank, as the game marks it on the item in the bags.
+  return <span className="fpx-qualwrap">{img}<img className="fpx-qual" src={quality} alt="" /></span>;
 }
 
 const TipHead = ({ name, icons, icon, sub }) => (
@@ -309,7 +327,7 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
         {!det && s && v == null && <div className="res b">Can't estimate this one (not simple damage reduction, absorb or healing)</div>}
         {!s && <div className="res b">Off cooldown when they died</div>}
         {det?.source && <div className="src">{SOURCE_TEXT[det.source]}</div>}
-        {inf?.kind === 'potion' && <PotionRank rank={det?.rank} ranks={det?.ranks} />}
+        {inf?.kind === 'potion' && <PotionRank rank={det?.rank} />}
         {det?.hot && <div className="src">Checked as if pressed early enough for every tick to land before the hit (never before it was off cooldown), using their real health in those seconds.</div>}
       </>
     );
@@ -335,7 +353,7 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
       const v = s?.wouldSave?.[name];
       strip.push(
         <Tip key={`r-${name}`} className={`i ${v === true ? 'ok' : 'no'}`} content={readyTip(name, v)}>
-          <Icon name={name} icons={icons} />
+          <Icon name={name} icons={icons} quality={qualityArt(s?.details?.[name]?.rank)} />
         </Tip>
       );
     });
@@ -358,7 +376,7 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
           <div className="res b">On cooldown: {c.text}</div>
           {c.rank && <PotionRank rank={c.rank} />}
         </>
-      )}><Icon name={c.name} icons={icons} />{c.label && <span className="t">{c.label}</span>}</Tip>
+      )}><Icon name={c.name} icons={icons} quality={qualityArt(c.rank)} />{c.label && <span className="t">{c.label}</span>}</Tip>
     ));
   }
   const saves = s ? Object.values(s.wouldSave || {}).filter((v) => v === true).length : 0;
