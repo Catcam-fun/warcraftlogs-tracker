@@ -2109,8 +2109,8 @@ export default function WarcraftLogsApp() {
                       {isExpanded && (
                         <div className="fpx-pbody">
                           <DefensiveTopUnused s={defensiveSummary} />
-                          {sortBossesByOrder(Object.keys(deathsByBoss), config.selectedRaid).map(boss => {
-                            const bossDeaths = deathsByBoss[boss];
+                          {sortBossesByOrder(Object.keys(showBothStats ? totalDeathsByBoss : deathsByBoss), config.selectedRaid).map(boss => {
+                            const bossDeaths = deathsByBoss[boss] || [];
                             const bossPulls = data.bossParticipation[boss]?.[player]?.length || 0;
                             const realDeathCount = bossDeaths.length;
                             const totalBossDeaths = totalDeathsByBoss[boss] || [];
@@ -2145,7 +2145,7 @@ export default function WarcraftLogsApp() {
                               )}
 
                               <div className="fpx-dlist">
-                                {(showBothStats ? totalBossDeaths : bossDeaths)
+                                {(showBothStats ? [...totalBossDeaths].sort((a, b) => a.absTs - b.absTs) : bossDeaths)
                                   .map((death, idx) => (
                                   <DeathRow key={idx} death={death} icons={data.icons} abilityIcons={data.abilityIcons} abilityInfo={data.abilityInfo} abilityText={data.abilityText}
                                     killCounts={killCounts} logHref={getWCLLink(death.reportId, death.fightId)}
