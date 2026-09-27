@@ -872,3 +872,9 @@ table.fpx-mtx{width:100%;border-collapse:collapse;font-size:12px;
   .fpx-spin{animation:none}
   .fpx-load-orb::before{animation:none}
 }
+
+/* Potion rank: the game's quality overlay on the item icon (top-left, as in the bags). */
+.fpx-qualwrap{position:relative;display:inline-block;line-height:0}
+.fpx-qual{position:absolute;left:-3px;top:-3px;z-index:2;height:15px;width:auto;pointer-events:none;
+  filter:drop-shadow(0 0 1px rgba(0,0,0,.9))}
+.fpx-qual-inline{height:13px;width:auto;vertical-align:-1px;margin-right:5px}

@@ -7,7 +7,7 @@ ability (so a player is only expected to have what they actually talented).
 Run after a patch:  python backend/scripts/build_defensive_catalog.py
 Needs network access to wago.tools.
 """
-import csv, gzip, io, json, os, pprint, sys, urllib.request
+import csv, gzip, io, json, os, pprint, re, sys, urllib.request
 
 # kind: "personal"   - the player's own button; tracked as active / available / on cooldown
 #       "external"   - raid cooldowns and externals from others; shown only when active on the player
@@ -37,6 +37,8 @@ CURATED = [
     (61336, "Survival Instincts", "Druid", None, "personal"),
     (108238, "Renewal", "Druid", None, "personal"),
     (22842, "Frenzied Regeneration", "Druid", None, "personal"),
+    # Every druid can shift; for Guardians it's their normal form, not a defensive.
+    (5487, "Bear Form", "Druid", ["Balance", "Feral", "Restoration"], "personal"),
     (102342, "Ironbark", "Druid", None, "external"),
     # Evoker
     (363916, "Obsidian Scales", "Evoker", None, "personal"),
@@ -118,7 +120,7 @@ CURATED = [
 # exists. Anti-Magic Shell and Touch of Karma have talent entries but are
 # pressed in real Midnight logs by players without them.
 BASELINE = {198589, 187827, 22812, 186265, 109304, 642, 498, 47585, 1966, 185311, 104773,
-            48707, 122470}
+            48707, 122470, 5487}
 
 # Talents that grant the button through a differently numbered spell of the
 # same name. Only these are matched by name: in Midnight several same-named
@@ -140,7 +142,9 @@ MITIGATION = {
     "Icebound Fortitude": {"dr": .30, "dur": 8}, "Rune Tap": {"dr": .20, "dur": 4},
     "Vampiric Blood": {"hp": .30, "dur": 10}, "Death Pact": {"heal": .50},
     "Anti-Magic Shell": {"absorb": .30, "school": "magic", "dur": 5},
-    "Blur": {"dr": .25, "dur": 10}, "Metamorphosis": {"hp": .40, "dur": 15},
+    "Blur": {"dr": .25, "dur": 10},
+    # "Increasing current health by 40%, healing for that amount, and increasing Armor by 200%".
+    "Metamorphosis": {"hp": .40, "heal": .40, "armor": 2.0, "dur": 15},
     "Fiery Brand": {"dr": .40, "dur": 10}, "Netherwalk": {"immune": True, "dur": 2},
     "Barkskin": {"dr": .20, "dur": 8}, "Survival Instincts": {"dr": .50, "dur": 6},
     "Renewal": {"heal": .30},
@@ -149,7 +153,8 @@ MITIGATION = {
     "Survival of the Fittest": {"dr": .30, "dur": 6},
     "Ice Block": {"immune": True, "dur": 10}, "Ice Cold": {"dr": .70, "dur": 6},
     "Blazing Barrier": {"absorb": .30, "dur": 60}, "Ice Barrier": {"absorb": .35, "dur": 60},
-    "Prismatic Barrier": {"absorb": .30, "dur": 60},
+    "Prismatic Barrier": {"absorb": .30, "dr": .15, "dur": 60},
+    "Mirror Image": {"dr": .20},
     "Fortifying Brew": {"dr": .20, "hp": .20, "dur": 15}, "Dampen Harm": {"dr": .20, "dur": 10},
     "Diffuse Magic": {"dr": .60, "school": "magic", "dur": 6}, "Touch of Karma": {"absorb": .50, "dur": 10},
     "Zen Meditation": {"dr": .60, "dur": 8},
@@ -170,11 +175,14 @@ MITIGATION = {
     "Evasion": {"immune": True, "school": "melee", "dur": 10},
     "Greater Invisibility": {"dr": .60, "dur": 3},
     "Frenzied Regeneration": {"heal": .24},        # 8% of max health per second for 3s
+    # +25% Stamina (max health, health share kept) and +220% armor; its magic
+    # reductions come from the game data (Bear Form Passive 2 and the form itself).
+    "Bear Form": {"hp": .25, "armor": 2.2},
     # Shields whose size depends on stats or resources: scored only from the
     # player's real shield size seen in the log (absorb=None).
     "Celestial Brew": {"absorb": None}, "Tombstone": {"absorb": None},
     "Stone Bulwark Totem": {"absorb": None},
-    # Leech and immunity to charm/fear only: can't stop a hit.
+    # Leech and immunity to charm/fear only, unless Unholy Endurance adds a reduction (TALENT_EFFECTS).
     "Lichborne": {},
     # Consumables. Healthstones heal a share of max health (from the game data);
     # potions heal a fixed amount per quality rank (POTION_TYPICAL below).
@@ -190,34 +198,142 @@ MITIGATION = {
 # that fills it in (Elusiveness).
 EFFECTS = {
     "Icebound Fortitude": [("dr", 48792, 2)], "Rune Tap": [("dr", 194679, 0)],
-    "Vampiric Blood": [("hp", 55233, 3)],   # effect 2 is absorbs received, not max health "Death Pact": [("heal", 48743, 0)],
-    "Anti-Magic Shell": [("absorb", 48707, 0)],
-    "Blur": [("dr", 212800, 2)], "Metamorphosis": [("hp", 187827, 1)],
+    # Effect 2 is absorbs received, not max health; 0 is healing received.
+    "Vampiric Blood": [("hp", 55233, 3), ("heal_taken", 55233, "aura:118")],
+    "Death Pact": [("heal", 48743, 0)],
+    "Anti-Magic Shell": [("absorb", 48707, 0), ("heal_taken", 48707, "aura:118", {"optional": True})],
+    "Blur": [("dr", 212800, 2)],
+    "Metamorphosis": [("hp", 187827, "aura:133"), ("armor", 187827, "aura:142", {"optional": True}),
+                      ("vers", 187827, "aura:471", {"optional": True})],
     "Fiery Brand": [("dr", 207771, 0)],
-    "Barkskin": [("dr", 22812, 0)], "Survival Instincts": [("dr", 50322, 0)],
-    "Renewal": [("heal", 108238, 0)], "Frenzied Regeneration": [("heal", 22842, 0, 3)],
+    "Barkskin": [("dr", 22812, 0), ("heal_taken", 22812, "aura:118", {"optional": True})],
+    "Survival Instincts": [("dr", 50322, 0)],
+    "Renewal": [("heal", 108238, 0)],
+    "Frenzied Regeneration": [("heal", 22842, 0, 3), ("heal_taken", 22842, "aura:118", {"optional": True})],
+    # Its own magic reductions only with Glistening Fur (a script); Bear Form
+    # Passive 2's only with Empowered Shapeshifting (a modifier on a 0 base).
+    "Bear Form": [("hp", 1178, "aura:137"), ("armor", 5487, "aura:142"),
+                  ("dr", 5487, "aura:87", {"optional": True, "needs": "Glistening Fur"}),
+                  ("dr", 21178, "aura:87", {"optional": True})],
     "Obsidian Scales": [("dr", 363916, 0)],
     "Aspect of the Turtle": [("dr", 186265, 3)], "Exhilaration": [("heal", 109304, 0)],
     "Survival of the Fittest": [("dr", 264735, 0)],
     "Ice Cold": [("dr", 414658, 7)], "Greater Invisibility": [("dr", 113862, 0)],
-    "Blazing Barrier": [("absorb", 235313, 0)], "Ice Barrier": [("absorb", 11426, 0)],
-    "Prismatic Barrier": [("absorb", 235450, 0)],
+    "Blazing Barrier": [("absorb", 235313, 0)],
+    # Improved Ice Barrier (Midnight) fills in a physical reduction on a 0 base.
+    "Ice Barrier": [("absorb", 11426, 0), ("dr", 11426, "aura:87", {"optional": True})],
+    "Prismatic Barrier": [("absorb", 235450, 0), ("dr", 235450, "aura:87")],
+    "Mirror Image": [("dr", 55342, "aura:87", {"optional": True})],
     "Diffuse Magic": [("dr", 122783, 0)], "Touch of Karma": [("absorb", 122470, 1)],
     "Celestial Brew": [("absorb", 322507, 0)], "Zen Meditation": [("dr", 115176, 1)],
-    "Ardent Defender": [("dr", 31850, 0)], "Divine Protection": [("dr", 498, 0)],
+    "Ardent Defender": [("dr", 31850, "aura:87"), ("hp", 31850, "aura:137", {"optional": True}),
+                        ("heal_taken", 31850, "aura:118", {"optional": True})],
+    "Divine Protection": [("dr", 498, 0), ("heal_taken", 498, "aura:118", {"optional": True})],
     "Guardian of Ancient Kings": [("dr", 86659, 2)], "Lay on Hands": [("heal", 633, 1)],
     "Shield of Vengeance": [("absorb", 184662, 0)],
     "Desperate Prayer": [("hp", 19236, 0), ("heal", 19236, 1)],
-    "Dispersion": [("dr", 47585, 0)], "Fade": [("dr", 586, 3)],
+    "Dispersion": [("dr", 47585, 0)],
+    # Fade reduces damage only with Translucent Image (a script in The War Within data).
+    "Fade": [("dr", 586, "aura:87", {"needs": "Translucent Image"})],
     "Crimson Vial": [("heal", 185311, 0, 4)],
     "Feint": [("dr", 1966, 0), ("dr", 1966, 1)],
-    "Evasion": [("immune", 5277, 0), ("dr", 5277, 1), ("dr", 5277, 2)],   # 2: magic, The War Within only
+    # 1: all damage (Elusiveness); 2: magic, only with Bait and Switch (a script
+    # in The War Within, a modifier on a 0 base in Midnight).
+    "Evasion": [("immune", 5277, 0), ("dr", 5277, 1), ("dr", 5277, 2, 1, {"needs": "Bait and Switch"})],
+    "Cloak of Shadows": [("immune", 31224, 0), ("dr", 31224, 2, 1, {"needs": "Bait and Switch"})],
     "Astral Shift": [("dr", 108271, 0)], "Stone Bulwark Totem": [("absorb", 114893, 0)],
     "Dark Pact": [("absorb", 108416, 0)], "Unending Resolve": [("dr", 104773, 2)],
     "Die by the Sword": [("dr", 118038, 1)], "Enraged Regeneration": [("dr", 184364, 0)],
+    # "Increasing your current and maximum health": both rise by the same amount.
+    # The button's own points carry the values the buff's script reads ($<health>, $<damage>),
+    # and talents (Ironshell Brew) modify those.
+    "Fortifying Brew": [("hp", 115203, 0, 1, {"current": True}), ("dr", 115203, 1)],
     "Last Stand": [("hp", 12975, 0), ("heal", 12975, 1)], "Shield Wall": [("dr", 871, 0)],
     "Spell Reflection": [("dr", 385391, 0)], "Tombstone": [("absorb", 219809, 0)],
     "Healthstone": [("heal", 6262, 0)], "Demonic Healthstone": [("heal", 452930, 0)],
+}
+
+# Effects a talent adds to a button that the game data doesn't attach to the
+# button's own spell (a script, or a separate spell): talent -> [(button,
+# field, value source, options)]. The value source is [(spell, effect)] whose
+# base points are multiplied together ("talent" = the talent's own spell).
+# Only players with the talent in that pull's loadout get them; a talent not in
+# a patch's trees adds nothing there. Options: "over": a heal over time with
+# that spell's duration and tick period ("per_tick": the value is per tick);
+# "aura": a shield scored from its real size in the log.
+TALENT_EFFECTS = {
+    "Bloody Fortitude": [("Icebound Fortitude", "dr_missing", [("talent", 0)], {})],
+    # The War Within: Lichborne's reduction (Midnight's talent only lengthens it).
+    "Unholy Endurance": [("Lichborne", "dr", [(49039, "aura:87")], {"optional": True})],
+    "Matted Fur": [("Barkskin", "absorb_aura", [], {"aura": "Matted Fur"}),
+                   ("Survival Instincts", "absorb_aura", [], {"aura": "Matted Fur"})],
+    "Fount of Strength": [("Frenzied Regeneration", "hp", [("talent", 2)], {})],
+    "Ward of the Forest": [("Barkskin", "hp", [("talent", 1)], {})],
+    "Empowered Shapeshifting": [],        # reaches Bear Form Passive 2 by label; also lifts FR's form need
+    "Rejuvenating Wind": [("Exhilaration", "heal", [("talent", 0)], {"over": 385540})],
+    "Den Recovery": [("Aspect of the Turtle", "heal", [("talent", 0)], {"over": 448777}),
+                     ("Survival of the Fittest", "heal", [("talent", 0)], {"over": 448777})],
+    "Niuzao's Protection": [("Fortifying Brew", "absorb", [(442749, 1)], {})],
+    "Invigorating Fury": [("Enraged Regeneration", "heal", [("talent", 1)], {})],
+    "Infernal Vitality": [("Unending Resolve", "heal", [(434559, "aura:20")], {"over": 434559, "per_tick": True})],
+    "Infernal Bulwark": [("Unending Resolve", "absorb", [("talent", 0)], {})],
+    "Friends In Dark Places": [("Dark Pact", "absorb", [(108416, 1), ("talent", 0)], {})],
+    "Phantasmal Image": [],               # reaches Mirror Image by label
+    # "For 4 sec after shifting into Bear Form, your health and armor are increased by 15%."
+    "Ursine Vigor": [("Bear Form", "hp", [("talent", 0)], {}), ("Bear Form", "armor", [("talent", 0)], {})],
+    "Mantra of Tenacity": [("Fortifying Brew", "absorb_aura", [], {"aura": "Chi Cocoon"})],
+}
+
+# Every talent that names a defensive in its tooltip with a survival word has
+# been reviewed (all patches from 11.0.2): handled through the game data
+# (modifiers), in TALENT_EFFECTS or EFFECTS "needs", or left out for the reason
+# given. A new one fails the build of the current patch until it's reviewed.
+TALENTS_REVIEWED = {
+    # handled: modifiers on a mapped effect, EFFECTS "needs", TALENT_EFFECTS, or the form rule
+    "Osmosis": "handled", "Improved Vampiric Blood": "handled", "Verdant Heart": "handled",
+    "Ironshell Brew": "handled", "Improved Prismatic Barrier": "handled", "Improved Ardent Defender": "handled",
+    "Translucent Image": "handled", "Bait and Switch": "handled", "First of the Illidari": "handled",
+    "Gorebound Fortitude": "handled", "Ice Cold": "handled", "Pact of Gluttony": "handled",
+    "Wildshape Mastery": "only keeps Frenzied Regeneration going after leaving Bear Form; casting still needs it",
+    **{t: "handled" for t in TALENT_EFFECTS},
+    # left out: not pressed by the player, after the hit, or not something that stops a hit
+    "Blood Feast": "heals from damage absorbed: nothing before the killing blow",
+    "Vestigial Shell": "shields allies", "Expelling Shield": "slows enemy casts",
+    "Pact of the Deathbringer": "casts Death Pact by itself",
+    "Red Thirst": "cooldown from resource spent (observed recasts cover it)",
+    "Umbilicus Eternus": "after Vampiric Blood ends", "Insatiable Blade": "cooldown from Bone Shield",
+    "Revel in Pain": "after Fiery Brand ends", "Flower Walk": "heals allies",
+    "Brambles": "damages attackers", "Berserk: Persistence": "cooldown while another button is up",
+    "Well-Honed Instincts": "casts Frenzied Regeneration by itself",
+    "Guardian of Elune": "depends on the previous Mangle", "Heart of the Wild": "a separate button",
+    "Aspects' Favor": "boosts Black Attunement, an aura that isn't tracked",
+    "Foci of Life": "heals back damage over time after the hit", "Natural Mending": "cooldown from Focus spent",
+    "Cryo-Freeze": "heals inside Ice Block, which already makes them immune",
+    "Reduplication": "cooldown when images die", "Reabsorption": "heals when an image dies",
+    "Master of Time": "cooldown of Alter Time", "Blackout Combo": "depends on the previous Blackout Kick",
+    "Purifying Brew": "depends on Stagger level", "Aspect of Harmony": "depends on stored vitality",
+    "Resolute Defender": "cooldown from Holy Power spent", "Gift of the Golden Val'kyr": "cooldown / automatic",
+    "Righteous Protector": "cooldown from Holy Power spent", "Tirion's Devotion": "cooldown from Holy Power spent",
+    "Laying Down Arms": "cooldown from Armaments", "Healing Hands": "cooldown by target health",
+    "Angel's Mercy": "cooldown", "Desperate Measures": "duration, and Angelic Bulwark (automatic)",
+    "Intangibility": "Dispersion's heal is a script formula the data doesn't give",
+    "Float Like a Butterfly": "cooldown from combo points", "Nimble Fingers": "energy cost",
+    "Resolute Barrier": "cooldown from hits taken", "Ichor of Devils": "health cost",
+    "Frequent Donor": "cooldown", "Zevrim's Resilience": "a flat heal the data doesn't size",
+    "Anger Management": "cooldown from Rage spent", "Impenetrable Wall": "cooldown from Shield Slam",
+    "Lifeblood": "Leech after a Healthstone", "Swift Artifice": "cast time",
+    "Soulburn": "handled", "Iron Stomach": "handled", "Glistening Fur": "handled", "Inspired Guard": "handled",
+    "Berserk": "a separate button", "Incarnation: Guardian of Ursoc": "a separate button (Guardian)",
+    "Blood Mist": "parry chance", "Dance of Midnight": "automatic", "Demonsurge": "damage",
+    "Elune's Favored": "heals from damage dealt", "Empyreal Ward": "armor after Lay on Hands, which already heals fully",
+    "Light's Revocation": "heals per effect removed", "Lycara's Inspiration": "no defensive in Bear Form (movement speed)",
+    "Natural Resilience": "turns Frenzied Regeneration's overhealing into a shield whose cap the data doesn't give",
+    "Persistence": "after leaving Bear Form", "Reinvigoration": "heals from other spells, and duration",
+    "Sanguine Vial": "after a killing blow", "Temporal Realignment": "automatic",
+    "The Blood is Life": "automatic", "Ursine Adept": "its Bear Form reduction is 0 in the data",
+    "Voidpurge": "cooldown", "Voidrush": "cooldown", "World Killer": "cooldown",
+    "Improved Ice Barrier": "handled", "Wilderness Medicine": "cooldown, and heals the pet",
+    "Harmonic Surge": "damage", "Improved Blazing Barrier": "heals from damage absorbed",
 }
 
 # Potions heal a fixed amount that depends on the potion's quality rank, and
@@ -230,6 +346,21 @@ POTION_TYPICAL = {
     "Potent Healing Potion": 200_000,
 }
 
+# Each potion comes in quality ranks: separate items with their own item level,
+# all casting the same spell (so a log names the potion but not the rank). A
+# rank's tooltip heal is the heal effect's coefficient times the item-level
+# budget of its scaling class (RandPropPoints at the item's level), rounded
+# down: checked against the in-game tooltips of Concentrated Silvermoon Health
+# Potion (359,498 / 421,200) and Algari Healing Potion (3,839,477 at rank 3).
+# How many ranks a potion has differs by tier (The War Within: 3, Midnight: 2).
+POTION_SCALING_COLUMN = {-9: "DamageSecondaryF", -8: "DamageReplaceStatF", -2: "EpicF_0", -1: "EpicF_0"}
+RANK_NAMES = {2: ["silver", "gold"], 3: ["bronze", "silver", "gold"]}
+HEAL_EFFECT = "10"
+
+# Buttons the game only allows in a form (SpellShapeshift), and the talent that
+# lifts it: Empowered Shapeshifting lets Frenzied Regeneration be cast in Cat Form.
+FORM_REQUIRED = {"Frenzied Regeneration": ("Bear Form", "Empowered Shapeshifting")}
+
 # Buffs that live on a spell the button doesn't point to in the game data.
 AURA_SPELLS = {"Fortifying Brew": [120954], "Rallying Cry": [97463], "Renewing Blaze": [374349]}
 
@@ -239,12 +370,17 @@ ALSO_CONSUMABLES = {"Iron Stomach": 185311}
 # Healthstone extras that come from a talent rather than the item: Soulburn
 # makes a Warlock's Healthstone also raise max health (Soulburn: Healthstone).
 SOULBURN = (385899, 387636)       # talent spell, the buff it adds to a Healthstone
+GOREBOUND = ("Gorebound Fortitude", 1.3)   # its tooltip: "increasing its healing by 30%"
 
 # SpellModOp values that change one effect's value -> that effect's index.
 MOD_OP_EFFECT_INDEX = {3: 0, 12: 1, 23: 2, 32: 3, 33: 4}
 MOD_OP_ALL = 0          # percent modifier on all of a spell's healing / absorb amounts
 MOD_OP_COOLDOWN = 11
 AURA_ADD_MOD, AURA_PCT_MOD = "107", "108"
+# The same, for every spell carrying a label (misc value 1) instead of a class
+# mask: how Improved Ardent Defender, Phantasmal Image and Empowered
+# Shapeshifting reach their spells.
+AURA_ADD_MOD_LABEL, AURA_PCT_MOD_LABEL = "219", "220"
 AURA_MAX_CHARGES = "411"            # +N charges of a charge category
 AURA_CHARGE_RECOVERY_FLAT = "453"   # +ms to a charge category's recharge
 AURA_CHARGE_RECOVERY_PCT = "454"    # +% to a charge category's recharge
@@ -252,7 +388,7 @@ AURA_HEALING_TAKEN_PCT = "118"      # healing taken +%
 ALL_SCHOOLS = "127"
 SPELL_ATTR0_PASSIVE = 0x40
 AURA_OVERRIDE_BUTTON = "332"        # base points = new spell, misc value = the button it replaces
-FIELDS = ("immune", "dr", "absorb", "hp", "heal")
+FIELDS = ("immune", "dr", "armor", "absorb", "hp", "heal", "heal_taken")
 
 # Cooldowns the game data stores elsewhere (seconds).
 COOLDOWN_FALLBACK = {196555: 180, 374348: 90, 184662: 90}
@@ -335,6 +471,16 @@ class GameData:
         self.passive = {int(r["SpellID"]) for r in misc_rows if int(r["Attributes_0"]) & SPELL_ATTR0_PASSIVE}
         length = {int(r["ID"]): int(r["MaxDuration"]) for r in table("SpellDuration", build)}
         self.duration = {sid: length.get(i, 0) for sid, i in misc.items()}
+        self.labels = {}                          # spell -> label IDs
+        for r in table("SpellLabel", build):
+            self.labels.setdefault(int(r["SpellID"]), set()).add(int(r["LabelID"]))
+        self.periods = {}                         # (spell, effect index) -> tick period (ms)
+        for sid, effs in self.effects.items():
+            for i, r in effs.items():
+                if int(r["EffectAuraPeriod"] or 0):
+                    self.periods[(sid, i)] = int(r["EffectAuraPeriod"])
+        self.shapeshift = {int(r["SpellID"]): int(r["ShapeshiftMask_0"]) for r in table("SpellShapeshift", build)
+                           if int(r["ShapeshiftMask_0"] or 0)}
         self.definitions = table("TraitDefinition", build)
         self.node_entries = table("TraitNodeEntry", build)
         specs = {r["ID"]: r["Name_lang"] for r in table("ChrSpecialization", build)}
@@ -351,7 +497,10 @@ class GameData:
 # Damage-reduction auras and the damage they cover: aura 87 names schools in its
 # misc value (127 all, 126 magic, 1 physical); aura 229 is AoE damage only.
 AURA_AOE_REDUCTION = "229"
+AURA_DAMAGE_TAKEN_PCT = "87"
+AURA_SHAPESHIFT = "36"
 SCHOOL_MASKS = {"127": None, "126": "magic", "1": "physical"}
+MAGIC_SCHOOLS = 126
 
 
 def data_value(field, gd, spell, index, ticks):
@@ -364,11 +513,30 @@ def data_value(field, gd, spell, index, ticks):
         return None, None
     bp = float(r["EffectBasePointsF"])
     if field == "dr":
-        school = "aoe" if r["EffectAura"] == AURA_AOE_REDUCTION else SCHOOL_MASKS.get(r["EffectMiscValue_0"])
-        return round(abs(bp) / 100, 4), school
-    if field in ("heal", "hp"):
+        misc = r["EffectMiscValue_0"]
+        if r["EffectAura"] == AURA_AOE_REDUCTION:
+            return round(abs(bp) / 100, 4), "aoe"
+        if r["EffectAura"] != AURA_DAMAGE_TAKEN_PCT:
+            return round(abs(bp) / 100, 4), None          # a script's number (dummy effect): all damage
+        if misc in SCHOOL_MASKS:
+            return round(abs(bp) / 100, 4), SCHOOL_MASKS[misc]
+        # Other school sets: magic ones only (Bear Form's "all other magic damage").
+        return round(abs(bp) / 100, 4), int(misc) & MAGIC_SCHOOLS
+    if field in ("heal", "hp", "armor", "heal_taken", "dr_missing", "absorb_pct"):
         return round(bp / 100 * ticks, 4), None
+    if field == "vers":
+        return round(bp / 200, 4), None
     return None, None
+
+
+def effect_indices(gd, spell, where):
+    """Indices of a spell's effects: an index, or "aura:N" for every effect with that aura
+    (effects move between patches; their aura type doesn't)."""
+    effs = gd.effects.get(spell, {})
+    if isinstance(where, int):
+        return [where] if where in effs else []
+    aura = where.split(":")[1]
+    return sorted(i for i, r in effs.items() if r["EffectAura"] == aura)
 
 
 class Modifiers:
@@ -401,6 +569,8 @@ class Modifiers:
         return None
 
     def _covers(self, row, spell):
+        if row["EffectAura"] in (AURA_ADD_MOD_LABEL, AURA_PCT_MOD_LABEL):
+            return int(row["EffectMiscValue_1"]) in self.gd.labels.get(spell, ())
         fam, mask = self.gd.family.get(spell, (None, [0] * 4))
         if self.gd.family.get(int(row["SpellID"]), (None,))[0] != fam:
             return False
@@ -420,8 +590,8 @@ class Modifiers:
     def effect(self, spell, index, field, ticks):
         """Modifiers of one effect value (a reduction, heal, max health or absorb)."""
         found = []
-        for aura in (AURA_ADD_MOD, AURA_PCT_MOD):
-            pct = aura == AURA_PCT_MOD
+        for aura in (AURA_ADD_MOD, AURA_PCT_MOD, AURA_ADD_MOD_LABEL, AURA_PCT_MOD_LABEL):
+            pct = aura in (AURA_PCT_MOD, AURA_PCT_MOD_LABEL)
             for r, who in self._source_rows(aura):
                 if not self._covers(r, spell):
                     continue
@@ -437,18 +607,20 @@ class Modifiers:
                 else:
                     # Reductions are negative in the data; heals/health are % of max health.
                     mod["add"] = round((-value if field == "dr" else value) / 100 * ticks, 4)
+                    if field == "vers":
+                        mod["add"] = round(value / 200, 4)     # Versatility reduces damage taken by half its value
                 found.append(mod)
         return _dedupe(found)
 
     def cooldown(self, spell):
         """Cooldown / recharge modifiers: {"add_ms"} or {"mult"}."""
         found = []
-        for aura in (AURA_ADD_MOD, AURA_PCT_MOD):
+        for aura in (AURA_ADD_MOD, AURA_PCT_MOD, AURA_ADD_MOD_LABEL, AURA_PCT_MOD_LABEL):
             for r, who in self._source_rows(aura):
                 if int(r["EffectMiscValue_0"]) == MOD_OP_COOLDOWN and self._covers(r, spell):
                     value = float(r["EffectBasePointsF"])
                     mod = {"talent": self.gd.names.get(int(r["SpellID"])), **who}
-                    if aura == AURA_PCT_MOD:
+                    if aura in (AURA_PCT_MOD, AURA_PCT_MOD_LABEL):
                         mod["mult"] = round(1 + value / 100, 4)
                     else:
                         mod["add_ms"] = int(value)
@@ -502,6 +674,42 @@ def healing_taken_auras(gd, mods):
     return out
 
 
+def potion_ranks(build, gd, problems):
+    """spell -> [{"rank", "ilvl", "heal", "items"}], lowest rank first, for every curated potion.
+
+    Only the potion's own items count (same name, or its "Fleeting" copy from a
+    cauldron, which has the same item levels); test items are left out.
+    """
+    potions = {sid: name for sid, name, _, _, kind in CURATED if kind == "potion" and sid in gd.names}
+    effect_spell = {r["ID"]: int(r["SpellID"]) for r in table("ItemEffect", build) if int(r["SpellID"]) in potions}
+    item_spell = {int(r["ItemID"]): effect_spell[r["ItemEffectID"]]
+                  for r in table("ItemXItemEffect", build) if r["ItemEffectID"] in effect_spell}
+    levels = {}
+    # Only this expansion's potions: an older one scales differently after an
+    # item squish (Invigorating Healing Potion heals 90,971 in Midnight).
+    expansion = str(int(build.split(".")[0]) - 1)
+    for r in table("ItemSparse", build):
+        item = int(r["ID"])
+        sid = item_spell.get(item)
+        if sid and r["ExpansionID"] == expansion and r["Display_lang"] in (potions[sid], "Fleeting " + potions[sid]):
+            levels.setdefault(sid, {}).setdefault(int(r["ItemLevel"]), []).append(item)
+    budget = {int(r["ID"]): r for r in table("RandPropPoints", build)}
+    out = {}
+    for sid, by_level in levels.items():
+        eff = next((e for e in gd.effects.get(sid, {}).values() if e["Effect"] == HEAL_EFFECT), None)
+        column = POTION_SCALING_COLUMN.get(int(eff["ScalingClass"])) if eff else None
+        if len(by_level) < 2:
+            continue                      # a single rank: nothing to tell apart
+        if column is None or not float(eff["Coefficient"] or 0):
+            problems.append(f"{potions[sid]}: no scaled heal effect, ranks unknown")
+            continue
+        names = RANK_NAMES.get(len(by_level)) or [f"rank {i + 1}" for i in range(len(by_level))]
+        out[sid] = [{"rank": names[i], "ilvl": lvl, "items": sorted(by_level[lvl]),
+                     "heal": int(float(eff["Coefficient"]) * float(budget[lvl][column]))}
+                    for i, lvl in enumerate(sorted(by_level))]
+    return out
+
+
 def aura_duration(gd, sid, name):
     """Longest base duration (ms) of an ability's aura (the button, spells it triggers, effect spells).
 
@@ -514,56 +722,153 @@ def aura_duration(gd, sid, name):
         spells |= frontier
     spells |= {e[1] for e in EFFECTS.get(name, ())} | set(AURA_SPELLS.get(name, ()))
     found = [gd.duration.get(s, 0) for s in spells if gd.names.get(s) == name]
-    return max(found, default=0) or None
+    return max(found, default=0) if max(found, default=0) > 0 else None   # -1: lasts until cancelled (a form)
+
+
+def talent_who(gd, mods, name):
+    """Who has a talent (by name) in this patch: {"talent", "entries"} or None if it isn't in a tree."""
+    for sid, n in gd.names.items():
+        if n == name and mods.entries_for_spell.get(sid):
+            return {"talent": name, "entries": sorted(mods.entries_for_spell[sid])}, sid
+    return None, None
+
+
+def _talent_mods_reach(mods_list, talent):
+    return any(m.get("talent") == talent for m in mods_list or ())
 
 
 def components(name, gd, mods, problems):
     """One component per effect of an ability, base values from this patch's data, with talent modifiers.
 
-    A component: {<field>: value, "school"?, "observed"?, "mods"?: [...]} where
-    field is dr / absorb / hp / heal (fractions of damage or of max health) or
+    A component: {<field>: value, "school"?, "observed"?, "mods"?: [...], "needs"?, "current"?,
+    "over_ms"/"ticks"?} where field is dr / absorb / hp / heal / armor / heal_taken
+    (fractions of damage or of max health; armor: +x of the player's armor) or
     immune. Absorbs are "observed": the player's real shield size from the log
-    wins over the estimate. Returns None when the ability can't be scored.
+    wins over the estimate. "needs": only players with that talent get it.
+    Returns None when the ability can't be scored.
     """
     values = MITIGATION.get(name)
     if values is None:
         return None
     out, used = [], set()
     for eff in EFFECTS.get(name) or [(f, None, None) for f in FIELDS if f in values]:
-        field, spell, index = eff[:3]
+        opts = eff[-1] if isinstance(eff[-1], dict) else {}
+        eff = eff[:-1] if opts else eff
+        field, spell, where = eff[:3]
         ticks = eff[3] if len(eff) > 3 else 1
-        first = field in values and field not in used     # the hand-listed value covers the first use only
-        used.add(field)
-        listed = values[field] if first else 0.0
-        school = values.get("school") if first and values.get("school") not in (None, "all") else None
-        comp = {field: listed}
-        if spell is not None and field in ("dr", "heal", "hp"):
-            from_data, data_school = data_value(field, gd, spell, index, ticks)
-            if from_data is None:
-                problems.append(f"{name}: effect {index} of spell {spell} is missing")
-            elif from_data or not listed:
-                # The data wins; a 0 there with a listed value means a script sets
-                # it (Fortifying Brew), so the listed value stays.
-                comp[field] = from_data
-            if field == "dr" and school not in ("aoe", "melee"):
-                school = data_school
-        if school:
-            comp["school"] = school
-        if field == "absorb":
-            comp["observed"] = True
-        if spell is not None:
-            m = mods.effect(spell, index, field, ticks)
-            if m:
-                comp["mods"] = m
-        if comp[field] is None or comp[field] or comp.get("mods") or comp.get("observed"):
-            out.append(comp)
-    for field in FIELDS:           # values without a mapped effect (e.g. Fortifying Brew)
+        indices = effect_indices(gd, spell, where) if spell is not None else [None]
+        if not indices:
+            if not opts.get("optional"):
+                problems.append(f"{name}: effect {where} of spell {spell} is missing")
+                indices = [None]
+            else:
+                used.add("dr" if field == "vers" else field)   # not in this patch: no listed fallback either
+                continue
+        for index in indices:
+            out_field = "dr" if field == "vers" else field
+            first = out_field in values and out_field not in used     # the hand-listed value covers the first use only
+            used.add(out_field)
+            listed = values[out_field] if first else 0.0
+            school = values.get("school") if first and values.get("school") not in (None, "all") else None
+            comp = {out_field: listed}
+            if index is not None and field in ("dr", "heal", "hp", "armor", "heal_taken", "vers"):
+                from_data, data_school = data_value(field, gd, spell, index, ticks)
+                if from_data or not listed:
+                    # The data wins; a 0 there with a listed value means a script sets
+                    # it (Fortifying Brew), so the listed value stays.
+                    comp[out_field] = from_data
+                if field == "dr" and school not in ("aoe", "melee"):
+                    school = data_school
+            if school:
+                comp["school"] = school
+            if field == "absorb":
+                comp["observed"] = True
+            if opts.get("current"):
+                comp["current"] = True
+            if index is not None:
+                m = mods.effect(spell, index, field, ticks)
+                if m:
+                    comp["mods"] = m
+            need = opts.get("needs")
+            if need and comp[out_field] and not _talent_mods_reach(comp.get("mods"), need):
+                # A value in the data that a talent's script turns on (Translucent Image).
+                who, _ = talent_who(gd, mods, need)
+                if who:
+                    comp["needs"] = who
+            if comp[out_field] is None or comp[out_field] or comp.get("mods") or comp.get("observed"):
+                out.append(comp)
+    for field in FIELDS:           # values without a mapped effect (e.g. Metamorphosis' heal)
         if field in values and field not in used:
             comp = {field: values[field]}
             if values.get("school") not in (None, "all"):
                 comp["school"] = values["school"]
             out.append(comp)
+    for talent, adds in TALENT_EFFECTS.items():
+        for ability, field, source, extra in adds:
+            if ability != name:
+                continue
+            comp = talent_component(gd, mods, talent, field, source, extra, problems)
+            if comp:
+                out.append(comp)
     return out
+
+
+def talent_component(gd, mods, talent, field, source, extra, problems):
+    """An effect a talent adds to a button, for players who have it (TALENT_EFFECTS)."""
+    who, talent_spell = talent_who(gd, mods, talent)
+    if who is None:
+        return None                       # not in this patch's talent trees
+    value = 1.0
+    for spell, where in source:
+        spell = talent_spell if spell == "talent" else spell
+        idx = effect_indices(gd, spell, where)
+        if not idx:
+            if not extra.get("optional"):
+                problems.append(f"{talent}: effect {where} of spell {spell} is missing")
+            return None
+        value *= abs(float(gd.effects[spell][idx[0]]["EffectBasePointsF"])) / 100
+    if field == "absorb_aura":
+        comp = {"absorb": None, "observed": True, "aura": extra["aura"]}
+    else:
+        comp = {field: round(value, 4)}
+    if extra.get("school"):
+        comp["school"] = extra["school"]
+    over = extra.get("over")
+    if over:
+        # A heal over time: the listed value is per tick, spread over the spell's duration.
+        dur = gd.duration.get(over, 0)
+        period = next((p for (s, _), p in gd.periods.items() if s == over), 0)
+        if not dur or not period:
+            problems.append(f"{talent}: no duration/tick period on spell {over}")
+            return None
+        comp["ticks"] = dur // period
+        comp[field] = round(value * comp["ticks"], 4) if extra.get("per_tick") else comp[field]
+        comp["over_ms"] = dur
+    comp["needs"] = who
+    return comp
+
+
+SURVIVAL_WORDS = re.compile(r"damage taken|damage you take|maximum health|absorb|heal|armor|immun|reduc", re.I)
+
+
+def unreviewed_talents(gd, build, catalog, mods):
+    """Talents whose tooltip names a tracked defensive with a survival word and that
+    no modifier, TALENT_EFFECTS entry or TALENTS_REVIEWED line covers."""
+    desc = {int(r["ID"]): r["Description_lang"] for r in table("Spell", build)}
+    handled = set(TALENTS_REVIEWED)
+    for d in catalog.values():
+        for c in d.get("mitigation") or ():
+            handled.update(m["talent"] for m in c.get("mods", ()))
+        handled.update(m["talent"] for m in d.get("cooldown_mods", []) + d.get("charge_mods", []))
+    names = {d["name"] for d in catalog.values() if d["kind"] in ("personal", "healthstone", "potion")}
+    found = set()
+    for sid, entries in mods.entries_for_spell.items():
+        text, talent = desc.get(sid) or "", gd.names.get(sid)
+        if talent in handled or talent in names or not SURVIVAL_WORDS.search(text):
+            continue
+        if any(re.search(rf"\b{re.escape(n)}\b", text) for n in names):
+            found.add(talent)
+    return sorted(found)
 
 
 def build_catalog(build):
@@ -600,6 +905,7 @@ def build_catalog(build):
             entries_for_spell.setdefault(sid, set()).add(int(r["ID"]))
 
     catalog, problems, missing = {}, [], []
+    ranks = potion_ranks(build, gd, problems)
     for sid, name, cls, specs, kind in CURATED:
         if sid not in names:
             missing.append(name)     # not in the game yet (or any more) in this patch
@@ -635,6 +941,26 @@ def build_catalog(build):
                 entry["charge_mods"] = mods.charges(sid)
         if kind == "potion" and POTION_TYPICAL.get(name):
             entry["mitigation"] = [{"heal_amount": POTION_TYPICAL[name], "observed": True}]
+        if kind == "potion" and ranks.get(sid):
+            entry["ranks"] = ranks[sid]
+        if name == "Bear Form":
+            # Shifting replaces the form they're in: its armor bonus (Moonkin Form +125%)
+            # comes off before Bear Form's goes on (checked on live logs: no form 1,173,
+            # Moonkin 2,640, Bear 3,754, Bear with Ursine Vigor 4,317).
+            entry["form_armor"] = {s: round(1 + float(r["EffectBasePointsF"]) / 100, 4)
+                                   for s, effs in gd.effects.items() if s != sid
+                                   and any(e["EffectAura"] == AURA_SHAPESHIFT for e in effs.values())
+                                   for r in effs.values()
+                                   if r["EffectAura"] == "142" and r["EffectMiscValue_0"] == "1"
+                                   and gd.family.get(s, (None,))[0] == gd.family.get(sid, (None,))[0]}
+            for comp in entry["mitigation"] or ():
+                if "armor" in comp and "needs" not in comp:
+                    comp["replaces_form"] = True
+        form = FORM_REQUIRED.get(name)
+        if form and gd.shapeshift.get(sid):
+            # Castable only in a form (Frenzied Regeneration: Bear Form), unless a talent lifts it.
+            unless, _ = talent_who(gd, mods, form[1]) if form[1] else (None, None)
+            entry["needs_form"] = {"form": form[0], **({"unless": unless} if unless else {})}
         catalog[sid] = entry
 
     # Talents that also reach consumables (item spells share no class mask with
@@ -659,9 +985,19 @@ def build_catalog(build):
             for r in gd.effects.get(buff, {}).values():
                 if r["EffectAura"] == "133":          # max health +%
                     hp = float(r["EffectBasePointsF"]) / 100
-            if who and hp:
-                entry["mitigation"].append({"hp": 0.0, "mods": [{"talent": names.get(talent), **who, "add": hp}]})
+            hp_mods = [{"talent": names.get(talent), **who, "add": hp}] if who and hp else []
+            # Gorebound Fortitude: the Soulburn benefit on every Healthstone (+30% heal, +20% max health).
+            gore, _ = talent_who(gd, mods, GOREBOUND[0])
+            if gore and hp:
+                hp_mods.append({**gore, "add": hp})
+                for comp in entry["mitigation"]:
+                    if "heal" in comp:
+                        comp.setdefault("mods", []).append({**gore, "mult": GOREBOUND[1]})
+            if hp_mods:
+                entry["mitigation"].append({"hp": 0.0, "mods": hp_mods})
     heal = {"talents": mods.healing_taken(), "auras": healing_taken_auras(gd, mods)}
+    for talent in unreviewed_talents(gd, build, catalog, mods):
+        problems.append(f"talent {talent!r} names a defensive: review it (TALENT_EFFECTS / TALENTS_REVIEWED)")
     return catalog, heal, problems, missing
 
 
