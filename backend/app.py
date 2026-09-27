@@ -33,7 +33,8 @@ import defensives
 import boss_spell_text
 from auth import require_user, verify_token, forget_token, _bearer_token
 from cache import (report_meta_cache, report_deaths_cache as deaths_lru,
-                   report_defensive_cache as defensive_lru, report_recap_cache as recap_lru)
+                   report_defensive_cache as defensive_lru, report_recap_cache as recap_lru,
+                   report_hp_window_cache as hp_window_lru)
 from ratelimit import RateLimiter, limit
 import supabase_client
 
@@ -250,15 +251,16 @@ def analyze():
             # Process deaths
             yield f"data: {json.dumps({'stage': 'deaths', 'message': 'Processing death events...'})}\n\n"
             counted_death_events = defaultdict(list)
-            # For the results page: icon of every ability a death names, and
+            # For the results page: icon of every killing blow's spell, by spell
+            # ID (names aren't unique: a boss's Tempest isn't the Shaman's), and
             # what each defensive does (from the catalog of the report's patch).
-            report_icons = {}
+            report_icons_by_id = {}
             ability_info = {}
+            # Deaths whose heal-over-time verdict needs the health before the hit.
+            hot_pending = []
             for fd in all_fights_deduped:
                 for aid, icon in fd.get('ability_icons', {}).items():
-                    name = fd['ability_map'].get(aid)
-                    if name:
-                        report_icons.setdefault(name, icon)
+                    report_icons_by_id.setdefault(str(aid), icon)
             pull_participation = defaultdict(set)
             boss_participation = defaultdict(lambda: defaultdict(set))
             pull_counter_by_boss = defaultdict(int)
@@ -309,7 +311,7 @@ def analyze():
 
                     # Killing blows (one cheap request per report), for "would it have saved them".
                     fight_ids = sorted(f['id'] for f in fights_list)
-                    kb_key = (rid, tuple(fight_ids))
+                    kb_key = (rid, tuple(fight_ids), "with-instakills")
                     recaps = recap_lru.get(kb_key) if report_finished.get(rid) else None
                     if recaps is None:
                         try:
@@ -378,6 +380,7 @@ def analyze():
                 player_details = fight_data.get("player_details", {})
                 friendly_class = {f.get("id"): f.get("type") for f in friendlies}
                 friendly_names_by_id = {f.get("id"): f.get("name") for f in friendlies}
+                friendly_log_names = {f.get("id"): f.get("logName") for f in friendlies}
                 
                 pull_counter_by_boss[boss_id] += 1
                 seq_no = pull_counter_by_boss[boss_id]
@@ -450,7 +453,7 @@ def analyze():
                     
                     def_data = report_defensive_data.get(rid)
                     if def_data and target_id and not death_event["isCheatDeath"]:
-                        death_event['defensives'] = defensives.analyze_death(
+                        death_args = dict(
                             player_id=target_id,
                             player_class=friendly_class.get(target_id),
                             spec=player_spec,
@@ -466,6 +469,11 @@ def analyze():
                             cat=defensives.catalog_for(report_abs_start),
                             aoe_known=defensives.logs_mark_aoe(report_recaps.get(rid)),
                         )
+                        death_event['defensives'] = defensives.analyze_death(**death_args)
+                        # Only deaths that can count (within the deaths tracked, not in a wipe).
+                        if slot <= max_cutoff and not in_wipe and defensives.needs_hp_timeline(death_event['defensives']):
+                            hot_pending.append((death_event, death_args, rid,
+                                                friendly_log_names.get(target_id) or friendly_names_by_id.get(target_id)))
                         cat = defensives.catalog_for(report_abs_start)
                         d = death_event['defensives']
                         for name in ([x["name"] for k in ("active", "available", "cooldown") for x in d[k]]
@@ -496,6 +504,32 @@ def analyze():
                     else:
                         pullCutoffTimestamps[pull_key][cutoff_val] = real_deaths_only[cutoff_idx]["timestamp"]
             
+            # Heals over time (Frenzied Regeneration, Crimson Vial): fetch the
+            # few seconds before those deaths and redo just those verdicts.
+            if hot_pending:
+                yield f"data: {json.dumps({'stage': 'deaths', 'message': f'Checking heals over time for {len(hot_pending)} deaths...'})}\n\n"
+
+                def hp_window(item):
+                    _, args, rid, log_name = item
+                    key = (rid, args["player_id"], args["death_ts"])
+                    cached = hp_window_lru.get(key) if report_finished.get(rid) else None
+                    if cached is not None:
+                        return cached
+                    try:
+                        timeline = defensives.fetch_hp_timeline(token, rid, log_name, args["player_id"], args["death_ts"])
+                    except Exception as e:
+                        print(f"[WARN] Health before a death unavailable ({rid}): {e}")
+                        return None
+                    if report_finished.get(rid):
+                        hp_window_lru.set(key, timeline)
+                    return timeline
+
+                with ThreadPoolExecutor(max_workers=8) as executor:
+                    timelines = list(executor.map(hp_window, hot_pending))
+                for (death_event, args, _, _), timeline in zip(hot_pending, timelines):
+                    if timeline:
+                        death_event['defensives'] = defensives.analyze_death(**args, hp_timeline=timeline)
+
             yield f"data: {json.dumps({'stage': 'complete', 'message': f'Analysis complete! Tracked {total_deaths} deaths across {len(counted_death_events)} players'})}\n\n"
             
             pull_participation_json = {p: list(s) for p, s in pull_participation.items()}
@@ -523,8 +557,11 @@ def analyze():
                 "pullParticipation": pull_participation_json,
                 "bossParticipation": boss_participation_json,
                 "pullCutoffTimestamps": pullCutoffTimestamps,
-                "icons": {n: i for n in set(ability_info) | {e["abilityName"] for evs in counted_death_events.values() for e in evs}
-                          if (i := defensives.icon_name(n, report_icons))},
+                # Defensives, externals and consumables, by name (game data).
+                "icons": {n: i for n in ability_info if (i := defensives.icon_name(n))},
+                # Killing blows, by spell ID (the report's own icon for that spell).
+                "abilityIcons": {str(e["abilityId"]): i for evs in counted_death_events.values() for e in evs
+                                 if e.get("abilityId") and (i := defensives.clean_icon(report_icons_by_id.get(str(e["abilityId"]))))},
                 "abilityInfo": {n: v for n, v in ability_info.items() if v},
                 # In-game description of each killing blow's spell, by spell ID.
                 "abilityText": {str(e["abilityId"]): t for evs in counted_death_events.values() for e in evs

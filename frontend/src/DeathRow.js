@@ -9,8 +9,9 @@ import { createPortal } from 'react-dom';
      death.defensives: see backend/defensives.py analyze_death. With a killing
        blow, survival.details[name] = {amount, why?, school?, effect?, talents?,
        source?, typical?} (defensives._explain).
-     icons:       {abilityName: icon file name} for render.worldofwarcraft.com.
-     abilityInfo: {name: {kind, cooldownMs, auraMs, charges, effect, typicalHeal?}}.
+     icons:       {defensive name: icon file name} for render.worldofwarcraft.com.
+     abilityIcons: {spell ID: icon file name} for killing blows (death.abilityId).
+     abilityInfo: {name: {kind, cooldownMs, auraMs, charges, effect, typicalHeal?, description?}}.
      abilityText: {spell ID: in-game description} for killing blows (death.abilityId).
      killCounts:  {"boss|ability": counted deaths to it in these results}. */
 
@@ -26,17 +27,60 @@ export const fmt = (n) => {
 const secs = (ms) => (ms >= 60000 && ms % 60000 === 0 ? `${ms / 60000} min` : `${Math.round(ms / 1000)}s`);
 const pct = (v) => `${Math.round(v * 1000) / 10}%`;
 
+// Damage schools and their colours in the game's combat log.
 const SCHOOL_BITS = [[1, 'Physical'], [2, 'Holy'], [4, 'Fire'], [8, 'Nature'], [16, 'Frost'], [32, 'Shadow'], [64, 'Arcane']];
+const SCHOOL_COLORS = { 1: '#FFFF00', 2: '#FFE680', 4: '#FF8000', 8: '#4DFF4D', 16: '#80FFFF', 32: '#8080FF', 64: '#FF80FF' };
+// The game's names for mixed schools, by school mask.
+const MIXED_SCHOOLS = {
+  3: 'Holystrike', 5: 'Flamestrike', 9: 'Stormstrike', 17: 'Froststrike', 33: 'Shadowstrike', 65: 'Spellstrike',
+  6: 'Radiant', 10: 'Holystorm', 18: 'Holyfrost', 34: 'Twilight', 66: 'Divine', 12: 'Volcanic', 20: 'Frostfire',
+  36: 'Shadowflame', 68: 'Spellfire', 24: 'Froststorm', 40: 'Plague', 72: 'Astral', 48: 'Shadowfrost',
+  80: 'Spellfrost', 96: 'Spellshadow', 28: 'Elemental', 106: 'Cosmic', 124: 'Chromatic', 126: 'Magic', 127: 'Chaos',
+};
+const SCHOOL_MASKS = Object.fromEntries([
+  ...SCHOOL_BITS.map(([b, n]) => [n, b]), ...Object.entries(MIXED_SCHOOLS).map(([m, n]) => [n, Number(m)]),
+]);
 const schoolName = (mask) => {
   if (!mask) return null;
+  if (MIXED_SCHOOLS[mask]) return MIXED_SCHOOLS[mask];
   const names = SCHOOL_BITS.filter(([b]) => mask & b).map(([, n]) => n);
-  if (!names.length) return null;
-  return names.length > 2 ? 'Chaos' : names.join(' + ');
+  return names.length ? names.join(' + ') : null;
 };
+
+/* A school's name in its colour; a mixed school shades through each of its colours. */
+function School({ mask, children }) {
+  const colors = SCHOOL_BITS.filter(([b]) => mask & b).map(([b]) => SCHOOL_COLORS[b]);
+  if (!colors.length) return <>{children}</>;
+  const style = colors.length === 1 ? { color: colors[0] }
+    : { backgroundImage: `linear-gradient(90deg, ${colors.join(', ')})`, WebkitBackgroundClip: 'text',
+        backgroundClip: 'text', color: 'transparent' };
+  return <span className="school" style={style}>{children}</span>;
+}
+
+const SCHOOL_WORDS = new RegExp(`\\b(${Object.keys(SCHOOL_MASKS).join('|')})(?= damage\\b)`, 'g');
+/* Description text with each "<school> damage" coloured. */
+function schoolText(text) {
+  const parts = [];
+  let last = 0;
+  text.replace(SCHOOL_WORDS, (m, name, at) => {
+    parts.push(text.slice(last, at), <School key={at} mask={SCHOOL_MASKS[name]}>{name}</School>);
+    last = at + m.length;
+    return m;
+  });
+  parts.push(text.slice(last));
+  return parts;
+}
 const SCOPE = { magic: 'magic ', physical: 'physical ', aoe: 'area ', melee: 'melee ' };
 
-/* Plain-English effect of an ability, from its components. */
+/* What an ability does: worked out from its components (exact, talents
+   applied), else its in-game description, plus its cooldown. */
 function effectText(effect, info) {
+  // Exact numbers first (catalog components); the game's text when there are none (externals).
+  if (info?.description && info.kind !== 'potion' && !(effect || []).length) {
+    const cd = info.cooldownMs && !/cooldown/i.test(info.description)
+      ? ` ${secs(info.cooldownMs)} cooldown${info.charges > 1 ? `, ${info.charges} charges` : ''}.` : '';
+    return info.description + cd;
+  }
   const parts = (effect || []).map((c) => {
     const scope = SCOPE[c.school] || '';
     if (c.immune) return c.school === 'melee' ? 'Dodges all melee attacks' : `Immune to ${scope}damage`;
@@ -69,6 +113,8 @@ function whyText(d, hitName) {
     case 'noReduction': return 'Nothing reduced this hit, so damage reduction doesn\'t work on it';
     case 'fullHealth': return 'They were at full health, so a heal can\'t help';
     case 'aoeUnknown': return 'This log doesn\'t mark area damage, so this can\'t be checked';
+    case 'instakill': return 'it was an instant kill, with no damage to reduce, absorb or heal';
+    case 'hotTooLate': return 'it came off cooldown too late for any of its heal to land before this hit';
     default: return null;
   }
 }
@@ -114,42 +160,49 @@ export function Tip({ content, className, children }) {
 // Blizzard's icon server doesn't have every new icon; WarcraftLogs hosts them all.
 const ICON_FALLBACK = (icon) => `https://assets.rpglogs.com/img/warcraft/abilities/${icon}.jpg`;
 
-function Icon({ name, icons, className = '' }) {
-  const icon = icons?.[name];
+function Icon({ name, icons, icon: given, className = '' }) {
+  const icon = given || icons?.[name];
   const [tries, setTries] = useState(0);
   if (!icon || tries > 1) return <span className={`fpx-ico none ${className}`}>{(name || '?').charAt(0)}</span>;
   return <img className={`fpx-ico ${className}`} src={(tries ? ICON_FALLBACK : ICON_URL)(icon)} alt="" loading="lazy"
     onError={() => setTries((t) => t + 1)} />;
 }
 
-const TipHead = ({ name, icons, sub }) => (
-  <div className="th"><Icon name={name} icons={icons} /><div><b>{name}</b>{sub && <small>{sub}</small>}</div></div>
+const TipHead = ({ name, icons, icon, sub }) => (
+  <div className="th"><Icon name={name} icons={icons} icon={icon} /><div><b>{name}</b>{sub && <small>{sub}</small>}</div></div>
 );
 const Row = ({ a, b, cls }) => <div className="r"><span className={cls}>{a}</span><span>{b}</span></div>;
 
 /* ---------- the row ---------- */
 
-export function DeathRow({ death, icons, abilityInfo, abilityText, killCounts, logHref, timeLabel }) {
+export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText, killCounts, logHref, timeLabel }) {
   const d = death.defensives;
   const current = isCurrentShape(d);
   const s = current ? d.survival : null;
   const hitName = death.abilityName === 'Unknown' ? 'Unknown ability' : death.abilityName;
   const kills = killCounts?.[`${death.boss}|${death.abilityName}`];
   const info = (n) => abilityInfo?.[n];
+  // Killing blows by spell ID: names aren't unique (a boss's Tempest isn't the Shaman's).
+  const kbIcon = abilityIcons?.[death.abilityId];
+  const kbSchool = s?.killingHit.school;
 
+  const instakill = s?.deathType === 'instakill';
   const ctx = death.isCheatDeath ? 'prevented death (cheat death)'
     : !s ? (current ? 'no killing blow recorded' : '')
+    : instakill ? 'instant kill: the mechanic killed them outright, with no damage'
     : s.deathType === 'oneShot'
       ? `one-shot from ${s.hpBeforePct}% health · died by ${fmt(s.overkill)}`
       : `at ${s.hpBeforePct}% health, hit for ${s.killingHit.pctOfMax}% of max · died by ${fmt(s.overkill)}`;
 
   const killTip = () => (
     <>
-      <TipHead name={hitName} icons={icons} sub={[death.boss, s && schoolName(s.killingHit.school)].filter(Boolean).join(' · ')} />
-      {abilityText?.[death.abilityId] && <p>{abilityText[death.abilityId]}</p>}
-      {s && <Row a="This hit" b={`${fmt(s.killingHit.size)} (${s.killingHit.pctOfMax.toLocaleString()}% of max health)`} />}
-      {s && <Row a="Health before it" b={`${s.hpBeforePct}% (${fmt(s.maxHp * s.hpBeforePct / 100)})`} />}
-      {s && <Row a="They died by" b={fmt(s.overkill)} />}
+      <TipHead name={hitName} icon={kbIcon}
+        sub={<>{death.boss}{schoolName(kbSchool) && <> · <School mask={kbSchool}>{schoolName(kbSchool)}</School></>}</>} />
+      {abilityText?.[death.abilityId] && <p>{schoolText(abilityText[death.abilityId])}</p>}
+      {s && !instakill && <Row a="This hit" b={`${fmt(s.killingHit.size)} (${s.killingHit.pctOfMax.toLocaleString()}% of max health)`} />}
+      {s && !instakill && <Row a="Health before it" b={`${s.hpBeforePct}% (${fmt(s.maxHp * s.hpBeforePct / 100)})`} />}
+      {s && !instakill && <Row a="They died by" b={fmt(s.overkill)} />}
+      {instakill && <div className="note warn">Instant kill: the game killed them outright, with no damage to reduce, absorb or heal. Only avoiding the mechanic prevents it.</div>}
       {kills > 0 && <Row a="Killed in these pulls" b={`${kills} raider${kills === 1 ? '' : 's'}`} />}
       {s?.ignoresImmunity && <div className="note warn">Goes through immunities (Ice Block, Divine Shield…)</div>}
       {s?.ignoresReduction && <div className="note warn">Nothing reduced this hit, so damage reduction doesn't work on it (shields and heals still do)</div>}
@@ -169,7 +222,17 @@ export function DeathRow({ death, icons, abilityInfo, abilityText, killCounts, l
         <TipHead name={name} icons={icons} sub={inf?.kind === 'external' ? 'External' : null} />
         <p>{effectText(inf ? inf.effect : effect, inf)}</p>
         {talents.map((t) => <Row key={t.talent} a={t.talent} b={TALENT_TEXT(t)} cls="tal" />)}
-        {det && s && det.amount > 0 && (
+        {det?.hot && (
+          <Row a={`Heals over ${secs(info(name)?.auraMs || 0)}`}
+            b={`${det.hot.ticks} of ${det.hot.of} ticks land before the hit`} />
+        )}
+        {det && s && det.amount > 0 && det.hot && (
+          <>
+            <Row a="Would heal before the hit" b={`${fmt(det.amount)} of ${fmt(det.hot.full)}`} />
+            <Row a="They died by" b={fmt(s.overkill)} />
+          </>
+        )}
+        {det && s && det.amount > 0 && !det.hot && (
           <>
             {heals && fullHeal > det.amount + 1
               ? <Row a="Would heal" b={`${fmt(det.amount)} (all they were missing)`} />
@@ -179,6 +242,8 @@ export function DeathRow({ death, icons, abilityInfo, abilityText, killCounts, l
         )}
         {det && s && (
           v === true ? <div className="res g">Survives with {fmt(det.amount - s.overkill)} to spare</div>
+            : det.why === 'needsTimeline'
+              ? <div className="res b">Can't tell: it heals over time, and the log's health for the seconds before this death couldn't be read</div>
             : det.why ? <div className="res b">Doesn't help: {whyText(det, hitName)}</div>
             : det.amount > 0 ? <div className="res b">Not enough: {fmt(s.overkill - det.amount)} short</div>
             : null
@@ -186,6 +251,7 @@ export function DeathRow({ death, icons, abilityInfo, abilityText, killCounts, l
         {!det && s && v == null && <div className="res b">Can't estimate this one (not simple damage reduction, absorb or healing)</div>}
         {!s && <div className="res b">Off cooldown when they died</div>}
         {det?.source && <div className="src">{SOURCE_TEXT[det.source]}</div>}
+        {det?.hot && <div className="src">Checked as if pressed early enough for every tick to land before the hit (never before it was off cooldown), using their real health in those seconds.</div>}
       </>
     );
   };
@@ -217,8 +283,11 @@ export function DeathRow({ death, icons, abilityInfo, abilityText, killCounts, l
     const cds = [
       ...d.cooldown.map((c) => ({ name: c.name, label: `${c.readyIn}s`, text: `Pressed ${c.usedAgo}s before they died; back ${c.readyIn}s after` })),
       ...['healthstone', 'potion'].filter((k) => d[k]?.usedAgo != null).map((k) => ({
-        name: d[k].name || (k === 'potion' ? 'Health Potion' : 'Healthstone'), label: '',
-        text: `Used ${d[k].usedAgo}s before they died (once per pull)` })),
+        name: d[k].name || (k === 'potion' ? 'Health Potion' : 'Healthstone'),
+        label: d[k].readyIn != null ? `${d[k].readyIn}s` : '',
+        text: d[k].readyIn != null
+          ? `Used ${d[k].usedAgo}s before they died; back ${d[k].readyIn}s after`
+          : `Used ${d[k].usedAgo}s before they died` })),
     ];
     if (cds.length) strip.push(<span key="s2" className="sep" />);
     cds.forEach((c) => strip.push(
@@ -236,14 +305,14 @@ export function DeathRow({ death, icons, abilityInfo, abilityText, killCounts, l
   return (
     <div className={`fpx-drow${death.isCheatDeath ? ' cheat' : ''}`}>
       <Tip className="kb" content={killTip}>
-        <Icon name={death.abilityName} icons={icons} className="big" />
+        <Icon name={death.abilityName} icon={kbIcon} className="big" />
         <span className="kbt">
           <span className="an">#{death.pullNo} · {hitName}{death.isCheatDeath && <span className="fpx-cheatbadge">CHEAT</span>}</span>
           {ctx && <span className="cx">{ctx}{s?.ignoresImmunity ? <em> · through immunities</em> : null}</span>}
         </span>
       </Tip>
       <span className="hp" title={s ? `${s.hpBeforePct}% health before the killing blow` : undefined}>
-        {s && <><span className="bar"><i style={{ width: `${Math.min(s.hpBeforePct, 100)}%` }} /></span>
+        {s && !instakill && <><span className="bar"><i style={{ width: `${Math.min(s.hpBeforePct, 100)}%` }} /></span>
           <small>{s.hpBeforePct}% health before</small></>}
       </span>
       <span className="strip">
