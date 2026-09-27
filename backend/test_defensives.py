@@ -418,3 +418,27 @@ class ConsumableEstimateTests(unittest.TestCase):
             {"type": "heal", "timestamp": 6, "sourceID": 3, "targetID": 1, "abilityGameID": POTION, "amount": 9},
         ]}, self.cat)
         self.assertEqual(out["heals"][1], [(5, POTION, 200_000, 900_000, self.cat.heal_auras[aura])])
+
+
+class OlderLogTests(unittest.TestCase):
+    def test_feint_is_unknown_when_the_log_does_not_mark_aoe_hits(self):
+        kb = dict(hit(100_000, 1_000_000, 0, overkill=300_000), isAoE=False)   # 40% of 1.3M would save
+        marked = defensives.assess_survival([kb], 100_000, ready(FEINT), [], NAMES, SCHOOLS, talent_entries={})
+        self.assertFalse(marked["wouldSave"]["Feint"])                      # a single-target hit
+        unmarked = defensives.assess_survival([kb], 100_000, ready(FEINT), [], NAMES, SCHOOLS, talent_entries={},
+                                              aoe_known=False)
+        self.assertIsNone(unmarked["wouldSave"]["Feint"])
+
+    def test_report_marks_aoe_only_if_some_hit_is_aoe(self):
+        self.assertFalse(defensives.logs_mark_aoe({1: [{"isAoE": False}], 2: [{"isAoE": False}]}))
+        self.assertTrue(defensives.logs_mark_aoe({1: [{"isAoE": False}], 2: [{"isAoE": True}]}))
+
+
+class StandardPotionTests(unittest.TestCase):
+    def test_potion_without_a_typical_heal_uses_the_tiers_standard_potion(self):
+        cat = defensives.catalog_for(1_756_857_344_578)                      # Manaforge Omega, 11.2.0
+        delight = next(sid for sid, d in cat.consumable.items() if d["name"] == "Cavedweller's Delight")
+        e = defensives.consumable_estimate(delight, cat, [], 1.0, {}, "Frost")
+        standard = cat.all[cat.standard_potion]
+        self.assertEqual(standard["name"], "Invigorating Healing Potion")
+        self.assertEqual(e["mitigation"][0]["heal_amount"], standard["mitigation"][0]["heal_amount"])

@@ -34,7 +34,7 @@ def main():
 
     talents = indexed["talents"]
     all_entries = {e for d in cat.all.values() for e in d["talent_entries"]}
-    matched = sum(1 for s in talents.values() if s & all_entries)
+    matched = sum(1 for s in talents.values() if set(s) & all_entries)
     print(f"Talent loadouts: {len(talents)} player-pulls, {matched} contain catalog defensives")
     if talents and not matched:
         print("  !! Talent entry IDs never match the catalog: check the CombatantInfo talentTree format")
@@ -49,7 +49,8 @@ def main():
             spec = (meta["player_details"].get(pid) or {}).get("spec")
             r = defensives.analyze_death(pid, cls.get(pid), spec, f["id"], f["start_time"], d["timestamp"],
                                          indexed, meta["abilities"], names, killing_blows=killing.get(pid, []),
-                                         ability_schools=meta.get("ability_schools", {}), cat=cat)
+                                         ability_schools=meta.get("ability_schools", {}), cat=cat,
+                                         aoe_known=defensives.logs_mark_aoe(killing))
             t = (d["timestamp"] - f["start_time"]) / 1000
             print(f"[{f['name']} #{f['id']} +{t:.0f}s] {names.get(pid)} ({spec} {cls.get(pid)}) "
                   f"- {d.get('abilityName')}{'' if r['talentsKnown'] else '  (no talent data)'}")

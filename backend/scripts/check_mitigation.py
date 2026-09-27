@@ -24,6 +24,7 @@ from warcraftlogs import get_access_token, get_fights  # noqa: E402
 
 MIN_HITS = 3
 FLAG_AT = 0.03
+MIN_FLAG_HITS = 20            # fewer hits than this are too noisy to flag
 
 
 def main():
@@ -41,7 +42,9 @@ def main():
 
     hits = defensives._paged(token, code, "DamageTaken", None, fight_ids=fights)
     combatants = defensives._paged(token, code, "CombatantInfo", None, fight_ids=fights)
-    loadout = {e["sourceID"]: {t["id"]: t.get("rank") or 1 for t in e.get("talentTree") or []} for e in combatants}
+    # Talents can change between pulls, so each hit is judged by its own pull's loadout.
+    loadout = {(e["fight"], e["sourceID"]): {t["id"]: t.get("rank") or 1 for t in e.get("talentTree") or []
+                                             if t["id"] in cat.relevant_talent_entries} for e in combatants}
     spec = {pid: (meta["player_details"].get(pid) or {}).get("spec") for pid in players}
 
     dr_names = {d["name"]: d for d in cat.all.values()
@@ -49,6 +52,7 @@ def main():
     tracked = set(cat.name_to_id)
     # (player, ability) -> {defensive name or None: [share of damage that got through]}
     shares = defaultdict(lambda: defaultdict(list))
+    sample = {}                            # (player, ability) -> one hit (for school / AoE checks)
     for e in hits:
         if e.get("type") != "damage" or e.get("targetID") not in players or not e.get("unmitigatedAmount"):
             continue
@@ -61,29 +65,37 @@ def main():
         if which is not None and which not in dr_names:
             continue
         through = defensives._full_hit(e) / e["unmitigatedAmount"]
-        shares[(e["targetID"], e.get("abilityGameID"))][which].append(through)
+        talents = loadout.get((e.get("fight"), e["targetID"]))
+        key = (e["targetID"], e.get("abilityGameID"), tuple(sorted((talents or {}).items())))
+        shares[key][which].append(through)
+        sample[key] = e
 
-    measured = defaultdict(list)           # (player, defensive) -> [reduction per ability]
-    for (pid, _), groups in shares.items():
+    schools = meta.get("ability_schools", {})
+    # (player, defensive) -> [(hits with it, measured, predicted)] per boss ability
+    rows = defaultdict(list)
+    for (pid, ability, talents), groups in shares.items():
         base = groups.get(None, [])
         if len(base) < MIN_HITS:
             continue
         for name, got in groups.items():
-            if name and len(got) >= MIN_HITS:
-                measured[(pid, name)].append(1 - statistics.median(got) / statistics.median(base))
+            if not name or len(got) < MIN_HITS:
+                continue
+            comps, _ = defensives._resolve(dr_names[name], dict(talents), {}, spec.get(pid))
+            keep = 1.0
+            for c in comps or []:
+                if c.get("dr") and defensives._school_applies(c.get("school"), sample[(pid, ability, talents)], schools):
+                    keep *= 1 - c["dr"]
+            rows[(pid, name)].append((len(got), 1 - statistics.median(got) / statistics.median(base), 1 - keep))
 
-    print(f"{'player':16} {'defensive':28} {'measured':>9} {'catalog':>8}")
-    for (pid, name), values in sorted(measured.items(), key=lambda kv: (kv[0][1], players[kv[0][0]]["name"])):
-        entry = dr_names[name]
-        comps, _ = defensives._resolve(entry, loadout.get(pid), {}, spec.get(pid))
-        predicted = 1.0
-        for c in comps or []:
-            if c.get("dr") and c.get("school") in (None, "all"):
-                predicted *= 1 - c["dr"]
-        predicted = 1 - predicted
-        got = statistics.median(values)
-        flag = "  <-- check" if abs(got - predicted) > FLAG_AT else ""
-        print(f"{players[pid]['name']:16} {name:28} {got:9.3f} {predicted:8.3f}  ({len(values)} abilities){flag}")
+    # Each ability's gap between measured and predicted, weighted by hits:
+    # a handful of hits is noisy, a few hundred is not.
+    print(f"{'player':16} {'defensive':28} {'hits':>5} {'measured':>9} {'catalog':>8}")
+    for (pid, name), per in sorted(rows.items(), key=lambda kv: (kv[0][1], players[kv[0][0]]["name"])):
+        hits = sum(n for n, _, _ in per)
+        real = sum(n * m for n, m, _ in per) / hits
+        predicted = sum(n * p for n, _, p in per) / hits
+        flag = "  <-- check" if hits >= MIN_FLAG_HITS and abs(real - predicted) > FLAG_AT else ""
+        print(f"{players[pid]['name']:16} {name:28} {hits:5} {real:9.3f} {predicted:8.3f}{flag}")
 
 
 if __name__ == "__main__":

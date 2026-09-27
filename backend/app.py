@@ -445,6 +445,7 @@ def analyze():
                             if report_recaps.get(rid) is not None else None,
                             ability_schools=fight_data.get('ability_schools', {}),
                             cat=defensives.catalog_for(report_abs_start),
+                            aoe_known=defensives.logs_mark_aoe(report_recaps.get(rid)),
                         )
 
                     counted_death_events[main_char].append(death_event)
