@@ -27,10 +27,11 @@ from warcraftlogs import (
 from analysis import (
     get_report_deaths_bulk, get_main_character,
     analyze_fights, is_duplicate_pull,
-    find_mass_death_start, rank_pull_deaths, resolve_report_window
+    find_mass_death_start, rank_pull_deaths, resolve_report_window, drop_saves_that_died
 )
 import defensives
 import boss_spell_text
+from features import CHEAT_DEATH_ABILITY_IDS
 from auth import require_user, verify_token, forget_token, _bearer_token
 from cache import (report_meta_cache, report_deaths_cache as deaths_lru,
                    report_defensive_cache as defensive_lru, report_recap_cache as recap_lru,
@@ -282,7 +283,9 @@ def analyze():
                     ability_map = sample_fight_data['ability_map']
                     fights_list = [fd['fight'] for fd in report_fights]
                     
-                    cache_key = (rid, tuple(sorted(f['id'] for f in fights_list)), bool(enable_cheat_death))
+                    # With cheat deaths on, the list of effects is part of the key, so adding one refetches.
+                    cache_key = (rid, tuple(sorted(f['id'] for f in fights_list)), bool(enable_cheat_death),
+                                 tuple(sorted(CHEAT_DEATH_ABILITY_IDS)) if enable_cheat_death else None)
                     deaths = deaths_lru.get(cache_key) if report_finished.get(rid) else None
                     if deaths is None:
                         deaths = get_report_deaths_bulk(token, rid, fights_list, friendlies, ability_map, enable_cheat_death)
@@ -404,6 +407,10 @@ def analyze():
                         if name:
                             fight_parts.add(name)
                 
+                # A Warlock in the pull means a Soulwell's Healthstones for everyone.
+                soulwell = any(f.get("type") == "Warlock" and (not friendly_player_ids or f.get("id") in friendly_player_ids)
+                               for f in friendlies)
+
                 for p in fight_parts:
                     if not is_guild_member(p):
                         continue
@@ -412,8 +419,11 @@ def analyze():
                     pull_participation[main_char].add(pull_key)
                     boss_participation[boss_name][main_char].add(pull_key)
                 
+                # Cheat deaths cached before they carried their spell ID: find it by name.
+                cheat_ids = {n: aid for aid in CHEAT_DEATH_ABILITY_IDS
+                             if (n := fight_data['ability_map'].get(aid) or fight_data['ability_map'].get(str(aid)))}
                 deaths_for_fight = report_deaths_cache.get(rid, {}).get(fid, [])
-                deaths_sorted_all = sorted(deaths_for_fight, key=lambda d: d["timestamp"])
+                deaths_sorted_all = sorted(drop_saves_that_died(deaths_for_fight), key=lambda d: d["timestamp"])
                 slots = rank_pull_deaths(deaths_sorted_all)
                 
                 for ev, (slot, in_wipe) in zip(deaths_sorted_all, slots):
@@ -443,7 +453,8 @@ def analyze():
                         "absTs": report_abs_start + ev["timestamp"],
                         "timestamp": ev["timestamp"] - fight['start_time'],
                         "abilityName": ev.get("abilityName", "Unknown"),
-                        "abilityId": ev.get("abilityId") or ev.get("abilityGameID"),
+                        "abilityId": ev.get("abilityId") or ev.get("abilityGameID")
+                        or (cheat_ids.get(ev.get("abilityName")) if ev.get("isCheatDeath") else None),
                         "isCheatDeath": ev.get("isCheatDeath", False),
                         "slot": slot,
                         "inWipe": in_wipe,
@@ -469,6 +480,7 @@ def analyze():
                             cat=defensives.catalog_for(report_abs_start),
                             aoe_known=defensives.logs_mark_aoe(report_recaps.get(rid)),
                             armor_k=defensives.armor_constant(fight.get('boss'), fight.get('difficulty')),
+                            soulwell=soulwell,
                         )
                         death_event['defensives'] = defensives.analyze_death(**death_args)
                         # Only deaths that can count (within the deaths tracked, not in a wipe).
