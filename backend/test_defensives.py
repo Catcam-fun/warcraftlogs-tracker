@@ -145,7 +145,7 @@ class DefensiveAnalysisTests(unittest.TestCase):
     def test_consumables_this_pull_only(self):
         r = run("Mage", "Frost", talents=set(),
                 casts=[(150_000, POTION), (270_000, HEALTHSTONE)], fight_start=200_000, death=300_000)
-        self.assertEqual(r["healthstone"], {"usedAgo": 30})
+        self.assertEqual(r["healthstone"], {"usedAgo": 30, "name": "Healthstone"})
         self.assertEqual(r["potion"], {"usedAgo": None})
 
     def test_missing_talent_data_falls_back_to_log_evidence(self):
@@ -442,3 +442,60 @@ class StandardPotionTests(unittest.TestCase):
         standard = cat.all[cat.standard_potion]
         self.assertEqual(standard["name"], "Invigorating Healing Potion")
         self.assertEqual(e["mitigation"][0]["heal_amount"], standard["mitigation"][0]["heal_amount"])
+
+
+class ExplainTests(unittest.TestCase):
+    """The numbers and reasons sent with each verdict, for the results page tooltips."""
+
+    def details(self, killing, *available, talent_entries=None, schools=SCHOOLS):
+        r = defensives.assess_survival([killing], 100_000, ready(*available), [], NAMES, schools,
+                                       talent_entries=talent_entries)
+        return r["details"]
+
+    def test_amount_prevented_against_the_killing_blow(self):
+        # 1.3M hit from full: Shield Wall's 40% prevents 520k, 300k overkill.
+        d = self.details(hit(100_000, 1_000_000, 0, overkill=300_000), SHIELD_WALL)["Shield Wall"]
+        self.assertEqual(d["amount"], 520_000)
+        self.assertNotIn("why", d)
+        self.assertNotIn("effect", d)          # no talents: the general effect is sent once per result
+
+    def test_reason_when_it_prevents_nothing(self):
+        d = self.details(hit(100_000, 1_000_000, 0, overkill=200_000, ability=600), CLOAK)["Cloak of Shadows"]
+        self.assertEqual((d["amount"], d["why"], d["school"]), (0, "school", "magic"))
+        d = self.details(hit(100_000, 1_000_000, 0, overkill=100_000), EXHIL)["Exhilaration"]
+        self.assertEqual(d["why"], "fullHealth")
+        from boss_spell_flags import IGNORES_IMMUNITY
+        piercing = min(IGNORES_IMMUNITY)
+        d = self.details(hit(100_000, 1_000_000, 0, overkill=200_000, ability=piercing), DIVINE_SHIELD,
+                         schools={piercing: FROST})["Divine Shield"]
+        self.assertEqual(d["why"], "pierces")
+        kb = dict(hit(100_000, 1_000_000, 0, overkill=200_000), mitigated=0, unmitigatedAmount=1_200_000)
+        self.assertEqual(self.details(kb, SHIELD_WALL)["Shield Wall"]["why"], "noReduction")
+
+    def test_talent_changes_are_listed(self):
+        talented = {e: 1 for e in SurvivalTests.talent(None, ASTRAL, "Astral Bulwark")}
+        d = self.details(hit(100_000, 1_000_000, 0, overkill=800_000), ASTRAL, talent_entries=talented)["Astral Shift"]
+        self.assertEqual([t["talent"] for t in d["talents"]], ["Astral Bulwark"])
+        self.assertAlmostEqual(d["effect"][0]["dr"], 0.6)
+        self.assertEqual(d["amount"], 1_080_000)             # 60% of 1.8M
+
+
+class ResultsPageInfoTests(unittest.TestCase):
+    def test_every_catalog_ability_has_an_icon(self):
+        from spell_icons import ICONS
+        names = {d["name"] for cat in defensives.CATALOGS.values() for d in cat.values()}
+        self.assertEqual(names - set(ICONS), set())
+
+    def test_icon_names(self):
+        self.assertEqual(defensives.icon_name("Cloak of Shadows"), "spell_shadow_nethercloak")
+        # Boss abilities use the report's icon; WCL writes "-" where the file name has a space.
+        self.assertEqual(defensives.icon_name("Gravebound", {"Gravebound": "ability_demonhunter_shatteredsouls.jpg"}),
+                         "ability_demonhunter_shatteredsouls")
+        self.assertEqual(defensives.icon_name("X", {"X": "warlock_-healthstone.jpg"}), "warlock_healthstone")
+        self.assertIsNone(defensives.icon_name("Unknown", {}))
+
+    def test_ability_info(self):
+        info = defensives.ability_info(defensives._LATEST, "Cloak of Shadows")
+        self.assertEqual(info["effect"], [{"immune": True, "school": "magic"}])
+        self.assertEqual((info["cooldownMs"], info["auraMs"]), (120_000, 5_000))
+        self.assertIsNone(defensives.ability_info(defensives._LATEST, "Not A Spell"))

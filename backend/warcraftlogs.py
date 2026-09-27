@@ -349,6 +349,7 @@ def get_fights(token, report_code):
               gameID
               name
               type
+              icon
             }
           }
           playerDetails(startTime: 0, endTime: 999999999999)
@@ -357,7 +358,7 @@ def get_fights(token, report_code):
     }
     """
     empty = {"report_start": 0, "fights": [], "friendlies": [], "player_details": {}, "abilities": {},
-             "ability_schools": {}}
+             "ability_schools": {}, "ability_icons": {}}
 
     try:
         data = graphql_query(token, query, {"code": report_code})
@@ -394,6 +395,10 @@ def get_fights(token, report_code):
             except (TypeError, ValueError):
                 pass
 
+        # Icon file names ("spell_shadow_nethercloak.jpg"), for the results page.
+        ability_icons = {a["gameID"]: a["icon"] for a in master.get("abilities") or []
+                         if a.get("gameID") and a.get("icon")}
+
         # playerDetails: { data: { playerDetails: { tanks: [], healers: [], dps: [] } } }
         player_spec_map = {}
         details = ((report.get("playerDetails") or {}).get("data") or {}).get("playerDetails") or {}
@@ -416,6 +421,7 @@ def get_fights(token, report_code):
             "player_details": player_spec_map,
             "abilities": abilities,
             "ability_schools": ability_schools,
+            "ability_icons": ability_icons,
         }
     except Exception as e:
         print(f"Error fetching fights for {report_code}: {e}")

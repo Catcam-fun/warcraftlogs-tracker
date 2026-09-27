@@ -30,6 +30,7 @@ from analysis import (
     find_mass_death_start, rank_pull_deaths, resolve_report_window
 )
 import defensives
+import boss_spell_text
 from auth import require_user, verify_token, forget_token, _bearer_token
 from cache import (report_meta_cache, report_deaths_cache as deaths_lru,
                    report_defensive_cache as defensive_lru, report_recap_cache as recap_lru)
@@ -69,6 +70,13 @@ CORS(app,
 # =============================================================================
 # MAIN ANALYSIS ENDPOINT
 # =============================================================================
+
+# Killing blows with no description in the game data.
+BASIC_ABILITY_TEXT = {
+    "Melee": "A melee attack from an enemy.",
+    "Falling": "Fall damage.",
+}
+
 
 @app.route('/api/analyze', methods=['POST'])
 @limit(analyze_limiter, "Too many analyses from this network in the last hour. Please wait a bit.")
@@ -208,6 +216,7 @@ def analyze():
                             'friendlies': friendlies,
                             'ability_map': ability_map,
                             'ability_schools': fights_data.get("ability_schools", {}),
+                            'ability_icons': fights_data.get("ability_icons", {}),
                             'player_details': player_details
                         })
 
@@ -241,6 +250,15 @@ def analyze():
             # Process deaths
             yield f"data: {json.dumps({'stage': 'deaths', 'message': 'Processing death events...'})}\n\n"
             counted_death_events = defaultdict(list)
+            # For the results page: icon of every ability a death names, and
+            # what each defensive does (from the catalog of the report's patch).
+            report_icons = {}
+            ability_info = {}
+            for fd in all_fights_deduped:
+                for aid, icon in fd.get('ability_icons', {}).items():
+                    name = fd['ability_map'].get(aid)
+                    if name:
+                        report_icons.setdefault(name, icon)
             pull_participation = defaultdict(set)
             boss_participation = defaultdict(lambda: defaultdict(set))
             pull_counter_by_boss = defaultdict(int)
@@ -422,6 +440,7 @@ def analyze():
                         "absTs": report_abs_start + ev["timestamp"],
                         "timestamp": ev["timestamp"] - fight['start_time'],
                         "abilityName": ev.get("abilityName", "Unknown"),
+                        "abilityId": ev.get("abilityId") or ev.get("abilityGameID"),
                         "isCheatDeath": ev.get("isCheatDeath", False),
                         "slot": slot,
                         "inWipe": in_wipe,
@@ -447,6 +466,13 @@ def analyze():
                             cat=defensives.catalog_for(report_abs_start),
                             aoe_known=defensives.logs_mark_aoe(report_recaps.get(rid)),
                         )
+                        cat = defensives.catalog_for(report_abs_start)
+                        d = death_event['defensives']
+                        for name in ([x["name"] for k in ("active", "available", "cooldown") for x in d[k]]
+                                     + list((d.get("survival") or {}).get("wouldSave", {}))
+                                     + [d[k]["name"] for k in ("healthstone", "potion") if d.get(k, {}).get("name")]):
+                            if name not in ability_info:
+                                ability_info[name] = defensives.ability_info(cat, name)
 
                     counted_death_events[main_char].append(death_event)
                     total_deaths += 1
@@ -497,6 +523,13 @@ def analyze():
                 "pullParticipation": pull_participation_json,
                 "bossParticipation": boss_participation_json,
                 "pullCutoffTimestamps": pullCutoffTimestamps,
+                "icons": {n: i for n in set(ability_info) | {e["abilityName"] for evs in counted_death_events.values() for e in evs}
+                          if (i := defensives.icon_name(n, report_icons))},
+                "abilityInfo": {n: v for n, v in ability_info.items() if v},
+                # In-game description of each killing blow's spell, by spell ID.
+                "abilityText": {str(e["abilityId"]): t for evs in counted_death_events.values() for e in evs
+                                if e.get("abilityId") and (t := boss_spell_text.text_for(e["abilityId"])
+                                                           or BASIC_ABILITY_TEXT.get(e["abilityName"]))},
             }
             
             yield f"data: {json.dumps({'result': response})}\n\n"
