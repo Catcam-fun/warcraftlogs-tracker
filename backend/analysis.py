@@ -130,6 +130,23 @@ def _in_mass_window(ts, real_ts):
     return False
 
 
+# A save only counts as a cheat death if the player didn't die from it: no real
+# death of theirs this soon after. Measured on live Mythic logs: Purgatory that
+# isn't healed off kills 3-5s after it triggers, and a second hit right after a
+# Cheat Death or Defy Fate lands within a second or two.
+CHEAT_DEATH_SURVIVE_MS = 5000
+
+
+def drop_saves_that_died(deaths):
+    """Deaths of one pull, without the cheat deaths whose player died within CHEAT_DEATH_SURVIVE_MS."""
+    real = defaultdict(list)
+    for d in deaths:
+        if not d.get("isCheatDeath"):
+            real[d.get("targetID")].append(d["timestamp"])
+    return [d for d in deaths if not d.get("isCheatDeath")
+            or not any(0 < t - d["timestamp"] <= CHEAT_DEATH_SURVIVE_MS for t in real.get(d.get("targetID"), ()))]
+
+
 def rank_pull_deaths(deaths_sorted):
     """Where each death in one pull falls for the "first X deaths" count.
 
