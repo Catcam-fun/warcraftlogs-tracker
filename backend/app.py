@@ -27,7 +27,7 @@ from warcraftlogs import (
 from analysis import (
     get_report_deaths_bulk, get_main_character,
     analyze_fights, is_duplicate_pull,
-    find_mass_death_start, resolve_report_window
+    find_mass_death_start, rank_pull_deaths, resolve_report_window
 )
 import defensives
 from auth import require_user, verify_token, forget_token, _bearer_token
@@ -391,8 +391,9 @@ def analyze():
                 
                 deaths_for_fight = report_deaths_cache.get(rid, {}).get(fid, [])
                 deaths_sorted_all = sorted(deaths_for_fight, key=lambda d: d["timestamp"])
+                slots = rank_pull_deaths(deaths_sorted_all)
                 
-                for ev in deaths_sorted_all:
+                for ev, (slot, in_wipe) in zip(deaths_sorted_all, slots):
                     target_name = normalize_character_name(ev.get("targetName", "Unknown"))
                     if not is_guild_member(target_name):
                         continue
@@ -420,6 +421,8 @@ def analyze():
                         "timestamp": ev["timestamp"] - fight['start_time'],
                         "abilityName": ev.get("abilityName", "Unknown"),
                         "isCheatDeath": ev.get("isCheatDeath", False),
+                        "slot": slot,
+                        "inWipe": in_wipe,
                         "class": player_class,
                         "spec": player_spec
                     }
