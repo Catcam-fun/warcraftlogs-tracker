@@ -12,7 +12,7 @@ import FpxRail from './FpxRail';
 import TermsOfService from './TermsOfService';
 import PrivacyPolicy from './PrivacyPolicy';
 import { MOCK_RESULTS, MOCK_CONFIG } from './mockResults';
-import { API_URL, apiFetch, stripSecrets } from './api';
+import { API_URL, apiFetch, stripSecrets, loadLocalCredentials, saveLocalCredentials } from './api';
 import SavedReports from './SavedReports';
 import SaveReportDialog from './SaveReportDialog';
 import { countedDeaths, isCounted } from './deathCounting';
@@ -190,9 +190,8 @@ export default function WarcraftLogsApp() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
 
-  const [config, setConfig] = useState({
-    clientId: '',
-    clientSecret: '',
+  const [config, setConfig] = useState(() => ({
+    ...loadLocalCredentials(),
     guildName: '',
     server: '',
     region: 'us',
@@ -206,7 +205,12 @@ export default function WarcraftLogsApp() {
     authorFilters: '',
     characterGroups: '',
     enableCheatDeath: false  // Optional cheat death detection (slower)
-  });
+  }));
+
+  // Remember the WarcraftLogs credentials in this browser (see api.js).
+  useEffect(() => {
+    saveLocalCredentials(config.clientId, config.clientSecret);
+  }, [config.clientId, config.clientSecret]);
 
   const [loading, setLoading] = useState(false);
   const [loadingStage, setLoadingStage] = useState('');
@@ -343,7 +347,7 @@ export default function WarcraftLogsApp() {
     if (!isLocal) return;
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('mock') === '1' && !data && !loading) {
-      setConfig((prev) => ({ ...prev, ...MOCK_CONFIG }));
+      setConfig((prev) => ({ ...prev, ...stripSecrets(MOCK_CONFIG) }));
       setData(MOCK_RESULTS);
       if (location.pathname !== '/results') navigate('/results');
     }

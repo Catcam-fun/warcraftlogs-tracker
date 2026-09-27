@@ -207,6 +207,9 @@ export default function PrivacyPolicy({ user, onShowAuthModal, onShowSettings, o
             <p>
               We use minimal cookies for essential functionality only (authentication and preferences). We do not use advertising or tracking cookies.
             </p>
+            <p>
+              Your browser's local storage keeps your WarcraftLogs Client ID and Client Secret, your latest analysis and a list of recent runs, so you don't have to re-enter them, whether or not you are signed in. This data stays on your device and is never sent to us except in the analysis request itself. Clearing your browser's site data removes it.
+            </p>
           </section>
 
           <section style={{ marginBottom: '32px' }}>
