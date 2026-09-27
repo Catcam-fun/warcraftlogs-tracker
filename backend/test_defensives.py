@@ -362,6 +362,33 @@ class SurvivalTests(unittest.TestCase):
             NAMES, {}, killing_blows=kb, ability_schools=SCHOOLS)
         self.assertNotIn("Healthstone", not_carried["survival"]["wouldSave"])
 
+    def test_a_warlock_in_the_pull_means_a_healthstone_from_the_soulwell(self):
+        kb = [hit(300_000, 200_000, 0, overkill=100_000)]
+        r = defensives.analyze_death(
+            1, "Mage", "Frost", 7, 200_000, 300_000, {"casts": {}, "talents": {(7, 1): set()}},
+            NAMES, {}, killing_blows=kb, ability_schools=SCHOOLS, soulwell=True)
+        self.assertTrue(r["survival"]["wouldSave"]["Healthstone"])
+        self.assertTrue(r["survival"]["details"]["Healthstone"]["soulwell"])
+        # One they used in this log is theirs, not the Soulwell's guess.
+        r = defensives.analyze_death(
+            1, "Mage", "Frost", 7, 200_000, 300_000,
+            {"casts": {1: [(10_000, HEALTHSTONE)]}, "talents": {(7, 1): set()}},
+            NAMES, {}, killing_blows=kb, ability_schools=SCHOOLS, soulwell=True)
+        self.assertNotIn("soulwell", r["survival"]["details"]["Healthstone"])
+
+    def test_instant_kill_keeps_the_potion_rank(self):
+        conc = next(sid for sid, d in defensives._LATEST.consumable.items()
+                    if d["name"] == "Concentrated Silvermoon Health Potion")
+        names_map = {**NAMES, conc: "Concentrated Silvermoon Health Potion"}
+        r = defensives.analyze_death(
+            1, "Mage", "Frost", 7, 200_000, 300_000,
+            {"casts": {1: [(10_000, conc)]}, "talents": {(7, 1): set()},
+             "heals": {1: [(10_000, conc, 440_000, 1_000_000, 1.0, 400, 3)]}},
+            names_map, {}, killing_blows=[{"timestamp": 300_000, "type": "instakill", "targetID": 1,
+                                           "abilityGameID": 500}], ability_schools=SCHOOLS)
+        det = r["survival"]["details"]["Concentrated Silvermoon Health Potion"]
+        self.assertEqual((det["why"], det["rank"]["rank"]), ("instakill", "gold"))
+
 
 DIVINE_PROTECTION, UNENDING = 498, 104773
 
@@ -429,7 +456,7 @@ class ConsumableEstimateTests(unittest.TestCase):
              "resourceActor": 1, "versatility": 350},
             {"type": "heal", "timestamp": 6, "sourceID": 3, "targetID": 1, "abilityGameID": POTION, "amount": 9},
         ]}, self.cat)
-        self.assertEqual(out["heals"][1], [(5, POTION, 200_000, 900_000, self.cat.heal_auras[aura], 350)])
+        self.assertEqual(out["heals"][1], [(5, POTION, 200_000, 900_000, self.cat.heal_auras[aura], 350, None)])
 
 
 class OlderLogTests(unittest.TestCase):
@@ -703,6 +730,18 @@ class PotionRankTests(unittest.TestCase):
         # Reaches silver's tooltip but not gold's, with a 6% healing bonus.
         r = defensives.potion_rank(self.conc, self.cat, [self.heal(359_498 * 1.06 * 1.06, 600)], {}, None)
         self.assertEqual((r["rank"], r["bonus"]), ("silver", 6.0))
+
+    def test_each_heal_is_judged_with_the_talents_of_its_own_pull(self):
+        # Live log (Feral Druid): silver drunk in pull 48 with both +4% healing talents
+        # and in pull 49 with only one; they died in pull 22, with both.
+        nr, bwn = (next(m["entries"][0] for m in self.cat.heal_talents if m["talent"] == t)
+                   for t in ("Natural Recovery", "Bond with Nature"))
+        heals = [(1, self.conc, 419_436, 1_000_000, 1.0, 787, 48), (2, self.conc, 433_561, 1_000_000, 1.0, 1_596, 49)]
+        by_fight = {22: {nr: 1, bwn: 1}, 48: {nr: 1, bwn: 1}, 49: {nr: 1}}
+        r = defensives.potion_rank(self.conc, self.cat, heals, by_fight[22], "Feral", by_fight)
+        self.assertEqual(r["rank"], "silver")
+        # Judged with the death's pull's talents alone, the second heal falls under silver.
+        self.assertIsNone(defensives.potion_rank(self.conc, self.cat, heals, by_fight[22], "Feral"))
 
     def test_no_rank_under_every_tooltip_or_without_heals(self):
         self.assertIsNone(defensives.potion_rank(self.conc, self.cat, [self.heal(300_000, 0)], {}, None))

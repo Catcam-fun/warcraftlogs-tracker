@@ -105,6 +105,8 @@ class Catalog:
             self.name_to_id.setdefault(d["name"], sid)
         demonic = [v for p, v in DEMONIC_HEALTHSTONE_MEASURED if _patch_key(p) <= _patch_key(patch)]
         self.demonic_healthstone = demonic[-1] if demonic else None
+        # What a Soulwell hands out (Demonic Healthstones are the Warlock's own, by talent).
+        self.soulwell_stone = next((sid for sid, d in self.consumable.items() if d["name"] == "Healthstone"), None)
         standard = [n for p, n in STANDARD_POTION if _patch_key(p) <= _patch_key(patch)]
         self.standard_potion = next((sid for sid, d in self.consumable.items()
                                      if standard and d["name"] == standard[-1]), None)
@@ -156,7 +158,7 @@ def ability_info(cat, name):
 # Changes whenever what gets fetched or kept for defensives changes, so cached
 # data from an older catalog is never reused. Bump DATA_SHAPE when the
 # indexed layout changes.
-DATA_SHAPE = 3
+DATA_SHAPE = 4
 CATALOG_FINGERPRINT = hashlib.sha1(repr((DATA_SHAPE, [
     (c.patch, c.cast_ids, c.buff_names, sorted(c.relevant_talent_entries)) for c in _CATALOGS.values()
 ])).encode()).hexdigest()[:12]
@@ -263,7 +265,7 @@ def index_defensive_events(raw, cat=None):
         talents[(e.get("fight"), e["sourceID"])] = {t["id"]: t.get("rank") or 1 for t in tree
                                                      if t.get("id") in cat.relevant_talent_entries}
     # targetID -> [(ts, spellID, healed incl. overheal, max health, healing-taken buffs multiplier,
-    #              Versatility in hundredths of a percent)]
+    #              Versatility in hundredths of a percent, fightID)]
     heals = defaultdict(list)
     for e in raw.get("heals", []):
         full = (e.get("amount") or 0) + (e.get("overheal") or 0) + (e.get("absorbed") or 0)
@@ -271,7 +273,8 @@ def index_defensive_events(raw, cat=None):
                 and e.get("sourceID") == e.get("targetID"):
             heals[e["targetID"]].append((e["timestamp"], e.get("abilityGameID"), full, e.get("maxHitPoints") or 0,
                                          round(_heal_taken_mult(_auras(e), cat), 4),
-                                         e.get("versatility") if e.get("resourceActor") == 1 else None))
+                                         e.get("versatility") if e.get("resourceActor") == 1 else None,
+                                         e.get("fight")))
     for lst in casts.values():
         lst.sort()
     for lst in buffs.values():
@@ -473,7 +476,7 @@ def _auras(hit):
 
 def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts,
                   indexed, ability_names, actor_names, killing_blows=None, ability_schools=None, cat=None,
-                  aoe_known=True, hp_timeline=None, armor_k=None):
+                  aoe_known=True, hp_timeline=None, armor_k=None, soulwell=False):
     """Defensive picture for one death. All timestamps are report-relative ms.
 
     With `killing_blows` (the player's overkill hits in this log) it also
@@ -483,6 +486,8 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
     `hp_timeline`: the player's health in the seconds before the death
     (fetch_hp_timeline), for heals over time; needs_hp_timeline() says when.
     `armor_k`: the boss's armor constant (armor_constant), for armor increases.
+    `soulwell`: a Warlock was in this pull, so a Soulwell's Healthstones were
+    there for everyone, used in this log or not.
     """
     cat = cat or _LATEST
     own_casts = indexed["casts"].get(player_id, [])
@@ -490,6 +495,7 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
     for t, sid in own_casts:
         casts_by_spell[sid].append(t)
     talent_entries = indexed["talents"].get((fight_id, player_id))
+    talents_by_fight = {f: t for (f, p), t in indexed["talents"].items() if p == player_id}
 
     # Auras on the player at death, matched to the catalog by name (aura IDs
     # often differ from the button's spell ID) -> who applied them.
@@ -569,7 +575,7 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
     # this pull; the cooldown resets between pulls. Measured on live logs:
     # repeat uses within a pull are always at least that far apart, and
     # several per pull are common.
-    unused_consumables = []
+    unused_consumables, from_soulwell = [], None
     for kind in ("healthstone", "potion"):
         used = [(t, sid) for t, sid in own_casts
                 if cat.consumable.get(sid, {}).get("kind") == kind and fight_start <= t <= death_ts]
@@ -578,17 +584,21 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
             result[kind] = {"usedAgo": round((death_ts - used[-1][0]) / 1000), "name": cat.all[used[-1][1]]["name"],
                             "readyIn": round((used[-1][0] + cooldown - death_ts) / 1000)}
             rank = potion_rank(used[-1][1], cat, (indexed.get("heals") or {}).get(player_id, []),
-                               talent_entries, spec) if kind == "potion" else None
+                               talent_entries, spec, talents_by_fight) if kind == "potion" else None
             if rank:
                 result[kind]["rank"] = rank
             continue
         result[kind] = {"usedAgo": None}
         if used:
             result[kind]["lastUsedAgo"] = round((death_ts - used[-1][0]) / 1000)
-        # Only assume they carry one if they used that kind somewhere in this log.
+        # Only assume they carry one if they used that kind somewhere in this log,
+        # or, for a Healthstone, a Warlock in the pull had a Soulwell for them.
         carried = [sid for _, sid in own_casts if cat.consumable.get(sid, {}).get("kind") == kind]
         if carried:
             unused_consumables.append(carried[-1])
+        elif kind == "healthstone" and soulwell and cat.soulwell_stone:
+            unused_consumables.append(cat.soulwell_stone)
+            from_soulwell = cat.soulwell_stone
 
     # Real shield sizes this player got from their own shields in this log
     # (latest before the death, else any): exact, gear and talents included.
@@ -628,8 +638,11 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
     if killing_blows is not None:
         death_mult = _heal_taken_mult(_auras(killing), cat) if killing is not None else 1.0
         own_heals = (indexed.get("heals") or {}).get(player_id, [])
-        consumables = [consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec)
+        consumables = [consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec, talents_by_fight)
                        for sid in unused_consumables]
+        for sid, c in zip(unused_consumables, consumables):
+            if sid == from_soulwell:
+                c["soulwell"] = True
         result["survival"] = assess_survival(killing_blows, death_ts, ready_entries, consumables,
                                              ability_names, ability_schools or {},
                                              talent_entries=talent_entries, observed_absorbs=observed, spec=spec,
@@ -903,7 +916,7 @@ RANK_TOLERANCE = 0.005
 RANK_BONUS_MAX = 0.16
 
 
-def potion_rank(sid, cat, own_heals, talent_entries, spec):
+def potion_rank(sid, cat, own_heals, talent_entries, spec, talents_by_fight=None):
     """The quality rank of a potion this player drinks, from their own heals with it.
 
     A potion heals at least its rank's tooltip amount: Versatility (on each
@@ -913,15 +926,23 @@ def potion_rank(sid, cat, own_heals, talent_entries, spec):
     one. Returns the rank; {"unknown": ...} when the ranks are too close to
     tell apart; None when the potion has no ranks in this patch, they didn't
     drink it in these boss pulls, or their heals are under every tooltip.
+
+    Talents are recorded per pull and players swap them (and specs) between
+    pulls, so each heal is judged with the talents of the pull it was drunk
+    in (`talents_by_fight`: {fightID: talent entries}); `talent_entries` (the
+    death's pull) stands in for a pull without a record.
     """
     entry = cat.all.get(sid) or {}
     ranks = entry.get("ranks")
     own = [h for h in own_heals if h[1] == sid]
     if not ranks or not own:
         return None
-    talent_mult, applied = _heal_talent_mult(entry, cat, talent_entries, spec)
+    talents_by_fight = talents_by_fight or {}
+    _, applied = _heal_talent_mult(entry, cat, talent_entries, spec)
+    talent_mult = [_heal_talent_mult(entry, cat, talents_by_fight.get(h[6] if len(h) > 6 else None, talent_entries),
+                                     spec)[0] for h in own]
     vers = [(h[5] if len(h) > 5 and h[5] is not None else 0) / 10_000 for h in own]
-    base = statistics.median(h[2] / (h[4] or 1.0) / (1 + v) for h, v in zip(own, vers)) / talent_mult
+    base = statistics.median(h[2] / (h[4] or 1.0) / (1 + v) / m for h, v, m in zip(own, vers, talent_mult))
     reached = [i for i, r in enumerate(ranks) if base >= r["heal"] * (1 - RANK_TOLERANCE)]
     info = {"of": len(ranks), "ranks": [{"rank": r["rank"], "heal": r["heal"]} for r in ranks], "n": len(own),
             "base": round(base), "raw": round(statistics.median(h[2] for h in own)),
@@ -935,7 +956,7 @@ def potion_rank(sid, cat, own_heals, talent_entries, spec):
             "bonus": round((base / ranks[i]["heal"] - 1) * 100, 1)}
 
 
-def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec):
+def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec, talents_by_fight=None):
     """How much an unused Healthstone or potion would have healed this player, as a scorable entry.
 
     From the player's own uses of it in the same report when there are any:
@@ -979,7 +1000,7 @@ def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec):
         out["source"] = "log"
         # What their own potions healed (healing-taken buffs taken out), for the tooltip.
         out["samples"] = {"n": len(heals), "min": round(min(heals)), "max": round(max(heals))}
-        rank = potion_rank(sid, cat, own_heals, talent_entries, spec)
+        rank = potion_rank(sid, cat, own_heals, talent_entries, spec, talents_by_fight)
         if rank:
             out["rank"] = rank
         return out
@@ -1100,6 +1121,8 @@ def _explain(entry, comps, applied, hit, max_hp, missing_hp, ability_schools):
             out["rank"] = entry["rank"]
         elif entry.get("ranks"):
             out["ranks"] = entry["ranks"]
+        if entry.get("soulwell"):
+            out["soulwell"] = True
     if amount <= 0:
         for m in comps:
             immune = bool(m.get("immune"))
@@ -1148,7 +1171,9 @@ def assess_survival(killing_blows, death_ts, available, consumables, ability_nam
             "killingHit": {"name": ability_names.get(killing.get("abilityGameID"), "Unknown"),
                            "school": ability_schools.get(killing.get("abilityGameID"))},
             "wouldSave": {n: False for n in names},
-            "details": {n: {"amount": 0, "why": "instakill"} for n in names},
+            "details": {e["name"]: {"amount": 0, "why": "instakill",
+                                    **{k: e[k] for k in ("source", "samples", "rank", "soulwell") if e.get(k)}}
+                        for e in list(available) + list(consumables)},
             "consumables": {e["name"]: e["kind"] for e in consumables},
             "allTogetherWouldSave": False,
             "ignoresReduction": False,
