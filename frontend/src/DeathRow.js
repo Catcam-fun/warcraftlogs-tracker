@@ -82,14 +82,18 @@ function effectText(effect, info) {
     return info.description + cd;
   }
   const parts = (effect || []).map((c) => {
-    const scope = SCOPE[c.school] || '';
+    const scope = typeof c.school === 'number' ? `${(schoolName(c.school) || 'magic').toLowerCase()} ` : SCOPE[c.school] || '';
+    const over = c.over_ms ? ` over ${secs(c.over_ms)}` : '';
     if (c.immune) return c.school === 'melee' ? 'Dodges all melee attacks' : `Immune to ${scope}damage`;
     if (c.dr) return `Reduces ${scope}damage taken by ${pct(c.dr)}`;
+    if (c.dr_missing) return `Reduces damage taken by up to ${pct(c.dr_missing)} more, the lower their health`;
+    if (c.armor) return `Increases armor by ${pct(c.armor)}`;
     if (c.absorb) return `Absorbs ${scope}damage equal to ${pct(c.absorb)} of max health`;
     if (c.absorb_amount) return `Absorbs ${fmt(c.absorb_amount)} ${scope}damage`;
-    if (c.hp) return `Increases max health by ${pct(c.hp)}`;
-    if (c.heal) return `Heals ${pct(c.heal)} of max health`;
-    if (c.heal_amount) return `Heals ${fmt(c.heal_amount)}`;
+    if (c.hp) return c.current ? `Increases current and max health by ${pct(c.hp)}` : `Increases max health by ${pct(c.hp)}`;
+    if (c.heal) return `Heals ${pct(c.heal)} of max health${over}`;
+    if (c.heal_amount) return `Heals ${fmt(c.heal_amount)}${over}`;
+    if (c.heal_taken) return `Increases healing received by ${pct(c.heal_taken)}`;
     return null;
   }).filter(Boolean);
   if (!parts.length && info?.typicalHeal) parts.push(`Heals about ${fmt(info.typicalHeal)}`);
@@ -115,11 +119,24 @@ function whyText(d, hitName) {
     case 'aoeUnknown': return 'This log doesn\'t mark area damage, so this can\'t be checked';
     case 'instakill': return 'it was an instant kill, with no damage to reduce, absorb or heal';
     case 'hotTooLate': return 'it came off cooldown too late for any of its heal to land before this hit';
+    case 'notArmor': return `armor doesn't reduce ${hitName}`;
+    case 'armorUnknown': return `it isn't known whether armor reduces ${hitName}`;
     default: return null;
   }
 }
 
-const TALENT_TEXT = (t) => ('add' in t ? `+${pct(t.add * t.rank)}` : `×${Math.round((1 + (t.mult - 1) * t.rank) * 100) / 100}`);
+// What a talent-added effect adds, by the field it fills (defensives._resolve).
+const ADDS_WHAT = {
+  dr: 'damage reduction', dr_missing: 'damage reduction at low health', armor: 'armor', hp: 'max health',
+  heal: 'heal', heal_taken: 'healing received', absorb: 'shield',
+};
+const TALENT_TEXT = (t) => {
+  if ('adds' in t) {
+    if (t.field === 'absorb' && t.adds > 1) return `adds a ${fmt(t.adds)} shield`;
+    return `adds ${pct(t.adds * t.rank)}${t.field === 'absorb' ? ' of max health as a' : ''} ${ADDS_WHAT[t.field] || ''}`.trim();
+  }
+  return 'add' in t ? `+${pct(t.add * t.rank)}` : `×${Math.round((1 + (t.mult - 1) * t.rank) * 100) / 100}`;
+};
 /* What their own potions / Healthstones healed in these boss pulls. */
 function ownUsesText(sm, info) {
   const what = info?.kind === 'healthstone' ? 'Healthstone' : 'potion';
@@ -129,6 +146,30 @@ function ownUsesText(sm, info) {
       : `${pct(sm.minShare)} to ${pct(sm.maxShare)} of max health`);
   const cd = info?.cooldownMs ? ` ${secs(info.cooldownMs)} cooldown.` : '';
   return `Their ${sm.n} ${what}${sm.n === 1 ? '' : 's'} in these boss pulls healed ${range}.${cd}`;
+}
+
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+/* The potion rank a player drinks (defensives.potion_rank), or the ranks there
+   are when none of theirs was in these boss pulls. */
+function PotionRank({ rank, ranks, unknown }) {
+  const all = rank?.ranks || ranks;
+  if (!all?.length) return null;
+  const extra = rank && rank.factor > 1 ? Math.round((rank.factor - 1) * 100) : 0;
+  return (
+    <>
+      {rank && <Row a="Potion rank" b={cap(rank.rank)} cls="tal" />}
+      {all.map((r) => (
+        <Row key={r.rank} a={`${cap(r.rank)} rank tooltip`} b={r.heal.toLocaleString()} cls={rank?.rank === r.rank ? 'tal' : undefined} />
+      ))}
+      <div className="src">
+        {rank
+          ? `Their potions healed ${rank.raw.toLocaleString()} (middle of ${rank.n}). Without their ${rank.vers}% Versatility, healing buffs and talents that's ${rank.base.toLocaleString()}, the ${rank.rank} tooltip${extra ? ` plus the ${extra}% every potion heals over its tooltip this tier` : ''}. `
+          : unknown ? `This tier's ${all.length} ranks are evenly spaced, the same step as a bonus every potion this tier gets over its tooltip, so the log can't show which rank they drank. `
+          : ''}
+        Potions heal more than the tooltip: Versatility, raid buffs such as Mark of the Wild, and healing-received talents raise it, so the heal changes from pull to pull.
+      </div>
+    </>
+  );
 }
 
 const SOURCE_TEXT = {
@@ -221,6 +262,7 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
     </>
   );
 
+  const withForm = Object.fromEntries((current ? d.available : []).filter((a) => a.withForm).map((a) => [a.name, a.withForm]));
   const readyTip = (name, v) => () => {
     const det = s?.details?.[name];
     const inf = info(name);
@@ -231,16 +273,20 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
     return (
       <>
         <TipHead name={name} icons={icons} sub={inf?.kind === 'external' ? 'External' : null} />
+        {withForm[name] && <div className="note">Needs {withForm[name]}: checked as shifting into it, then pressing {name}.</div>}
         <p>{det?.source === 'log' && det.samples ? ownUsesText(det.samples, inf)
           : effectText(inf ? inf.effect : effect, inf)}</p>
-        {talents.map((t) => <Row key={t.talent} a={t.talent} b={TALENT_TEXT(t)} cls="tal" />)}
+        {talents.map((t) => <Row key={`${t.talent}-${t.field}`} a={t.talent} b={TALENT_TEXT(t)} cls="tal" />)}
         {det?.hot && (
           <Row a={`Heals over ${secs(info(name)?.auraMs || 0)}`}
             b={`${det.hot.ticks} of ${det.hot.of} ticks land before the hit`} />
         )}
         {det && s && det.amount > 0 && det.hot && (
           <>
-            <Row a="Would heal before the hit" b={`${fmt(det.amount)} of ${fmt(det.hot.full)}`} />
+            <Row a="Would heal before the hit" b={`${fmt(det.hot.landed ?? det.amount)} of ${fmt(det.hot.full)}`} />
+            {withForm[name] && det.hot.landed != null && det.amount > det.hot.landed + 1 && (
+              <Row a={`With ${withForm[name]}, all together`} b={fmt(det.amount)} />
+            )}
             <Row a="They died by" b={fmt(s.overkill)} />
           </>
         )}
@@ -263,6 +309,7 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
         {!det && s && v == null && <div className="res b">Can't estimate this one (not simple damage reduction, absorb or healing)</div>}
         {!s && <div className="res b">Off cooldown when they died</div>}
         {det?.source && <div className="src">{SOURCE_TEXT[det.source]}</div>}
+        {inf?.kind === 'potion' && <PotionRank rank={det?.rank} ranks={det?.ranks} unknown={det?.rankUnknown} />}
         {det?.hot && <div className="src">Checked as if pressed early enough for every tick to land before the hit (never before it was off cooldown), using their real health in those seconds.</div>}
       </>
     );
@@ -296,6 +343,7 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
       ...d.cooldown.map((c) => ({ name: c.name, label: `${c.readyIn}s`, text: `Pressed ${c.usedAgo}s before they died; back ${c.readyIn}s after` })),
       ...['healthstone', 'potion'].filter((k) => d[k]?.usedAgo != null).map((k) => ({
         name: d[k].name || (k === 'potion' ? 'Health Potion' : 'Healthstone'),
+        rank: d[k].rank,
         label: d[k].readyIn != null ? `${d[k].readyIn}s` : '',
         text: d[k].readyIn != null
           ? `Used ${d[k].usedAgo}s before they died; back ${d[k].readyIn}s after`
@@ -308,6 +356,7 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
           <TipHead name={c.name} icons={icons} />
           <p>{effectText(info(c.name)?.effect, info(c.name))}</p>
           <div className="res b">On cooldown: {c.text}</div>
+          {c.rank && <PotionRank rank={c.rank} />}
         </>
       )}><Icon name={c.name} icons={icons} />{c.label && <span className="t">{c.label}</span>}</Tip>
     ));

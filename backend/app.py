@@ -311,7 +311,7 @@ def analyze():
 
                     # Killing blows (one cheap request per report), for "would it have saved them".
                     fight_ids = sorted(f['id'] for f in fights_list)
-                    kb_key = (rid, tuple(fight_ids), "with-instakills")
+                    kb_key = (rid, tuple(fight_ids), "with-instakills-armor")
                     recaps = recap_lru.get(kb_key) if report_finished.get(rid) else None
                     if recaps is None:
                         try:
@@ -468,6 +468,7 @@ def analyze():
                             ability_schools=fight_data.get('ability_schools', {}),
                             cat=defensives.catalog_for(report_abs_start),
                             aoe_known=defensives.logs_mark_aoe(report_recaps.get(rid)),
+                            armor_k=defensives.armor_constant(fight.get('boss'), fight.get('difficulty')),
                         )
                         death_event['defensives'] = defensives.analyze_death(**death_args)
                         # Only deaths that can count (within the deaths tracked, not in a wipe).
