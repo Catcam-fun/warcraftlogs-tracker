@@ -5,7 +5,7 @@ import React from 'react';
    { active: [{name, kind, major?}], activeKnown, available: [{name, major}],
      cooldown: [{name, major, usedAgo, readyIn}], talentsKnown,
      healthstone: {usedAgo|null}, potion: {usedAgo|null},
-     survival?: { deathType: 'oneShot'|'wasLow', killingHit: {name, size, pctOfMax},
+     survival?: { deathType: 'oneShot'|'wasLow'|'instakill', killingHit: {name, size, pctOfMax, school},
                   hpBeforePct, overkill, maxHp, ignoresReduction, ignoresImmunity,
                   wouldSave: {name: true|false|null}, allTogetherWouldSave } }
    Available entries may carry boostedBy: [talent names that strengthen it]. */
@@ -27,7 +27,7 @@ export function summarizeDefensives(deaths) {
     const s = d.survival;
     if (!s) return;
     summary.assessed += 1;
-    if (s.deathType === 'oneShot') summary.oneShots += 1;
+    if (s.deathType === 'oneShot' || s.deathType === 'instakill') summary.oneShots += 1;
     const savers = Object.entries(s.wouldSave || {}).filter(([, v]) => v === true).map(([n]) => n);
     if (savers.length > 0 || s.allTogetherWouldSave) summary.preventable += 1;
     savers.forEach((n) => { summary.savers[n] = (summary.savers[n] || 0) + 1; });
@@ -57,7 +57,7 @@ export function DefensiveSummaryChip({ s }) {
         {s.preventable}/{s.assessed} preventable
       </span>
       {s.oneShots > 0 && (
-        <span className="fpx-pdef neutral" title="Killed by a single hit from 85%+ health">
+        <span className="fpx-pdef neutral" title="Killed by a single hit from 85%+ health, or instantly by a mechanic">
           {s.oneShots} one-shot{s.oneShots !== 1 ? 's' : ''}
         </span>
       )}

@@ -117,14 +117,16 @@ def is_in_mass_death(death_index, deaths_list):
 
 
 def _in_mass_window(ts, real_ts):
-    """Is a moment at `ts` inside a wipe? Same windows as is_in_mass_death:
-    each starts at a real death and counts only real deaths."""
+    """Is a moment at `ts` inside a wipe: any 8-second stretch holding 8 real
+    deaths? Only real deaths count toward it. Windows start or end at a real
+    death, so a cheat death just before a wipe's first death is inside it
+    too (a real death always starts its own window)."""
     if len(real_ts) < MASS_DEATH_THRESHOLD:
         return False
-    for start in real_ts:
-        if start <= ts <= start + MASS_DEATH_WINDOW and \
-                sum(1 for t in real_ts if start <= t <= start + MASS_DEATH_WINDOW) >= MASS_DEATH_THRESHOLD:
-            return True
+    for t0 in real_ts:
+        for start, end in ((t0, t0 + MASS_DEATH_WINDOW), (t0 - MASS_DEATH_WINDOW, t0)):
+            if start <= ts <= end and sum(1 for t in real_ts if start <= t <= end) >= MASS_DEATH_THRESHOLD:
+                return True
     return False
 
 
