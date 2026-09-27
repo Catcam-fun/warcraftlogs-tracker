@@ -30,6 +30,7 @@ from analysis import (
     find_mass_death_start, rank_pull_deaths, resolve_report_window
 )
 import defensives
+import boss_spell_text
 from auth import require_user, verify_token, forget_token, _bearer_token
 from cache import (report_meta_cache, report_deaths_cache as deaths_lru,
                    report_defensive_cache as defensive_lru, report_recap_cache as recap_lru)
@@ -432,6 +433,7 @@ def analyze():
                         "absTs": report_abs_start + ev["timestamp"],
                         "timestamp": ev["timestamp"] - fight['start_time'],
                         "abilityName": ev.get("abilityName", "Unknown"),
+                        "abilityId": ev.get("abilityId") or ev.get("abilityGameID"),
                         "isCheatDeath": ev.get("isCheatDeath", False),
                         "slot": slot,
                         "inWipe": in_wipe,
@@ -517,6 +519,9 @@ def analyze():
                 "icons": {n: i for n in set(ability_info) | {e["abilityName"] for evs in counted_death_events.values() for e in evs}
                           if (i := defensives.icon_name(n, report_icons))},
                 "abilityInfo": {n: v for n, v in ability_info.items() if v},
+                # In-game description of each killing blow's spell, by spell ID.
+                "abilityText": {str(i): t for i in {e.get("abilityId") for evs in counted_death_events.values() for e in evs}
+                                if i and (t := boss_spell_text.text_for(i))},
             }
             
             yield f"data: {json.dumps({'result': response})}\n\n"

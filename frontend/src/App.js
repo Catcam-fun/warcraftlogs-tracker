@@ -2143,7 +2143,7 @@ export default function WarcraftLogsApp() {
                               <div className="fpx-dlist">
                                 {(showBothStats ? totalBossDeaths : bossDeaths)
                                   .map((death, idx) => (
-                                  <DeathRow key={idx} death={death} icons={data.icons} abilityInfo={data.abilityInfo}
+                                  <DeathRow key={idx} death={death} icons={data.icons} abilityInfo={data.abilityInfo} abilityText={data.abilityText}
                                     killCounts={killCounts} logHref={getWCLLink(death.reportId, death.fightId)}
                                     timeLabel={formatTimestamp(death.absTs)} />
                                 ))}
