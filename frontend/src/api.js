@@ -11,6 +11,32 @@ export const API_URL = process.env.REACT_APP_API_URL
    /api/analyze call itself (not in shares, saves, or local history). */
 const SECRET_KEYS = ['clientId', 'clientSecret'];
 
+/* The WarcraftLogs Client ID and Secret are remembered in this browser
+   (localStorage), signed in or not, so nobody has to paste them again.
+   Storage can be missing or blocked (private windows, previews); every
+   access is guarded and the form just starts empty then. */
+const LOCAL_CREDS_KEY = 'fpx.wclCredentials';
+
+export function loadLocalCredentials() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LOCAL_CREDS_KEY) || 'null');
+    if (saved && typeof saved === 'object') {
+      return { clientId: String(saved.clientId || ''), clientSecret: String(saved.clientSecret || '') };
+    }
+  } catch { /* unavailable or unreadable: start empty */ }
+  return { clientId: '', clientSecret: '' };
+}
+
+export function saveLocalCredentials(clientId, clientSecret) {
+  try {
+    if (clientId || clientSecret) {
+      localStorage.setItem(LOCAL_CREDS_KEY, JSON.stringify({ clientId, clientSecret }));
+    } else {
+      localStorage.removeItem(LOCAL_CREDS_KEY);
+    }
+  } catch { /* unavailable: nothing to remember */ }
+}
+
 export function stripSecrets(config) {
   if (!config || typeof config !== 'object') return config;
   const copy = { ...config };
