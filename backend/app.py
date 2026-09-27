@@ -27,7 +27,7 @@ from warcraftlogs import (
 from analysis import (
     get_report_deaths_bulk, get_main_character,
     analyze_fights, is_duplicate_pull,
-    find_mass_death_start, resolve_report_window
+    find_mass_death_start, rank_pull_deaths, resolve_report_window
 )
 import defensives
 from auth import require_user, verify_token, forget_token, _bearer_token
@@ -269,17 +269,19 @@ def analyze():
                         if report_finished.get(rid):
                             deaths_lru.set(cache_key, deaths)
                     
-                    # Defensive casts, auras and talents for the players who died.
+                    # Defensive casts, auras, talents and consumable heals for the
+                    # players who died, judged by the patch live when it was logged.
+                    cat = defensives.catalog_for(sample_fight_data.get('report_abs_start'))
                     dead = {d.get("targetID") for ds in deaths.values() for d in ds if d.get("targetID")}
                     def_key = (rid, tuple(sorted(f['id'] for f in fights_list)), tuple(sorted(dead)),
-                               defensives.CATALOG_FINGERPRINT)
+                               cat.patch, defensives.CATALOG_FINGERPRINT)
                     def_data = defensive_lru.get(def_key) if report_finished.get(rid) else None
                     if def_data is None:
                         try:
                             def_data = defensives.fetch_defensive_events(
                                 token, rid, sorted(f['id'] for f in fights_list),
                                 min(f['start_time'] for f in fights_list),
-                                max(f['end_time'] for f in fights_list), dead)
+                                max(f['end_time'] for f in fights_list), dead, cat)
                             if report_finished.get(rid):
                                 defensive_lru.set(def_key, def_data)
                         except Exception as e:
@@ -391,8 +393,9 @@ def analyze():
                 
                 deaths_for_fight = report_deaths_cache.get(rid, {}).get(fid, [])
                 deaths_sorted_all = sorted(deaths_for_fight, key=lambda d: d["timestamp"])
+                slots = rank_pull_deaths(deaths_sorted_all)
                 
-                for ev in deaths_sorted_all:
+                for ev, (slot, in_wipe) in zip(deaths_sorted_all, slots):
                     target_name = normalize_character_name(ev.get("targetName", "Unknown"))
                     if not is_guild_member(target_name):
                         continue
@@ -420,6 +423,8 @@ def analyze():
                         "timestamp": ev["timestamp"] - fight['start_time'],
                         "abilityName": ev.get("abilityName", "Unknown"),
                         "isCheatDeath": ev.get("isCheatDeath", False),
+                        "slot": slot,
+                        "inWipe": in_wipe,
                         "class": player_class,
                         "spec": player_spec
                     }
@@ -439,6 +444,8 @@ def analyze():
                             killing_blows=(report_recaps.get(rid) or {}).get(target_id, [])
                             if report_recaps.get(rid) is not None else None,
                             ability_schools=fight_data.get('ability_schools', {}),
+                            cat=defensives.catalog_for(report_abs_start),
+                            aoe_known=defensives.logs_mark_aoe(report_recaps.get(rid)),
                         )
 
                     counted_death_events[main_char].append(death_event)

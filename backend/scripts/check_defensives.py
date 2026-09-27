@@ -11,7 +11,6 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 from analysis import get_report_deaths_bulk  # noqa: E402
-from defensive_catalog import CATALOG  # noqa: E402
 import defensives  # noqa: E402
 from warcraftlogs import get_access_token, get_fights  # noqa: E402
 
@@ -28,11 +27,14 @@ def main():
     start, end = min(f["start_time"] for f in fights), max(f["end_time"] for f in fights)
     deaths = get_report_deaths_bulk(token, code, fights, meta["friendlies"], meta["abilities"])
     dead = {d["targetID"] for ds in deaths.values() for d in ds if d.get("targetID")}
-    indexed = defensives.fetch_defensive_events(token, code, [f["id"] for f in fights], start, end, dead)
+    cat = defensives.catalog_for(meta.get("report_start"))
+    print(f"Patch {cat.patch}")
+    indexed = defensives.fetch_defensive_events(token, code, [f["id"] for f in fights], start, end, dead, cat)
+    killing = defensives.fetch_killing_blows(token, code, [f["id"] for f in fights])
 
     talents = indexed["talents"]
-    all_entries = {e for d in CATALOG.values() for e in d["talent_entries"]}
-    matched = sum(1 for s in talents.values() if s & all_entries)
+    all_entries = {e for d in cat.all.values() for e in d["talent_entries"]}
+    matched = sum(1 for s in talents.values() if set(s) & all_entries)
     print(f"Talent loadouts: {len(talents)} player-pulls, {matched} contain catalog defensives")
     if talents and not matched:
         print("  !! Talent entry IDs never match the catalog: check the CombatantInfo talentTree format")
@@ -46,7 +48,9 @@ def main():
             pid = d.get("targetID")
             spec = (meta["player_details"].get(pid) or {}).get("spec")
             r = defensives.analyze_death(pid, cls.get(pid), spec, f["id"], f["start_time"], d["timestamp"],
-                                         indexed, meta["abilities"], names)
+                                         indexed, meta["abilities"], names, killing_blows=killing.get(pid, []),
+                                         ability_schools=meta.get("ability_schools", {}), cat=cat,
+                                         aoe_known=defensives.logs_mark_aoe(killing))
             t = (d["timestamp"] - f["start_time"]) / 1000
             print(f"[{f['name']} #{f['id']} +{t:.0f}s] {names.get(pid)} ({spec} {cls.get(pid)}) "
                   f"- {d.get('abilityName')}{'' if r['talentsKnown'] else '  (no talent data)'}")
@@ -54,6 +58,10 @@ def main():
             print("   available:", ", ".join(a["name"] for a in r["available"]) or "-")
             print("   cooldown: ", ", ".join(f"{a['name']} (used {a['usedAgo']}s ago)" for a in r["cooldown"]) or "-")
             print(f"   healthstone: {r['healthstone']['usedAgo']}  potion: {r['potion']['usedAgo']}")
+            if r.get("survival"):
+                sv = r["survival"]
+                print(f"   killing blow: {sv['killingHit']['name']} {sv['killingHit']['pctOfMax']}% of max, "
+                      f"overkill {sv['overkill']:,}; would save: {sv['wouldSave']}")
 
 
 if __name__ == "__main__":
