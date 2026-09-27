@@ -291,6 +291,7 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
     return (
       <>
         <TipHead name={name} icons={icons} sub={inf?.kind === 'external' ? 'External' : null} />
+        {det?.soulwell && <div className="note">They didn't use one in this log, but a Warlock was in the pull, so the Soulwell had one for them.</div>}
         {withForm[name] && <div className="note">Needs {withForm[name]}: checked as shifting into it, then pressing {name}.</div>}
         <p>{det?.source === 'log' && det.samples ? ownUsesText(det.samples, inf)
           : effectText(inf ? inf.effect : effect, inf)}</p>
