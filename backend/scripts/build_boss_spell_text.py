@@ -2,8 +2,9 @@
 
 The in-game description of every boss spell in the raids in
 analysis.RAID_ENCOUNTERS (the Dungeon Journal's spells, the spells they
-trigger, and the spells whose description points at one of those), by spell
-ID, for the killing-blow tooltip on the results page.
+trigger, the spells linked to them through their descriptions, and
+same-named variants such as Mythic-only copies), by spell ID, for the
+killing-blow tooltip on the results page.
 
 Blizzard's description templates are filled in from the game data where the
 data is exact: durations ($d), tick intervals ($t), radii ($a / $A), spell
@@ -30,6 +31,7 @@ from analysis import RAID_ENCOUNTERS  # noqa: E402
 from build_defensive_catalog import patches, table  # noqa: E402
 
 MAX_DEPTH = 4
+FIRST_TWW_SPELL = 400_000
 
 
 class Data:
@@ -72,10 +74,14 @@ def render(data, sid, depth=0):
         return data.effects.get(int(ref) if ref else sid, {}).get(int(idx), {})
 
     # Links: |cFF2959D3|Hspell:123|h[Name]|h|r -> Name; other colour codes -> their text.
-    text = re.sub(r"\|c[0-9A-Fa-f]{8}\|H[^|]*\|h\[([^\]]*)\]\|h\|r", r"\1", text)
-    text = re.sub(r"\|c[0-9A-Fa-f]{8}(.*?)\|r", r"\1", text, flags=re.S)
-    # Conditions: $?DIFF16[...][...], $?a123[...][...], $?s123[...], $[!16 ...] -> dropped.
+    text = re.sub(r"\|c[0-9A-Fa-f]{8}\|H[^|]*\|h\[([^\]]*)\]\|h\|r", r"\1", text, flags=re.I)
+    text = re.sub(r"\|c[0-9A-Fa-f]{8}(.*?)\|r", r"\1", text, flags=re.S | re.I)
+    text = re.sub(r"\|cn[^:|]*:(.*?)\|r", r"\1", text, flags=re.S | re.I)
+    # Conditions. Difficulty ($?diff16[Mythic][other]): the text for other
+    # difficulties, which holds on all of them more often. Anything else
+    # ($?a123[...], $?s123[...], $[!16 ...]): dropped.
     for _ in range(3):
+        text = re.sub(r"\$\?(?:diff|DIFF)\d+\[[^\[\]]*\]\[([^\[\]]*)\]", r"\1", text)
         text = re.sub(r"\$\?[^\[\]]*\[[^\[\]]*\](\[[^\[\]]*\])?", "", text)
         text = re.sub(r"\$\[[^\[\]]*\]", "", text)
     text = re.sub(r"\$@spelldesc(\d+)", lambda m: render(data, int(m.group(1)), depth + 1) or "", text)
@@ -83,6 +89,7 @@ def render(data, sid, depth=0):
     text = re.sub(r"\$@\w+?\d*", "", text)
     text = text.replace("$bullet;", "•").replace("$bullet", "•")
     text = re.sub(r"\$[gG]([^:;]*):[^;]*;", r"\1", text)                       # $ghis:her; -> his
+    text = re.sub(r"\|4([^:;]*):([^;]*);", r"\2", text)                          # |4target:targets; -> targets
     text = re.sub(r"\$(\d*)d\b", lambda m: _secs(data.duration.get(int(m.group(1)) if m.group(1) else sid, 0))
                   if data.duration.get(int(m.group(1)) if m.group(1) else sid) else "", text)
     text = re.sub(r"\$(\d*)t(\d)", lambda m: _num(effect(m.group(1), m.group(2)).get("period", 0) / 1000)
@@ -94,12 +101,18 @@ def render(data, sid, depth=0):
                   lambda m: _num(abs(effect(m.group(1), m.group(2)).get("points", 0)))
                   if effect(m.group(1), m.group(2)).get("points") else "", text)
     text = re.sub(r"\$\{[^}]*\}", "", text)
+    text = re.sub(r"\$<[^>]*>", "", text)
     text = re.sub(r"\$\d*[a-zA-Z]+\d*", "", text)
+    text = text.replace("$", "")
     text = re.sub(r"\s+", " ", text)
     text = re.sub(r"\bwithin (yards|yds)\b", "nearby", text)
     text = re.sub(r"\bevery (sec|seconds?)\b", "periodically", text)
+    text = re.sub(r"\s*\b(by|of|to) (%|sec|seconds?|yards?|yds)(?=\W|$)", "", text)   # value missing in the data
+    text = re.sub(r"(^|\s)% ", r"\1", text)
     text = re.sub(r"\b(for|by|of)\s*(?=[.,;]|$)", "", text)
     text = re.sub(r"\s+([.,;:])", r"\1", text).replace("( ", "(").replace(" )", ")").replace("()", "").strip()
+    if text and text[-1] not in ".!?":
+        text += "."
     return text if len(text) > 12 else None
 
 
@@ -108,8 +121,9 @@ def main():
     data = Data(build)
     encounters = set().union(*RAID_ENCOUNTERS.values())
     journal = {int(r["ID"]) for r in table("JournalEncounter", build) if int(r["DungeonEncounterID"]) in encounters}
-    seen, stack = set(), [int(r["SpellID"]) for r in table("JournalEncounterSection", build)
-                          if int(r["JournalEncounterID"]) in journal and r["SpellID"] != "0"]
+    journal_spells = {int(r["SpellID"]) for r in table("JournalEncounterSection", build)
+                      if int(r["JournalEncounterID"]) in journal and r["SpellID"] != "0"}
+    seen, stack = set(), list(journal_spells)
     while stack:
         sid = stack.pop()
         if sid in seen:
@@ -128,10 +142,17 @@ def main():
                 if a in seen and b not in seen:
                     seen.add(b)
                     grew = True
+    # Variants the journal doesn't link (Mythic-only copies, a second copy of
+    # an ability): same name as a journal ability of these raids, a spell of
+    # The War Within or later.
+    journal_names = {data.names.get(s) for s in journal_spells} - {None, ""}
+    seen |= {sid for sid in data.desc if sid >= FIRST_TWW_SPELL and data.names.get(sid) in journal_names}
     out = {}
     for sid in sorted(seen):
         text = render(data, sid)
-        if text:
+        # Player spells (extra action buttons, same-named class spells) are
+        # written to "you"; boss spells never kill anyone with those.
+        if text and not re.search(r"\byour?\b", text, re.I):
             out[sid] = text
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "boss_spell_text.py")
     texts = sorted(set(out.values()))

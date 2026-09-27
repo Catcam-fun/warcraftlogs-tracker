@@ -71,6 +71,13 @@ CORS(app,
 # MAIN ANALYSIS ENDPOINT
 # =============================================================================
 
+# Killing blows with no description in the game data.
+BASIC_ABILITY_TEXT = {
+    "Melee": "A melee attack from an enemy.",
+    "Falling": "Fall damage.",
+}
+
+
 @app.route('/api/analyze', methods=['POST'])
 @limit(analyze_limiter, "Too many analyses from this network in the last hour. Please wait a bit.")
 def analyze():
@@ -520,8 +527,9 @@ def analyze():
                           if (i := defensives.icon_name(n, report_icons))},
                 "abilityInfo": {n: v for n, v in ability_info.items() if v},
                 # In-game description of each killing blow's spell, by spell ID.
-                "abilityText": {str(i): t for i in {e.get("abilityId") for evs in counted_death_events.values() for e in evs}
-                                if i and (t := boss_spell_text.text_for(i))},
+                "abilityText": {str(e["abilityId"]): t for evs in counted_death_events.values() for e in evs
+                                if e.get("abilityId") and (t := boss_spell_text.text_for(e["abilityId"])
+                                                           or BASIC_ABILITY_TEXT.get(e["abilityName"]))},
             }
             
             yield f"data: {json.dumps({'result': response})}\n\n"
