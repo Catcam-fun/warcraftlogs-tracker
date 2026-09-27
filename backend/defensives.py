@@ -789,15 +789,20 @@ def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec):
     potion's typical heal with the player's healing-taken talents and buffs.
     """
     entry = cat.all[sid]
+    # Their own uses of this exact potion or Healthstone. The log names only the
+    # spell, which both quality ranks of a potion share (different items and
+    # item levels, different heals), so their own heals are what show the rank
+    # they drink. Potions don't crit (none in 582 live heals).
     own = [h for h in own_heals if h[1] == sid]
     out = {"name": entry["name"], "kind": entry["kind"], "estimated": True, "boostedBy": []}
     if entry["kind"] == "healthstone":
-        shares = [full / max_hp for _, _, full, max_hp, _ in own if max_hp]
+        shares = [h[2] / h[3] for h in own if h[3]]
         extra = [c for c in (entry.get("mitigation") or []) if "hp" in c]     # Soulburn: Healthstone
         extra, boosted = _resolve({"mitigation": extra, "name": entry["name"]}, talent_entries, {}, spec)
         if shares:
             out["mitigation"] = [{"heal": statistics.median(shares)}] + (extra or [])
             out["source"] = "log"
+            out["samples"] = {"n": len(shares), "minShare": round(min(shares), 3), "maxShare": round(max(shares), 3)}
         elif entry["name"] == "Demonic Healthstone" and cat.demonic_healthstone:
             out["mitigation"] = [{"heal": cat.demonic_healthstone}] + (extra or [])
             out["source"] = "typical"
@@ -807,9 +812,12 @@ def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec):
             out["source"] = "gameData"
         return out
     if own:
-        amount = statistics.median(full / (mult or 1.0) for _, _, full, _, mult in own) * death_mult
+        heals = [h[2] / (h[4] or 1.0) for h in own]
+        amount = statistics.median(heals) * death_mult
         out["mitigation"] = [{"heal_amount": amount}]
         out["source"] = "log"
+        # What their own potions healed (healing-taken buffs taken out), for the tooltip.
+        out["samples"] = {"n": len(heals), "min": round(min(heals)), "max": round(max(heals))}
         return out
     comps, boosted = _resolve(entry, talent_entries, {}, spec)
     typical = next((c["heal_amount"] for c in comps or () if "heal_amount" in c), None)
@@ -888,6 +896,8 @@ def _explain(entry, comps, applied, hit, max_hp, missing_hp, ability_schools):
             out["talents"] = talents
     if entry.get("estimated"):
         out["source"] = entry.get("source")
+        if entry.get("samples"):
+            out["samples"] = entry["samples"]
         if entry.get("typical"):
             out["typical"] = round(entry["typical"])
     if amount <= 0:
