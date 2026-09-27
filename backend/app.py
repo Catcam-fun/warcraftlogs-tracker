@@ -27,7 +27,7 @@ from warcraftlogs import (
 from analysis import (
     get_report_deaths_bulk, get_main_character,
     analyze_fights, is_duplicate_pull,
-    find_mass_death_start, rank_pull_deaths, resolve_report_window
+    find_mass_death_start, rank_pull_deaths, resolve_report_window, drop_saves_that_died
 )
 import defensives
 import boss_spell_text
@@ -423,7 +423,7 @@ def analyze():
                 cheat_ids = {n: aid for aid in CHEAT_DEATH_ABILITY_IDS
                              if (n := fight_data['ability_map'].get(aid) or fight_data['ability_map'].get(str(aid)))}
                 deaths_for_fight = report_deaths_cache.get(rid, {}).get(fid, [])
-                deaths_sorted_all = sorted(deaths_for_fight, key=lambda d: d["timestamp"])
+                deaths_sorted_all = sorted(drop_saves_that_died(deaths_for_fight), key=lambda d: d["timestamp"])
                 slots = rank_pull_deaths(deaths_sorted_all)
                 
                 for ev, (slot, in_wipe) in zip(deaths_sorted_all, slots):
