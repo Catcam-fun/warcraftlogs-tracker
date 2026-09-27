@@ -210,7 +210,8 @@ EFFECTS = {
     "Desperate Prayer": [("hp", 19236, 0), ("heal", 19236, 1)],
     "Dispersion": [("dr", 47585, 0)], "Fade": [("dr", 586, 3)],
     "Crimson Vial": [("heal", 185311, 0, 4)],
-    "Feint": [("dr", 1966, 0), ("dr", 1966, 1)], "Evasion": [("immune", 5277, 0), ("dr", 5277, 1)],
+    "Feint": [("dr", 1966, 0), ("dr", 1966, 1)],
+    "Evasion": [("immune", 5277, 0), ("dr", 5277, 1), ("dr", 5277, 2)],   # 2: magic, The War Within only
     "Astral Shift": [("dr", 108271, 0)], "Stone Bulwark Totem": [("absorb", 114893, 0)],
     "Dark Pact": [("absorb", 108416, 0)], "Unending Resolve": [("dr", 104773, 2)],
     "Die by the Sword": [("dr", 118038, 1)], "Enraged Regeneration": [("dr", 184364, 0)],
@@ -347,16 +348,27 @@ class GameData:
         return float(r["EffectBasePointsF"]) if r else None
 
 
+# Damage-reduction auras and the damage they cover: aura 87 names schools in its
+# misc value (127 all, 126 magic, 1 physical); aura 229 is AoE damage only.
+AURA_AOE_REDUCTION = "229"
+SCHOOL_MASKS = {"127": None, "126": "magic", "1": "physical"}
+
+
 def data_value(field, gd, spell, index, ticks):
-    """An effect's base value from the game data, as the catalog stores it."""
-    bp = gd.value(spell, index)
-    if bp is None:
-        return None
+    """An effect's base value and school from the game data, as the catalog stores it.
+
+    Returns (value, school) or (None, None) if the effect isn't there.
+    """
+    r = gd.effects.get(spell, {}).get(index)
+    if r is None:
+        return None, None
+    bp = float(r["EffectBasePointsF"])
     if field == "dr":
-        return round(abs(bp) / 100, 4)
+        school = "aoe" if r["EffectAura"] == AURA_AOE_REDUCTION else SCHOOL_MASKS.get(r["EffectMiscValue_0"])
+        return round(abs(bp) / 100, 4), school
     if field in ("heal", "hp"):
-        return round(bp / 100 * ticks, 4)
-    return None
+        return round(bp / 100 * ticks, 4), None
+    return None, None
 
 
 class Modifiers:
@@ -520,28 +532,30 @@ def components(name, gd, mods, problems):
     for eff in EFFECTS.get(name) or [(f, None, None) for f in FIELDS if f in values]:
         field, spell, index = eff[:3]
         ticks = eff[3] if len(eff) > 3 else 1
-        comp = {}
-        if field in values and field not in used:
-            base = values[field]
-            if spell is not None and field in ("dr", "heal", "hp"):
-                from_data = data_value(field, gd, spell, index, ticks)
-                if from_data is None:
-                    problems.append(f"{name}: effect {index} of spell {spell} is missing")
-                elif base:
-                    base = from_data
-            comp[field] = base
-            if values.get("school") not in (None, "all"):
-                comp["school"] = values["school"]
-            used.add(field)
-        else:
-            comp[field] = 0.0          # filled in only by a talent
+        first = field in values and field not in used     # the hand-listed value covers the first use only
+        used.add(field)
+        listed = values[field] if first else 0.0
+        school = values.get("school") if first and values.get("school") not in (None, "all") else None
+        comp = {field: listed}
+        if spell is not None and field in ("dr", "heal", "hp"):
+            from_data, data_school = data_value(field, gd, spell, index, ticks)
+            if from_data is None:
+                problems.append(f"{name}: effect {index} of spell {spell} is missing")
+            elif from_data or not listed:
+                # The data wins; a 0 there with a listed value means a script sets
+                # it (Fortifying Brew), so the listed value stays.
+                comp[field] = from_data
+            if field == "dr" and school not in ("aoe", "melee"):
+                school = data_school
+        if school:
+            comp["school"] = school
         if field == "absorb":
             comp["observed"] = True
         if spell is not None:
             m = mods.effect(spell, index, field, ticks)
             if m:
                 comp["mods"] = m
-        if comp[field] or comp.get("mods") or comp.get("observed"):
+        if comp[field] is None or comp[field] or comp.get("mods") or comp.get("observed"):
             out.append(comp)
     for field in FIELDS:           # values without a mapped effect (e.g. Fortifying Brew)
         if field in values and field not in used:

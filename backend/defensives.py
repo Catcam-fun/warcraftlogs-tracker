@@ -354,12 +354,14 @@ def _auras(hit):
 
 
 def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts,
-                  indexed, ability_names, actor_names, killing_blows=None, ability_schools=None, cat=None):
+                  indexed, ability_names, actor_names, killing_blows=None, ability_schools=None, cat=None,
+                  aoe_known=True):
     """Defensive picture for one death. All timestamps are report-relative ms.
 
     With `killing_blows` (the player's overkill hits in this log) it also
     estimates whether the defensives they had ready would have saved them.
     `cat`: the catalog of the patch the report was logged on (catalog_for).
+    `aoe_known`: whether this report marks AoE hits at all (logs_mark_aoe).
     """
     cat = cat or _LATEST
     own_casts = indexed["casts"].get(player_id, [])
@@ -469,7 +471,8 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
                        for sid in unused_consumables]
         result["survival"] = assess_survival(killing_blows, death_ts, ready_entries, consumables,
                                              ability_names, ability_schools or {},
-                                             talent_entries=talent_entries, observed_absorbs=observed, spec=spec)
+                                             talent_entries=talent_entries, observed_absorbs=observed, spec=spec,
+                                             aoe_known=aoe_known)
 
     for key in ("active", "available", "cooldown"):
         result[key].sort(key=lambda d: (not d.get("major", True), d["name"]))
@@ -529,6 +532,12 @@ KILLING_BLOW_FIELDS = ("timestamp", "type", "sourceID", "targetID", "abilityGame
                        "isAoE", "resourceActor", "hitPoints", "maxHitPoints")
 
 
+def logs_mark_aoe(killing_blows_by_player):
+    """Does this report mark AoE hits? Older logs (The War Within) have isAoE
+    false on every hit, so a report with no AoE killing blow at all doesn't."""
+    return any(h.get("isAoE") for hits in (killing_blows_by_player or {}).values() for h in hits)
+
+
 def index_killing_blows(events):
     """{targetID: [killing hits sorted by time]}"""
     idx = defaultdict(list)
@@ -553,7 +562,9 @@ def _school_applies(school, hit, ability_schools, immunity=False):
     if school in (None, "all"):
         return True
     if school == "aoe":
-        return bool(hit.get("isAoE"))
+        # None: this log doesn't mark AoE hits (The War Within logs have
+        # isAoE false on every hit), so whether it applies is unknown.
+        return bool(hit.get("isAoE")) if hit.get("aoeKnown", True) else None
     if school == "melee":
         return hit.get("abilityGameID") == MELEE_SWING
     mask = ability_schools.get(hit.get("abilityGameID"), 0)
@@ -697,7 +708,7 @@ def _prevented(options, hit, max_hp, missing_hp, ability_schools):
     for m in options:
         immune = bool(m.get("immune"))
         if not _school_applies(m.get("school"), hit, ability_schools, immunity=immune):
-            continue
+            continue           # doesn't apply, or unknown (counted as not helping)
         if immune:
             if not pierces:
                 keep = 0.0
@@ -713,7 +724,7 @@ def _prevented(options, hit, max_hp, missing_hp, ability_schools):
 
 
 def assess_survival(killing_blows, death_ts, available, consumables, ability_names, ability_schools,
-                    talent_entries=None, observed_absorbs=None, spec=None):
+                    talent_entries=None, observed_absorbs=None, spec=None, aoe_known=True):
     """How they died, and whether the defensives they had ready would have saved them.
 
     `killing_blows`: this player's hits with overkill (any time); the one at
@@ -734,8 +745,15 @@ def assess_survival(killing_blows, death_ts, available, consumables, ability_nam
     hit_size = _full_hit(killing)
     missing_hp = max(max_hp - hp_before, 0)
 
+    if not aoe_known:
+        killing = dict(killing, aoeKnown=False)
+
     def verdict(options):
-        return _prevented(options, killing, max_hp, missing_hp, ability_schools) > overkill
+        """True / False, or None when it doesn't save them without parts whose effect on this hit is unknown."""
+        if _prevented(options, killing, max_hp, missing_hp, ability_schools) > overkill:
+            return True
+        unknown = any(_school_applies(m.get("school"), killing, ability_schools) is None for m in options)
+        return None if unknown else False
 
     per_button, scored = {}, []
     for entry in list(available) + list(consumables):
