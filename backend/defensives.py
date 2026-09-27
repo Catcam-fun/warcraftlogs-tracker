@@ -147,7 +147,7 @@ def ability_info(cat, name):
 # Changes whenever what gets fetched or kept for defensives changes, so cached
 # data from an older catalog is never reused. Bump DATA_SHAPE when the
 # indexed layout changes.
-DATA_SHAPE = 3
+DATA_SHAPE = 2
 CATALOG_FINGERPRINT = hashlib.sha1(repr((DATA_SHAPE, [
     (c.patch, c.cast_ids, c.buff_names, sorted(c.relevant_talent_entries)) for c in _CATALOGS.values()
 ])).encode()).hexdigest()[:12]
@@ -253,14 +253,14 @@ def index_defensive_events(raw, cat=None):
             continue
         talents[(e.get("fight"), e["sourceID"])] = {t["id"]: t.get("rank") or 1 for t in tree
                                                      if t.get("id") in cat.relevant_talent_entries}
-    # targetID -> [(ts, spellID, healed incl. overheal, max health, healing-taken buffs multiplier, crit)]
+    # targetID -> [(ts, spellID, healed incl. overheal, max health, healing-taken buffs multiplier)]
     heals = defaultdict(list)
     for e in raw.get("heals", []):
         full = (e.get("amount") or 0) + (e.get("overheal") or 0) + (e.get("absorbed") or 0)
         if e.get("type") == "heal" and not e.get("tick") and full > 0 and e.get("targetID") is not None \
                 and e.get("sourceID") == e.get("targetID"):
             heals[e["targetID"]].append((e["timestamp"], e.get("abilityGameID"), full, e.get("maxHitPoints") or 0,
-                                         round(_heal_taken_mult(_auras(e), cat), 4), e.get("hitType") == 2))
+                                         round(_heal_taken_mult(_auras(e), cat), 4)))
     for lst in casts.values():
         lst.sort()
     for lst in buffs.values():
@@ -789,9 +789,11 @@ def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec):
     potion's typical heal with the player's healing-taken talents and buffs.
     """
     entry = cat.all[sid]
+    # Their own uses of this exact potion or Healthstone. The log names only the
+    # spell, which both quality ranks of a potion share (different items and
+    # item levels, different heals), so their own heals are what show the rank
+    # they drink. Potions don't crit (none in 582 live heals).
     own = [h for h in own_heals if h[1] == sid]
-    # A crit isn't something to count on: left out unless every use was one.
-    own = [h for h in own if not (len(h) > 5 and h[5])] or own
     out = {"name": entry["name"], "kind": entry["kind"], "estimated": True, "boostedBy": []}
     if entry["kind"] == "healthstone":
         shares = [h[2] / h[3] for h in own if h[3]]
