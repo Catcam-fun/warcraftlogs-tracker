@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
-import { AlertCircle, Loader2, Filter, ChevronDown, ChevronRight, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown, Share2, Copy, Check, LogOut, Settings as SettingsIcon, Info, X, Crosshair, LogIn, Save } from 'lucide-react';
+import { AlertCircle, Loader2, Filter, ChevronDown, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Share2, Copy, Check, LogOut, Settings as SettingsIcon, Info, X, Crosshair, LogIn, Save } from 'lucide-react';
 import { supabase, sessionEndedByBrowserClose, setSessionOnly } from './supabaseClient';
 import Auth from './Auth';
 import Settings from './Settings';
@@ -16,7 +16,8 @@ import { API_URL, apiFetch, stripSecrets } from './api';
 import SavedReports from './SavedReports';
 import SaveReportDialog from './SaveReportDialog';
 import { countedDeaths, isCounted } from './deathCounting';
-import { DeathDefensives, DefensiveSummaryChip, DefensiveTopUnused, summarizeDefensives } from './DefensivePanel';
+import { DefensiveSummaryChip, DefensiveTopUnused, summarizeDefensives } from './DefensivePanel';
+import { DeathRow } from './DeathRow';
 
 
 
@@ -1240,6 +1241,16 @@ export default function WarcraftLogsApp() {
     config.selectedRaid, hiddenPlayers, minPulls,
   ]);
   /* eslint-enable react-hooks/exhaustive-deps */
+  // Deaths that count, per boss ability, for the killing-blow tooltips.
+  const killCounts = useMemo(() => {
+    const counts = {};
+    Object.values(data?.events || {}).forEach((evs) => evs.forEach((ev) => {
+      if (ev.isCheatDeath || !isCounted(ev, cutoff, data.pullCutoffTimestamps)) return;
+      const key = `${ev.boss}|${ev.abilityName}`;
+      counts[key] = (counts[key] || 0) + 1;
+    }));
+    return counts;
+  }, [data, cutoff]);
   const getFilteredStats = () => filteredStatsMemo;
   const getOverviewData = () => overviewDataMemo;
 
@@ -2132,32 +2143,9 @@ export default function WarcraftLogsApp() {
                               <div className="fpx-dlist">
                                 {(showBothStats ? totalBossDeaths : bossDeaths)
                                   .map((death, idx) => (
-                                  <div key={idx} className={`fpx-death${death.isCheatDeath ? ' cheat' : ''}`}>
-                                    <div className="fpx-death-top">
-                                      <div className="fpx-death-meta">
-                                        <span className="pn">Pull #{death.pullNo}</span>
-                                        <span>{formatTimestamp(death.absTs)}</span>
-                                        {death.isCheatDeath && (
-                                          <span className="fpx-cheatbadge">CHEAT</span>
-                                        )}
-                                        <span className="ab">
-                                          {death.abilityName === 'Unknown' ? (
-                                            <span className="un">Unknown ability</span>
-                                          ) : death.abilityName}
-                                        </span>
-                                      </div>
-                                      <a
-                                        href={getWCLLink(death.reportId, death.fightId)}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="fpx-wcl"
-                                      >
-                                        View log <ExternalLink size={12} />
-                                      </a>
-                                    </div>
-
-                                    <DeathDefensives d={death.defensives} />
-                                  </div>
+                                  <DeathRow key={idx} death={death} icons={data.icons} abilityInfo={data.abilityInfo} abilityText={data.abilityText}
+                                    killCounts={killCounts} logHref={getWCLLink(death.reportId, death.fightId)}
+                                    timeLabel={formatTimestamp(death.absTs)} />
                                 ))}
                               </div>
                             </div>
