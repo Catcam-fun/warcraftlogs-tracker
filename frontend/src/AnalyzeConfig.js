@@ -137,7 +137,7 @@ export default function AnalyzeConfig({
                 <KeyRound size={17} />
                 <div>
                   <b>Need API credentials?</b> Create a WarcraftLogs V2 client (Client ID + Secret),
-                  then <button className="fpx-link" onClick={onShowAuth}>sign in</button> to save them to your account.
+                  this browser remembers them, or <button className="fpx-link" onClick={onShowAuth}>sign in</button> to keep them on your account.
                   <a className="fpx-link" href="https://www.warcraftlogs.com/api/clients/" target="_blank" rel="noopener noreferrer">
                     WarcraftLogs API Clients <ExternalLink size={12} />
                   </a>
@@ -148,9 +148,9 @@ export default function AnalyzeConfig({
             <section className="fpx-form fpx-rv">
               <div className="fpx-grid2">
                 {field('Client ID (V2 API) *', 'clientId', 'text',
-                  user ? '✓ Auto-fills from your account' : 'Required')}
+                  user ? '✓ Auto-fills from your account' : 'Required · remembered in this browser')}
                 {field('Client Secret (V2 API) *', 'clientSecret', 'password',
-                  user ? '✓ Auto-fills from your account' : 'Required')}
+                  user ? '✓ Auto-fills from your account' : 'Required · remembered in this browser')}
               </div>
               <div className="fpx-grid2">
                 {field('Guild Name *', 'guildName', 'text', 'Exactly as on WarcraftLogs — e.g. Do Over, Method')}

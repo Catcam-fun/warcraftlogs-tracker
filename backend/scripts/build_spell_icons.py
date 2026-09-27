@@ -35,6 +35,26 @@ def icons_for(build):
     return out
 
 
+def item_icons_for(build, spell_names):
+    """Potions: their item's icon (what players see in their bags), not the generic spell icon.
+
+    {potion name: icon}, from the potion's own items (same name) that cast that spell.
+    """
+    files = {int(r["ID"]): r["FileName"] for r in table("ManifestInterfaceData", build)
+             if r["FilePath"].lower().startswith("interface\\icons")}
+    effect_spell = {r["ID"]: int(r["SpellID"]) for r in table("ItemEffect", build) if int(r["SpellID"]) in spell_names}
+    item_spell = {int(r["ItemID"]): effect_spell[r["ItemEffectID"]]
+                  for r in table("ItemXItemEffect", build) if r["ItemEffectID"] in effect_spell}
+    names = {int(r["ID"]): r["Display_lang"] for r in table("ItemSparse", build) if int(r["ID"]) in item_spell}
+    out = {}
+    for r in table("Item", build):
+        item = int(r["ID"])
+        sid = item_spell.get(item)
+        if sid and names.get(item) == spell_names[sid] and int(r["IconFileDataID"] or 0) in files:
+            out.setdefault(spell_names[sid], files[int(r["IconFileDataID"])].rsplit(".", 1)[0].lower().replace(" ", ""))
+    return out
+
+
 def main():
     spells = {}          # name -> spell IDs, newest patch first
     for patch in sorted(CATALOGS, key=lambda p: [int(x) for x in p.split(".")], reverse=True):
@@ -44,9 +64,11 @@ def main():
                 spells[entry["name"]].append(sid)
     build = patches()[-1][2]
     live, data = icons_for(build), Data(build)
+    potions = {sid: e["name"] for c in CATALOGS.values() for sid, e in c.items() if e["kind"] == "potion"}
+    item_icons = item_icons_for(build, potions)
     icons, texts, missing, no_text = {}, {}, [], []
     for name, sids in sorted(spells.items()):
-        icon = next((live[s] for s in sids if s in live), None)
+        icon = item_icons.get(name) or next((live[s] for s in sids if s in live), None)
         if icon:
             icons[name] = icon
         else:

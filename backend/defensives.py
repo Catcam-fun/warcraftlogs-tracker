@@ -19,6 +19,7 @@ import statistics
 from collections import defaultdict
 from datetime import datetime, timezone
 
+from armor_constants import ARMOR_K, IGNORES_ARMOR, REDUCED_BY_ARMOR
 from boss_spell_flags import IGNORES_IMMUNITY
 from defensive_catalog import CATALOGS, HEALING_TAKEN, LATEST, PATCHES
 from spell_icons import DESCRIPTIONS as CATALOG_DESCRIPTIONS, ICONS as CATALOG_ICONS
@@ -75,7 +76,11 @@ class Catalog:
         # owner's call); the per-player summary counts only major (60s+) ones.
         self.tracked = self.personal
         self.cast_ids = sorted(set(self.tracked) | set(self.consumable))
-        self.buff_names = sorted({d["name"] for d in list(self.personal.values()) + list(self.external.values())})
+        # Shields a talent adds to a button (Matted Fur): scored from their real size in the log.
+        self.observed_auras = sorted({c["aura"] for d in self.all.values() for c in d.get("mitigation") or ()
+                                      if isinstance(c, dict) and c.get("aura")})
+        self.buff_names = sorted({d["name"] for d in list(self.personal.values()) + list(self.external.values())}
+                                 | set(self.observed_auras))
         heal = HEALING_TAKEN.get(patch, {})
         self.heal_talents = heal.get("talents", [])
         self.heal_auras = {int(k): v for k, v in heal.get("auras", {}).items()}
@@ -85,6 +90,10 @@ class Catalog:
         entries = set()
         for d in self.all.values():
             entries.update(d["talent_entries"], d.get("replaced_by_entries", ()))
+            entries.update(((d.get("needs_form") or {}).get("unless") or {}).get("entries", ()))
+            for c in d.get("mitigation") or []:
+                if isinstance(c, dict) and c.get("needs"):
+                    entries.update(c["needs"].get("entries", ()))
             for m in [m for c in (d.get("mitigation") or []) for m in _mods(c)] \
                     + d.get("cooldown_mods", []) + d.get("charge_mods", []):
                 entries.update(m.get("entries", ()))
@@ -147,7 +156,7 @@ def ability_info(cat, name):
 # Changes whenever what gets fetched or kept for defensives changes, so cached
 # data from an older catalog is never reused. Bump DATA_SHAPE when the
 # indexed layout changes.
-DATA_SHAPE = 2
+DATA_SHAPE = 3
 CATALOG_FINGERPRINT = hashlib.sha1(repr((DATA_SHAPE, [
     (c.patch, c.cast_ids, c.buff_names, sorted(c.relevant_talent_entries)) for c in _CATALOGS.values()
 ])).encode()).hexdigest()[:12]
@@ -253,14 +262,16 @@ def index_defensive_events(raw, cat=None):
             continue
         talents[(e.get("fight"), e["sourceID"])] = {t["id"]: t.get("rank") or 1 for t in tree
                                                      if t.get("id") in cat.relevant_talent_entries}
-    # targetID -> [(ts, spellID, healed incl. overheal, max health, healing-taken buffs multiplier)]
+    # targetID -> [(ts, spellID, healed incl. overheal, max health, healing-taken buffs multiplier,
+    #              Versatility in hundredths of a percent)]
     heals = defaultdict(list)
     for e in raw.get("heals", []):
         full = (e.get("amount") or 0) + (e.get("overheal") or 0) + (e.get("absorbed") or 0)
         if e.get("type") == "heal" and not e.get("tick") and full > 0 and e.get("targetID") is not None \
                 and e.get("sourceID") == e.get("targetID"):
             heals[e["targetID"]].append((e["timestamp"], e.get("abilityGameID"), full, e.get("maxHitPoints") or 0,
-                                         round(_heal_taken_mult(_auras(e), cat), 4)))
+                                         round(_heal_taken_mult(_auras(e), cat), 4),
+                                         e.get("versatility") if e.get("resourceActor") == 1 else None))
     for lst in casts.values():
         lst.sort()
     for lst in buffs.values():
@@ -462,7 +473,7 @@ def _auras(hit):
 
 def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts,
                   indexed, ability_names, actor_names, killing_blows=None, ability_schools=None, cat=None,
-                  aoe_known=True, hp_timeline=None):
+                  aoe_known=True, hp_timeline=None, armor_k=None):
     """Defensive picture for one death. All timestamps are report-relative ms.
 
     With `killing_blows` (the player's overkill hits in this log) it also
@@ -471,6 +482,7 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
     `aoe_known`: whether this report marks AoE hits at all (logs_mark_aoe).
     `hp_timeline`: the player's health in the seconds before the death
     (fetch_hp_timeline), for heals over time; needs_hp_timeline() says when.
+    `armor_k`: the boss's armor constant (armor_constant), for armor increases.
     """
     cat = cat or _LATEST
     own_casts = indexed["casts"].get(player_id, [])
@@ -534,9 +546,8 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
         if left > 0:
             result["available"].append({"name": name, "major": entry["major"]})
             ready_entries.append(entry)
-            if name in HEAL_OVER_TIME:
-                since = _ready_since(death_ts, window, charges, recharge)
-                ready_since[name] = max(fight_start, since if since is not None else fight_start)
+            since = _ready_since(death_ts, window, charges, recharge)
+            ready_since[name] = max(fight_start, since if since is not None else fight_start)
         else:
             result["cooldown"].append({
                 "name": name, "major": entry["major"],
@@ -566,6 +577,10 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
         if used and death_ts - used[-1][0] < cooldown:
             result[kind] = {"usedAgo": round((death_ts - used[-1][0]) / 1000), "name": cat.all[used[-1][1]]["name"],
                             "readyIn": round((used[-1][0] + cooldown - death_ts) / 1000)}
+            rank = potion_rank(used[-1][1], cat, (indexed.get("heals") or {}).get(player_id, []),
+                               talent_entries, spec) if kind == "potion" else None
+            if rank:
+                result[kind]["rank"] = rank
             continue
         result[kind] = {"usedAgo": None}
         if used:
@@ -580,7 +595,8 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
     observed = {}
     for ts, typ, aid, src, amount in (e + (0,) * (5 - len(e)) for e in (buff_events or {}).get(player_id, [])):
         name = ability_names.get(aid)
-        if amount and src == player_id and typ in ("applybuff", "refreshbuff") and name in cat.name_to_id:
+        if amount and src == player_id and typ in ("applybuff", "refreshbuff") and \
+                (name in cat.name_to_id or name in cat.observed_auras):
             if ts <= death_ts or name not in observed:
                 observed[name] = amount
 
@@ -588,6 +604,26 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
     for a in result["available"]:
         if boosts.get(a["name"]):
             a["boostedBy"] = boosts[a["name"]]
+
+    # Buttons that need a form the player wasn't in (Frenzied Regeneration needs
+    # Bear Form unless a talent lifts that): judged as shifting, then pressing.
+    forms = {}
+    for e in ready_entries:
+        need = e.get("needs_form")
+        if not need or need["form"] in active_names or _mod_rank(need.get("unless") or {}, talent_entries, spec):
+            continue
+        form = next((f for f in ready_entries if f["name"] == need["form"]), None)
+        if form is not None:
+            forms[e["name"]] = form
+    for a in result["available"]:
+        if a["name"] in forms:
+            a["withForm"] = forms[a["name"]]["name"]
+    # The armor bonus of the form they were in (Moonkin Form), from the killing blow's aura snapshot.
+    form_armor = 1.0
+    for e in ready_entries:
+        for aid, mult in (e.get("form_armor") or {}).items():
+            if killing is not None and int(aid) in _auras(killing):
+                form_armor *= mult
 
     if killing_blows is not None:
         death_mult = _heal_taken_mult(_auras(killing), cat) if killing is not None else 1.0
@@ -598,7 +634,8 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
                                              ability_names, ability_schools or {},
                                              talent_entries=talent_entries, observed_absorbs=observed, spec=spec,
                                              aoe_known=aoe_known, hp_timeline=hp_timeline, ready_since=ready_since,
-                                             aura_ms={e["name"]: e.get("aura_ms") for e in ready_entries})
+                                             aura_ms={e["name"]: e.get("aura_ms") for e in ready_entries},
+                                             forms=forms, armor_k=armor_k, form_armor=form_armor)
 
     for key in ("active", "available", "cooldown"):
         result[key].sort(key=lambda d: (not d.get("major", True), d["name"]))
@@ -663,7 +700,7 @@ def fetch_killing_blows(token, report_code, fight_ids):
 # like positions and stats, is dropped so cached reports stay small).
 KILLING_BLOW_FIELDS = ("timestamp", "type", "sourceID", "targetID", "abilityGameID", "fight", "buffs",
                        "hitType", "amount", "overkill", "absorbed", "mitigated", "unmitigatedAmount",
-                       "isAoE", "resourceActor", "hitPoints", "maxHitPoints")
+                       "isAoE", "resourceActor", "hitPoints", "maxHitPoints", "armor")
 
 
 def logs_mark_aoe(killing_blows_by_player):
@@ -704,6 +741,10 @@ def _school_applies(school, hit, ability_schools, immunity=False):
     if school == "melee":
         return hit.get("abilityGameID") == MELEE_SWING
     mask = ability_schools.get(hit.get("abilityGameID"), 0)
+    if isinstance(school, int):           # a set of schools from the game data (Bear Form: arcane)
+        if immunity:
+            return mask != 0 and not mask & ~school
+        return bool(mask & school)
     if school == "magic":
         if immunity:
             return mask != 0 and not mask & PHYSICAL
@@ -719,6 +760,50 @@ def _ignores_reduction(hit):
     WCL leaves `mitigated` out when it's 0; `unmitigatedAmount` shows the log has the data.
     """
     return not hit.get("mitigated") and (hit.get("unmitigatedAmount") or 0) > 0
+
+
+ARMOR_CAP = 0.85                     # armor never reduces a hit by more than this
+
+
+def armor_constant(encounter_id, difficulty):
+    """K in armor / (armor + K) for a boss's hits (armor_constants.py; Mythic's when a difficulty wasn't measured)."""
+    for d in (difficulty, 5, 4, 3):
+        k = (ARMOR_K.get(d) or {}).get(encounter_id)
+        if k:
+            return k
+    return None
+
+
+def _armor_reduction(hit, ability_schools):
+    """Does armor reduce this hit: True / False, or None when that isn't known.
+
+    Only purely physical hits; boss melee swings always, other physical spells
+    as measured in the logs (some ignore armor).
+    """
+    ability = hit.get("abilityGameID")
+    if ability == MELEE_SWING:
+        return True
+    if ability_schools.get(ability, 0) != PHYSICAL:
+        return False
+    if ability in IGNORES_ARMOR:
+        return False
+    return True if ability in REDUCED_BY_ARMOR else None
+
+
+def _armor_dr(extra, hit):
+    """Extra damage reduction from raising the player's armor by `extra` (2.2 = +220%) against this hit.
+
+    From their real armor on the killing blow and the boss's armor constant:
+    what armor already took off is in the hit, so only the added part counts.
+    None when the armor or the constant isn't known.
+    """
+    armor, k = hit.get("armor"), hit.get("armorK")
+    if not armor or not k:
+        return None
+    before = min(armor / (armor + k), ARMOR_CAP)
+    raised = armor * (1 + extra)          # extra can be below 0 when a form's bonus comes off
+    after = min(raised / (raised + k), ARMOR_CAP)
+    return 1 - (1 - after) / (1 - before)
 
 
 def _rank(talent_entries, entries):
@@ -748,10 +833,26 @@ def _resolve(entry, talent_entries, observed_absorbs, spec=None, applied=None):
         comps = [comps]
     out, boosted = [], []
     for c in comps:
-        field = next(f for f in ("immune", "dr", "absorb", "hp", "heal", "heal_amount") if f in c)
+        field = next(f for f in FIELDS if f in c)
         value = c[field]
-        if field == "absorb" and c.get("observed") and observed_absorbs.get(entry["name"]):
-            out.append({"absorb_amount": observed_absorbs[entry["name"]], "school": c.get("school")})
+        needs = c.get("needs")
+        seen = observed_absorbs.get(c.get("aura") or entry["name"]) if field == "absorb" and c.get("observed") else None
+        if needs:
+            # An effect a talent adds (Niuzao's Protection's shield on Fortifying
+            # Brew): only for players who have it, scaled by its rank.
+            rank = _mod_rank(needs, talent_entries, spec)
+            if not rank or (value is None and not seen):
+                continue                 # not talented, or a talent's shield that wasn't seen in the log
+            boosted.append(needs["talent"])
+            if applied is not None:
+                applied.append({"talent": needs["talent"], "field": field, "rank": rank,
+                                "adds": seen if value is None else value,
+                                **({"school": c["school"]} if c.get("school") else {})})
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                value = value * rank
+        extra = {k: c[k] for k in ("over_ms", "ticks", "current", "replaces_form") if k in c}
+        if seen:
+            out.append({"absorb_amount": seen, "school": c.get("school")})
             continue
         if value is None:
             return None, []              # only scored from a real shield size, and none was seen
@@ -770,8 +871,68 @@ def _resolve(entry, talent_entries, observed_absorbs, spec=None, applied=None):
         if field == "dr":
             value = min(value, 1.0)
         if value:
-            out.append({field: value, "school": c.get("school")})
+            out.append({field: value, "school": c.get("school"), **extra})
     return out, boosted
+
+
+# Component fields, in the order they're recognised (see _resolve).
+FIELDS = ("immune", "dr", "dr_missing", "armor", "absorb", "hp", "heal", "heal_amount", "heal_taken")
+
+
+def _heal_talent_mult(entry, cat, talent_entries, spec):
+    """How much this player's talents raise a potion's heal: healing-taken talents and
+    talents that boost potions (Iron Stomach). Returns (multiplier, [talent changes])."""
+    mult, applied = 1.0, []
+    mods = list(cat.heal_talents) + [m for c in entry.get("mitigation") or () for m in _mods(c)]
+    for m in mods:
+        rank = _mod_rank(m, talent_entries, spec)
+        if rank and "mult" in m:
+            mult *= 1 + (m["mult"] - 1) * rank
+            applied.append({"talent": m["talent"], "field": "heal_amount", "rank": rank, "mult": m["mult"]})
+    return mult, applied
+
+
+# A heal a hair under a rank's tooltip still reaches it (rounding).
+RANK_TOLERANCE = 0.005
+# Potions are the drinker's own heal, so their class and spec healing bonuses
+# raise it too, by up to this much for players who reach silver (measured on
+# live Midnight logs, Versatility and buffs taken out: never above 16%). A rank
+# is only claimed when the rank below heals at least this much less, so no
+# bonus could make a lower rank look like it (Midnight: 17% apart; The War
+# Within's ranks are 4% apart, so its ranks can't be told apart).
+RANK_BONUS_MAX = 0.16
+
+
+def potion_rank(sid, cat, own_heals, talent_entries, spec):
+    """The quality rank of a potion this player drinks, from their own heals with it.
+
+    A potion heals at least its rank's tooltip amount: Versatility (on each
+    heal event), healing-taken buffs, talents and class healing bonuses only
+    raise it. With Versatility, buffs and known talents taken out, the middle
+    of their heals reaches the tooltip of the rank they drink and no higher
+    one. Returns the rank; {"unknown": ...} when the ranks are too close to
+    tell apart; None when the potion has no ranks in this patch, they didn't
+    drink it in these boss pulls, or their heals are under every tooltip.
+    """
+    entry = cat.all.get(sid) or {}
+    ranks = entry.get("ranks")
+    own = [h for h in own_heals if h[1] == sid]
+    if not ranks or not own:
+        return None
+    talent_mult, applied = _heal_talent_mult(entry, cat, talent_entries, spec)
+    vers = [(h[5] if len(h) > 5 and h[5] is not None else 0) / 10_000 for h in own]
+    base = statistics.median(h[2] / (h[4] or 1.0) / (1 + v) for h, v in zip(own, vers)) / talent_mult
+    reached = [i for i, r in enumerate(ranks) if base >= r["heal"] * (1 - RANK_TOLERANCE)]
+    info = {"of": len(ranks), "ranks": [{"rank": r["rank"], "heal": r["heal"]} for r in ranks], "n": len(own),
+            "base": round(base), "raw": round(statistics.median(h[2] for h in own)),
+            "vers": round(statistics.median(vers) * 100, 1), **({"talents": applied} if applied else {})}
+    if not reached:
+        return None
+    i = reached[-1]
+    if i > 0 and ranks[i]["heal"] < ranks[i - 1]["heal"] * (1 + RANK_BONUS_MAX):
+        return {**info, "unknown": round((ranks[i]["heal"] / ranks[i - 1]["heal"] - 1) * 100, 1)}
+    return {**info, "rank": ranks[i]["rank"], "heal": ranks[i]["heal"],
+            "bonus": round((base / ranks[i]["heal"] - 1) * 100, 1)}
 
 
 def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec):
@@ -818,6 +979,9 @@ def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec):
         out["source"] = "log"
         # What their own potions healed (healing-taken buffs taken out), for the tooltip.
         out["samples"] = {"n": len(heals), "min": round(min(heals)), "max": round(max(heals))}
+        rank = potion_rank(sid, cat, own_heals, talent_entries, spec)
+        if rank:
+            out["rank"] = rank
         return out
     comps, boosted = _resolve(entry, talent_entries, {}, spec)
     typical = next((c["heal_amount"] for c in comps or () if "heal_amount" in c), None)
@@ -835,6 +999,8 @@ def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec):
             talent_mult *= 1 + (m["mult"] - 1) * rank
             boosted.append(m["talent"])
             applied.append({"talent": m["talent"], "field": "heal_amount", "rank": rank, "mult": m["mult"]})
+    if cat.all[sid].get("ranks"):
+        out["ranks"] = [{"rank": r["rank"], "heal": r["heal"]} for r in cat.all[sid]["ranks"]]
     out["mitigation"] = [{"heal_amount": typical * talent_mult * death_mult}]
     out["applied"], out["typical"] = applied, typical
     out["boostedBy"], out["source"] = boosted, "typical"
@@ -846,33 +1012,63 @@ def _full_hit(hit):
     return (hit.get("amount") or 0) + (hit.get("overkill") or 0) + (hit.get("absorbed") or 0)
 
 
+def _effect_applies(m, hit, ability_schools):
+    """Does one component apply to this hit: True / False / None (unknown)."""
+    if m.get("armor"):
+        return _armor_reduction(hit, ability_schools) and (True if _armor_dr(m["armor"], hit) is not None else None)
+    return _school_applies(m.get("school"), hit, ability_schools, immunity=bool(m.get("immune")))
+
+
 def _prevented(options, hit, max_hp, missing_hp, ability_schools):
     """Damage the given defensives would have prevented (or healed) against the killing blow.
 
     `options`: resolved components (see _resolve). Reductions apply first, then
     shields soak what's left, as in the game. Reductions are skipped for a hit
     that ignored them, and immunities for spells that pierce them.
+    Max health: a percent increase keeps the health share (the game scales
+    current health with it), "current" ones add the same amount to both
+    (Fortifying Brew). Heals fill health missing after that, raised by any
+    healing-received increase among the options.
     """
     dmg = _full_hit(hit)
     keep, absorb = 1.0, 0.0
     no_reduction = _ignores_reduction(hit)
     pierces = hit.get("abilityGameID") in IGNORES_IMMUNITY
+    armor_up = 1.0
     for m in options:
         immune = bool(m.get("immune"))
-        if not _school_applies(m.get("school"), hit, ability_schools, immunity=immune):
+        if not _effect_applies(m, hit, ability_schools):
             continue           # doesn't apply, or unknown (counted as not helping)
         if immune:
             if not pierces:
                 keep = 0.0
-        elif m.get("dr"):
+        elif m.get("armor"):
+            armor_up *= 1 + m["armor"]       # armor increases multiply (Bear Form x Ursine Vigor)
+        elif m.get("dr") or m.get("dr_missing"):
             if not no_reduction:
-                keep *= 1 - m["dr"]
+                dr = m.get("dr") or 0
+                if m.get("dr_missing"):              # up to its value at no health, by missing health
+                    dr += m["dr_missing"] * missing_hp / max_hp
+                keep *= 1 - min(dr, 1.0)
         absorb += m.get("absorb", 0) * max_hp + m.get("absorb_amount", 0)
-    extra_hp = sum(m.get("hp", 0) for m in options)
-    # A heal only helps up to the health they were missing before the killing blow.
-    heal = min(sum(m.get("heal", 0) for m in options) * max_hp + sum(m.get("heal_amount", 0) for m in options),
-               missing_hp)
-    return min(dmg, dmg * (1 - keep) + absorb) + extra_hp * max_hp + heal
+    if armor_up > 1 and not no_reduction:
+        if any(m.get("replaces_form") for m in options):
+            # Shifting forms: the current form's armor bonus comes off first.
+            armor_up /= hit.get("formArmor") or 1.0
+        keep *= 1 - _armor_dr(armor_up - 1, hit)
+    hp_now = max_hp - missing_hp
+    share_up = 1.0
+    for m in options:
+        if m.get("hp") and not m.get("current"):
+            share_up *= 1 + m["hp"]          # percent max health increases multiply (checked on live logs)
+    share_up -= 1
+    flat_up = sum(m.get("hp", 0) for m in options if m.get("current"))
+    new_max = max_hp * (1 + share_up + flat_up)
+    health = hp_now * (1 + share_up) + flat_up * max_hp
+    boost = 1 + sum(m.get("heal_taken", 0) for m in options)
+    heal = min(sum((m.get("heal", 0) * max_hp + m.get("heal_amount", 0)) * (1 if m.get("boosted") else boost)
+                   for m in options), new_max - health)
+    return min(dmg, dmg * (1 - keep) + absorb) + (health - hp_now) + max(heal, 0)
 
 
 def _explain(entry, comps, applied, hit, max_hp, missing_hp, ability_schools):
@@ -900,19 +1096,27 @@ def _explain(entry, comps, applied, hit, max_hp, missing_hp, ability_schools):
             out["samples"] = entry["samples"]
         if entry.get("typical"):
             out["typical"] = round(entry["typical"])
+        if entry.get("rank"):
+            out["rank"] = entry["rank"]
+        elif entry.get("ranks"):
+            out["ranks"] = entry["ranks"]
     if amount <= 0:
         for m in comps:
             immune = bool(m.get("immune"))
-            applies = _school_applies(m.get("school"), hit, ability_schools, immunity=immune)
-            if applies is None:
+            applies = _effect_applies(m, hit, ability_schools)
+            if applies is None and m.get("armor"):
+                out["why"] = "armorUnknown"
+            elif applies is None:
                 out["why"] = "aoeUnknown"
+            elif not applies and m.get("armor"):
+                out["why"] = "notArmor"
             elif not applies:
                 out["why"], out["school"] = "school", m.get("school")
             elif immune and hit.get("abilityGameID") in IGNORES_IMMUNITY:
                 out["why"] = "pierces"
-            elif m.get("dr") and _ignores_reduction(hit):
+            elif (m.get("dr") or m.get("armor")) and _ignores_reduction(hit):
                 out["why"] = "noReduction"
-            elif ("heal" in m or "heal_amount" in m) and missing_hp <= 0:
+            elif ("heal" in m or "heal_amount" in m or "heal_taken" in m) and missing_hp <= 0:
                 out["why"] = "fullHealth"
             else:
                 continue
@@ -928,7 +1132,7 @@ def needs_hp_timeline(defensive_result):
 
 def assess_survival(killing_blows, death_ts, available, consumables, ability_names, ability_schools,
                     talent_entries=None, observed_absorbs=None, spec=None, aoe_known=True,
-                    hp_timeline=None, ready_since=None, aura_ms=None):
+                    hp_timeline=None, ready_since=None, aura_ms=None, forms=None, armor_k=None, form_armor=None):
     """How they died, and whether the defensives they had ready would have saved them.
 
     `killing_blows`: this player's hits with overkill (any time); the one at
@@ -965,12 +1169,13 @@ def assess_survival(killing_blows, death_ts, available, consumables, ability_nam
 
     if not aoe_known:
         killing = dict(killing, aoeKnown=False)
+    killing = dict(killing, armorK=armor_k, formArmor=form_armor)
 
     def verdict(options):
         """True / False, or None when it doesn't save them without parts whose effect on this hit is unknown."""
         if _prevented(options, killing, max_hp, missing_hp, ability_schools) > overkill:
             return True
-        unknown = any(_school_applies(m.get("school"), killing, ability_schools) is None for m in options)
+        unknown = any(_effect_applies(m, killing, ability_schools) is None for m in options)
         return None if unknown else False
 
     per_button, scored, details = {}, [], {}
@@ -979,16 +1184,32 @@ def assess_survival(killing_blows, death_ts, available, consumables, ability_nam
         comps, _ = _resolve(entry, talent_entries, observed_absorbs or {}, spec, applied)
         name = entry["name"]
         hot = None
-        if comps is not None and name in HEAL_OVER_TIME and (aura_ms or {}).get(name):
-            total = sum((c.get("heal") or 0) * max_hp + (c.get("heal_amount") or 0) for c in comps)
+        if comps is not None and (name in (forms or {})):
+            # Needs a form first (Frenzied Regeneration needs Bear Form): judged with it.
+            form_comps, _ = _resolve(forms[name], talent_entries, observed_absorbs or {}, spec, applied)
+            comps = comps + (form_comps or [])
+        legacy_ticks = HEAL_OVER_TIME.get(name) if (aura_ms or {}).get(name) else None
+        over = [c for c in comps or () if ("heal" in c or "heal_amount" in c)
+                and (c.get("over_ms") or (legacy_ticks and not c.get("over_ms")))]
+        if over:
             if not hp_timeline:          # not fetched, or nothing came back: can't tell
                 per_button[name] = None
                 details[name] = {"amount": 0, "why": "needsTimeline"}
                 continue
-            landed, ticks = _hot_landed(total, HEAL_OVER_TIME[name], aura_ms[name], killing["timestamp"],
+            boost = 1 + sum(c.get("heal_taken", 0) for c in comps)
+            hot = {"full": 0, "ticks": 0, "of": 0}
+            landed_comps = []
+            for c in over:
+                total = ((c.get("heal") or 0) * max_hp + (c.get("heal_amount") or 0)) * boost
+                ticks = c.get("ticks") or legacy_ticks or 1
+                landed, n = _hot_landed(total, ticks, c.get("over_ms") or aura_ms[name], killing["timestamp"],
                                         (ready_since or {}).get(name, 0), hp_timeline, max_hp, hp_before)
-            hot = {"full": round(total), "ticks": ticks, "of": HEAL_OVER_TIME[name]}
-            comps = [{"heal_amount": landed}]
+                hot["full"] += round(total)
+                hot["landed"] = hot.get("landed", 0) + round(landed)
+                hot["ticks"] += n
+                hot["of"] += ticks
+                landed_comps.append({"heal_amount": landed, "boosted": True})
+            comps = [c for c in comps if not any(c is o for o in over)] + landed_comps
         per_button[name] = None if comps is None else verdict(comps)
         scored += comps or []
         if comps is not None:

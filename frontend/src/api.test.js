@@ -1,4 +1,4 @@
-import { apiFetch, stripSecrets } from './api';
+import { apiFetch, stripSecrets, loadLocalCredentials, saveLocalCredentials } from './api';
 import { supabase } from './supabaseClient';
 
 jest.mock('./supabaseClient', () => ({
@@ -42,4 +42,19 @@ test('network failures resolve with a readable error', async () => {
   const res = await apiFetch('/api/shared/abc');
   expect(res.ok).toBe(false);
   expect(res.body.error).toMatch(/server/i);
+});
+
+test('credentials are remembered in this browser and cleared when emptied', () => {
+  localStorage.clear();
+  expect(loadLocalCredentials()).toEqual({ clientId: '', clientSecret: '' });
+  saveLocalCredentials('id', 'secret');
+  expect(loadLocalCredentials()).toEqual({ clientId: 'id', clientSecret: 'secret' });
+  saveLocalCredentials('', '');
+  expect(localStorage.length).toBe(0);
+});
+
+test('unreadable stored credentials start the form empty', () => {
+  localStorage.setItem('fpx.wclCredentials', '{broken');
+  expect(loadLocalCredentials()).toEqual({ clientId: '', clientSecret: '' });
+  localStorage.clear();
 });
