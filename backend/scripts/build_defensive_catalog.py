@@ -7,7 +7,7 @@ ability (so a player is only expected to have what they actually talented).
 Run after a patch:  python backend/scripts/build_defensive_catalog.py
 Needs network access to wago.tools.
 """
-import csv, io, os, pprint, urllib.request
+import csv, gzip, io, json, os, pprint, sys, urllib.request
 
 # kind: "personal"   - the player's own button; tracked as active / available / on cooldown
 #       "external"   - raid cooldowns and externals from others; shown only when active on the player
@@ -111,6 +111,7 @@ CURATED = [
     (1238009, "Invigorating Healing Potion", None, None, "potion"),
     (1262857, "Potent Healing Potion", None, None, "potion"),
     (431416, "Algari Healing Potion", None, None, "potion"),
+    (431419, "Cavedweller's Delight", None, None, "potion"),
 ]
 
 # Every player of the class/spec has these, whether or not a talent entry
@@ -175,11 +176,9 @@ MITIGATION = {
     "Stone Bulwark Totem": {"absorb": None},
     # Leech and immunity to charm/fear only: can't stop a hit.
     "Lichborne": {},
-    # Consumables: medians measured across real Midnight logs.
-    "Healthstone": {"heal": .25}, "Demonic Healthstone": {"heal": .60},
-    "Silvermoon Health Potion": {"heal": .26}, "Concentrated Silvermoon Health Potion": {"heal": .44},
-    "Potent Healing Potion": {"heal": .24}, "Invigorating Healing Potion": {"heal": .25},
-    "Algari Healing Potion": {"heal": .25},
+    # Consumables. Healthstones heal a share of max health (from the game data);
+    # potions heal a fixed amount per quality rank (POTION_TYPICAL below).
+    "Healthstone": {"heal": .25}, "Demonic Healthstone": {"heal": .25},
 }
 
 # Where each value lives in the game data: (field, spell carrying the effect,
@@ -211,82 +210,352 @@ EFFECTS = {
     "Desperate Prayer": [("hp", 19236, 0), ("heal", 19236, 1)],
     "Dispersion": [("dr", 47585, 0)], "Fade": [("dr", 586, 3)],
     "Crimson Vial": [("heal", 185311, 0, 4)],
-    "Feint": [("dr", 1966, 0), ("dr", 1966, 1)], "Evasion": [("immune", 5277, 0), ("dr", 5277, 1)],
+    "Feint": [("dr", 1966, 0), ("dr", 1966, 1)],
+    "Evasion": [("immune", 5277, 0), ("dr", 5277, 1), ("dr", 5277, 2)],   # 2: magic, The War Within only
     "Astral Shift": [("dr", 108271, 0)], "Stone Bulwark Totem": [("absorb", 114893, 0)],
     "Dark Pact": [("absorb", 108416, 0)], "Unending Resolve": [("dr", 104773, 2)],
     "Die by the Sword": [("dr", 118038, 1)], "Enraged Regeneration": [("dr", 184364, 0)],
     "Last Stand": [("hp", 12975, 0), ("heal", 12975, 1)], "Shield Wall": [("dr", 871, 0)],
     "Spell Reflection": [("dr", 385391, 0)], "Tombstone": [("absorb", 219809, 0)],
-    "Healthstone": [("heal", 6262, 0)],
+    "Healthstone": [("heal", 6262, 0)], "Demonic Healthstone": [("heal", 452930, 0)],
+}
+
+# Potions heal a fixed amount that depends on the potion's quality rank, and
+# talents and buffs change it further. Each player's own heals from the same
+# report are used when they drank one there; otherwise these typical amounts
+# (median heal measured across real logs of that tier) stand in.
+POTION_TYPICAL = {
+    "Algari Healing Potion": 4_200_000, "Invigorating Healing Potion": 6_600_000,
+    "Silvermoon Health Potion": 230_000, "Concentrated Silvermoon Health Potion": 390_000,
+    "Potent Healing Potion": 200_000,
 }
 
 # Buffs that live on a spell the button doesn't point to in the game data.
 AURA_SPELLS = {"Fortifying Brew": [120954], "Rallying Cry": [97463], "Renewing Blaze": [374349]}
 
-
-def aura_durations(names):
-    """name -> longest base duration (ms) of that ability's aura, from SpellMisc/SpellDuration.
-
-    Logs sometimes miss the "aura removed" event (the player died, moved out
-    of range...), so the analysis never treats an aura as still up much past
-    this. Looks at the button, the spells it triggers, and the effect spells.
-    """
-    triggers = {}
-    for r in table("SpellEffect"):
-        if r["DifficultyID"] == "0" and int(r["EffectTriggerSpell"] or 0):
-            triggers.setdefault(int(r["SpellID"]), set()).add(int(r["EffectTriggerSpell"]))
-    index = {int(r["SpellID"]): int(r["DurationIndex"]) for r in table("SpellMisc") if r["DifficultyID"] == "0"}
-    length = {int(r["ID"]): int(r["MaxDuration"]) for r in table("SpellDuration")}
-
-    def duration(sid, name):
-        spells, frontier = {sid}, {sid}
-        for _ in range(2):
-            frontier = {t for s in frontier for t in triggers.get(s, ())}
-            spells |= frontier
-        spells |= {e[1] for e in EFFECTS.get(name, ())} | set(AURA_SPELLS.get(name, ()))
-        found = [length.get(index.get(s, 0), 0) for s in spells if names.get(s) == name]
-        return max(found, default=0) or None
-    return duration
-
-
 # talent -> catalog spell whose modifier it copies onto potions and Healthstones.
 ALSO_CONSUMABLES = {"Iron Stomach": 185311}
+
+# Healthstone extras that come from a talent rather than the item: Soulburn
+# makes a Warlock's Healthstone also raise max health (Soulburn: Healthstone).
+SOULBURN = (385899, 387636)       # talent spell, the buff it adds to a Healthstone
 
 # SpellModOp values that change one effect's value -> that effect's index.
 MOD_OP_EFFECT_INDEX = {3: 0, 12: 1, 23: 2, 32: 3, 33: 4}
 MOD_OP_ALL = 0          # percent modifier on all of a spell's healing / absorb amounts
+MOD_OP_COOLDOWN = 11
+AURA_ADD_MOD, AURA_PCT_MOD = "107", "108"
+AURA_MAX_CHARGES = "411"            # +N charges of a charge category
+AURA_CHARGE_RECOVERY_FLAT = "453"   # +ms to a charge category's recharge
+AURA_CHARGE_RECOVERY_PCT = "454"    # +% to a charge category's recharge
+AURA_HEALING_TAKEN_PCT = "118"      # healing taken +%
+ALL_SCHOOLS = "127"
+SPELL_ATTR0_PASSIVE = 0x40
+AURA_OVERRIDE_BUTTON = "332"        # base points = new spell, misc value = the button it replaces
 FIELDS = ("immune", "dr", "absorb", "hp", "heal")
 
+# Cooldowns the game data stores elsewhere (seconds).
+COOLDOWN_FALLBACK = {196555: 180, 374348: 90, 184662: 90}
 
-def components(name, values, effects, mods_for):
-    """Split a MITIGATION entry into one component per effect, with talent modifiers.
+# At or above this base cooldown an ability counts toward the "died with a
+# major defensive available" summary; shorter ones are listed but not scored.
+MAJOR_COOLDOWN_S = 60
+
+# Game versions: one catalog per patch from The War Within's first raid tier
+# (Nerub-ar Palace, 11.0.2) on. Each patch uses its last build (hotfixes in).
+FIRST_PATCH = (11, 0, 2)
+WAGO = "https://wago.tools/db2/{}/csv"
+WAGO_BUILDS = "https://wago.tools/api/builds"
+CACHE_DIR = os.environ.get("WAGO_CACHE")     # optional: keep downloaded tables here
+
+
+def _get(url):
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    return urllib.request.urlopen(req, timeout=600).read()
+
+
+def table(name, build=None):
+    path = CACHE_DIR and os.path.join(CACHE_DIR, f"{name}_{build or 'live'}.csv.gz")
+    if path and os.path.exists(path):
+        with gzip.open(path, "rt", encoding="utf-8") as f:
+            return list(csv.DictReader(f))
+    data = _get(WAGO.format(name) + (f"?build={build}" if build else ""))
+    if path:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        with gzip.open(path, "wb") as f:
+            f.write(data)
+    return list(csv.DictReader(io.StringIO(data.decode("utf-8"))))
+
+
+def patches():
+    """[(patch, first live date, last build)] for every retail patch since FIRST_PATCH."""
+    found = {}
+    for b in json.loads(_get(WAGO_BUILDS))["wow"]:
+        if b.get("is_bgdl"):
+            continue
+        parts = tuple(int(x) for x in b["version"].split("."))
+        if parts[:3] < FIRST_PATCH:
+            continue
+        patch = ".".join(map(str, parts[:3]))
+        first, last = found.get(patch, (None, None))
+        day = b["created_at"][:10]
+        found[patch] = (min(first or day, day),
+                        max(last or b["version"], b["version"], key=lambda v: [int(x) for x in v.split(".")]))
+    return sorted(((p, d, v) for p, (d, v) in found.items()), key=lambda x: [int(n) for n in x[0].split(".")])
+
+
+class GameData:
+    """The tables one patch's catalog needs, indexed."""
+
+    def __init__(self, build):
+        self.names = {int(r["ID"]): r["Name_lang"] for r in table("SpellName", build)}
+        self.effects = {}                         # spell -> {index: row} (base difficulty)
+        self.by_aura = {}                         # aura -> [rows]
+        self.triggers = {}
+        for r in table("SpellEffect", build):
+            if r["DifficultyID"] != "0":
+                continue
+            sid = int(r["SpellID"])
+            self.effects.setdefault(sid, {})[int(r["EffectIndex"])] = r
+            self.by_aura.setdefault(r["EffectAura"], []).append(r)
+            if int(r["EffectTriggerSpell"] or 0):
+                self.triggers.setdefault(sid, set()).add(int(r["EffectTriggerSpell"]))
+        self.cooldowns = {int(r["SpellID"]): max(int(r["RecoveryTime"]), int(r["CategoryRecoveryTime"]))
+                          for r in table("SpellCooldowns", build) if r["DifficultyID"] == "0"}
+        self.charge_cat = {int(r["SpellID"]): int(r["ChargeCategory"])
+                           for r in table("SpellCategories", build) if r["DifficultyID"] == "0"}
+        self.charges = {int(r["ID"]): (int(r["MaxCharges"]), int(r["ChargeRecoveryTime"]))
+                        for r in table("SpellCategory", build)}
+        self.family = {int(r["SpellID"]): (int(r["SpellClassSet"]),
+                                           [int(r[f"SpellClassMask_{i}"]) & 0xffffffff for i in range(4)])
+                       for r in table("SpellClassOptions", build)}
+        misc_rows = [r for r in table("SpellMisc", build) if r["DifficultyID"] == "0"]
+        misc = {int(r["SpellID"]): int(r["DurationIndex"]) for r in misc_rows}
+        # Always-on spells (talents and passives, not buttons or temporary buffs).
+        self.passive = {int(r["SpellID"]) for r in misc_rows if int(r["Attributes_0"]) & SPELL_ATTR0_PASSIVE}
+        length = {int(r["ID"]): int(r["MaxDuration"]) for r in table("SpellDuration", build)}
+        self.duration = {sid: length.get(i, 0) for sid, i in misc.items()}
+        self.definitions = table("TraitDefinition", build)
+        self.node_entries = table("TraitNodeEntry", build)
+        specs = {r["ID"]: r["Name_lang"] for r in table("ChrSpecialization", build)}
+        self.spec_spells = {}                     # passive spell -> spec names it belongs to
+        for r in table("SpecializationSpells", build):
+            if r["SpecID"] in specs:
+                self.spec_spells.setdefault(int(r["SpellID"]), set()).add(specs[r["SpecID"]])
+
+    def value(self, spell, index):
+        r = self.effects.get(spell, {}).get(index)
+        return float(r["EffectBasePointsF"]) if r else None
+
+
+# Damage-reduction auras and the damage they cover: aura 87 names schools in its
+# misc value (127 all, 126 magic, 1 physical); aura 229 is AoE damage only.
+AURA_AOE_REDUCTION = "229"
+SCHOOL_MASKS = {"127": None, "126": "magic", "1": "physical"}
+
+
+def data_value(field, gd, spell, index, ticks):
+    """An effect's base value and school from the game data, as the catalog stores it.
+
+    Returns (value, school) or (None, None) if the effect isn't there.
+    """
+    r = gd.effects.get(spell, {}).get(index)
+    if r is None:
+        return None, None
+    bp = float(r["EffectBasePointsF"])
+    if field == "dr":
+        school = "aoe" if r["EffectAura"] == AURA_AOE_REDUCTION else SCHOOL_MASKS.get(r["EffectMiscValue_0"])
+        return round(abs(bp) / 100, 4), school
+    if field in ("heal", "hp"):
+        return round(bp / 100 * ticks, 4), None
+    return None, None
+
+
+class Modifiers:
+    """Talents and spec passives that change a catalog ability.
+
+    Each modifier names who gets it: "entries" (talent-tree entries; a player
+    has it when their loadout includes one, scaled by rank) or "specs" (a spec
+    passive every player of that spec has).
+    """
+
+    def __init__(self, gd):
+        self.gd = gd
+        entries_for_def = {}
+        for r in gd.node_entries:
+            entries_for_def.setdefault(int(r["TraitDefinitionID"]), set()).add(int(r["ID"]))
+        self.entries_for_spell = {}               # talent spell -> trait node entries that grant it
+        for r in gd.definitions:
+            if r.get("SpellID") and r["SpellID"] != "0":
+                self.entries_for_spell.setdefault(int(r["SpellID"]), set()).update(
+                    entries_for_def.get(int(r["ID"]), ()))
+
+    def who(self, spell):
+        """{"entries": [...]} or {"specs": [...]} for a modifier source, or None if nobody gets it."""
+        entries = self.entries_for_spell.get(spell)
+        if entries:
+            return {"entries": sorted(entries)}
+        specs = self.gd.spec_spells.get(spell)
+        if specs:
+            return {"specs": sorted(specs)}
+        return None
+
+    def _covers(self, row, spell):
+        fam, mask = self.gd.family.get(spell, (None, [0] * 4))
+        if self.gd.family.get(int(row["SpellID"]), (None,))[0] != fam:
+            return False
+        m = [int(row[f"EffectSpellClassMask_{i}"]) & 0xffffffff for i in range(4)]
+        return any(a & b for a, b in zip(m, mask))
+
+    def _source_rows(self, aura):
+        """Effects of always-on talents and spec passives. A talent that is a
+        button (Incarnation) changes things only while active, so it's skipped."""
+        for r in self.gd.by_aura.get(aura, ()):
+            if int(r["SpellID"]) not in self.gd.passive:
+                continue
+            who = self.who(int(r["SpellID"]))
+            if who and float(r["EffectBasePointsF"]):
+                yield r, who
+
+    def effect(self, spell, index, field, ticks):
+        """Modifiers of one effect value (a reduction, heal, max health or absorb)."""
+        found = []
+        for aura in (AURA_ADD_MOD, AURA_PCT_MOD):
+            pct = aura == AURA_PCT_MOD
+            for r, who in self._source_rows(aura):
+                if not self._covers(r, spell):
+                    continue
+                op, value = int(r["EffectMiscValue_0"]), float(r["EffectBasePointsF"])
+                if MOD_OP_EFFECT_INDEX.get(op) != index and not (
+                        op == MOD_OP_ALL and pct and field in ("heal", "absorb")):
+                    continue
+                if field == "immune" or (field == "absorb" and not pct):
+                    continue   # absorbs scale with stats: only percent changes apply
+                mod = {"talent": self.gd.names.get(int(r["SpellID"])), **who}
+                if pct:
+                    mod["mult"] = round(1 + value / 100, 4)
+                else:
+                    # Reductions are negative in the data; heals/health are % of max health.
+                    mod["add"] = round((-value if field == "dr" else value) / 100 * ticks, 4)
+                found.append(mod)
+        return _dedupe(found)
+
+    def cooldown(self, spell):
+        """Cooldown / recharge modifiers: {"add_ms"} or {"mult"}."""
+        found = []
+        for aura in (AURA_ADD_MOD, AURA_PCT_MOD):
+            for r, who in self._source_rows(aura):
+                if int(r["EffectMiscValue_0"]) == MOD_OP_COOLDOWN and self._covers(r, spell):
+                    value = float(r["EffectBasePointsF"])
+                    mod = {"talent": self.gd.names.get(int(r["SpellID"])), **who}
+                    if aura == AURA_PCT_MOD:
+                        mod["mult"] = round(1 + value / 100, 4)
+                    else:
+                        mod["add_ms"] = int(value)
+                    found.append(mod)
+        cat = self.gd.charge_cat.get(spell, 0)
+        if cat:
+            for aura, key in ((AURA_CHARGE_RECOVERY_FLAT, "add_ms"), (AURA_CHARGE_RECOVERY_PCT, "mult")):
+                for r, who in self._source_rows(aura):
+                    if int(r["EffectMiscValue_0"]) == cat:
+                        value = float(r["EffectBasePointsF"])
+                        found.append({"talent": self.gd.names.get(int(r["SpellID"])), **who,
+                                      key: int(value) if key == "add_ms" else round(1 + value / 100, 4)})
+        return _dedupe(found)
+
+    def charges(self, spell):
+        cat = self.gd.charge_cat.get(spell, 0)
+        if not cat:
+            return []
+        return _dedupe([{"talent": self.gd.names.get(int(r["SpellID"])), **who, "add": int(float(r["EffectBasePointsF"]))}
+                        for r, who in self._source_rows(AURA_MAX_CHARGES) if int(r["EffectMiscValue_0"]) == cat])
+
+    def healing_taken(self):
+        """Talents and spec passives that raise (or lower) all healing the player takes."""
+        return _dedupe([{"talent": self.gd.names.get(int(r["SpellID"])), **who,
+                         "mult": round(1 + float(r["EffectBasePointsF"]) / 100, 4)}
+                        for r, who in self._source_rows(AURA_HEALING_TAKEN_PCT)
+                        if r["EffectMiscValue_0"] == ALL_SCHOOLS])
+
+
+def _dedupe(mods):
+    seen, out = set(), []
+    for m in mods:
+        key = repr(sorted(m.items()))
+        if key not in seen:
+            seen.add(key)
+            out.append(m)
+    return out
+
+
+def healing_taken_auras(gd, mods):
+    """Buffs and debuffs (not talents) that change healing taken: spell -> multiplier.
+
+    Matched against the auras WarcraftLogs lists on the player's heal events
+    and killing blow, so temporary effects count only when they were up.
+    """
+    out = {}
+    for r in gd.by_aura.get(AURA_HEALING_TAKEN_PCT, ()):
+        sid, value = int(r["SpellID"]), float(r["EffectBasePointsF"])
+        if value and r["EffectMiscValue_0"] == ALL_SCHOOLS and mods.who(sid) is None:
+            out[sid] = round(out.get(sid, 1.0) * (1 + value / 100), 4)
+    return out
+
+
+def aura_duration(gd, sid, name):
+    """Longest base duration (ms) of an ability's aura (the button, spells it triggers, effect spells).
+
+    Logs sometimes miss the "aura removed" event (the player died, moved out
+    of range...), so the analysis never treats an aura as still up much past this.
+    """
+    spells, frontier = {sid}, {sid}
+    for _ in range(2):
+        frontier = {t for s in frontier for t in gd.triggers.get(s, ())}
+        spells |= frontier
+    spells |= {e[1] for e in EFFECTS.get(name, ())} | set(AURA_SPELLS.get(name, ()))
+    found = [gd.duration.get(s, 0) for s in spells if gd.names.get(s) == name]
+    return max(found, default=0) or None
+
+
+def components(name, gd, mods, problems):
+    """One component per effect of an ability, base values from this patch's data, with talent modifiers.
 
     A component: {<field>: value, "school"?, "observed"?, "mods"?: [...]} where
     field is dr / absorb / hp / heal (fractions of damage or of max health) or
     immune. Absorbs are "observed": the player's real shield size from the log
     wins over the estimate. Returns None when the ability can't be scored.
     """
+    values = MITIGATION.get(name)
     if values is None:
         return None
     out, used = [], set()
-    for eff in effects or [(f, None, None) for f in FIELDS if f in values]:
+    for eff in EFFECTS.get(name) or [(f, None, None) for f in FIELDS if f in values]:
         field, spell, index = eff[:3]
         ticks = eff[3] if len(eff) > 3 else 1
-        comp = {}
-        if field in values and field not in used:
-            comp[field] = values[field]
-            if values.get("school") not in (None, "all"):
-                comp["school"] = values["school"]
-            used.add(field)
-        else:
-            comp[field] = 0.0          # filled in only by a talent
+        first = field in values and field not in used     # the hand-listed value covers the first use only
+        used.add(field)
+        listed = values[field] if first else 0.0
+        school = values.get("school") if first and values.get("school") not in (None, "all") else None
+        comp = {field: listed}
+        if spell is not None and field in ("dr", "heal", "hp"):
+            from_data, data_school = data_value(field, gd, spell, index, ticks)
+            if from_data is None:
+                problems.append(f"{name}: effect {index} of spell {spell} is missing")
+            elif from_data or not listed:
+                # The data wins; a 0 there with a listed value means a script sets
+                # it (Fortifying Brew), so the listed value stays.
+                comp[field] = from_data
+            if field == "dr" and school not in ("aoe", "melee"):
+                school = data_school
+        if school:
+            comp["school"] = school
         if field == "absorb":
             comp["observed"] = True
         if spell is not None:
-            mods = mods_for(spell, index, field, ticks)
-            if mods:
-                comp["mods"] = mods
-        if comp[field] or comp.get("mods") or comp.get("observed"):
+            m = mods.effect(spell, index, field, ticks)
+            if m:
+                comp["mods"] = m
+        if comp[field] is None or comp[field] or comp.get("mods") or comp.get("observed"):
             out.append(comp)
     for field in FIELDS:           # values without a mapped effect (e.g. Fortifying Brew)
         if field in values and field not in used:
@@ -297,82 +566,24 @@ def components(name, values, effects, mods_for):
     return out
 
 
-# Cooldowns the game data stores elsewhere (seconds).
-COOLDOWN_FALLBACK = {196555: 180, 374348: 90, 184662: 90}
-
-# At or above this base cooldown an ability counts toward the "died with a
-# major defensive available" summary; shorter ones are listed but not scored.
-MAJOR_COOLDOWN_S = 60
-
-WAGO = "https://wago.tools/db2/{}/csv"
-
-
-def table(name):
-    req = urllib.request.Request(WAGO.format(name), headers={"User-Agent": "Mozilla/5.0"})
-    return list(csv.DictReader(io.StringIO(urllib.request.urlopen(req, timeout=300).read().decode("utf-8"))))
-
-
-def talent_modifiers(names, def_spell_plain):
-    """Return mods_for(spell, effect_index, field, ticks) -> talent modifiers of that value."""
-    effects = {}
-    for r in table("SpellEffect"):
-        if r["DifficultyID"] == "0" and r["EffectAura"] in ("107", "108"):
-            effects.setdefault(int(r["SpellID"]), []).append(r)
-    family = {int(r["SpellID"]): (int(r["SpellClassSet"]), [int(r[f"SpellClassMask_{i}"]) & 0xffffffff for i in range(4)])
-              for r in table("SpellClassOptions")}
-    entries_for_def = {}
-    for r in table("TraitNodeEntry"):
-        entries_for_def.setdefault(int(r["TraitDefinitionID"]), set()).add(int(r["ID"]))
-    talent_entries = {}    # talent spell -> trait node entries that grant it
-    for d, sid in def_spell_plain.items():
-        talent_entries.setdefault(sid, set()).update(entries_for_def.get(d, ()))
-
-    def mods_for(spell, index, field, ticks):
-        fam, mask = family.get(spell, (None, [0] * 4))
-        found = []
-        for tsid, entries in sorted(talent_entries.items()):
-            if not entries or family.get(tsid, (None,))[0] != fam:
-                continue
-            for r in effects.get(tsid, ()):
-                m = [int(r[f"EffectSpellClassMask_{i}"]) & 0xffffffff for i in range(4)]
-                if not any(a & b for a, b in zip(m, mask)):
-                    continue
-                op, pct = int(r["EffectMiscValue_0"]), r["EffectAura"] == "108"
-                value = float(r["EffectBasePointsF"])
-                if not value:
-                    continue
-                if MOD_OP_EFFECT_INDEX.get(op) != index and not (
-                        op == MOD_OP_ALL and pct and field in ("heal", "absorb")):
-                    continue
-                if field == "immune" or (field == "absorb" and not pct):
-                    continue   # absorbs scale with stats: only percent changes apply
-                mod = {"talent": names.get(tsid), "entries": sorted(entries)}
-                if pct:
-                    mod["mult"] = round(1 + value / 100, 4)
-                else:
-                    # Reductions are negative in the data; heals/health are % of max health.
-                    mod["add"] = round((-value if field == "dr" else value) / 100 * ticks, 4)
-                found.append(mod)
-        return found
-    return mods_for
-
-
-def main():
-    names = {int(r["ID"]): r["Name_lang"] for r in table("SpellName")}
-    cooldowns = {int(r["SpellID"]): max(int(r["RecoveryTime"]), int(r["CategoryRecoveryTime"]))
-                 for r in table("SpellCooldowns") if r["DifficultyID"] == "0"}
-    charge_cat = {int(r["SpellID"]): int(r["ChargeCategory"])
-                  for r in table("SpellCategories") if r["DifficultyID"] == "0"}
-    charges = {int(r["ID"]): (int(r["MaxCharges"]), int(r["ChargeRecoveryTime"])) for r in table("SpellCategory")}
+def build_catalog(build):
+    """The catalog for one game build. Returns (catalog, healing-taken info, problems)."""
+    gd = GameData(build)
+    mods = Modifiers(gd)
+    names = gd.names
     curated_by_name = {name: sid for sid, name, _, _, _ in CURATED if name in NAME_ALIAS_OK}
     def_spell = {}
-    def_spell_plain = {}   # TraitDefinition -> its own SpellID (no name aliases)
     replaced_by_def = {}   # spell -> talent definitions that replace it (Ice Cold replaces Ice Block)
-    for r in table("TraitDefinition"):
+    for r in gd.definitions:
         if r.get("OverridesSpellID") and r["OverridesSpellID"] != "0":
             replaced_by_def.setdefault(int(r["OverridesSpellID"]), set()).add(int(r["ID"]))
-        if r.get("SpellID") and r["SpellID"] != "0":
-            def_spell_plain[int(r["ID"])] = int(r["SpellID"])
+        # A talent spell that swaps a button on the action bar (aura 332:
+        # Ice Cold's talent 414659 puts Ice Cold 414658 in place of Ice Block)
+        # grants the new button and replaces the old one.
+        for eff in gd.effects.get(int(r["SpellID"] or 0), {}).values():
+            if eff["EffectAura"] == AURA_OVERRIDE_BUTTON and float(eff["EffectBasePointsF"]):
+                def_spell.setdefault(int(r["ID"]), set()).add(int(float(eff["EffectBasePointsF"])))
+                replaced_by_def.setdefault(int(eff["EffectMiscValue_0"]), set()).add(int(r["ID"]))
         for k in ("SpellID", "VisibleSpellID"):
             if r.get(k) and r[k] != "0":
                 sid = int(r[k])
@@ -382,20 +593,22 @@ def main():
                 alias = curated_by_name.get(names.get(sid))
                 if alias:
                     def_spell[int(r["ID"])].add(alias)
-    mods_for = talent_modifiers(names, def_spell_plain)
-    aura_ms = aura_durations(names)
     entries_for_spell, entries_for_def = {}, {}
-    for r in table("TraitNodeEntry"):
+    for r in gd.node_entries:
         entries_for_def.setdefault(int(r["TraitDefinitionID"]), set()).add(int(r["ID"]))
         for sid in def_spell.get(int(r["TraitDefinitionID"]), ()):
             entries_for_spell.setdefault(sid, set()).add(int(r["ID"]))
 
-    catalog, problems = {}, []
+    catalog, problems, missing = {}, [], []
     for sid, name, cls, specs, kind in CURATED:
-        if names.get(sid) != name:
-            problems.append(f"{sid}: expected {name!r}, game data says {names.get(sid)!r}")
-        max_charges, charge_ms = charges.get(charge_cat.get(sid, 0), (0, 0))
-        cd_ms = cooldowns.get(sid, 0)
+        if sid not in names:
+            missing.append(name)     # not in the game yet (or any more) in this patch
+            continue
+        if names[sid] != name:
+            problems.append(f"{sid}: expected {name!r}, game data says {names[sid]!r}")
+            continue
+        max_charges, charge_ms = gd.charges.get(gd.charge_cat.get(sid, 0), (0, 0))
+        cd_ms = gd.cooldowns.get(sid, 0)
         if charge_ms and max_charges:
             cd_ms = charge_ms
         if cd_ms < 1500 and sid in COOLDOWN_FALLBACK:
@@ -407,14 +620,23 @@ def main():
             known = "baseline" if sid in BASELINE else ("talent" if entries else "evidence")
         else:
             known = "baseline"
-        catalog[sid] = {
+        entry = {
             "name": name, "class": cls, "specs": specs, "kind": kind, "known": known,
             "cooldown_ms": cd_ms, "charges": max(max_charges, 1),
             "major": cd_ms >= MAJOR_COOLDOWN_S * 1000, "talent_entries": entries,
             "replaced_by_entries": replaced_by,
-            "mitigation": components(name, MITIGATION.get(name), EFFECTS.get(name), mods_for),
-            "aura_ms": aura_ms(sid, name) if kind in ("personal", "external") else None,
+            "mitigation": components(name, gd, mods, problems),
+            "aura_ms": aura_duration(gd, sid, name) if kind in ("personal", "external") else None,
         }
+        if kind in ("personal", "external"):
+            if mods.cooldown(sid):
+                entry["cooldown_mods"] = mods.cooldown(sid)
+            if mods.charges(sid):
+                entry["charge_mods"] = mods.charges(sid)
+        if kind == "potion" and POTION_TYPICAL.get(name):
+            entry["mitigation"] = [{"heal_amount": POTION_TYPICAL[name], "observed": True}]
+        catalog[sid] = entry
+
     # Talents that also reach consumables (item spells share no class mask with
     # the talent, so the game data can't link them): Iron Stomach boosts
     # healing potions and Healthstones too, per its tooltip.
@@ -422,23 +644,60 @@ def main():
         if entry["kind"] not in ("healthstone", "potion") or not entry["mitigation"]:
             continue
         for talent, source in ALSO_CONSUMABLES.items():
+            if source not in catalog:
+                continue
             mod = next((m for c in catalog[source]["mitigation"] or [] for m in c.get("mods", ())
                         if m["talent"] == talent), None)
             if mod is None:
-                problems.append(f"{talent} no longer modifies {catalog[source]['name']}; check ALSO_CONSUMABLES")
                 continue
             for comp in entry["mitigation"]:
-                if "heal" in comp:
+                if "heal" in comp or "heal_amount" in comp:
                     comp.setdefault("mods", []).append(dict(mod))
-    if problems:
-        raise SystemExit("Spell names changed; update CURATED:\n  " + "\n  ".join(problems))
+        if entry["kind"] == "healthstone":
+            talent, buff = SOULBURN
+            who, hp = mods.who(talent), None
+            for r in gd.effects.get(buff, {}).values():
+                if r["EffectAura"] == "133":          # max health +%
+                    hp = float(r["EffectBasePointsF"]) / 100
+            if who and hp:
+                entry["mitigation"].append({"hp": 0.0, "mods": [{"talent": names.get(talent), **who, "add": hp}]})
+    heal = {"talents": mods.healing_taken(), "auras": healing_taken_auras(gd, mods)}
+    return catalog, heal, problems, missing
 
+
+def main():
+    only = sys.argv[1:]
+    all_patches = patches()
     out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "defensive_catalog.py")
+    catalogs, healing, starts = {}, {}, []
+    for patch, first_day, build in all_patches:
+        if only and patch not in only:
+            continue
+        print(f"{patch} (live {first_day}, build {build})...", flush=True)
+        catalog, heal, problems, missing = build_catalog(build)
+        latest = patch == all_patches[-1][0]
+        if problems and latest:
+            raise SystemExit(f"{patch}: spell data changed; update CURATED / EFFECTS:\n  " + "\n  ".join(problems))
+        for p in problems:
+            print(f"  note: {p}")
+        if missing:
+            print(f"  not in this patch: {', '.join(missing)}")
+        catalogs[patch] = catalog
+        healing[patch] = heal
+        starts.append((first_day, patch))
+    if only:
+        raise SystemExit("Built " + ", ".join(catalogs) + " (dry run: the catalog file is only written for all patches).")
     with open(out, "w") as f:
         f.write('"""GENERATED by scripts/build_defensive_catalog.py from wago.tools game data.\n'
-                'Edit the curated list in that script, not this file."""\n\n')
-        f.write("CATALOG = " + pprint.pformat(catalog, width=110, sort_dicts=True) + "\n")
-    print(f"Wrote {len(catalog)} abilities to {os.path.normpath(out)}")
+                'Edit the curated lists in that script, not this file.\n\n'
+                'One catalog per game patch; a report uses the patch that was live when it was logged."""\n\n')
+        f.write("# (first day live, patch), oldest first\n")
+        f.write("PATCHES = " + pprint.pformat(starts, width=110) + "\n\n")
+        f.write("CATALOGS = " + pprint.pformat(catalogs, width=150, sort_dicts=True) + "\n\n")
+        f.write("# Healing-taken modifiers per patch: talents / spec passives, and buffs or debuffs by aura ID.\n")
+        f.write("HEALING_TAKEN = " + pprint.pformat(healing, width=150, sort_dicts=True) + "\n\n")
+        f.write("LATEST = PATCHES[-1][1]\nCATALOG = CATALOGS[LATEST]\n")
+    print(f"Wrote {len(catalogs)} patches to {os.path.normpath(out)}")
 
 
 if __name__ == "__main__":
