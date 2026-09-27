@@ -5,7 +5,7 @@ import sys
 import defensives
 from defensive_catalog import CATALOG
 
-ICE_BLOCK, ICE_COLD, MIRROR = 45438, 414658, 55342
+ICE_BLOCK, ICE_COLD, MIRROR, ALTER_TIME = 45438, 414658, 55342, 342245
 FEINT, CLOAK, EVASION = 1966, 31224, 5277
 PAIN_SUPP, HEALTHSTONE, POTION = 33206, 6262, 1234768
 
@@ -270,8 +270,8 @@ class SurvivalTests(unittest.TestCase):
         self.assertTrue(r["allTogetherWouldSave"])
 
     def test_unscored_ability_reports_unknown(self):
-        r = self.assess(hit(100_000, 1_000_000, 0, overkill=200_000), available=[MIRROR])
-        self.assertIsNone(r["wouldSave"]["Mirror Image"])
+        r = self.assess(hit(100_000, 1_000_000, 0, overkill=200_000), available=[ALTER_TIME])
+        self.assertIsNone(r["wouldSave"]["Alter Time"])
 
     def test_no_killing_blow_near_the_death(self):
         self.assertIsNone(defensives.assess_survival([hit(60_000, 900_000, 0, overkill=5)], 100_000,
@@ -425,10 +425,11 @@ class ConsumableEstimateTests(unittest.TestCase):
         aura = next(iter(self.cat.heal_auras))
         out = defensives.index_defensive_events({"heals": [
             {"type": "heal", "timestamp": 5, "sourceID": 1, "targetID": 1, "abilityGameID": POTION,
-             "amount": 150_000, "overheal": 50_000, "maxHitPoints": 900_000, "buffs": f"{aura}."},
+             "amount": 150_000, "overheal": 50_000, "maxHitPoints": 900_000, "buffs": f"{aura}.",
+             "resourceActor": 1, "versatility": 350},
             {"type": "heal", "timestamp": 6, "sourceID": 3, "targetID": 1, "abilityGameID": POTION, "amount": 9},
         ]}, self.cat)
-        self.assertEqual(out["heals"][1], [(5, POTION, 200_000, 900_000, self.cat.heal_auras[aura])])
+        self.assertEqual(out["heals"][1], [(5, POTION, 200_000, 900_000, self.cat.heal_auras[aura], 350)])
 
 
 class OlderLogTests(unittest.TestCase):
@@ -540,7 +541,8 @@ class HealOverTimeTests(unittest.TestCase):
     def test_tick_counts_match_the_catalog_build(self):
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
         import build_defensive_catalog as build
-        ticks = {n: e[3] for n, effs in build.EFFECTS.items() for e in effs if len(e) > 3 and e[3] > 1}
+        ticks = {n: e[3] for n, effs in build.EFFECTS.items() for e in effs
+                 if len(e) > 3 and isinstance(e[3], int) and e[3] > 1}
         self.assertEqual(ticks, defensives.HEAL_OVER_TIME)
 
     def test_ticks_only_fill_missing_health(self):
@@ -587,3 +589,127 @@ class HealOverTimeTests(unittest.TestCase):
                                        aura_ms={"Frenzied Regeneration": 3_000})
         self.assertTrue(r["wouldSave"]["Frenzied Regeneration"])          # 24% of 1M lands > 50k overkill
         self.assertEqual(r["details"]["Frenzied Regeneration"]["hot"]["ticks"], 3)
+
+
+class TalentEffectTests(unittest.TestCase):
+    """Effects talents add to a button, and the health / armor rules they rely on."""
+    tww = defensives.catalog_for(1_740_000_000_000)          # 2025-02-19: The War Within, 11.0.7/11.1
+
+    def by_name(self, cat, name):
+        return next(d for d in cat.all.values() if d["name"] == name)
+
+    def talented(self, cat, name, talent):
+        entry = self.by_name(cat, name)
+        comp = next(c for c in entry["mitigation"] if (c.get("needs") or {}).get("talent") == talent
+                    or talent in [m["talent"] for m in c.get("mods", ())])
+        return {e: 1 for e in (comp.get("needs") or next(m for m in comp["mods"] if m["talent"] == talent))["entries"]}
+
+    def test_fade_reduces_damage_only_with_translucent_image(self):
+        fade = self.by_name(defensives._LATEST, "Fade")
+        self.assertEqual(defensives._resolve(fade, {}, {})[0], [])
+        comps, boosted = defensives._resolve(fade, self.talented(defensives._LATEST, "Fade", "Translucent Image"), {})
+        self.assertEqual([c["dr"] for c in comps], [0.1])
+        self.assertEqual(boosted, ["Translucent Image"])
+
+    def test_label_modifiers_reach_their_button(self):
+        # Improved Ardent Defender reaches Ardent Defender by spell label, not class mask.
+        ad = self.by_name(self.tww, "Ardent Defender")
+        self.assertIn("Improved Ardent Defender", [m["talent"] for c in ad["mitigation"] for m in c.get("mods", ())])
+
+    def test_talent_heal_over_time_carries_its_duration(self):
+        ur = self.by_name(defensives._LATEST, "Unending Resolve")
+        hot = next(c for c in ur["mitigation"] if (c.get("needs") or {}).get("talent") == "Infernal Vitality")
+        self.assertEqual((hot["heal"], hot["over_ms"], hot["ticks"]), (0.3, 10_000, 10))
+
+    def test_max_health_increase_keeps_the_health_share(self):
+        # At half health, +30% max health is +150k health, not +300k.
+        kb = hit(100_000, 500_000, 0, overkill=100_000)
+        self.assertEqual(defensives._prevented([{"hp": 0.3}], kb, MAX, 500_000, SCHOOLS), 150_000)
+        # "Current and maximum health" (Fortifying Brew) adds the full amount.
+        self.assertEqual(defensives._prevented([{"hp": 0.2, "current": True}], kb, MAX, 500_000, SCHOOLS), 200_000)
+        # Increases multiply: +30% and +15% is x1.495.
+        self.assertAlmostEqual(defensives._prevented([{"hp": 0.3}, {"hp": 0.15}], kb, MAX, 500_000, SCHOOLS),
+                               247_500)
+
+    def test_healing_received_raises_heals_in_the_same_option(self):
+        kb = hit(100_000, 200_000, 0, overkill=100_000)
+        self.assertAlmostEqual(defensives._prevented([{"heal": 0.1}, {"heal_taken": 0.2}], kb, MAX, 800_000, SCHOOLS),
+                               120_000)
+
+    def test_reduction_by_missing_health(self):
+        # Bloody Fortitude: up to 20% more at no health; at 80% missing that's 16%.
+        kb = hit(100_000, 200_000, 0, overkill=800_000)
+        self.assertAlmostEqual(defensives._prevented([{"dr_missing": 0.2}], kb, MAX, 800_000, SCHOOLS), 160_000)
+
+
+class BearFormTests(unittest.TestCase):
+    """Bear Form for druids who aren't Guardians, checked on live logs (armor 1,173 -> Moonkin
+    2,640 -> Bear 3,754; x1.15 with Ursine Vigor; max health x1.30 with Ursoc's Spirit)."""
+    cat = defensives._LATEST
+    bear = next(d for d in defensives._LATEST.all.values() if d["name"] == "Bear Form")
+    frenzied = next(d for d in defensives._LATEST.all.values() if d["name"] == "Frenzied Regeneration")
+
+    def melee(self, armor, overkill=10_000):
+        return dict(hit(100_000, 1_000_000, 0, overkill=overkill, ability=1), armor=armor,
+                    unmitigatedAmount=2_000_000, mitigated=100_000)
+
+    def test_armor_math(self):
+        # K 4,050, armor 2,640 in Moonkin Form (x2.25): Bear Form makes it 1,173 x 3.2 = 3,754.
+        kb = dict(self.melee(2_640), armorK=4_050, formArmor=2.25)
+        before, after = 2_640 / (2_640 + 4_050), 3_754 / (3_754 + 4_050)
+        expected = 1 - (1 - after) / (1 - before)
+        prevented = defensives._prevented([{"armor": 2.2, "replaces_form": True}], kb, MAX, 0, {1: PHYS})
+        self.assertAlmostEqual(prevented / 1_010_000, expected, places=3)
+
+    def test_armor_doesnt_reduce_magic_and_unknown_spells_are_unknown(self):
+        kb = dict(hit(100_000, 1_000_000, 0, overkill=10), armor=2_000, armorK=4_000)
+        self.assertFalse(defensives._effect_applies({"armor": 2.2}, kb, SCHOOLS))       # frost
+        kb = dict(kb, abilityGameID=999_999_999)
+        self.assertIsNone(defensives._effect_applies({"armor": 2.2}, kb, {999_999_999: PHYS}))
+
+    def test_balance_druid_has_bear_form_and_frenzied_needs_it(self):
+        entries = set(self.frenzied["talent_entries"])
+        r = run("Druid", "Balance", talents={e: 1 for e in entries}, auras=[])
+        self.assertIn("Bear Form", names(r["available"]))
+        fr = next(a for a in r["available"] if a["name"] == "Frenzied Regeneration")
+        self.assertEqual(fr.get("withForm"), "Bear Form")
+        # Empowered Shapeshifting lets it be cast in Cat Form: no form needed.
+        lift = self.frenzied["needs_form"]["unless"]["entries"]
+        r = run("Druid", "Feral", talents={e: 1 for e in entries | set(lift)}, auras=[])
+        fr = next(a for a in r["available"] if a["name"] == "Frenzied Regeneration")
+        self.assertNotIn("withForm", fr)
+
+    def test_guardians_dont_get_it(self):
+        r = run("Druid", "Guardian", talents=set(), auras=[])
+        self.assertNotIn("Bear Form", names(r["available"]))
+
+
+class PotionRankTests(unittest.TestCase):
+    cat = defensives._LATEST
+    conc = next(sid for sid, d in defensives._LATEST.consumable.items()
+                if d["name"] == "Concentrated Silvermoon Health Potion")
+
+    def heal(self, amount, vers, mult=1.0):
+        return (1, self.conc, amount, 1_000_000, mult, vers)
+
+    def test_versatility_and_buffs_come_out(self):
+        # Live log: 449,991 at 4.74% Versatility, and 539,990 with a +20% healing buff up.
+        r = defensives.potion_rank(self.conc, self.cat, [self.heal(449_991, 474), self.heal(539_990, 474, 1.2),
+                                                         self.heal(485_316, 1_296)], {}, None)
+        self.assertEqual((r["rank"], r["heal"], r["of"]), ("gold", 421_200, 2))
+        self.assertEqual(r["vers"], 4.7)
+
+    def test_silver(self):
+        factor = self.cat.all[self.conc].get("rank_factor") or 1.0
+        r = defensives.potion_rank(self.conc, self.cat, [self.heal(359_498 * factor * 1.06, 600)], {}, None)
+        self.assertEqual(r["rank"], "silver")
+
+    def test_no_rank_when_nothing_matches_or_no_heals(self):
+        self.assertIsNone(defensives.potion_rank(self.conc, self.cat, [self.heal(390_000, 0)], {}, None))
+        self.assertIsNone(defensives.potion_rank(self.conc, self.cat, [], {}, None))
+
+    def test_three_ranks_in_the_war_within(self):
+        cat = defensives.catalog_for(1_740_000_000_000)
+        algari = next(d for d in cat.consumable.values() if d["name"] == "Algari Healing Potion")
+        self.assertEqual([r["rank"] for r in algari["ranks"]], ["bronze", "silver", "gold"])
+        self.assertEqual(algari["ranks"][-1]["heal"], 3_839_477)

@@ -11,6 +11,7 @@ ICONS = {'Algari Healing Potion': 'inv_potion_49',
  'Astral Shift': 'ability_shaman_astralshift',
  'Aura Mastery': 'spell_holy_auramastery',
  'Barkskin': 'spell_nature_stoneclawtotem',
+ 'Bear Form': 'ability_racial_bearform',
  'Blazing Barrier': 'ability_mage_moltenarmor',
  'Blessing of Protection': 'spell_holy_sealofprotection',
  'Blessing of Sacrifice': 'spell_holy_sealofsacrifice',
@@ -105,6 +106,9 @@ DESCRIPTIONS = {'Algari Healing Potion': 'Restores health.',
  'Barkskin': 'Your skin becomes as tough as bark, reducing all damage you take by 20% and preventing damage '
              'from delaying your spellcasts. Lasts 8 sec. Usable while stunned, frozen, incapacitated, '
              'feared, or asleep, and in all shapeshift forms.',
+ 'Bear Form': 'Shapeshift into Bear Form, increasing armor by 220% and Stamina by 25%, granting protection '
+              'from Polymorph effects, and increasing threat generation. The act of shapeshifting frees you '
+              'from movement impairing effects.',
  'Blazing Barrier': 'Shields you in flame, absorbing damage for 1 min. Melee attacks against you cause the '
                     'attacker to take Fire damage.',
  'Blessing of Protection': 'Blesses a party or raid member, granting immunity to Physical damage and harmful '

@@ -50,18 +50,34 @@ def main():
             r = defensives.analyze_death(pid, cls.get(pid), spec, f["id"], f["start_time"], d["timestamp"],
                                          indexed, meta["abilities"], names, killing_blows=killing.get(pid, []),
                                          ability_schools=meta.get("ability_schools", {}), cat=cat,
-                                         aoe_known=defensives.logs_mark_aoe(killing))
+                                         aoe_known=defensives.logs_mark_aoe(killing),
+                                         armor_k=defensives.armor_constant(f.get("boss"), f.get("difficulty")))
             t = (d["timestamp"] - f["start_time"]) / 1000
             print(f"[{f['name']} #{f['id']} +{t:.0f}s] {names.get(pid)} ({spec} {cls.get(pid)}) "
                   f"- {d.get('abilityName')}{'' if r['talentsKnown'] else '  (no talent data)'}")
             print("   active:   ", ", ".join(a["name"] + (f" ({a['by']})" if a.get("by") else "") for a in r["active"]) or "-")
-            print("   available:", ", ".join(a["name"] for a in r["available"]) or "-")
+            print("   available:", ", ".join(a["name"] + (f" (with {a['withForm']})" if a.get("withForm") else "")
+                                         for a in r["available"]) or "-")
             print("   cooldown: ", ", ".join(f"{a['name']} (used {a['usedAgo']}s ago)" for a in r["cooldown"]) or "-")
-            print(f"   healthstone: {r['healthstone']['usedAgo']}  potion: {r['potion']['usedAgo']}")
+            print(f"   healthstone: {r['healthstone']['usedAgo']}  potion: {r['potion']['usedAgo']}"
+                  + (f" (rank {r['potion']['rank']['rank']})" if r["potion"].get("rank") else ""))
             if r.get("survival"):
                 sv = r["survival"]
+                if sv.get("deathType") == "instakill":
+                    print(f"   instant kill: {sv['killingHit']['name']}")
+                    continue
                 print(f"   killing blow: {sv['killingHit']['name']} {sv['killingHit']['pctOfMax']}% of max, "
                       f"overkill {sv['overkill']:,}; would save: {sv['wouldSave']}")
+                for name, det in sv["details"].items():
+                    extra = []
+                    if det.get("talents"):
+                        extra.append("talents " + ", ".join(x["talent"] for x in det["talents"]))
+                    if det.get("rank"):
+                        extra.append(f"rank {det['rank']['rank']} (base {det['rank']['base']:,} vs "
+                                     + ", ".join(f"{x['rank']} {x['heal']:,}" for x in det['rank']['ranks']) + ")")
+                    if det.get("why"):
+                        extra.append("why " + det["why"])
+                    print(f"      {name}: {det['amount']:,}" + (" | " + "; ".join(extra) if extra else ""))
 
 
 if __name__ == "__main__":
