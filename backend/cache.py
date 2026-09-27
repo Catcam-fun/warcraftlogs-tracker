@@ -82,7 +82,7 @@ class SharedReportCache:
         return len(self.memory)
 
 
-CACHE_VERSION = "v1"
+CACHE_VERSION = "v2"
 _WRITER = ThreadPoolExecutor(max_workers=2, thread_name_prefix="report-cache")
 
 
