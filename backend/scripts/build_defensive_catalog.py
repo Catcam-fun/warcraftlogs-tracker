@@ -722,7 +722,7 @@ def aura_duration(gd, sid, name):
         spells |= frontier
     spells |= {e[1] for e in EFFECTS.get(name, ())} | set(AURA_SPELLS.get(name, ()))
     found = [gd.duration.get(s, 0) for s in spells if gd.names.get(s) == name]
-    return max(found, default=0) or None
+    return max(found, default=0) if max(found, default=0) > 0 else None   # -1: lasts until cancelled (a form)
 
 
 def talent_who(gd, mods, name):
