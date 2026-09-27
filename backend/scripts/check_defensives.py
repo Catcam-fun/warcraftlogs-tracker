@@ -60,7 +60,7 @@ def main():
                                          for a in r["available"]) or "-")
             print("   cooldown: ", ", ".join(f"{a['name']} (used {a['usedAgo']}s ago)" for a in r["cooldown"]) or "-")
             print(f"   healthstone: {r['healthstone']['usedAgo']}  potion: {r['potion']['usedAgo']}"
-                  + (f" (rank {r['potion']['rank']['rank']})" if r["potion"].get("rank") else ""))
+                  + (f" (rank {r['potion']['rank'].get('rank', 'too close to tell')})" if r["potion"].get("rank") else ""))
             if r.get("survival"):
                 sv = r["survival"]
                 if sv.get("deathType") == "instakill":
@@ -73,7 +73,7 @@ def main():
                     if det.get("talents"):
                         extra.append("talents " + ", ".join(x["talent"] for x in det["talents"]))
                     if det.get("rank"):
-                        extra.append(f"rank {det['rank']['rank']} (base {det['rank']['base']:,} vs "
+                        extra.append(f"rank {det['rank'].get('rank', 'too close to tell')} (base {det['rank']['base']:,} vs "
                                      + ", ".join(f"{x['rank']} {x['heal']:,}" for x in det['rank']['ranks']) + ")")
                     if det.get("why"):
                         extra.append("why " + det["why"])

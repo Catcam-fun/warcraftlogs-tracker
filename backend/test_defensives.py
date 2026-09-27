@@ -700,12 +700,12 @@ class PotionRankTests(unittest.TestCase):
         self.assertEqual(r["vers"], 4.7)
 
     def test_silver(self):
-        factor = self.cat.all[self.conc].get("rank_factor") or 1.0
-        r = defensives.potion_rank(self.conc, self.cat, [self.heal(359_498 * factor * 1.06, 600)], {}, None)
-        self.assertEqual(r["rank"], "silver")
+        # Reaches silver's tooltip but not gold's, with a 6% healing bonus.
+        r = defensives.potion_rank(self.conc, self.cat, [self.heal(359_498 * 1.06 * 1.06, 600)], {}, None)
+        self.assertEqual((r["rank"], r["bonus"]), ("silver", 6.0))
 
-    def test_no_rank_when_nothing_matches_or_no_heals(self):
-        self.assertIsNone(defensives.potion_rank(self.conc, self.cat, [self.heal(390_000, 0)], {}, None))
+    def test_no_rank_under_every_tooltip_or_without_heals(self):
+        self.assertIsNone(defensives.potion_rank(self.conc, self.cat, [self.heal(300_000, 0)], {}, None))
         self.assertIsNone(defensives.potion_rank(self.conc, self.cat, [], {}, None))
 
     def test_three_ranks_in_the_war_within(self):
@@ -713,3 +713,8 @@ class PotionRankTests(unittest.TestCase):
         algari = next(d for d in cat.consumable.values() if d["name"] == "Algari Healing Potion")
         self.assertEqual([r["rank"] for r in algari["ranks"]], ["bronze", "silver", "gold"])
         self.assertEqual(algari["ranks"][-1]["heal"], 3_839_477)
+        # 4.3% apart, less than players' own healing bonuses: the rank isn't claimed.
+        sid = next(s for s, d in cat.consumable.items() if d["name"] == "Algari Healing Potion")
+        r = defensives.potion_rank(sid, cat, [(1, sid, 4_500_000, 9_000_000, 1.0, 500)], {}, None)
+        self.assertNotIn("rank", r)
+        self.assertEqual(r["unknown"], 4.3)

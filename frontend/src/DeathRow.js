@@ -149,23 +149,23 @@ function ownUsesText(sm, info) {
 }
 
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-/* The potion rank a player drinks (defensives.potion_rank), or the ranks there
-   are when none of theirs was in these boss pulls. */
-function PotionRank({ rank, ranks, unknown }) {
+/* The potion rank a player drinks (defensives.potion_rank): their heals, with
+   Versatility, healing buffs and talents taken out, reach that rank's tooltip
+   and no higher one. `ranks` alone: none of theirs in these boss pulls. */
+function PotionRank({ rank, ranks }) {
   const all = rank?.ranks || ranks;
   if (!all?.length) return null;
-  const extra = rank && rank.factor > 1 ? Math.round((rank.factor - 1) * 100) : 0;
+  const known = rank && rank.rank;
   return (
     <>
-      {rank && <Row a="Potion rank" b={cap(rank.rank)} cls="tal" />}
+      {known && <Row a="Potion rank" b={cap(rank.rank)} cls="tal" />}
       {all.map((r) => (
-        <Row key={r.rank} a={`${cap(r.rank)} rank tooltip`} b={r.heal.toLocaleString()} cls={rank?.rank === r.rank ? 'tal' : undefined} />
+        <Row key={r.rank} a={`${cap(r.rank)} rank tooltip`} b={r.heal.toLocaleString()} cls={known && rank.rank === r.rank ? 'tal' : undefined} />
       ))}
       <div className="src">
-        {rank
-          ? `Their potions healed ${rank.raw.toLocaleString()} (middle of ${rank.n}). Without their ${rank.vers}% Versatility, healing buffs and talents that's ${rank.base.toLocaleString()}, the ${rank.rank} tooltip${extra ? ` plus the ${extra}% every potion heals over its tooltip this tier` : ''}. `
-          : unknown ? `This tier's ${all.length} ranks are evenly spaced, the same step as a bonus every potion this tier gets over its tooltip, so the log can't show which rank they drank. `
-          : ''}
+        {rank && `Their potions healed ${rank.raw.toLocaleString()} (middle of ${rank.n}); without their ${rank.vers}% Versatility, healing buffs and talents that's ${rank.base.toLocaleString()}. `}
+        {known && `That reaches the ${rank.rank} tooltip${rank.rank !== all[all.length - 1].rank ? ` but not the ${all[all.length - 1].rank} one` : ''}; the ${rank.bonus}% over it comes from their class and spec healing bonuses. `}
+        {rank && !known && `This tier's ranks are only ${rank.unknown}% apart, less than the healing bonuses players carry from their class and spec (up to 16%), so the log can't show which one they drank. `}
         Potions heal more than the tooltip: Versatility, raid buffs such as Mark of the Wild, and healing-received talents raise it, so the heal changes from pull to pull.
       </div>
     </>
@@ -309,7 +309,7 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
         {!det && s && v == null && <div className="res b">Can't estimate this one (not simple damage reduction, absorb or healing)</div>}
         {!s && <div className="res b">Off cooldown when they died</div>}
         {det?.source && <div className="src">{SOURCE_TEXT[det.source]}</div>}
-        {inf?.kind === 'potion' && <PotionRank rank={det?.rank} ranks={det?.ranks} unknown={det?.rankUnknown} />}
+        {inf?.kind === 'potion' && <PotionRank rank={det?.rank} ranks={det?.ranks} />}
         {det?.hot && <div className="src">Checked as if pressed early enough for every tick to land before the hit (never before it was off cooldown), using their real health in those seconds.</div>}
       </>
     );
