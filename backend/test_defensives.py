@@ -28,7 +28,7 @@ def run(player_class, spec, casts=(), auras=None, talents=None, fight_start=0, d
         kb = [{"timestamp": death, "type": "damage", "targetID": 1, "amount": 1, "overkill": 1,
                "buffs": "".join(f"{a}." for a in auras)}]
     return defensives.analyze_death(1, player_class, spec, 7, fight_start, death, indexed, names, actors or {},
-                                    killing_blows=kb)
+                                    hits=kb)
 
 
 def names(items):
@@ -94,7 +94,7 @@ class DefensiveAnalysisTests(unittest.TestCase):
         # Events say Ice Block is up, but the killing blow's aura list only has Pain Suppression.
         kb = [{"timestamp": 100_000, "type": "damage", "targetID": 1, "amount": 1, "overkill": 1, "buffs": "999."}]
         r = defensives.analyze_death(1, "Mage", "Frost", 7, 0, 100_000, indexed, names_map, {5: "Holypriest"},
-                                     killing_blows=kb)
+                                     hits=kb)
         self.assertNotIn("Ice Block", names(r["active"]))
         self.assertIn({"name": "Pain Suppression", "kind": "external", "by": "Holypriest"}, r["active"])
 
@@ -354,26 +354,26 @@ class SurvivalTests(unittest.TestCase):
         carried = defensives.analyze_death(
             1, "Mage", "Frost", 7, 200_000, 300_000,
             {"casts": {1: [(10_000, HEALTHSTONE)]}, "talents": {(7, 1): set()}},
-            NAMES, {}, killing_blows=kb, ability_schools=SCHOOLS)
+            NAMES, {}, hits=kb, ability_schools=SCHOOLS)
         self.assertTrue(carried["survival"]["wouldSave"]["Healthstone"])
         not_carried = defensives.analyze_death(
             1, "Mage", "Frost", 7, 200_000, 300_000,
             {"casts": {}, "talents": {(7, 1): set()}},
-            NAMES, {}, killing_blows=kb, ability_schools=SCHOOLS)
+            NAMES, {}, hits=kb, ability_schools=SCHOOLS)
         self.assertNotIn("Healthstone", not_carried["survival"]["wouldSave"])
 
     def test_a_warlock_in_the_pull_means_a_healthstone_from_the_soulwell(self):
         kb = [hit(300_000, 200_000, 0, overkill=100_000)]
         r = defensives.analyze_death(
             1, "Mage", "Frost", 7, 200_000, 300_000, {"casts": {}, "talents": {(7, 1): set()}},
-            NAMES, {}, killing_blows=kb, ability_schools=SCHOOLS, soulwell=True)
+            NAMES, {}, hits=kb, ability_schools=SCHOOLS, soulwell=True)
         self.assertTrue(r["survival"]["wouldSave"]["Healthstone"])
         self.assertTrue(r["survival"]["details"]["Healthstone"]["soulwell"])
         # One they used in this log is theirs, not the Soulwell's guess.
         r = defensives.analyze_death(
             1, "Mage", "Frost", 7, 200_000, 300_000,
             {"casts": {1: [(10_000, HEALTHSTONE)]}, "talents": {(7, 1): set()}},
-            NAMES, {}, killing_blows=kb, ability_schools=SCHOOLS, soulwell=True)
+            NAMES, {}, hits=kb, ability_schools=SCHOOLS, soulwell=True)
         self.assertNotIn("soulwell", r["survival"]["details"]["Healthstone"])
 
     def test_instant_kill_keeps_the_potion_rank(self):
@@ -384,7 +384,7 @@ class SurvivalTests(unittest.TestCase):
             1, "Mage", "Frost", 7, 200_000, 300_000,
             {"casts": {1: [(10_000, conc)]}, "talents": {(7, 1): set()},
              "heals": {1: [(10_000, conc, 440_000, 1_000_000, 1.0, 400, 3)]}},
-            names_map, {}, killing_blows=[{"timestamp": 300_000, "type": "instakill", "targetID": 1,
+            names_map, {}, hits=[{"timestamp": 300_000, "type": "instakill", "targetID": 1,
                                            "abilityGameID": 500}], ability_schools=SCHOOLS)
         det = r["survival"]["details"]["Concentrated Silvermoon Health Potion"]
         self.assertEqual((det["why"], det["rank"]["rank"]), ("instakill", "gold"))
@@ -549,7 +549,7 @@ class InstakillTests(unittest.TestCase):
         return {"timestamp": ts, "type": "instakill", "targetID": 1, "abilityGameID": 1292348, "fight": 31}
 
     def test_instant_kills_are_indexed_with_the_hits(self):
-        idx = defensives.index_killing_blows([self.instakill(), hit(50_000, 100, 0, overkill=10)])
+        idx = defensives.index_hits([self.instakill(), hit(50_000, 100, 0, overkill=10)])
         self.assertEqual([e["type"] for e in idx[1]], ["damage", "instakill"])
 
     def test_nothing_saves_from_an_instant_kill(self):
@@ -572,50 +572,140 @@ class HealOverTimeTests(unittest.TestCase):
                  if len(e) > 3 and isinstance(e[3], int) and e[3] > 1}
         self.assertEqual(ticks, defensives.HEAL_OVER_TIME)
 
-    def test_ticks_only_fill_missing_health(self):
-        # 24% over 3 ticks of a 1M bar, ticking ~98s, ~99s, ~100s. At 90% for the first two ticks,
-        # then a big hit to 20%: tick 1 fills 8%, tick 2 only 2% more (capped at max), tick 3 +8%.
-        timeline = [(96_000, 900_000, 1_000_000), (99_500, 200_000, 1_000_000)]
-        landed, ticks = defensives._hot_landed(240_000, 3, 3_000, 100_000, 0, timeline, 1_000_000, 200_000)
-        self.assertEqual(ticks, 3)
-        self.assertAlmostEqual(landed, 180_000, delta=1)
+    frenzied = next(sid for sid, d in CATALOG.items() if d["name"] == "Frenzied Regeneration")
+
+    def assess(self, hits, ready_since=None):
+        return defensives.assess_survival(hits, 100_000, ready(self.frenzied), [], NAMES, SCHOOLS,
+                                          aura_ms={"Frenzied Regeneration": 3_000}, ready_since=ready_since)
+
+    def test_ticks_land_while_they_are_low(self):
+        # Low for five seconds, then killed: 24% of 1M over 3 ticks lands in full (240k > 200k overkill).
+        r = self.assess([hit(95_000, 700_000, 300_000), hit(100_000, 300_000, 0, overkill=200_000)])
+        self.assertTrue(r["wouldSave"]["Frenzied Regeneration"])
+        self.assertEqual(r["details"]["Frenzied Regeneration"]["hot"]["ticks"], 3)
+        self.assertAlmostEqual(r["details"]["Frenzied Regeneration"]["amount"], 240_000, delta=1)
 
     def test_real_heals_topping_them_up_waste_the_extra(self):
-        # Low when it ticks, but healed back to full by a healer before the hit, then hit from full.
-        timeline = [(96_000, 300_000, 1_000_000), (99_000, 1_000_000, 1_000_000)]
-        landed, _ = defensives._hot_landed(240_000, 3, 3_000, 100_000, 0, timeline, 1_000_000, 1_000_000)
-        self.assertEqual(landed, 0)
+        # Low when it would tick, but a healer brought them back to full before they were hit from full.
+        r = self.assess([hit(95_000, 700_000, 300_000), hit(99_500, 10_000, 990_000),
+                         hit(100_000, 990_000, 0, overkill=50_000)])
+        self.assertFalse(r["wouldSave"]["Frenzied Regeneration"])
+        self.assertLessEqual(r["details"]["Frenzied Regeneration"]["amount"], 10_000)
 
     def test_cannot_press_before_it_was_ready(self):
-        # Came off cooldown 1.5s before the hit: only the tick 1s after pressing lands.
-        timeline = [(90_000, 100_000, 1_000_000)]
-        landed, ticks = defensives._hot_landed(240_000, 3, 3_000, 100_000, 98_500, timeline, 1_000_000, 100_000)
-        self.assertEqual(ticks, 1)
-        self.assertAlmostEqual(landed, 80_000, delta=1)
-
-    def test_bear_form_keeps_health_shares(self):
-        # A form change mid-window changes max health; shares of the bar are what count.
-        timeline = [(96_000, 500_000, 1_000_000), (97_500, 650_000, 1_300_000)]
-        landed, _ = defensives._hot_landed(240_000, 3, 3_000, 100_000, 0, timeline, 1_000_000, 500_000)
-        self.assertAlmostEqual(landed, 240_000, delta=1)
+        # Off cooldown 1.5s before the killing blow: only the first tick lands in time.
+        r = self.assess([hit(90_000, 900_000, 100_000), hit(100_000, 100_000, 0, overkill=150_000)],
+                        ready_since={"Frenzied Regeneration": 98_500})
+        self.assertEqual(r["details"]["Frenzied Regeneration"]["hot"]["ticks"], 1)
+        self.assertAlmostEqual(r["details"]["Frenzied Regeneration"]["amount"], 80_000, delta=1)
+        self.assertFalse(r["wouldSave"]["Frenzied Regeneration"])
 
     def test_ready_since(self):
         # One charge, 36s cooldown, pressed at 10s: ready again at 46s.
         self.assertEqual(defensives._ready_since(100_000, [10_000], 1, 36_000), 46_000)
         self.assertIsNone(defensives._ready_since(100_000, [], 1, 36_000))
 
-    def test_verdict_waits_for_the_health_before_the_hit(self):
-        frenzied = next(sid for sid, d in CATALOG.items() if d["name"] == "Frenzied Regeneration")
-        kb = hit(100_000, 200_000, 0, overkill=50_000)
-        r = defensives.assess_survival([kb], 100_000, ready(frenzied), [], NAMES, SCHOOLS,
-                                       aura_ms={"Frenzied Regeneration": 3_000})
-        self.assertIsNone(r["wouldSave"]["Frenzied Regeneration"])
-        self.assertTrue(defensives.needs_hp_timeline({"survival": r}))
-        timeline = [(96_000, 200_000, MAX)]
-        r = defensives.assess_survival([kb], 100_000, ready(frenzied), [], NAMES, SCHOOLS, hp_timeline=timeline,
-                                       aura_ms={"Frenzied Regeneration": 3_000})
-        self.assertTrue(r["wouldSave"]["Frenzied Regeneration"])          # 24% of 1M lands > 50k overkill
-        self.assertEqual(r["details"]["Frenzied Regeneration"]["hot"]["ticks"], 3)
+class LethalWindowTests(unittest.TestCase):
+    """The seconds before a death are replayed, not just the killing blow."""
+
+    def assess(self, hits, available=(), consumables=(), **kw):
+        durations = {CATALOG[s]["name"]: CATALOG[s].get("aura_ms") for s in available}
+        return defensives.assess_survival(hits, 100_000, ready(*available), ready(*consumables), NAMES, SCHOOLS,
+                                          aura_ms=durations, **kw)
+
+    def test_reduction_counts_on_the_big_hit_before_a_finishing_tick(self):
+        # Full health, a 900k hit leaves them at 100k, then a 180k tick kills (80k overkill).
+        # Shield Wall on the tick alone saves 72k (not enough); pressed before the big hit, 432k.
+        hits = [hit(98_000, 900_000, 100_000), hit(100_000, 100_000, 0, overkill=80_000)]
+        r = self.assess(hits, available=[SHIELD_WALL])
+        self.assertTrue(r["wouldSave"]["Shield Wall"])
+        self.assertAlmostEqual(r["details"]["Shield Wall"]["amount"], 0.4 * 1_080_000, delta=1)
+        self.assertEqual(r["details"]["Shield Wall"]["pressAgo"], 2.0)
+        self.assertEqual(r["killingHit"]["pctOfMax"], 18)
+        self.assertEqual(r["biggestHit"]["pctOfMax"], 90)
+        self.assertEqual(r["biggestHit"]["ago"], 2.0)
+        self.assertEqual(r["deathType"], "wasLow")           # two seconds at 10% before the tick
+
+    def test_heals_need_time_to_react(self):
+        # The big hit and the tick 50ms apart: no time to heal in between, and at full health before.
+        fast = self.assess([hit(99_900, 900_000, 100_000), hit(99_950, 100_000, 0, overkill=50_000)],
+                           available=[EXHIL])
+        self.assertFalse(fast["wouldSave"]["Exhilaration"])
+        self.assertEqual(fast["details"]["Exhilaration"]["why"], "tooFast")
+        self.assertEqual(fast["deathType"], "oneShot")       # full health a moment before
+        self.assertEqual(fast["fromPct"], 100)
+        # Two seconds between them: pressing it after the big hit heals 300k.
+        slow = self.assess([hit(97_950, 900_000, 100_000), hit(99_950, 100_000, 0, overkill=50_000)],
+                           available=[EXHIL])
+        self.assertTrue(slow["wouldSave"]["Exhilaration"])
+
+    def test_one_shot_needs_a_press_before_the_hit(self):
+        # Nothing before the killing blow: Shield Wall still counts, pressed a second before it.
+        r = self.assess([hit(100_000, 1_000_000, 0, overkill=300_000)], available=[SHIELD_WALL])
+        self.assertTrue(r["wouldSave"]["Shield Wall"])
+        self.assertEqual(r["details"]["Shield Wall"]["pressAgo"], 1.0)
+
+    def test_damage_prevented_early_is_lost_when_healers_top_them_up(self):
+        # A hit at 91s, healed back to full by 95s, then a 1.69M hit from full kills by 700k.
+        # Shield Wall lasts 8s: pressed for the first hit it's gone by the killing blow, and what it
+        # saved then was healed over anyway; pressed for the killing blow (and the 10k hit at 95s,
+        # 4k of which they keep: they were 10k short of full) it saves 680k: not enough.
+        hits = [hit(91_000, 300_000, 700_000), hit(95_000, 10_000, 990_000),
+                hit(100_000, 990_000, 0, overkill=700_000)]
+        r = self.assess(hits, available=[SHIELD_WALL])
+        self.assertFalse(r["wouldSave"]["Shield Wall"])
+        self.assertAlmostEqual(r["details"]["Shield Wall"]["amount"], 0.4 * 1_690_000 + 4_000, delta=1)
+
+    def test_window_query_keeps_accented_names(self):
+        # WCL matches names as written in the log: an escaped "\\u00e9" matches nobody.
+        seen = []
+        with __import__("unittest.mock").mock.patch.object(defensives, "graphql_query",
+                                                            side_effect=lambda t, q, v: seen.append(q) or {}):
+            defensives.fetch_death_windows("t", "R", [(3, [(50_000, "Icéblade")])])
+        self.assertIn('target.name in (\\"Icéblade\\")', seen[0])
+        self.assertIn("endTime: 50051", seen[0])          # a killing blow logged just after the death
+
+    def test_nearby_pulls_share_a_block_and_only_death_windows_are_kept(self):
+        queries = []
+
+        def fake(token, q, v):
+            queries.append(q)
+            ev = lambda ts: {"timestamp": ts, "type": "damage", "targetID": 1, "amount": 1, "hitPoints": 5,
+                             "maxHitPoints": 10, "resourceActor": 2}
+            return {"reportData": {"report": {a: {"data": [ev(55_000), ev(80_000), ev(120_000)]}
+                                              for a in __import__("re").findall(r"(p\d+): events", q)}}}
+        with __import__("unittest.mock").mock.patch.object(defensives, "graphql_query", side_effect=fake):
+            hits = defensives.fetch_death_windows("t", "R", [
+                (3, [(60_000, "A")]), (4, [(300_000, "B")]),           # 4 minutes apart: one block
+                (9, [(60_000 + 2 * defensives.WINDOW_BLOCK_SPAN_MS, "C")])])   # far later: its own
+        self.assertEqual(len(queries), 1)
+        self.assertIn("fightIDs: [3, 4]", queries[0])
+        self.assertIn("fightIDs: [9]", queries[0])
+        # 55s is in A's window; 80s and 120s are between deaths (not kept).
+        self.assertEqual([h["timestamp"] for h in hits[1]], [55_000, 55_000])
+
+    def test_ready_too_late(self):
+        r = self.assess([hit(100_000, 1_000_000, 0, overkill=300_000)], available=[SHIELD_WALL],
+                        ready_since={"Shield Wall": 99_500})
+        self.assertFalse(r["wouldSave"]["Shield Wall"])
+        self.assertEqual(r["details"]["Shield Wall"]["why"], "readyTooLate")
+
+    def test_an_earlier_death_cuts_the_window(self):
+        # Died at 92s, battle-rezzed, then one-shot at 100s: the hits of the first life don't count.
+        hits = [hit(91_000, 800_000, 200_000), hit(92_000, 200_000, 0, overkill=10_000),
+                hit(100_000, 1_000_000, 0, overkill=900_000)]
+        r = self.assess(hits)
+        self.assertEqual(r["window"]["hits"], 1)
+        self.assertNotIn("biggestHit", r)
+
+    def test_shield_soaks_the_hits_after_it_is_pressed(self):
+        # Ice Barrier's shield, pressed before two hits, soaks both until it runs out.
+        hits = [hit(98_000, 100_000, 300_000), hit(100_000, 300_000, 0, overkill=150_000)]
+        r = defensives.assess_survival(hits, 100_000, ready(11426), [], NAMES, SCHOOLS,
+                                       aura_ms={"Ice Barrier": 60_000})
+        shield = r["details"]["Ice Barrier"]["amount"]
+        self.assertGreater(shield, 0)
+        self.assertEqual(r["wouldSave"]["Ice Barrier"], shield > 150_000)
 
 
 class TalentEffectTests(unittest.TestCase):
@@ -651,9 +741,9 @@ class TalentEffectTests(unittest.TestCase):
     def test_max_health_increase_keeps_the_health_share(self):
         # At half health, +30% max health is +150k health, not +300k.
         kb = hit(100_000, 500_000, 0, overkill=100_000)
-        self.assertEqual(defensives._prevented([{"hp": 0.3}], kb, MAX, 500_000, SCHOOLS), 150_000)
+        self.assertAlmostEqual(defensives._prevented([{"hp": 0.3}], kb, MAX, 500_000, SCHOOLS), 150_000)
         # "Current and maximum health" (Fortifying Brew) adds the full amount.
-        self.assertEqual(defensives._prevented([{"hp": 0.2, "current": True}], kb, MAX, 500_000, SCHOOLS), 200_000)
+        self.assertAlmostEqual(defensives._prevented([{"hp": 0.2, "current": True}], kb, MAX, 500_000, SCHOOLS), 200_000)
         # Increases multiply: +30% and +15% is x1.495.
         self.assertAlmostEqual(defensives._prevented([{"hp": 0.3}, {"hp": 0.15}], kb, MAX, 500_000, SCHOOLS),
                                247_500)

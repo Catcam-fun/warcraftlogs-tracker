@@ -15,8 +15,11 @@ generated from game data by scripts/build_defensive_catalog.py.
 """
 
 import hashlib
+from bisect import bisect_right
+import json
 import statistics
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from armor_constants import ARMOR_K, IGNORES_ARMOR, REDUCED_BY_ARMOR
@@ -200,15 +203,16 @@ def _paged(token, report_code, data_type, flt, fight_ids=None, start_time=None, 
     return events
 
 
-def fetch_defensive_events(token, report_code, fight_ids, start_time, end_time, player_ids, cat=None):
-    """Defensive casts, defensive auras, talent loadouts and consumable heals for one report.
+def fetch_defensive_raw(token, report_code, fight_ids, start_time, end_time, cat=None):
+    """Defensive casts, defensive auras, talent loadouts and consumable heals for one report,
+    for every player (the four queries run at once). Keep only the players who
+    died with filter_defensive_raw.
 
     - Casts and auras cover the whole time range (trash and time between pulls
       included, from 3 minutes before the first pull) so a defensive pressed
-      just before a pull counts. They're kept only for `player_ids` (the
-      players who died; nobody else is analyzed). That filtering happens
-      here, not in the query: WCL returns nothing for `source.id in (...)` /
-      `target.id in (...)` on Casts and Buffs (verified on a live log), and
+      just before a pull counts. They're filtered to the players who died
+      afterwards, not in the query: WCL returns nothing for `source.id in (...)`
+      / `target.id in (...)` on Casts and Buffs (verified on a live log), and
       the unfiltered query costs fewer points anyway.
     - Talent loadouts are only recorded at pull start, so they're scoped to
       the boss pulls.
@@ -217,23 +221,42 @@ def fetch_defensive_events(token, report_code, fight_ids, start_time, end_time, 
       and buffs included). Scoped to boss pulls, which costs least.
     """
     cat = cat or _LATEST
-    players = set(player_ids)
-    if not players:
-        return {"casts": {}, "buffs": {}, "talents": {}, "heals": {}}
     lookback = max(0, start_time - ENCOUNTER_RESET_MS)
     cast_filter = f"type = \"cast\" and ability.id in ({', '.join(map(str, cat.cast_ids))})"
     buff_filter = "ability.name in (" + ", ".join(f'"{n}"' for n in cat.buff_names) + ")"
     heal_filter = f"ability.id in ({', '.join(map(str, sorted(cat.consumable)))})"
-    casts = _paged(token, report_code, "Casts", cast_filter, start_time=lookback, end_time=end_time)
-    buffs = _paged(token, report_code, "Buffs", buff_filter, start_time=lookback, end_time=end_time)
-    heals = _paged(token, report_code, "Healing", heal_filter, fight_ids=fight_ids, resources=True)
+    jobs = {
+        "casts": ("Casts", cast_filter, None, lookback, False),
+        "buffs": ("Buffs", buff_filter, None, lookback, False),
+        "heals": ("Healing", heal_filter, fight_ids, start_time, True),
+        "combatants": ("CombatantInfo", None, fight_ids, start_time, False),
+    }
+    with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+        futures = {k: pool.submit(_paged, token, report_code, dt, flt, fight_ids=ids, start_time=start,
+                                  end_time=end_time + 1, resources=res)
+                   for k, (dt, flt, ids, start, res) in jobs.items()}
+        return {k: f.result() for k, f in futures.items()}
+
+
+def filter_defensive_raw(raw, player_ids, cat=None):
+    """fetch_defensive_raw's events for the given players only, indexed (index_defensive_events)."""
+    players = set(player_ids)
+    if not players:
+        return {"casts": {}, "buffs": {}, "talents": {}, "heals": {}}
     return index_defensive_events({
-        "casts": [e for e in casts if e.get("sourceID") in players],
-        "buffs": [e for e in buffs if e.get("targetID") in players],
-        "combatants": [e for e in _paged(token, report_code, "CombatantInfo", None, fight_ids=fight_ids)
-                       if e.get("sourceID") in players],
-        "heals": [e for e in heals if e.get("targetID") in players],
-    }, cat)
+        "casts": [e for e in raw.get("casts", []) if e.get("sourceID") in players],
+        "buffs": [e for e in raw.get("buffs", []) if e.get("targetID") in players],
+        "combatants": [e for e in raw.get("combatants", []) if e.get("sourceID") in players],
+        "heals": [e for e in raw.get("heals", []) if e.get("targetID") in players],
+    }, cat or _LATEST)
+
+
+def fetch_defensive_events(token, report_code, fight_ids, start_time, end_time, player_ids, cat=None):
+    """Defensive casts, auras, talent loadouts and consumable heals for the given players (see fetch_defensive_raw)."""
+    if not set(player_ids):
+        return {"casts": {}, "buffs": {}, "talents": {}, "heals": {}}
+    return filter_defensive_raw(fetch_defensive_raw(token, report_code, fight_ids, start_time, end_time, cat),
+                                player_ids, cat)
 
 
 def _heal_taken_mult(auras, cat):
@@ -383,58 +406,6 @@ def _ready_since(death_ts, casts_in_window, charges, recharge_ms):
 # over the aura's duration, not at once. Same tick counts as EFFECTS in
 # scripts/build_defensive_catalog.py (tested).
 HEAL_OVER_TIME = {"Frenzied Regeneration": 3, "Crimson Vial": 4}
-# How far before a death its health is fetched for them: the longest of them, plus a second.
-HOT_WINDOW_MS = 5_000
-
-
-def _hot_landed(total, ticks, duration_ms, hit_ts, earliest_press, hp_timeline, max_hp, hp_before):
-    """How much of a heal over time would have landed before the killing blow.
-
-    Pressed as early as it could land every tick before the hit (never before
-    it was off cooldown or the pull began). Each tick only fills health they
-    were missing then (actual health from the log, capped at max); health
-    healed above what they'd have had anyway is lost when real heals top them
-    up. Worked in shares of max health: a form change (Bear Form) keeps the
-    health share and these heals are shares of max health, so it holds either
-    way. Ticks before their first recorded health aren't credited.
-    `hp_timeline`: [(ts, hp, max_hp)]. Returns (health at the hit's max, ticks landed).
-    """
-    press = max(hit_ts - duration_ms - 1, earliest_press)
-    period = duration_ms / ticks
-    ticks_at = [press + period * (k + 1) for k in range(ticks) if press + period * (k + 1) < hit_ts]
-    points = sorted((p[0], p[1] / p[2]) for p in hp_timeline if p[0] < hit_ts and p[2]) + \
-        [(hit_ts - 0.5, hp_before / max_hp)]
-    timeline = sorted([(t, 0, share) for t, share in points] + [(t, 1, None) for t in ticks_at])
-    tick_share = total / max_hp / ticks
-    extra, share = 0.0, None
-    for _, is_tick, h in timeline:
-        if not is_tick:
-            share = h
-            extra = min(extra, max(1 - h, 0))
-        elif share is not None:
-            extra = min(extra + tick_share, max(1 - share, 0))
-    return extra * max_hp, len(ticks_at)
-
-
-def fetch_hp_timeline(token, report_code, player_name, player_id, death_ts, window_ms=HOT_WINDOW_MS):
-    """The player's health after every event on them in the seconds before a death: [(ts, hp, max_hp)].
-
-    One small query (the full event stream: some boss damage isn't in the
-    damage-taken stream). About 1 API point.
-    """
-    query = """query($c: String!, $s: Float, $e: Float, $f: String) { reportData { report(code: $c) {
-        events(startTime: $s, endTime: $e, dataType: All, filterExpression: $f, includeResources: true,
-               limit: 2000) { data } } } }"""
-    data = graphql_query(token, query, {"c": report_code, "s": death_ts - window_ms, "e": death_ts,
-                                        "f": f"target.name = '{player_name}'"})
-    events = ((((data.get("reportData") or {}).get("report") or {}).get("events") or {}).get("data")) or []
-    out = []
-    for e in events:
-        mine = (e.get("resourceActor") == 2 and e.get("targetID") == player_id) or \
-               (e.get("resourceActor") == 1 and e.get("sourceID") == player_id)
-        if mine and e.get("hitPoints") is not None and e.get("maxHitPoints"):
-            out.append((e["timestamp"], e["hitPoints"], e["maxHitPoints"]))
-    return out
 
 
 def _buffs_active_at(death_ts, buff_events, max_ms=None):
@@ -461,10 +432,11 @@ def _buffs_active_at(death_ts, buff_events, max_ms=None):
 
 
 def _killing_blow(killing_blows, death_ts):
-    """The player's overkill hit that caused this death, if one was recorded."""
+    """The player's overkill hit (or instant kill) that caused this death, if one was recorded."""
     found = None
     for h in killing_blows or ():
-        if death_ts - 2_000 <= h["timestamp"] <= death_ts + 50:
+        if death_ts - 2_000 <= h["timestamp"] <= death_ts + KILLING_BLOW_AFTER_MS and \
+                (h.get("type") == "instakill" or (h.get("overkill") or 0) > 0):
             found = h
     return found
 
@@ -475,16 +447,15 @@ def _auras(hit):
 
 
 def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts,
-                  indexed, ability_names, actor_names, killing_blows=None, ability_schools=None, cat=None,
-                  aoe_known=True, hp_timeline=None, armor_k=None, soulwell=False):
+                  indexed, ability_names, actor_names, hits=None, ability_schools=None, cat=None,
+                  aoe_known=True, armor_k=None, soulwell=False):
     """Defensive picture for one death. All timestamps are report-relative ms.
 
-    With `killing_blows` (the player's overkill hits in this log) it also
-    estimates whether the defensives they had ready would have saved them.
+    With `hits` (the player's hits in the seconds before their deaths, and
+    instant kills: fetch_death_windows, fetch_instakills) it also estimates
+    whether the defensives they had ready would have saved them.
     `cat`: the catalog of the patch the report was logged on (catalog_for).
     `aoe_known`: whether this report marks AoE hits at all (logs_mark_aoe).
-    `hp_timeline`: the player's health in the seconds before the death
-    (fetch_hp_timeline), for heals over time; needs_hp_timeline() says when.
     `armor_k`: the boss's armor constant (armor_constant), for armor increases.
     `soulwell`: a Warlock was in this pull, so a Soulwell's Healthstones were
     there for everyone, used in this log or not.
@@ -503,7 +474,7 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
     # hit (verified on live logs: no list means no auras), so it decides what
     # was up; the aura events add who cast externals. Without a killing blow,
     # the aura events decide, capped by each aura's duration.
-    killing = _killing_blow(killing_blows, death_ts)
+    killing = _killing_blow(hits, death_ts)
     if killing is not None and killing.get("type") == "instakill":
         killing = None       # an instant kill carries no aura snapshot; aura events decide
     active = {}
@@ -589,8 +560,10 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
                 result[kind]["rank"] = rank
             continue
         result[kind] = {"usedAgo": None}
+        ready_at = fight_start
         if used:
             result[kind]["lastUsedAgo"] = round((death_ts - used[-1][0]) / 1000)
+            ready_at = used[-1][0] + cooldown
         # Only assume they carry one if they used that kind somewhere in this log,
         # or, for a Healthstone, a Warlock in the pull had a Soulwell for them.
         carried = [sid for _, sid in own_casts if cat.consumable.get(sid, {}).get("kind") == kind]
@@ -599,6 +572,8 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
         elif kind == "healthstone" and soulwell and cat.soulwell_stone:
             unused_consumables.append(cat.soulwell_stone)
             from_soulwell = cat.soulwell_stone
+        if unused_consumables and cat.consumable[unused_consumables[-1]]["kind"] == kind:
+            ready_since[cat.all[unused_consumables[-1]]["name"]] = ready_at
 
     # Real shield sizes this player got from their own shields in this log
     # (latest before the death, else any): exact, gear and talents included.
@@ -635,7 +610,7 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
             if killing is not None and int(aid) in _auras(killing):
                 form_armor *= mult
 
-    if killing_blows is not None:
+    if hits is not None:
         death_mult = _heal_taken_mult(_auras(killing), cat) if killing is not None else 1.0
         own_heals = (indexed.get("heals") or {}).get(player_id, [])
         consumables = [consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec, talents_by_fight)
@@ -643,10 +618,10 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
         for sid, c in zip(unused_consumables, consumables):
             if sid == from_soulwell:
                 c["soulwell"] = True
-        result["survival"] = assess_survival(killing_blows, death_ts, ready_entries, consumables,
+        result["survival"] = assess_survival(hits, death_ts, ready_entries, consumables,
                                              ability_names, ability_schools or {},
                                              talent_entries=talent_entries, observed_absorbs=observed, spec=spec,
-                                             aoe_known=aoe_known, hp_timeline=hp_timeline, ready_since=ready_since,
+                                             aoe_known=aoe_known, ready_since=ready_since,
                                              aura_ms={e["name"]: e.get("aura_ms") for e in ready_entries},
                                              forms=forms, armor_k=armor_k, form_armor=form_armor)
 
@@ -659,80 +634,165 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
 # WOULD A DEFENSIVE HAVE SAVED THEM?
 # =============================================================================
 #
-# Uses only the killing blow of each death: one request per report returns
-# every hit with overkill in its boss pulls, with the player's health and max
-# health attached (about 1 WCL point per pull; fetching the seconds before
-# every death costs more and returns far more data). From the killing blow
-# we know:
-#   - how they died: one-shot from near full health, or already low
-#   - how big the hit was and how much it overkilled by
-#   - whether each defensive they had ready would have covered that hit
-#     (reductions/immunities applied to it, absorbs, extra max health, and
-#     heals up to the health they were missing).
-# It is deliberately cautious: a defensive is only credited against the
-# killing blow, not the hits before it.
+# Judged against the seconds before the death, not only the killing blow: the
+# last hit is often a small tick or a bit of residual damage that finished off
+# a player a big hit had left low, and a defensive pressed before that big hit
+# would have kept them alive. For every death that can count, every hit the
+# player took in the LETHAL_WINDOW_MS before it is fetched, with their health
+# after each one (one request per report, one block per pull: about 1 WCL
+# point per pull with counted deaths). Those seconds are then replayed with the
+# defensive pressed at its best moment (assess_survival).
 
-FULL_HEALTH = 0.85           # at or above this before the killing blow = one-shot (88% reads as full)
+FULL_HEALTH = 0.85           # at or above this = high health (88% reads as full)
 PHYSICAL = 1
-KILLING_BLOW_FILTER = "overkill > 0"
 INSTAKILL_FILTER = "type = 'instakill'"
+# How far before a death its hits are fetched and replayed. Longer than every
+# common defensive lasts (Fortifying Brew, 15s, is among the longest).
+LETHAL_WINDOW_MS = 15_000
+# A press counts only this long before the killing blow or earlier: nobody can
+# react to a hit faster, so a heal can't land between a big hit and a tick that
+# follows it within a second.
+REACTION_MS = 1_000
+# A killing blow can be logged this long after the death event.
+KILLING_BLOW_AFTER_MS = 50
+# Pulls whose death windows fall within this span share one event block.
+WINDOW_BLOCK_SPAN_MS = 900_000
+# Event blocks per request: WCL caps a query's complexity.
+WINDOW_BLOCKS_PER_REQUEST = 20
+
+# Everything the survival assessment reads from a hit (the rest, like
+# positions and stats, is dropped so cached reports stay small).
+HIT_FIELDS = ("timestamp", "type", "sourceID", "targetID", "abilityGameID", "fight", "buffs",
+              "hitType", "amount", "overkill", "absorbed", "mitigated", "unmitigatedAmount",
+              "isAoE", "resourceActor", "hitPoints", "maxHitPoints", "armor")
 
 
-def fetch_killing_blows(token, report_code, fight_ids):
-    """Every hit on a player with overkill in the given pulls, with health values.
+def _events_query(blocks):
+    """One request for several event blocks: {alias: (fightIDs, start, end, dataType, filter)}."""
+    parts = []
+    for alias, (ids, start, end, data_type, flt) in blocks.items():
+        parts.append(f"{alias}: events(fightIDs: {json.dumps(list(ids))}, startTime: {start}, endTime: {end}, "
+                     f"dataType: {data_type}, filterExpression: {json.dumps(flt, ensure_ascii=False)}, includeResources: true, "
+                     f"limit: 10000) {{ data nextPageTimestamp }}")
+    return "query($c: String!) { reportData { report(code: $c) { " + " ".join(parts) + " } } }"
 
-    Scoped with fightIDs so WCL only scans boss pulls (not trash or downtime);
-    a filtered query over a whole report pages through mostly-empty time
-    chunks. Cost measured on live logs: about 1 API point per pull.
+
+def _fetch_blocks(token, report_code, blocks):
+    """All events of several blocks, fetched together; blocks that don't fit one page are followed up.
+
+    Always with an endTime: WCL returns an empty second page for a block scoped
+    by fightIDs without one (verified on a live log).
     """
-    query = """query($c: String!, $ids: [Int], $f: String, $d: EventDataType, $s: Float) { reportData {
-        report(code: $c) { events(fightIDs: $ids, startTime: $s, dataType: $d, filterExpression: $f,
-               includeResources: true, limit: 10000) { data nextPageTimestamp } } } }"""
-
-    def fetch(data_type, flt):
-        events, start = [], None
-        for _ in range(50):
-            variables = {"c": report_code, "ids": list(fight_ids), "f": flt, "d": data_type}
-            if start:
-                variables["s"] = start
-            data = graphql_query(token, query, variables)
-            block = ((data.get("reportData") or {}).get("report") or {}).get("events") or {}
-            events += block.get("data") or []
-            start = block.get("nextPageTimestamp")
-            if not start:
-                break
-        return events
-
-    # Instant kills (a mechanic that kills outright, like Eternal Venom at max
-    # stacks) deal no damage, so they're only in the full event stream. About
-    # as cheap as the hits (measured: ~16 points for a 54-pull report).
-    return index_killing_blows(fetch("DamageTaken", KILLING_BLOW_FILTER) + fetch("All", INSTAKILL_FILTER))
+    out = {alias: [] for alias in blocks}
+    pending = dict(blocks)
+    for _ in range(50):
+        if not pending:
+            break
+        nxt = {}
+        items = list(pending.items())
+        for i in range(0, len(items), WINDOW_BLOCKS_PER_REQUEST):
+            chunk = dict(items[i:i + WINDOW_BLOCKS_PER_REQUEST])
+            data = graphql_query(token, _events_query(chunk), {"c": report_code})
+            report = (data.get("reportData") or {}).get("report") or {}
+            for alias, spec in chunk.items():
+                block = report.get(alias) or {}
+                out[alias] += block.get("data") or []
+                if block.get("nextPageTimestamp"):
+                    nxt[alias] = (spec[0], block["nextPageTimestamp"]) + tuple(spec[2:])
+        pending = nxt
+    return out
 
 
-# Everything the survival assessment reads from a killing blow (the rest,
-# like positions and stats, is dropped so cached reports stay small).
-KILLING_BLOW_FIELDS = ("timestamp", "type", "sourceID", "targetID", "abilityGameID", "fight", "buffs",
-                       "hitType", "amount", "overkill", "absorbed", "mitigated", "unmitigatedAmount",
-                       "isAoE", "resourceActor", "hitPoints", "maxHitPoints", "armor")
+def fetch_death_windows(token, report_code, pulls):
+    """Every hit the given players took in the seconds before their deaths.
+
+    `pulls`: [(fightID, [(death_ts, log name)])], the deaths that can count.
+    WCL charges about a point per page of events and at least one per block,
+    so pulls within WINDOW_BLOCK_SPAN_MS of each other share a block: from
+    LETHAL_WINDOW_MS before its first death to its last, for the players who
+    died (WCL filters by name; `target.id` and timestamps return nothing in a
+    filter), scoped to those pulls. Measured on live Mythic logs: 19 -> 8 and
+    11 -> 5 points for a night's reports, each block still one page. Only the
+    hits inside a death's window are kept. Returns {targetID: [hits, by time]}.
+    """
+    pulls = sorted(((fid, sorted(d)) for fid, d in pulls if d and any(n for _, n in d)), key=lambda p: p[1][0][0])
+    groups = []
+    for fid, deaths in pulls:
+        if groups and deaths[-1][0] - (groups[-1][0][1][0][0] - LETHAL_WINDOW_MS) <= WINDOW_BLOCK_SPAN_MS:
+            groups[-1].append((fid, deaths))
+        else:
+            groups.append([(fid, deaths)])
+    blocks, windows = {}, []
+    for group in groups:
+        deaths = [d for _, ds in group for d in ds]
+        names = sorted({n for _, n in deaths if n})
+        # Names as they are in the log, accents and all (an escaped é matches nobody).
+        flt = "target.name in (" + ", ".join(json.dumps(n, ensure_ascii=False) for n in names) + ")"
+        start = max(min(t for t, _ in deaths) - LETHAL_WINDOW_MS, 0)
+        # A killing blow can be logged a few ms after the death (_killing_blow).
+        end = max(t for t, _ in deaths) + KILLING_BLOW_AFTER_MS + 1
+        blocks[f"p{group[0][0]}"] = ([fid for fid, _ in group], start, end, "DamageTaken", flt)
+        windows += [(t - LETHAL_WINDOW_MS, t + KILLING_BLOW_AFTER_MS) for t, _ in deaths]
+    if not blocks:
+        return {}
+    windows.sort()
+
+    def in_a_window(ts):
+        # Windows are all as long: the one starting last at or before ts ends last too.
+        i = bisect_right(windows, (ts, float("inf"))) - 1
+        return i >= 0 and ts <= windows[i][1]
+
+    events = [e for evs in _fetch_blocks(token, report_code, blocks).values() for e in evs]
+    return index_hits(e for e in events if e.get("type") == "damage" and in_a_window(e.get("timestamp", 0)))
 
 
-def logs_mark_aoe(killing_blows_by_player):
+def fetch_instakills(token, report_code, fight_ids, start_time, end_time):
+    """Instant kills in the given pulls (a mechanic that kills outright, like
+    Eternal Venom at max stacks): they deal no damage, so they're only in the
+    full event stream. About 1 WCL point per report."""
+    blocks = {"k": (list(fight_ids), start_time, end_time + 1, "All", INSTAKILL_FILTER)}
+    return index_hits(_fetch_blocks(token, report_code, blocks)["k"])
+
+
+def logs_mark_aoe(hits_by_player):
     """Does this report mark AoE hits? Older logs (The War Within) have isAoE
-    false on every hit, so a report with no AoE killing blow at all doesn't."""
-    return any(h.get("isAoE") for hits in (killing_blows_by_player or {}).values() for h in hits)
+    false on every hit, so a report with no AoE hit at all doesn't."""
+    return any(h.get("isAoE") for hits in (hits_by_player or {}).values() for h in hits)
 
 
-def index_killing_blows(events):
-    """{targetID: [killing hits and instant kills, sorted by time]}"""
+def index_hits(events):
+    """{targetID: [hits and instant kills, sorted by time]}
+
+    Health and armor are kept only when they're the target's own: WCL attaches
+    the source's (resourceActor 1) to some hits, which for self-damage
+    (Refraction) is the same player and for anything else is someone else.
+    """
     idx = defaultdict(list)
     for e in events:
-        if e.get("targetID") is None:
+        if e.get("targetID") is None or e.get("type") not in ("damage", "instakill"):
             continue
-        if (e.get("type") == "damage" and (e.get("overkill") or 0) > 0) or e.get("type") == "instakill":
-            idx[e["targetID"]].append({k: e[k] for k in KILLING_BLOW_FIELDS if k in e})
+        h = {k: e[k] for k in HIT_FIELDS if k in e}
+        if h.get("resourceActor") == 1:
+            if e.get("sourceID") == e["targetID"]:
+                h["resourceActor"] = 2
+            else:
+                for k in ("resourceActor", "hitPoints", "maxHitPoints", "armor"):
+                    h.pop(k, None)
+        idx[e["targetID"]].append(h)
     for hits in idx.values():
         hits.sort(key=lambda e: e["timestamp"])
     return dict(idx)
+
+
+def merge_hits(*indexes):
+    """Several {targetID: [hits]} indexes as one, each player's hits by time, without duplicates."""
+    out = defaultdict(dict)
+    for idx in indexes:
+        for pid, hits in (idx or {}).items():
+            for h in hits:
+                out[pid][(h["timestamp"], h.get("type"), h.get("abilityGameID"), h.get("amount"),
+                          h.get("sourceID"))] = h
+    return {pid: sorted(hs.values(), key=lambda e: e["timestamp"]) for pid, hs in out.items()}
 
 
 MELEE_SWING = 1             # WCL's ability ID for auto-attacks ("Melee")
@@ -1029,7 +1089,7 @@ def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec, t
 
 
 def _full_hit(hit):
-    """Whole killing blow: WCL's `amount` is only the health it took (the rest is `overkill`)."""
+    """Whole hit: WCL's `amount` is only the health it took (the rest is `overkill`, or absorbed)."""
     return (hit.get("amount") or 0) + (hit.get("overkill") or 0) + (hit.get("absorbed") or 0)
 
 
@@ -1040,70 +1100,262 @@ def _effect_applies(m, hit, ability_schools):
     return _school_applies(m.get("school"), hit, ability_schools, immunity=bool(m.get("immune")))
 
 
-def _prevented(options, hit, max_hp, missing_hp, ability_schools):
-    """Damage the given defensives would have prevented (or healed) against the killing blow.
+def _keep(comps, hit, max_hp, missing_hp, ability_schools):
+    """Share of a hit that still lands through the given reductions and immunities (shields aside).
 
-    `options`: resolved components (see _resolve). Reductions apply first, then
-    shields soak what's left, as in the game. Reductions are skipped for a hit
-    that ignored them, and immunities for spells that pierce them.
-    Max health: a percent increase keeps the health share (the game scales
-    current health with it), "current" ones add the same amount to both
-    (Fortifying Brew). Heals fill health missing after that, raised by any
-    healing-received increase among the options.
+    Reductions are skipped for a hit that ignored them, immunities for spells
+    that pierce them. Armor increases multiply (Bear Form x Ursine Vigor);
+    shifting forms takes the current form's armor bonus off first.
     """
-    dmg = _full_hit(hit)
-    keep, absorb = 1.0, 0.0
+    keep, armor_up = 1.0, 1.0
     no_reduction = _ignores_reduction(hit)
-    pierces = hit.get("abilityGameID") in IGNORES_IMMUNITY
-    armor_up = 1.0
-    for m in options:
-        immune = bool(m.get("immune"))
+    for m in comps:
+        if not any(f in m for f in ("immune", "armor", "dr", "dr_missing")):
+            continue
         if not _effect_applies(m, hit, ability_schools):
             continue           # doesn't apply, or unknown (counted as not helping)
-        if immune:
-            if not pierces:
+        if m.get("immune"):
+            if hit.get("abilityGameID") not in IGNORES_IMMUNITY:
                 keep = 0.0
         elif m.get("armor"):
-            armor_up *= 1 + m["armor"]       # armor increases multiply (Bear Form x Ursine Vigor)
-        elif m.get("dr") or m.get("dr_missing"):
-            if not no_reduction:
-                dr = m.get("dr") or 0
-                if m.get("dr_missing"):              # up to its value at no health, by missing health
-                    dr += m["dr_missing"] * missing_hp / max_hp
-                keep *= 1 - min(dr, 1.0)
-        absorb += m.get("absorb", 0) * max_hp + m.get("absorb_amount", 0)
+            armor_up *= 1 + m["armor"]
+        elif not no_reduction:
+            dr = m.get("dr") or 0
+            if m.get("dr_missing"):              # up to its value at no health, by missing health
+                dr += m["dr_missing"] * missing_hp / max_hp
+            keep *= 1 - min(dr, 1.0)
     if armor_up > 1 and not no_reduction:
-        if any(m.get("replaces_form") for m in options):
-            # Shifting forms: the current form's armor bonus comes off first.
+        if any(m.get("replaces_form") for m in comps):
             armor_up /= hit.get("formArmor") or 1.0
         keep *= 1 - _armor_dr(armor_up - 1, hit)
-    hp_now = max_hp - missing_hp
-    share_up = 1.0
-    for m in options:
-        if m.get("hp") and not m.get("current"):
-            share_up *= 1 + m["hp"]          # percent max health increases multiply (checked on live logs)
-    share_up -= 1
-    flat_up = sum(m.get("hp", 0) for m in options if m.get("current"))
-    new_max = max_hp * (1 + share_up + flat_up)
-    health = hp_now * (1 + share_up) + flat_up * max_hp
-    boost = 1 + sum(m.get("heal_taken", 0) for m in options)
-    heal = min(sum((m.get("heal", 0) * max_hp + m.get("heal_amount", 0)) * (1 if m.get("boosted") else boost)
-                   for m in options), new_max - health)
-    return min(dmg, dmg * (1 - keep) + absorb) + (health - hp_now) + max(heal, 0)
+    return keep
 
 
-def _explain(entry, comps, applied, hit, max_hp, missing_hp, ability_schools):
+def _health_points(hits):
+    """[(ts, health, max health)] just before and just after every hit with the player's health on it.
+
+    Between two hits only heals land, so these points bound the health they
+    had at any moment (verified on live logs: health after a hit plus what it
+    took equals the health after the one before, unless heals landed).
+    """
+    points = []
+    for h in hits:
+        if h.get("resourceActor") == 2 and h.get("maxHitPoints") and h.get("type") == "damage":
+            after = h.get("hitPoints") or 0
+            points.append((h["timestamp"] - 0.5, after + (h.get("amount") or 0), h["maxHitPoints"]))
+            points.append((h["timestamp"], after, h["maxHitPoints"]))
+    return points
+
+
+def _health_at(points, t):
+    """(health, max health) at time t: the last point at or before it (health only rises between hits)."""
+    if not points:
+        return (0, 0)
+    times = points.times if isinstance(points, _Points) else [p[0] for p in points]
+    i = bisect_right(times, t) - 1
+    p = points[i if i >= 0 else 0]
+    return (p[1], p[2])
+
+
+class _Points(list):
+    """Health points (_health_points) with their times, for lookups by time."""
+
+    def __init__(self, points):
+        super().__init__(points)
+        self.times = [p[0] for p in points]
+
+
+class _Window:
+    """A death's replayed hits with what every replay reads from them, worked out once."""
+
+    def __init__(self, hits, ability_schools):
+        self.hits = hits
+        self.schools = ability_schools
+        self.points = _Points(_health_points(hits))
+        self.full = [_full_hit(h) for h in hits]
+        self.known = [h.get("resourceActor") == 2 and bool(h.get("maxHitPoints")) for h in hits]
+        self.before = []
+        for h, known in zip(hits, self.known):
+            if known:
+                self.before.append(((h.get("hitPoints") or 0) + (h.get("amount") or 0), h["maxHitPoints"]))
+            else:
+                self.before.append(_health_at(self.points, h["timestamp"]))
+        self._keep = {}
+        self._applies = {}
+
+    def keep(self, comps, key, k, max_hp, missing_hp):
+        """_keep for hit k, remembered under `key` (which comps) when it doesn't depend on health."""
+        if key is None:
+            return _keep(comps, self.hits[k], max_hp, missing_hp, self.schools)
+        key = (key, k)
+        if key not in self._keep:
+            self._keep[key] = _keep(comps, self.hits[k], max_hp, missing_hp, self.schools)
+        return self._keep[key]
+
+    def applies(self, comp, k):
+        key = (id(comp), k)
+        if key not in self._applies:
+            self._applies[key] = _effect_applies(comp, self.hits[k], self.schools)
+        return self._applies[key]
+
+
+def _option(entry_name, comps, dur_ms, legacy_ticks=None):
+    """One button's effect, timed: {"name", "lasting": [(comp, ms or None)], "instant": [comp], "hots": [(comp, ticks, ms)]}.
+
+    Effects last the aura's duration; without one (Bear Form, Soulburn's health)
+    they're up until the death. Heals land when pressed, or over time.
+    """
+    opt = {"name": entry_name, "lasting": [], "instant": [], "hots": []}
+    for c in comps or ():
+        if "heal" in c or "heal_amount" in c:
+            over = c.get("over_ms") or (dur_ms if legacy_ticks else None)
+            if over:
+                opt["hots"].append((c, c.get("ticks") or legacy_ticks or 1, over))
+            else:
+                opt["instant"].append(c)
+        else:
+            opt["lasting"].append((c, dur_ms))
+    return opt
+
+
+def _simulate(options, press, win, kb_index):
+    """Health the player would have had on top of their real health right after the killing blow,
+    with every option pressed at `press`. Returns (extra health, HoT ticks landed).
+
+    Walks the hits in time order (hits[kb_index] is the killing blow):
+      - reductions, immunities and armor take their share off every hit they
+        cover; shields soak what's left of it until they run out;
+      - max health increases add health when pressed (keeping the health share)
+        and take it back when they run out;
+      - heals add health when they land (instantly, or tick by tick);
+      - all of it is health the player only keeps while they are below max:
+        before each hit, the extra is capped by what they were missing then
+        (their real heals would have overhealed the rest).
+    The player lives if the extra is more than the killing blow's overkill.
+    `win`: the death's hits, prepared (_Window).
+    """
+    hits, points = win.hits, win.points
+    lasting = [(c, press + ms if ms else float("inf")) for o in options for c, ms in o["lasting"]]
+    heal_taken = [(c["heal_taken"], until) for c, until in lasting if c.get("heal_taken")]
+    hp_now, max_now = _health_at(points, press)
+    extra, dmax = 0.0, 0.0
+
+    def boost(t):
+        return 1 + sum(v for v, until in heal_taken if until >= t)
+
+    # Max health increases, grouped by how long they last (percent ones multiply).
+    groups = defaultdict(lambda: [1.0, 0.0])
+    for c, until in lasting:
+        if c.get("hp"):
+            if c.get("current"):
+                groups[until][1] += c["hp"]
+            else:
+                groups[until][0] *= 1 + c["hp"]
+    expiries = []
+    for until, (share, flat) in groups.items():
+        gain = hp_now * (share - 1) + flat * max_now
+        grow = max_now * (share - 1 + flat)
+        extra += gain
+        dmax += grow
+        expiries.append((until, gain, grow))
+    shields = [[c.get("absorb", 0) * max_now + c.get("absorb_amount", 0), c, until]
+               for c, until in lasting if c.get("absorb") or c.get("absorb_amount")]
+    # Reductions, immunities and armor up, dropped as they run out (in that order).
+    covering = [c for c, _ in lasting if any(f in c for f in ("immune", "armor", "dr", "dr_missing"))]
+    ends = sorted(((until, c) for c, until in lasting if c in covering and until != float("inf")),
+                  key=lambda x: x[0])
+    sig = tuple(id(c) for c in covering)
+    by_health = any(c.get("dr_missing") for c in covering)
+
+    # Heals: (time, amount before healing-taken increases, boosted already?).
+    heals = []
+    for o in options:
+        for c in o["instant"]:
+            heals.append((press, (c.get("heal", 0) * max_now + c.get("heal_amount", 0)), c.get("boosted")))
+        for c, ticks, over in o["hots"]:
+            total = c.get("heal", 0) * max_now + c.get("heal_amount", 0)
+            heals += [(press + over / ticks * (k + 1), total / ticks, c.get("boosted")) for k in range(ticks)]
+    heals.sort(key=lambda x: x[0])
+    kb_ts = hits[kb_index]["timestamp"]
+    hot_ticks = sum(1 for o in options for _, ticks, over in o["hots"]
+                    for k in range(ticks) if press + over / ticks * (k + 1) < kb_ts)
+    hi = 0
+
+    def land_heals(until_t):
+        nonlocal extra, hi
+        while hi < len(heals) and heals[hi][0] < until_t:
+            t, amount, boosted = heals[hi]
+            hi += 1
+            hp, mx = _health_at(points, t)
+            extra = min(extra + amount * (1 if boosted else boost(t)), max(mx + dmax - hp, 0))
+
+    def expire(until_t):
+        nonlocal extra, dmax
+        for i, (until, gain, grow) in enumerate(expiries):
+            if until < until_t and grow is not None:
+                extra = max(extra - gain, 0)
+                dmax -= grow
+                expiries[i] = (until, gain, None)
+
+    for k in range(kb_index + 1):
+        t = hits[k]["timestamp"]
+        if t <= press:
+            continue
+        if hi < len(heals):
+            land_heals(t)
+        if expiries:
+            expire(t)
+        hp_before, max_k = win.before[k]
+        if win.known[k]:
+            extra = min(extra, max(max_k + dmax - hp_before, 0))
+        dmg = win.full[k]
+        if not dmg:
+            continue
+        while ends and ends[0][0] < t:
+            covering.remove(ends.pop(0)[1])
+        if covering:
+            key = None if by_health else (sig, len(ends))
+            left = dmg * win.keep(covering, key, k, max_k, max(max_k + dmax - hp_before - extra, 0))
+        else:
+            left = dmg
+        for sh in shields:
+            if sh[0] > 0 and sh[2] >= t and left > 0 and win.applies(sh[1], k):
+                took = min(sh[0], left)
+                sh[0] -= took
+                left -= took
+        extra += dmg - left
+    return extra, hot_ticks
+
+
+def _prevented(options, hit, max_hp, missing_hp, ability_schools):
+    """Health the given components would have saved against one hit, pressed just before it.
+
+    `options`: resolved components (see _resolve). Reductions apply first, then
+    shields soak what's left, as in the game. Max health: a percent increase
+    keeps the health share (the game scales current health with it), "current"
+    ones add the same amount to both (Fortifying Brew). Heals fill health
+    missing, raised by any healing-received increase among the options.
+    """
+    hp = max_hp - missing_hp
+    one = dict(hit, resourceActor=2, maxHitPoints=max_hp, hitPoints=hp - (hit.get("amount") or 0),
+               timestamp=hit.get("timestamp") or 0)
+    if "amount" not in hit:
+        one["hitPoints"] = hp
+    extra, _ = _simulate([_option(None, options, None)], one["timestamp"] - 1, _Window([one], ability_schools), 0)
+    return extra
+
+
+def _explain(entry, comps, applied, hit, amount, max_hp, missing_hp, ability_schools, missing_at_kb=None):
     """The numbers behind one button's verdict, for the results page.
 
-    {"amount": damage it would have prevented or healed against the killing
-     blow (more than the overkill: they live), "why": when it prevents
-     nothing, the reason}. When talents changed it, or for an estimated
-    consumable: "effect", this player's version of it, and "talents", the
-    changes. Consumables also carry where their heal came from ("source":
-    log / typical / gameData) and, for a typical potion, the untalented heal.
-    The general effect of each ability is sent once per result (ability_info).
+    {"amount": health it would have saved by the killing blow (more than the
+     overkill: they live), "why": when it saves nothing, the reason}. When
+    talents changed it, or for an estimated consumable: "effect", this
+    player's version of it, and "talents", the changes. Consumables also carry
+    where their heal came from ("source": log / typical / gameData) and, for a
+    typical potion, the untalented heal. The general effect of each ability is
+    sent once per result (ability_info).
     """
-    amount = _prevented(comps, hit, max_hp, missing_hp, ability_schools)
     out = {"amount": round(amount)}
     talents = applied or entry.get("applied") or []
     if talents or entry.get("estimated"):
@@ -1139,30 +1391,94 @@ def _explain(entry, comps, applied, hit, max_hp, missing_hp, ability_schools):
                 out["why"] = "pierces"
             elif (m.get("dr") or m.get("armor")) and _ignores_reduction(hit):
                 out["why"] = "noReduction"
-            elif ("heal" in m or "heal_amount" in m or "heal_taken" in m) and missing_hp <= 0:
+            elif ("heal" in m or "heal_amount" in m or "heal_taken" in m) and \
+                    (missing_hp if missing_at_kb is None else missing_at_kb) <= 0:
                 out["why"] = "fullHealth"
+            elif "heal" in m or "heal_amount" in m:
+                out["why"] = "tooFast"           # missing health only in the last second, or healed back up
             else:
                 continue
             break
     return out
 
 
-def needs_hp_timeline(defensive_result):
-    """Does this death have a heal over time ready whose verdict needs the health before the hit?"""
-    details = ((defensive_result or {}).get("survival") or {}).get("details") or {}
-    return any(d.get("why") == "needsTimeline" for d in details.values())
+def _lethal_hits(hits, killing):
+    """The hits replayed for a death: from LETHAL_WINDOW_MS before its killing blow up to it,
+    never reaching back past an earlier death of theirs (a battle res)."""
+    kb_ts = killing["timestamp"]
+    start = kb_ts - LETHAL_WINDOW_MS
+    out = []
+    for h in hits:
+        if h["timestamp"] > kb_ts:
+            break
+        if h is killing:
+            out.append(h)
+            break
+        if h["timestamp"] < start:
+            continue
+        if h.get("type") == "instakill" or (h.get("overkill") or 0) > 0:
+            out = []                    # an earlier death: nothing before it carries over
+            continue
+        out.append(h)
+    return out
 
 
-def assess_survival(killing_blows, death_ts, available, consumables, ability_names, ability_schools,
+def _press_times(earliest, win, kb_index, options=None):
+    """Moments worth trying to press at, from `earliest` up to REACTION_MS before the killing blow.
+
+    Health only rises between hits, so these are just after each hit (most
+    health missing: heals, max health that keeps its share) and just before
+    each (covers the most for effects that run out), plus the earliest and
+    latest moments allowed. Given the options, only the moments that can
+    matter for them: effects that last until the death and nothing else are
+    best pressed as early as possible.
+    """
+    latest = win.hits[kb_index]["timestamp"] - REACTION_MS
+    if earliest > latest:
+        return []
+    after = before = True
+    if options is not None:
+        heals = any(o["instant"] or o["hots"] for o in options)
+        lasting = [(c, ms) for o in options for c, ms in o["lasting"]]
+        timed = any(ms for _, ms in lasting)
+        shield_or_hp = any(c.get("absorb") or c.get("absorb_amount") or c.get("hp") for c, _ in lasting)
+        after = heals or shield_or_hp
+        before = timed or shield_or_hp
+        if not after and not before:
+            return [earliest]            # up until the death either way: the earliest covers the most
+    times = {earliest, latest}
+    for h in win.hits[:kb_index]:
+        if before and earliest <= h["timestamp"] - 1 <= latest:
+            times.add(h["timestamp"] - 1)
+        if after and earliest <= h["timestamp"] + 1 <= latest:
+            times.add(h["timestamp"] + 1)
+    return sorted(times)
+
+
+def _best_press(options, earliest, win, kb_index):
+    """(extra health, press time, HoT ticks) for the best moment to press (_press_times);
+    None when it can't be pressed in time."""
+    best = None
+    for t in _press_times(earliest, win, kb_index, options):
+        extra, ticks = _simulate(options, t, win, kb_index)
+        if best is None or extra >= best[0] - 1e-6:
+            best = (extra, t, ticks)          # the latest press that saves the most
+    return best
+
+
+def assess_survival(hits, death_ts, available, consumables, ability_names, ability_schools,
                     talent_entries=None, observed_absorbs=None, spec=None, aoe_known=True,
-                    hp_timeline=None, ready_since=None, aura_ms=None, forms=None, armor_k=None, form_armor=None):
+                    ready_since=None, aura_ms=None, forms=None, armor_k=None, form_armor=None):
     """How they died, and whether the defensives they had ready would have saved them.
 
-    `killing_blows`: this player's hits with overkill (any time); the one at
-    this death is matched by time. `available` / `consumables`: catalog
+    `hits`: this player's hits (lethal windows, instant kills); the killing blow
+    of this death is matched by time and the seconds before it are replayed
+    (_simulate) with each option pressed at its best moment: no earlier than
+    it was ready (`ready_since`, else the start of the window) and at least
+    REACTION_MS before the killing blow. `available` / `consumables`: catalog
     entries ready at death (consumables only if carried and unused this pull).
     """
-    killing = _killing_blow(killing_blows, death_ts)
+    killing = _killing_blow(hits, death_ts)
     if killing is not None and killing.get("type") == "instakill":
         # Killed outright by a mechanic: no damage to reduce, absorb or heal.
         names = [e["name"] for e in list(available) + list(consumables)]
@@ -1180,7 +1496,7 @@ def assess_survival(killing_blows, death_ts, available, consumables, ability_nam
             "ignoresImmunity": False,
         }
     if killing is None or killing.get("resourceActor") != 2:
-        return None   # no recorded killing blow with health data (instant-kill mechanic, etc.)
+        return None   # no recorded killing blow with health data
     max_hp = killing.get("maxHitPoints") or 0
     if not max_hp:
         return None
@@ -1190,62 +1506,85 @@ def assess_survival(killing_blows, death_ts, available, consumables, ability_nam
     # `overkill` is the damage beyond that.
     hp_before = killing.get("amount") or 0
     hit_size = _full_hit(killing)
-    missing_hp = max(max_hp - hp_before, 0)
 
-    if not aoe_known:
-        killing = dict(killing, aoeKnown=False)
-    killing = dict(killing, armorK=armor_k, formArmor=form_armor)
+    tag = {"armorK": armor_k, "formArmor": form_armor, **({} if aoe_known else {"aoeKnown": False})}
+    window = [dict(h, **tag) for h in _lethal_hits(hits, killing)]
+    kb_index = len(window) - 1
+    killing = window[kb_index]
+    win = _Window(window, ability_schools)
+    points = win.points
+    kb_ts = killing["timestamp"]
+    window_start = kb_ts - LETHAL_WINDOW_MS
+    press_hp, _ = _health_at(points, kb_ts - REACTION_MS)
+    missing_at_reaction = max(max_hp - press_hp, 0)
 
-    def verdict(options):
-        """True / False, or None when it doesn't save them without parts whose effect on this hit is unknown."""
-        if _prevented(options, killing, max_hp, missing_hp, ability_schools) > overkill:
-            return True
-        unknown = any(_effect_applies(m, killing, ability_schools) is None for m in options)
-        return None if unknown else False
+    def unknown(comps):
+        return any(win.applies(m, k) is None for m in comps for k in range(len(window))
+                   if not ("heal" in m or "heal_amount" in m))
 
     per_button, scored, details = {}, [], {}
     for entry in list(available) + list(consumables):
         applied = []
         comps, _ = _resolve(entry, talent_entries, observed_absorbs or {}, spec, applied)
         name = entry["name"]
-        hot = None
-        if comps is not None and (name in (forms or {})):
+        if comps is None:
+            per_button[name] = None
+            continue
+        dur = (aura_ms or {}).get(name) if not entry.get("estimated") else None
+        legacy = HEAL_OVER_TIME.get(name) if dur else None
+        opts = [_option(name, comps, dur, legacy)]
+        if name in (forms or {}):
             # Needs a form first (Frenzied Regeneration needs Bear Form): judged with it.
             form_comps, _ = _resolve(forms[name], talent_entries, observed_absorbs or {}, spec, applied)
+            opts.append(_option(forms[name]["name"], form_comps or [], forms[name].get("aura_ms")))
             comps = comps + (form_comps or [])
-        legacy_ticks = HEAL_OVER_TIME.get(name) if (aura_ms or {}).get(name) else None
-        over = [c for c in comps or () if ("heal" in c or "heal_amount" in c)
-                and (c.get("over_ms") or (legacy_ticks and not c.get("over_ms")))]
-        if over:
-            if not hp_timeline:          # not fetched, or nothing came back: can't tell
-                per_button[name] = None
-                details[name] = {"amount": 0, "why": "needsTimeline"}
-                continue
-            boost = 1 + sum(c.get("heal_taken", 0) for c in comps)
-            hot = {"full": 0, "ticks": 0, "of": 0}
-            landed_comps = []
-            for c in over:
-                total = ((c.get("heal") or 0) * max_hp + (c.get("heal_amount") or 0)) * boost
-                ticks = c.get("ticks") or legacy_ticks or 1
-                landed, n = _hot_landed(total, ticks, c.get("over_ms") or aura_ms[name], killing["timestamp"],
-                                        (ready_since or {}).get(name, 0), hp_timeline, max_hp, hp_before)
-                hot["full"] += round(total)
-                hot["landed"] = hot.get("landed", 0) + round(landed)
-                hot["ticks"] += n
-                hot["of"] += ticks
-                landed_comps.append({"heal_amount": landed, "boosted": True})
-            comps = [c for c in comps if not any(c is o for o in over)] + landed_comps
-        per_button[name] = None if comps is None else verdict(comps)
-        scored += comps or []
-        if comps is not None:
-            details[name] = _explain(entry, comps, applied, killing, max_hp, missing_hp, ability_schools)
-            if hot:
-                details[name]["hot"] = hot
-                if not details[name]["amount"]:
-                    details[name]["why"] = "hotTooLate" if hot["ticks"] == 0 else details[name].get("why", "fullHealth")
+        earliest = max((ready_since or {}).get(name, window_start), window_start)
+        best = _best_press(opts, earliest, win, kb_index)
+        amount = best[0] if best else 0.0
+        scored.append((opts, earliest))
+        if best is None or amount > overkill:
+            per_button[name] = best is not None
+        else:
+            per_button[name] = None if unknown(comps) else False
+        details[name] = _explain(entry, comps, applied, killing, amount, max_hp, missing_at_reaction,
+                                 ability_schools, missing_at_kb=max(max_hp - hp_before, 0))
+        if best is None:
+            details[name]["why"] = "readyTooLate"
+        else:
+            details[name]["pressAgo"] = round((kb_ts - best[1]) / 1000, 1)
+        if opts[0]["hots"]:
+            full = sum((c.get("heal", 0) * max_hp + c.get("heal_amount", 0)) for c, _, _ in opts[0]["hots"])
+            of = sum(t for _, t, _ in opts[0]["hots"])
+            hot = {"full": round(full), "ticks": best[2] if best else 0, "of": of}
+            if best and len(opts) > 1:
+                hot["landed"] = round(_simulate(opts[:1], best[1], win, kb_index)[0])
+            details[name]["hot"] = hot
+            if best and not hot["ticks"] and not details[name]["amount"]:
+                details[name]["why"] = "hotTooLate"
 
-    return {
-        "deathType": "oneShot" if hp_before >= FULL_HEALTH * max_hp else "wasLow",
+    together = None
+    if scored:
+        # Everything pressed at once, at the best moment (each only once it was ready).
+        best_all = 0.0
+        everything = [o for os, _ in scored for o in os]
+        for t in _press_times(min(e for _, e in scored), win, kb_index, everything):
+            opts = [o for os, e in scored if e <= t for o in os]
+            if opts:
+                best_all = max(best_all, _simulate(opts, t, win, kb_index)[0])
+        all_comps = [c for os, _ in scored for o in os
+                     for c in [x for x, _ in o["lasting"]] + o["instant"] + [x for x, _, _ in o["hots"]]]
+        together = True if best_all > overkill else (None if unknown(all_comps) else False)
+
+    # How they died: a one-shot when they were at high health less than a
+    # reaction time before the killing blow (a big hit and a tick right after
+    # it count as one), else they were already low.
+    recent_high = [p for p in points if p[0] >= kb_ts - REACTION_MS and p[1] >= FULL_HEALTH * p[2]]
+    one_shot = hp_before >= FULL_HEALTH * max_hp or bool(recent_high)
+    from_pct = round(100 * max(p[1] / p[2] for p in recent_high)) if recent_high else None
+    # The biggest hit of those seconds, when it wasn't the killing blow.
+    biggest = max(window[:kb_index], key=_full_hit, default=None)
+    result = {
+        "deathType": "oneShot" if one_shot else "wasLow",
         "killingHit": {
             "name": ability_names.get(killing.get("abilityGameID"), "Unknown"),
             "size": hit_size,
@@ -1259,8 +1598,23 @@ def assess_survival(killing_blows, death_ts, available, consumables, ability_nam
         "details": details,                    # name -> the numbers behind each verdict (_explain)
         # Which scored names are the Healthstone / potion they carry.
         "consumables": {e["name"]: e["kind"] for e in consumables},
-        "allTogetherWouldSave": verdict(scored) if scored else None,
+        "allTogetherWouldSave": together,
         # Why a defensive might not help against this particular hit.
         "ignoresReduction": _ignores_reduction(killing),
         "ignoresImmunity": killing.get("abilityGameID") in IGNORES_IMMUNITY,
+        # The seconds replayed: how many hits, from how long before the killing blow.
+        "window": {"hits": len(window), "fromAgo": round((kb_ts - window[0]["timestamp"]) / 1000, 1)},
     }
+    if one_shot and from_pct is not None and from_pct > result["hpBeforePct"]:
+        result["fromPct"] = from_pct
+        result["burstMs"] = round(kb_ts - min(p[0] for p in recent_high))
+    if biggest is not None and _full_hit(biggest) > hit_size:
+        result["biggestHit"] = {
+            "name": ability_names.get(biggest.get("abilityGameID"), "Unknown"),
+            "abilityId": biggest.get("abilityGameID"),
+            "size": _full_hit(biggest),
+            "pctOfMax": round(100 * _full_hit(biggest) / max_hp),
+            "school": ability_schools.get(biggest.get("abilityGameID")),
+            "ago": round((kb_ts - biggest["timestamp"]) / 1000, 1),
+        }
+    return result

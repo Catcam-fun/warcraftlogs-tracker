@@ -252,18 +252,21 @@ def get_guild_reports(token, guild_name, server, region, start_date=None, end_da
 def get_guild_roster(token, guild_name, server, region):
     """Fetch the full guild roster.
 
-    WoW caps guilds at 1000 members and WCL serves 100/page, so the
-    roster is at most ~10 pages. WCL's guild.members endpoint is slow
-    through the proxy, so we fetch every possible page CONCURRENTLY —
-    total wall time is the slowest single page, not the sum. Best-effort:
-    a page that fails is skipped (analysis falls back to counting
-    everyone if the whole thing comes back empty).
+    WoW caps guilds at 1000 members and WCL serves 100/page, so the roster
+    is at most ~10 pages. WCL's guild.members endpoint is slow through the
+    proxy, so pages are fetched CONCURRENTLY: the first FIRST_PAGES at once
+    (most guilds fit), which also tell how many pages the guild has, then any
+    remaining ones at once. Each page costs a WCL point, so pages past the
+    guild's last aren't fetched. Best-effort: a page that fails is skipped
+    (analysis falls back to counting everyone if the whole thing comes back
+    empty).
     """
     query = """
     query($guildName: String!, $serverSlug: String!, $serverRegion: String!, $page: Int!) {
       guildData {
         guild(name: $guildName, serverSlug: $serverSlug, serverRegion: $serverRegion) {
           members(limit: 100, page: $page) {
+            last_page
             data { name }
           }
         }
@@ -272,6 +275,7 @@ def get_guild_roster(token, guild_name, server, region):
     """
 
     MAX_PAGES = 12  # 1000-member cap / 100 per page = 10, + margin
+    FIRST_PAGES = 3
     base_vars = {
         "guildName": guild_name,
         "serverSlug": server.lower().replace(" ", "-").replace("'", ""),
@@ -285,26 +289,38 @@ def get_guild_roster(token, guild_name, server, region):
             data = graphql_query(token, query, {**base_vars, "page": page},
                                   timeout=40, max_retries=1)
             guild = (data.get("guildData") or {}).get("guild") or {}
-            members = ((guild.get("members") or {}).get("data")) or []
-            return page, members, None
+            members = guild.get("members") or {}
+            return page, members.get("data") or [], members.get("last_page"), None
         except Exception as e:
-            return page, None, str(e)
+            return page, None, None, str(e)
 
     all_members = set()
     pages_fetched = 0
-    with ThreadPoolExecutor(max_workers=MAX_PAGES) as executor:
-        futures = {executor.submit(fetch_page, p): p for p in range(1, MAX_PAGES + 1)}
-        for fut in as_completed(futures):
-            page, members, err = fut.result()
-            if err:
-                print(f"Warning: roster page {page} failed ({err})")
-                continue
-            if members:
-                pages_fetched += 1
-                for member in members:
-                    name = normalize_character_name(member.get("name"))
-                    if name:
-                        all_members.add(name.lower())
+    last_page = None
+
+    def fetch_pages(pages):
+        nonlocal pages_fetched, last_page
+        if not pages:
+            return
+        with ThreadPoolExecutor(max_workers=len(pages)) as executor:
+            futures = {executor.submit(fetch_page, p): p for p in pages}
+            for fut in as_completed(futures):
+                page, members, last, err = fut.result()
+                if err:
+                    print(f"Warning: roster page {page} failed ({err})")
+                    continue
+                if last:
+                    last_page = max(last_page or 0, int(last))
+                if members:
+                    pages_fetched += 1
+                    for member in members:
+                        name = normalize_character_name(member.get("name"))
+                        if name:
+                            all_members.add(name.lower())
+
+    fetch_pages(list(range(1, FIRST_PAGES + 1)))
+    # Pages past the first ones: as many as the guild has (all of them if that wasn't readable).
+    fetch_pages(list(range(FIRST_PAGES + 1, min(last_page if last_page is not None else MAX_PAGES, MAX_PAGES) + 1)))
 
     if not all_members:
         print(f"Warning: Guild {guild_name} has no members or roster not available")
@@ -312,6 +328,8 @@ def get_guild_roster(token, guild_name, server, region):
 
     print(f"Successfully fetched {len(all_members)} guild members across {pages_fetched} page(s)")
     return all_members
+
+
 def get_fights(token, report_code):
     """Fetch a report's fights, players (with class/spec), and ability names.
 
