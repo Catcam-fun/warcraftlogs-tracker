@@ -703,6 +703,9 @@ LETHAL_WINDOW_MS = 15_000
 # react to a hit faster, so a heal can't land between a big hit and a tick that
 # follows it within a second.
 REACTION_MS = 1_000
+# Hits listed with a death (bigHits): this share of max health or more, the biggest few.
+BIG_HIT_SHARE = 0.05
+BIG_HITS_SHOWN = 3
 # A killing blow can be logged this long after the death event.
 KILLING_BLOW_AFTER_MS = 50
 # Pulls whose death windows fall within this span share one event block.
@@ -1658,6 +1661,18 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     if one_shot and from_pct is not None and from_pct > result["hpBeforePct"]:
         result["fromPct"] = from_pct
         result["burstMs"] = round(kb_ts - min(p[0] for p in recent_high))
+    # The big hits of those seconds (the death's story), in time order.
+    big = sorted(sorted((h for h in window[:kb_index] if _full_hit(h) >= BIG_HIT_SHARE * max_hp),
+                        key=_full_hit, reverse=True)[:BIG_HITS_SHOWN], key=lambda h: h["timestamp"])
+    if big:
+        result["bigHits"] = [{
+            "name": ability_names.get(h.get("abilityGameID"), "Unknown"),
+            "abilityId": h.get("abilityGameID"),
+            "size": _full_hit(h),
+            "pctOfMax": round(100 * _full_hit(h) / max_hp),
+            "school": ability_schools.get(h.get("abilityGameID")),
+            "ago": round((kb_ts - h["timestamp"]) / 1000, 1),
+        } for h in big]
     if biggest is not None and _full_hit(biggest) > hit_size:
         result["biggestHit"] = {
             "name": ability_names.get(biggest.get("abilityGameID"), "Unknown"),
