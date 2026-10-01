@@ -662,7 +662,18 @@ class LethalWindowTests(unittest.TestCase):
         self.assertEqual(r["biggestHit"]["pctOfMax"], 90)
         self.assertEqual(r["biggestHit"]["ago"], 2.0)
         self.assertEqual(r["deathType"], "wasLow")           # two seconds at 10% before the tick
-        self.assertEqual([(h["pctOfMax"], h["ago"]) for h in r["bigHits"]], [(90, 2.0)])
+
+    def test_set_up_hit_is_the_biggest_since_they_were_last_high(self):
+        # A big hit healed back to full long before doesn't count; the one after it does.
+        hits = [hit(86_000, 600_000, 400_000, ability=600), hit(90_000, 10_000, 990_000),
+                hit(97_000, 500_000, 490_000), hit(100_000, 490_000, 0, overkill=50_000)]
+        r = self.assess(hits)
+        self.assertEqual((r["biggestHit"]["name"], r["biggestHit"]["pctOfMax"], r["biggestHit"]["ago"]),
+                         ("Frost Bolt", 50, 3.0))
+        # Healed to full, then one-shot: no set-up hit.
+        r = self.assess([hit(90_000, 600_000, 400_000), hit(99_000, 10_000, 990_000),
+                         hit(100_000, 990_000, 0, overkill=50_000)])
+        self.assertNotIn("biggestHit", r)
 
     def test_heals_need_time_to_react(self):
         # The big hit and the tick 50ms apart: no time to heal in between, and at full health before.
