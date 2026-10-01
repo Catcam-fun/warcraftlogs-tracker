@@ -8,7 +8,9 @@ import { createPortal } from 'react-dom';
    Data (from the backend):
      death.defensives: see backend/defensives.py analyze_death. With a killing
        blow, survival.details[name] = {amount, why?, school?, effect?, talents?,
-       source?, typical?} (defensives._explain).
+       source?, typical?, pressAgo?} (defensives._explain, assess_survival):
+       judged over the seconds before the death (survival.window), with the
+       biggest hit of those seconds in survival.biggestHit.
      icons:       {defensive name: icon file name} for render.worldofwarcraft.com.
      abilityIcons: {spell ID: icon file name} for killing blows (death.abilityId).
      abilityInfo: {name: {kind, cooldownMs, auraMs, charges, effect, typicalHeal?, description?}}.
@@ -26,6 +28,7 @@ export const fmt = (n) => {
 };
 const secs = (ms) => (ms >= 60000 && ms % 60000 === 0 ? `${ms / 60000} min` : `${Math.round(ms / 1000)}s`);
 const pct = (v) => `${Math.round(v * 1000) / 10}%`;
+const secsFine = (ms) => (ms < 1000 ? `${(ms / 1000).toFixed(2).replace(/0$/, '')}s` : `${(ms / 1000).toFixed(1)}s`);
 
 // Damage schools and their colours in the game's combat log.
 const SCHOOL_BITS = [[1, 'Physical'], [2, 'Holy'], [4, 'Fire'], [8, 'Nature'], [16, 'Frost'], [32, 'Shadow'], [64, 'Arcane']];
@@ -119,6 +122,8 @@ function whyText(d, hitName) {
     case 'aoeUnknown': return 'This log doesn\'t mark area damage, so this can\'t be checked';
     case 'instakill': return 'it was an instant kill, with no damage to reduce, absorb or heal';
     case 'hotTooLate': return 'it came off cooldown too late for any of its heal to land before this hit';
+    case 'tooFast': return 'their health only dropped in the last second before they died, too fast to react with a heal (any earlier would have been overhealed)';
+    case 'readyTooLate': return 'it came off cooldown less than a second before they died';
     case 'notArmor': return `armor doesn't reduce ${hitName}`;
     case 'armorUnknown': return `it isn't known whether armor reduces ${hitName}`;
     default: return null;
@@ -264,8 +269,9 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
     : !s ? (current ? 'no killing blow recorded' : '')
     : instakill ? 'instant kill: the mechanic killed them outright, with no damage'
     : s.deathType === 'oneShot'
-      ? `one-shot from ${s.hpBeforePct}% health · died by ${fmt(s.overkill)}`
-      : `at ${s.hpBeforePct}% health, hit for ${s.killingHit.pctOfMax}% of max · died by ${fmt(s.overkill)}`;
+      ? `one-shot from ${s.fromPct ?? s.hpBeforePct}% health${s.burstMs ? ` in ${secsFine(s.burstMs)}` : ''} · died by ${fmt(s.overkill)}`
+      : `at ${s.hpBeforePct}% health, hit for ${s.killingHit.pctOfMax}% of max${s.biggestHit
+        ? ` after ${s.biggestHit.name} for ${s.biggestHit.pctOfMax}% ${s.biggestHit.ago}s before` : ''} · died by ${fmt(s.overkill)}`;
 
   const killTip = () => (
     <>
@@ -275,6 +281,12 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
       {s && !instakill && <Row a="This hit" b={`${fmt(s.killingHit.size)} (${s.killingHit.pctOfMax.toLocaleString()}% of max health)`} />}
       {s && !instakill && <Row a="Health before it" b={`${s.hpBeforePct}% (${fmt(s.maxHp * s.hpBeforePct / 100)})`} />}
       {s && !instakill && <Row a="They died by" b={fmt(s.overkill)} />}
+      {s?.biggestHit && (
+        <Row a="Biggest hit before it" b={`${s.biggestHit.name}: ${fmt(s.biggestHit.size)} (${s.biggestHit.pctOfMax}% of max), ${s.biggestHit.ago}s before`} />
+      )}
+      {s?.window && !instakill && (
+        <Row a="Defensives checked over" b={`the last ${s.window.fromAgo}s (${s.window.hits} hit${s.window.hits === 1 ? '' : 's'})`} />
+      )}
       {instakill && <div className="note warn">Instant kill: the game killed them outright, with no damage to reduce, absorb or heal. Only avoiding the mechanic prevents it.</div>}
       {kills > 0 && !notLogged && <Row a="Killed in these pulls" b={`${kills} raider${kills === 1 ? '' : 's'}`} />}
       {s?.ignoresImmunity && <div className="note warn">Goes through immunities (Ice Block, Divine Shield…)</div>}
@@ -321,6 +333,9 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
             <Row a="They died by" b={fmt(s.overkill)} />
           </>
         )}
+        {det && s && det.amount > 0 && det.pressAgo != null && (
+          <Row a="Best time to press" b={`${det.pressAgo}s before the killing blow`} />
+        )}
         {det && s && (
           v === true ? <div className="res g">Survives with {fmt(det.amount - s.overkill)} to spare</div>
             : det.why === 'needsTimeline'
@@ -333,7 +348,7 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
         {!s && <div className="res b">Off cooldown when they died</div>}
         {det?.source && <div className="src">{SOURCE_TEXT[det.source]}</div>}
         {inf?.kind === 'potion' && <PotionRank rank={det?.rank} />}
-        {det?.hot && <div className="src">Checked as if pressed early enough for every tick to land before the hit (never before it was off cooldown), using their real health in those seconds.</div>}
+        {det && s && !instakill && <div className="src">Checked over the seconds before the death, as if pressed at the best moment: not before it was off cooldown, and at least a second before the killing blow. Health they'd have saved counts only while they were below full (their healers would have overhealed the rest).</div>}
       </>
     );
   };
