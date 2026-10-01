@@ -204,7 +204,8 @@ export default function WarcraftLogsApp() {
     endDate: '',  // Optional: leave blank to include all reports
     authorFilters: '',
     characterGroups: '',
-    enableCheatDeath: false  // Optional cheat death detection (slower)
+    enableCheatDeath: false,  // Optional cheat death detection (slower)
+    rosterOnly: true  // Only count players on the guild roster (off: everyone in the reports)
   }));
 
   // Remember the WarcraftLogs credentials in this browser (see api.js).
