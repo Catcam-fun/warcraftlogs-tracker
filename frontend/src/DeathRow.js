@@ -228,15 +228,6 @@ const TipHead = ({ name, icons, icon, sub, glyph, quality }) => (
   <div className="th"><Icon name={glyph || name} icons={icons} icon={icon} quality={quality} />
     <div><b>{name}</b>{sub && <small>{sub}</small>}</div></div>
 );
-/* One hit in the killing blow's timeline: seconds before death, name, size, share of max health. */
-const HitRow = ({ ago, name, size, pct: share, school, kb }) => (
-  <div className={`hit${kb ? ' kb' : ''}`}>
-    <span className="t">{kb ? 'death' : `−${ago}s`}</span>
-    <span className="n">{school ? <School mask={school}>{name}</School> : name}</span>
-    <span className="v">{fmt(size)}</span>
-    <span className="p">{share}%</span>
-  </div>
-);
 const Row = ({ a, b, cls }) => <div className="r"><span className={cls}>{a}</span><span>{b}</span></div>;
 
 /* ---------- the row ---------- */
@@ -262,7 +253,7 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
     : s.deathType === 'oneShot'
       ? `one-shot from ${s.fromPct ?? s.hpBeforePct}%${s.burstMs ? ` in ${secsFine(s.burstMs)}` : ''} · died by ${fmt(s.overkill)}`
       : s.biggestHit
-        ? `at ${s.hpBeforePct}% after ${s.biggestHit.name} (${s.biggestHit.pctOfMax}%, ${s.biggestHit.ago}s before) · died by ${fmt(s.overkill)}`
+        ? `at ${s.hpBeforePct}% after ${s.biggestHit.name} (${s.biggestHit.pctOfMax}%${s.biggestHit.ago >= 0.1 ? `, ${s.biggestHit.ago}s before` : ''}) · died by ${fmt(s.overkill)}`
         : `at ${s.hpBeforePct}%, hit for ${s.killingHit.pctOfMax}% · died by ${fmt(s.overkill)}`;
 
   const killTip = () => (
@@ -271,19 +262,14 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
         sub={<>{death.boss}{schoolName(kbSchool) && <> · <School mask={kbSchool}>{schoolName(kbSchool)}</School></>}</>} />
       {abilityText?.[death.abilityId] && <p className="desc">{schoolText(abilityText[death.abilityId])}</p>}
       {s && !instakill && (
-        <div className="sec">
-          {s.window && <div className="sh">Last {s.window.fromAgo}s · {s.window.hits} hit{s.window.hits === 1 ? '' : 's'}</div>}
-          <div className="hits">
-            {(s.bigHits || (s.biggestHit ? [s.biggestHit] : [])).map((h, i) => (
-              <HitRow key={i} ago={h.ago} name={h.name} size={h.size} pct={h.pctOfMax} school={h.school} />
-            ))}
-            <HitRow kb ago={0} name={hitName} size={s.killingHit.size} pct={s.killingHit.pctOfMax} school={kbSchool} />
-          </div>
-        </div>
-      )}
-      {s && !instakill && (
         <div className="kv">
-          <Row a="Health before it" b={`${fmt(s.maxHp * s.hpBeforePct / 100)} · ${s.hpBeforePct}%`} />
+          <Row a="Killing blow" b={<>{fmt(s.killingHit.size)} <i>· {s.killingHit.pctOfMax}% of max HP</i></>} />
+          {s.biggestHit && (
+            <Row a="Set up by" b={<span className="stack">
+              <span><School mask={s.biggestHit.school}>{s.biggestHit.name}</School> {fmt(s.biggestHit.size)} <i>· {s.biggestHit.pctOfMax}%</i></span>
+              <small>{s.biggestHit.ago >= 0.1 ? `${s.biggestHit.ago}s before` : 'same moment'}</small></span>} />
+          )}
+          <Row a="Health before it" b={<>{fmt(s.maxHp * s.hpBeforePct / 100)} <i>· {s.hpBeforePct}%</i></>} />
           <Row a="Died by" b={fmt(s.overkill)} />
         </div>
       )}
@@ -292,8 +278,12 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
       {s?.ignoresReduction && <div className="note warn">Ignores damage reduction (shields and heals still work)</div>}
       {notLogged && <p>WarcraftLogs recorded no hit or instant kill for this death, so what killed them isn't known and defensives can't be checked against it.</p>}
       {!s && current && !notLogged && <p>No hit with health data was recorded for this death, so defensives can't be checked against it.</p>}
-      {kills > 0 && !notLogged && <div className="src">Killed {kills} raider{kills === 1 ? '' : 's'} in these pulls.</div>}
-      {s?.window && !instakill && <div className="src">Defensives are judged on these seconds, pressed at the best moment (at least 1s before death). Healing past full doesn't count.</div>}
+      {(kills > 0 && !notLogged) || (s?.window && !instakill) ? (
+        <div className="src">
+          {kills > 0 && !notLogged && `Killed ${kills} raider${kills === 1 ? '' : 's'} in these pulls. `}
+          {s?.window && !instakill && `Defensives are judged on the last ${Math.round(s.window.fromAgo)}s.`}
+        </div>
+      ) : null}
     </>
   );
 

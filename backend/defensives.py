@@ -703,9 +703,9 @@ LETHAL_WINDOW_MS = 15_000
 # react to a hit faster, so a heal can't land between a big hit and a tick that
 # follows it within a second.
 REACTION_MS = 1_000
-# Hits listed with a death (bigHits): this share of max health or more, the biggest few.
-BIG_HIT_SHARE = 0.05
-BIG_HITS_SHOWN = 3
+# A hit before the killing blow is named with the death (biggestHit) when it's
+# at least this share of max health and came after they were last at high health.
+SETUP_HIT_SHARE = 0.10
 # A killing blow can be logged this long after the death event.
 KILLING_BLOW_AFTER_MS = 50
 # Pulls whose death windows fall within this span share one event block.
@@ -1634,8 +1634,12 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     recent_high = [p for p in points if p[0] >= kb_ts - REACTION_MS and p[1] >= FULL_HEALTH * p[2]]
     one_shot = hp_before >= FULL_HEALTH * max_hp or bool(recent_high)
     from_pct = round(100 * max(p[1] / p[2] for p in recent_high)) if recent_high else None
-    # The biggest hit of those seconds, when it wasn't the killing blow.
-    biggest = max(window[:kb_index], key=_full_hit, default=None)
+    # The hit that set the death up: the biggest one since they were last at
+    # high health (before that, healers had already undone it).
+    high = [p[0] for p in points if p[0] < kb_ts - 0.5 and p[1] >= FULL_HEALTH * p[2]]
+    since = high[-1] if high else float("-inf")
+    biggest = max((h for h in window[:kb_index] if h["timestamp"] > since
+                   and _full_hit(h) >= SETUP_HIT_SHARE * max_hp), key=_full_hit, default=None)
     result = {
         "deathType": "oneShot" if one_shot else "wasLow",
         "killingHit": {
@@ -1661,19 +1665,7 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     if one_shot and from_pct is not None and from_pct > result["hpBeforePct"]:
         result["fromPct"] = from_pct
         result["burstMs"] = round(kb_ts - min(p[0] for p in recent_high))
-    # The big hits of those seconds (the death's story), in time order.
-    big = sorted(sorted((h for h in window[:kb_index] if _full_hit(h) >= BIG_HIT_SHARE * max_hp),
-                        key=_full_hit, reverse=True)[:BIG_HITS_SHOWN], key=lambda h: h["timestamp"])
-    if big:
-        result["bigHits"] = [{
-            "name": ability_names.get(h.get("abilityGameID"), "Unknown"),
-            "abilityId": h.get("abilityGameID"),
-            "size": _full_hit(h),
-            "pctOfMax": round(100 * _full_hit(h) / max_hp),
-            "school": ability_schools.get(h.get("abilityGameID")),
-            "ago": round((kb_ts - h["timestamp"]) / 1000, 1),
-        } for h in big]
-    if biggest is not None and _full_hit(biggest) > hit_size:
+    if biggest is not None:
         result["biggestHit"] = {
             "name": ability_names.get(biggest.get("abilityGameID"), "Unknown"),
             "abilityId": biggest.get("abilityGameID"),
