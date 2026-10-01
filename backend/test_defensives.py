@@ -662,6 +662,7 @@ class LethalWindowTests(unittest.TestCase):
         self.assertEqual(r["biggestHit"]["pctOfMax"], 90)
         self.assertEqual(r["biggestHit"]["ago"], 2.0)
         self.assertEqual(r["deathType"], "wasLow")           # two seconds at 10% before the tick
+        self.assertEqual([(h["pctOfMax"], h["ago"]) for h in r["bigHits"]], [(90, 2.0)])
 
     def test_heals_need_time_to_react(self):
         # The big hit and the tick 50ms apart: no time to heal in between, and at full health before.
