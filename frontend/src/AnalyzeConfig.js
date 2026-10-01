@@ -204,6 +204,21 @@ export default function AnalyzeConfig({
                   </p>
                 </div>
               </div>
+              <div className="fpx-grid2">
+                <div className="fpx-field">
+                  <label>Guild Roster</label>
+                  <label className="fpx-check">
+                    <input type="checkbox" checked={config.rosterOnly !== false}
+                      onChange={(e) => setConfig({ ...config, rosterOnly: e.target.checked })} />
+                    <span>Only count guild members</span>
+                  </label>
+                  <p className="hint">
+                    {config.rosterOnly !== false
+                      ? "Only players on the guild's WarcraftLogs roster count. Trials or pugs who aren't in the guild yet are left out."
+                      : "Everyone in the guild's reports counts, including trials and pugs not on the roster."}
+                  </p>
+                </div>
+              </div>
             </section>
 
             {error && (
