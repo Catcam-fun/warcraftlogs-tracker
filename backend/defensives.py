@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 
 from armor_constants import ARMOR_K, IGNORES_ARMOR, REDUCED_BY_ARMOR
 from boss_spell_flags import IGNORES_IMMUNITY
+from raid_wide_damage import RAID_WIDE
 from defensive_catalog import CATALOGS, HEALING_TAKEN, LATEST, PATCHES
 from spell_icons import DESCRIPTIONS as CATALOG_DESCRIPTIONS, ICONS as CATALOG_ICONS
 from warcraftlogs import graphql_query
@@ -703,6 +704,17 @@ LETHAL_WINDOW_MS = 15_000
 # react to a hit faster, so a heal can't land between a big hit and a tick that
 # follows it within a second.
 REACTION_MS = 1_000
+# A one-shot: a single hit of at least this share of max health, from high health.
+ONE_SHOT_SHARE = 0.80
+# A hit before the killing blow is named with the death (biggestHit) when it's
+# at least this share of max health and came after they were last at high health.
+SETUP_HIT_SHARE = 0.10
+# Rot: since they were last at high health, one raid-wide ability (RAID_WIDE)
+# hit them at least this many times for at least this share of the damage, and
+# none of its hits was a big chunk (this share of max health or more).
+ROT_MIN_HITS = 3
+ROT_SHARE = 0.6
+ROT_MAX_HIT = 0.35
 # A killing blow can be logged this long after the death event.
 KILLING_BLOW_AFTER_MS = 50
 # Pulls whose death windows fall within this span share one event block.
@@ -835,14 +847,17 @@ def index_hits(events):
 
 
 def merge_hits(*indexes):
-    """Several {targetID: [hits]} indexes as one, each player's hits by time, without duplicates."""
-    out = defaultdict(dict)
+    """Several {targetID: [hits]} indexes as one, each player's hits by time.
+
+    No de-duplication: identical hits at the same millisecond are real (three
+    Toxic Droplets soaked at once), and the indexes never overlap (windows are
+    damage in separate pulls, instant kills aren't damage).
+    """
+    out = defaultdict(list)
     for idx in indexes:
         for pid, hits in (idx or {}).items():
-            for h in hits:
-                out[pid][(h["timestamp"], h.get("type"), h.get("abilityGameID"), h.get("amount"),
-                          h.get("sourceID"))] = h
-    return {pid: sorted(hs.values(), key=lambda e: e["timestamp"]) for pid, hs in out.items()}
+            out[pid] += hits
+    return {pid: sorted(hs, key=lambda e: e["timestamp"]) for pid, hs in out.items()}
 
 
 MELEE_SWING = 1             # WCL's ability ID for auto-attacks ("Melee")
@@ -1625,16 +1640,49 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
                      for c in [x for x, _ in o["lasting"]] + o["instant"] + [x for x, _, _ in o["hots"]]]
         together = True if best_all > overkill else (None if unknown(all_comps) else False)
 
-    # How they died: a one-shot when they were at high health less than a
-    # reaction time before the killing blow (a big hit and a tick right after
-    # it count as one), else they were already low.
-    recent_high = [p for p in points if p[0] >= kb_ts - REACTION_MS and p[1] >= FULL_HEALTH * p[2]]
-    one_shot = hp_before >= FULL_HEALTH * max_hp or bool(recent_high)
-    from_pct = round(100 * max(p[1] / p[2] for p in recent_high)) if recent_high else None
-    # The biggest hit of those seconds, when it wasn't the killing blow.
-    biggest = max(window[:kb_index], key=_full_hit, default=None)
+    # How they died, from the hits since they were last at high health:
+    #   - one-shot: that was less than a reaction time ago and a single hit took
+    #     ONE_SHOT_SHARE of their max health or more (Sever);
+    #   - burst: less than a reaction time ago, but no single hit that big
+    #     (several hits at once: no time to react, but not one hit);
+    #   - wasLow: they had been below high health for longer.
+    high = [p for p in points if p[0] < kb_ts - 0.5 and p[1] >= FULL_HEALTH * p[2]]
+    since = high[-1][0] if high else float("-inf")
+    if hp_before >= FULL_HEALTH * max_hp:
+        since, high = kb_ts - 0.5, high + [(kb_ts - 0.5, hp_before, max_hp)]
+    run = [h for h in window if h["timestamp"] > since]
+    quick = bool(high) and kb_ts - since <= REACTION_MS
+    one_shot = quick and any(_full_hit(h) >= ONE_SHOT_SHARE * max_hp for h in run)
+    death_type = "oneShot" if one_shot else "burst" if quick else "wasLow"
+    from_pct = round(100 * high[-1][1] / high[-1][2]) if quick else None
+    # The hit that set the death up: the biggest one since they were last at
+    # high health (before that, healers had already undone it).
+    biggest = max((h for h in window[:kb_index] if h["timestamp"] > since
+                   and _full_hit(h) >= SETUP_HIT_SHARE * max_hp), key=_full_hit, default=None)
+    if one_shot and (biggest is None or _full_hit(biggest) < ONE_SHOT_SHARE * max_hp):
+        biggest = None        # the killing blow was the one hit; nothing smaller set it up
+    # Rot: worn down by one raid-wide ability's repeated damage (what the
+    # healers have to keep up with; raid_wide_damage.py, measured from Mythic
+    # kills), not set up by a single hit. Soaks and mechanics a player walks
+    # into are never rot, and neither is a one-shot or a burst (high health
+    # under a second before).
+    by_ability = defaultdict(list)
+    for h in run:
+        by_ability[h.get("abilityGameID")].append(h)
+    rot = None
+    if by_ability:
+        aid, hs = max(by_ability.items(), key=lambda kv: sum(_full_hit(h) for h in kv[1]))
+        total = sum(_full_hit(h) for h in run) or 1
+        if not quick and aid in RAID_WIDE and len(hs) >= ROT_MIN_HITS \
+                and sum(_full_hit(h) for h in hs) >= ROT_SHARE * total \
+                and max(_full_hit(h) for h in hs) < ROT_MAX_HIT * max_hp:
+            rot = {"name": ability_names.get(aid, "Unknown"), "abilityId": aid, "school": ability_schools.get(aid),
+                   "hits": len(hs), "total": sum(_full_hit(h) for h in hs),
+                   "pctOfMax": round(100 * sum(_full_hit(h) for h in hs) / max_hp),
+                   "seconds": round((kb_ts - hs[0]["timestamp"]) / 1000, 1)}
+            biggest = None
     result = {
-        "deathType": "oneShot" if one_shot else "wasLow",
+        "deathType": death_type,
         "killingHit": {
             "name": ability_names.get(killing.get("abilityGameID"), "Unknown"),
             "size": hit_size,
@@ -1655,10 +1703,21 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
         # The seconds replayed: how many hits, from how long before the killing blow.
         "window": {"hits": len(window), "fromAgo": round((kb_ts - window[0]["timestamp"]) / 1000, 1)},
     }
-    if one_shot and from_pct is not None and from_pct > result["hpBeforePct"]:
+    if quick and from_pct is not None and from_pct > result["hpBeforePct"]:
         result["fromPct"] = from_pct
-        result["burstMs"] = round(kb_ts - min(p[0] for p in recent_high))
-    if biggest is not None and _full_hit(biggest) > hit_size:
+        result["burstMs"] = round(kb_ts - since)
+    if death_type == "burst":
+        # Everything that hit them in it, by ability (most damage first).
+        parts = defaultdict(lambda: [0, 0])
+        for h in run:
+            parts[h.get("abilityGameID")][0] += 1
+            parts[h.get("abilityGameID")][1] += _full_hit(h)
+        result["burst"] = {"hits": len(run), "total": sum(_full_hit(h) for h in run), "ms": round(kb_ts - since),
+                           "abilities": [{"name": ability_names.get(a, "Unknown"), "school": ability_schools.get(a),
+                                          "times": n} for a, (n, _) in sorted(parts.items(), key=lambda x: -x[1][1])]}
+    if rot:
+        result["rot"] = rot
+    if biggest is not None:
         result["biggestHit"] = {
             "name": ability_names.get(biggest.get("abilityGameID"), "Unknown"),
             "abilityId": biggest.get("abilityGameID"),
@@ -1667,4 +1726,10 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
             "school": ability_schools.get(biggest.get("abilityGameID")),
             "ago": round((kb_ts - biggest["timestamp"]) / 1000, 1),
         }
+        # The same ability hitting them again and again since they were last high (soaking on).
+        same = [h for h in window[:kb_index + 1] if h["timestamp"] > since
+                and h.get("abilityGameID") == biggest.get("abilityGameID")]
+        if len(same) > 1:
+            result["biggestHit"].update(times=len(same), total=sum(_full_hit(h) for h in same),
+                                        over=round((kb_ts - same[0]["timestamp"]) / 1000, 1))
     return result

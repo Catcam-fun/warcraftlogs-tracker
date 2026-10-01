@@ -122,7 +122,7 @@ function whyText(d, hitName) {
     case 'aoeUnknown': return 'This log doesn\'t mark area damage, so this can\'t be checked';
     case 'instakill': return 'it was an instant kill, with no damage to reduce, absorb or heal';
     case 'hotTooLate': return 'it came off cooldown too late for any of its heal to land before this hit';
-    case 'tooFast': return 'their health only dropped in the last second before they died, too fast to react with a heal (any earlier would have been overhealed)';
+    case 'tooFast': return 'their health only dropped in the last second, too fast to react';
     case 'readyTooLate': return 'it came off cooldown less than a second before they died';
     case 'notArmor': return `armor doesn't reduce ${hitName}`;
     case 'armorUnknown': return `it isn't known whether armor reduces ${hitName}`;
@@ -151,17 +151,6 @@ const TALENT_TEXT = (t) => {
   }
   return 'add' in t ? `+${pct(t.add * t.rank)}` : `×${Math.round((1 + (t.mult - 1) * t.rank) * 100) / 100}`;
 };
-/* What their own potions / Healthstones healed in these boss pulls. */
-function ownUsesText(sm, info) {
-  const what = info?.kind === 'healthstone' ? 'Healthstone' : 'potion';
-  const range = sm.min != null
-    ? (sm.min === sm.max ? fmt(sm.min) : `${fmt(sm.min)} to ${fmt(sm.max)}`)
-    : (sm.minShare === sm.maxShare ? `${pct(sm.minShare)} of max health`
-      : `${pct(sm.minShare)} to ${pct(sm.maxShare)} of max health`);
-  const cd = info?.cooldownMs ? ` ${secs(info.cooldownMs)} cooldown.` : '';
-  return `Their ${sm.n} ${what}${sm.n === 1 ? '' : 's'} in these boss pulls healed ${range}.${cd}`;
-}
-
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 // The game's own quality overlays for potions in the bags (UI atlas crops in
 // public/art/quality): The War Within's three ranks, Midnight's two.
@@ -173,29 +162,21 @@ export const qualityArt = (rank) => {
   return art ? `/art/quality/${art}.png` : null;
 };
 
-/* The potion rank a player most likely drinks (defensives.potion_rank). */
-function PotionRank({ rank }) {
-  if (!rank) return null;
-  const art = qualityArt(rank);
-  return (
-    <>
-      {rank.rank
-        ? <Row a="Likely drinking" b={<>{art && <img className="fpx-qual-inline" src={art} alt="" />}{cap(rank.rank)} rank</>} cls="tal" />
-        : <Row a="Likely drinking" b="can't tell" />}
-      <div className="src">
-        {rank.rank
-          ? `From ${rank.n > 1 ? `the middle of their ${rank.n} potion heals` : 'their potion heal'} in these pulls, with Versatility and healing buffs taken out: it reaches the ${rank.rank} tooltip.`
-          : `This tier's ranks heal within ${rank.unknown}% of each other, less than players' own healing bonuses, so the log can't show which one they drink.`}
-      </div>
-    </>
-  );
+/* Where a consumable's heal comes from, in one line. */
+function sourceText(det, inf) {
+  const sm = det.samples;
+  if (det.source === 'log' && sm) {
+    const what = inf?.kind === 'healthstone' ? 'Healthstone' : 'potion';
+    const range = sm.min != null
+      ? (sm.min === sm.max ? fmt(sm.min) : `${fmt(sm.min)}–${fmt(sm.max)}`)
+      : `${sm.minShare === sm.maxShare ? pct(sm.minShare) : `${pct(sm.minShare)}–${pct(sm.maxShare)}`} of max health`;
+    const rank = det.rank?.rank ? `; the middle reaches the ${det.rank.rank} tooltip` : '';
+    return `Heal from their own ${sm.n} ${what}${sm.n === 1 ? '' : 's'} in these pulls (${range})${rank}, with their healing buffs at death.`;
+  }
+  if (det.source === 'typical') return "None used in these pulls: the tier's typical heal.";
+  if (det.source === 'gameData') return 'Heal from the game data.';
+  return null;
 }
-
-const SOURCE_TEXT = {
-  log: 'Estimate: the middle of their own heals from it, with the healing buffs they had when they died.',
-  typical: "None of theirs in these boss pulls, so the tier's typical heal is used.",
-  gameData: 'From the game data.',
-};
 
 /* ---------- tooltip ---------- */
 
@@ -243,8 +224,9 @@ function Icon({ name, icons, icon: given, className = '', quality }) {
   return <span className="fpx-qualwrap">{img}<img className="fpx-qual" src={quality} alt="" /></span>;
 }
 
-const TipHead = ({ name, icons, icon, sub, glyph }) => (
-  <div className="th"><Icon name={glyph || name} icons={icons} icon={icon} /><div><b>{name}</b>{sub && <small>{sub}</small>}</div></div>
+const TipHead = ({ name, icons, icon, sub, glyph, quality }) => (
+  <div className="th"><Icon name={glyph || name} icons={icons} icon={icon} quality={quality} />
+    <div><b>{name}</b>{sub && <small>{sub}</small>}</div></div>
 );
 const Row = ({ a, b, cls }) => <div className="r"><span className={cls}>{a}</span><span>{b}</span></div>;
 
@@ -267,32 +249,59 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
   const ctx = death.isCheatDeath ? 'prevented death (cheat death)'
     : notLogged ? 'the log has no hit for this death'
     : !s ? (current ? 'no killing blow recorded' : '')
-    : instakill ? 'instant kill: the mechanic killed them outright, with no damage'
+    : instakill ? 'instant kill, with no damage to stop'
     : s.deathType === 'oneShot'
-      ? `one-shot from ${s.fromPct ?? s.hpBeforePct}% health${s.burstMs ? ` in ${secsFine(s.burstMs)}` : ''} · died by ${fmt(s.overkill)}`
-      : `at ${s.hpBeforePct}% health, hit for ${s.killingHit.pctOfMax}% of max${s.biggestHit
-        ? ` after ${s.biggestHit.name} for ${s.biggestHit.pctOfMax}% ${s.biggestHit.ago}s before` : ''} · died by ${fmt(s.overkill)}`;
+      ? `one-shot from ${s.fromPct ?? s.hpBeforePct}% · died by ${fmt(s.overkill)}`
+    : s.deathType === 'burst' && s.burst
+      ? `burst from ${s.fromPct ?? s.hpBeforePct}%: ${s.burst.hits} hits ${s.burst.ms < 50 ? 'at once' : `in ${secsFine(s.burst.ms)}`} · died by ${fmt(s.overkill)}`
+      : s.rot
+        ? `worn down by ${s.rot.name} (rot, ${s.rot.hits} hits) · died by ${fmt(s.overkill)}`
+      : s.biggestHit
+        ? `at ${s.hpBeforePct}% after ${s.biggestHit.name}${s.biggestHit.times > 1 ? ` ×${s.biggestHit.times}` : ` (${s.biggestHit.pctOfMax}%${s.biggestHit.ago >= 0.1 ? `, ${s.biggestHit.ago}s before` : ''})`} · died by ${fmt(s.overkill)}`
+        : `at ${s.hpBeforePct}%, hit for ${s.killingHit.pctOfMax}% · died by ${fmt(s.overkill)}`;
 
   const killTip = () => (
     <>
       <TipHead name={hitName} glyph={notLogged ? '?' : null} icon={kbIcon}
         sub={<>{death.boss}{schoolName(kbSchool) && <> · <School mask={kbSchool}>{schoolName(kbSchool)}</School></>}</>} />
-      {abilityText?.[death.abilityId] && <p>{schoolText(abilityText[death.abilityId])}</p>}
-      {s && !instakill && <Row a="This hit" b={`${fmt(s.killingHit.size)} (${s.killingHit.pctOfMax.toLocaleString()}% of max health)`} />}
-      {s && !instakill && <Row a="Health before it" b={`${s.hpBeforePct}% (${fmt(s.maxHp * s.hpBeforePct / 100)})`} />}
-      {s && !instakill && <Row a="They died by" b={fmt(s.overkill)} />}
-      {s?.biggestHit && (
-        <Row a="Biggest hit before it" b={`${s.biggestHit.name}: ${fmt(s.biggestHit.size)} (${s.biggestHit.pctOfMax}% of max), ${s.biggestHit.ago}s before`} />
-      )}
-      {s?.window && !instakill && (
-        <Row a="Defensives checked over" b={`the last ${s.window.fromAgo}s (${s.window.hits} hit${s.window.hits === 1 ? '' : 's'})`} />
+      {abilityText?.[death.abilityId] && <p className="desc">{schoolText(abilityText[death.abilityId])}</p>}
+      {s && !instakill && (
+        <div className="kv">
+          <Row a="Killing blow" b={<>{fmt(s.killingHit.size)} <i>· {s.killingHit.pctOfMax}% of max HP</i></>} />
+          {s.rot && (
+            <Row a="Worn down by" b={<span className="stack">
+              <span><School mask={s.rot.school}>{s.rot.name}</School> <i>· rot</i></span>
+              <small>{s.rot.hits} hits, {fmt(s.rot.total)} over {s.rot.seconds}s</small></span>} />
+          )}
+          {s.deathType === 'burst' && s.burst && (
+            <Row a="Burst" b={<span className="stack">
+              <span>{s.burst.abilities.slice(0, 3).map((x, i) => (
+                <React.Fragment key={i}>{i > 0 && ', '}<School mask={x.school}>{x.name}</School>{x.times > 1 && ` ×${x.times}`}</React.Fragment>
+              ))}{s.burst.abilities.length > 3 && ', …'}</span>
+              <small>{s.burst.hits} hits, {fmt(s.burst.total)} {s.burst.ms < 50 ? 'at once' : `in ${secsFine(s.burst.ms)}`}</small></span>} />
+          )}
+          {s.biggestHit && s.deathType !== 'burst' && (
+            <Row a="Set up by" b={<span className="stack">
+              <span><School mask={s.biggestHit.school}>{s.biggestHit.name}</School> {fmt(s.biggestHit.size)} <i>· {s.biggestHit.pctOfMax}%</i></span>
+              <small>{s.biggestHit.times > 1
+                ? `${s.biggestHit.times} hits, ${fmt(s.biggestHit.total)} ${s.biggestHit.over >= 0.1 ? `over ${s.biggestHit.over}s` : 'at once'}`
+                : s.biggestHit.ago >= 0.1 ? `${s.biggestHit.ago}s before` : 'same moment'}</small></span>} />
+          )}
+          <Row a="Health before it" b={<>{fmt(s.maxHp * s.hpBeforePct / 100)} <i>· {s.hpBeforePct}%</i></>} />
+          <Row a="Died by" b={fmt(s.overkill)} />
+        </div>
       )}
       {instakill && <div className="note warn">Instant kill: the game killed them outright, with no damage to reduce, absorb or heal. Only avoiding the mechanic prevents it.</div>}
-      {kills > 0 && !notLogged && <Row a="Killed in these pulls" b={`${kills} raider${kills === 1 ? '' : 's'}`} />}
       {s?.ignoresImmunity && <div className="note warn">Goes through immunities (Ice Block, Divine Shield…)</div>}
-      {s?.ignoresReduction && <div className="note warn">Nothing reduced this hit, so damage reduction doesn't work on it (shields and heals still do)</div>}
+      {s?.ignoresReduction && <div className="note warn">Ignores damage reduction (shields and heals still work)</div>}
       {notLogged && <p>WarcraftLogs recorded no hit or instant kill for this death, so what killed them isn't known and defensives can't be checked against it.</p>}
       {!s && current && !notLogged && <p>No hit with health data was recorded for this death, so defensives can't be checked against it.</p>}
+      {(kills > 0 && !notLogged) || (s?.window && !instakill) ? (
+        <div className="src">
+          {kills > 0 && !notLogged && `Killed ${kills} raider${kills === 1 ? '' : 's'} in these pulls. `}
+          {s?.window && !instakill && `Defensives are judged on the last ${Math.round(s.window.fromAgo)}s.`}
+        </div>
+      ) : null}
     </>
   );
 
@@ -304,51 +313,49 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
     const effect = det?.effect || inf?.effect;
     const heals = (effect || []).length > 0 && effect.every((c) => c.heal != null || c.heal_amount != null);
     const fullHeal = heals && s ? effect.reduce((t, c) => t + (c.heal_amount || 0) + (c.heal || 0) * s.maxHp, 0) : 0;
+    const rank = det?.rank;
+    const sub = [inf?.kind === 'external' ? 'External' : null,
+      inf?.kind === 'potion' ? (rank?.rank ? `${cap(rank.rank)} rank` : rank ? 'rank unknown' : null) : null]
+      .filter(Boolean).join(' · ');
+    const verdict = !det || !s ? null
+      : v === true ? <div className="vd g">✓ Saves them · {fmt(det.amount - s.overkill)} to spare</div>
+      : det.why === 'needsTimeline' ? <div className="vd n">Can't tell: the log's health before this death couldn't be read</div>
+      : det.why ? <div className="vd b">✗ Doesn't help<small>{cap(whyText(det, hitName) || '')}</small></div>
+      : det.amount > 0 ? <div className="vd b">✗ Not enough · {fmt(s.overkill - det.amount)} short</div>
+      : null;
     return (
       <>
-        <TipHead name={name} icons={icons} sub={inf?.kind === 'external' ? 'External' : null} />
-        {det?.soulwell && <div className="note">They didn't use one in this log, but a Warlock was in the pull, so the Soulwell had one for them.</div>}
-        {withForm[name] && <div className="note">Needs {withForm[name]}: checked as shifting into it, then pressing {name}.</div>}
-        <p>{det?.source === 'log' && det.samples ? ownUsesText(det.samples, inf)
-          : effectText(inf ? inf.effect : effect, inf)}</p>
-        {talents.map((t) => <Row key={`${t.talent}-${t.field}`} a={t.talent} b={TALENT_TEXT(t)} cls="tal" />)}
-        {det?.hot && (
-          <Row a={`Heals over ${secs(info(name)?.auraMs || 0)}`}
-            b={`${det.hot.ticks} of ${det.hot.of} ticks land before the hit`} />
-        )}
-        {det && s && det.amount > 0 && det.hot && (
-          <>
-            <Row a="Would heal before the hit" b={`${fmt(det.hot.landed ?? det.amount)} of ${fmt(det.hot.full)}`} />
-            {withForm[name] && det.hot.landed != null && det.amount > det.hot.landed + 1 && (
-              <Row a={`With ${withForm[name]}, all together`} b={fmt(det.amount)} />
+        <TipHead name={name} icons={icons} sub={sub || null}
+          quality={inf?.kind === 'potion' ? qualityArt(rank) : null} />
+        {verdict}
+        {!det && s && v == null && <div className="vd n">Can't estimate this one (not simple damage reduction, absorb or healing)</div>}
+        {!s && <div className="vd n">Off cooldown when they died</div>}
+        {det && s && det.amount > 0 && (
+          <div className="kv">
+            {det.hot
+              ? <Row a="Heals before death" b={`${fmt(det.hot.landed ?? det.amount)} of ${fmt(det.hot.full)}`} />
+              : heals && fullHeal > det.amount + 1
+                ? <Row a="Would heal" b={`${fmt(det.amount)} · all missing`} />
+                : <Row a={heals ? 'Would heal' : 'Would prevent'} b={fmt(det.amount)} />}
+            {det.hot && withForm[name] && det.hot.landed != null && det.amount > det.hot.landed + 1 && (
+              <Row a={`With ${withForm[name]}`} b={fmt(det.amount)} />
             )}
+            {det.hot && <Row a="Ticks in time" b={`${det.hot.ticks} of ${det.hot.of}`} />}
             <Row a="They died by" b={fmt(s.overkill)} />
-          </>
+            {det.pressAgo != null && <Row a="Press" b={`${det.pressAgo}s before death`} />}
+          </div>
         )}
-        {det && s && det.amount > 0 && !det.hot && (
-          <>
-            {heals && fullHeal > det.amount + 1
-              ? <Row a="Would heal" b={`${fmt(det.amount)} (all they were missing)`} />
-              : <Row a={heals ? 'Would heal' : 'Would prevent'} b={fmt(det.amount)} />}
-            <Row a="They died by" b={fmt(s.overkill)} />
-          </>
+        {talents.length > 0 && (
+          <div className="kv">
+            {talents.map((t) => <Row key={`${t.talent}-${t.field}`} a={t.talent} b={TALENT_TEXT(t)} cls="tal" />)}
+          </div>
         )}
-        {det && s && det.amount > 0 && det.pressAgo != null && (
-          <Row a="Best time to press" b={`${det.pressAgo}s before the killing blow`} />
-        )}
-        {det && s && (
-          v === true ? <div className="res g">Survives with {fmt(det.amount - s.overkill)} to spare</div>
-            : det.why === 'needsTimeline'
-              ? <div className="res b">Can't tell: it heals over time, and the log's health for the seconds before this death couldn't be read</div>
-            : det.why ? <div className="res b">Doesn't help: {whyText(det, hitName)}</div>
-            : det.amount > 0 ? <div className="res b">Not enough: {fmt(s.overkill - det.amount)} short</div>
-            : null
-        )}
-        {!det && s && v == null && <div className="res b">Can't estimate this one (not simple damage reduction, absorb or healing)</div>}
-        {!s && <div className="res b">Off cooldown when they died</div>}
-        {det?.source && <div className="src">{SOURCE_TEXT[det.source]}</div>}
-        {inf?.kind === 'potion' && <PotionRank rank={det?.rank} />}
-        {det && s && !instakill && <div className="src">Checked over the seconds before the death, as if pressed at the best moment: not before it was off cooldown, and at least a second before the killing blow. Health they'd have saved counts only while they were below full (their healers would have overhealed the rest).</div>}
+        {det?.soulwell && <div className="note">Not used in this log, but a Warlock's Soulwell had one for them.</div>}
+        {withForm[name] && <div className="note">Needs {withForm[name]}: checked as shifting into it first.</div>}
+        <p className="desc">{det?.source === 'log' && det.samples
+          ? (inf?.cooldownMs ? `${secs(inf.cooldownMs)} cooldown.` : '')
+          : effectText(inf ? inf.effect : effect, inf)}</p>
+        {det?.source && <div className="src">{sourceText(det, inf)}</div>}
       </>
     );
   };
@@ -359,8 +366,8 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
       <Tip key={`a-${a.name}`} className="i act" content={() => (
         <>
           <TipHead name={a.name} icons={icons} sub={a.kind === 'external' ? `External${a.by ? ` from ${a.by}` : ''}` : null} />
-          <p>{effectText(info(a.name)?.effect, info(a.name))}</p>
-          <div className="res gold">Active when they died</div>
+          <div className="vd gold">Active when they died</div>
+          <p className="desc">{effectText(info(a.name)?.effect, info(a.name))}</p>
         </>
       )}><Icon name={a.name} icons={icons} /></Tip>
     ));
@@ -391,10 +398,10 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
     cds.forEach((c) => strip.push(
       <Tip key={`c-${c.name}`} className="i cd" content={() => (
         <>
-          <TipHead name={c.name} icons={icons} />
-          <p>{effectText(info(c.name)?.effect, info(c.name))}</p>
-          <div className="res b">On cooldown: {c.text}</div>
-          {c.rank && <PotionRank rank={c.rank} />}
+          <TipHead name={c.name} icons={icons} quality={qualityArt(c.rank)}
+            sub={c.rank ? (c.rank.rank ? `${cap(c.rank.rank)} rank` : 'rank unknown') : null} />
+          <div className="vd n">On cooldown · {c.text}</div>
+          <p className="desc">{effectText(info(c.name)?.effect, info(c.name))}</p>
         </>
       )}><Icon name={c.name} icons={icons} quality={qualityArt(c.rank)} />{c.label && <span className="t">{c.label}</span>}</Tip>
     ));
