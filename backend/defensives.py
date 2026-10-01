@@ -259,6 +259,30 @@ def fetch_defensive_events(token, report_code, fight_ids, start_time, end_time, 
                                 player_ids, cat)
 
 
+# WCL's specID (CombatantInfo, recorded at the start of every pull) -> spec name
+# as WCL's playerDetails and the catalog write it.
+SPEC_NAMES = {
+    250: "Blood", 251: "Frost", 252: "Unholy",
+    577: "Havoc", 581: "Vengeance", 1480: "Devourer",
+    102: "Balance", 103: "Feral", 104: "Guardian", 105: "Restoration",
+    1467: "Devastation", 1468: "Preservation", 1473: "Augmentation",
+    253: "BeastMastery", 254: "Marksmanship", 255: "Survival",
+    62: "Arcane", 63: "Fire", 64: "Frost",
+    268: "Brewmaster", 269: "Windwalker", 270: "Mistweaver",
+    65: "Holy", 66: "Protection", 70: "Retribution",
+    256: "Discipline", 257: "Holy", 258: "Shadow",
+    259: "Assassination", 260: "Outlaw", 261: "Subtlety",
+    262: "Elemental", 263: "Enhancement", 264: "Restoration",
+    265: "Affliction", 266: "Demonology", 267: "Destruction",
+    71: "Arms", 72: "Fury", 73: "Protection",
+}
+
+
+def pull_spec(indexed, fight_id, player_id, fallback=None):
+    """The spec a player played in one pull (they swap between pulls); `fallback` (the report's) if not recorded."""
+    return ((indexed or {}).get("specs") or {}).get((fight_id, player_id)) or fallback
+
+
 def _heal_taken_mult(auras, cat):
     """Healing-taken multiplier from the buffs and debuffs in an event's aura list."""
     mult = 1.0
@@ -281,6 +305,10 @@ def index_defensive_events(raw, cat=None):
             buffs[e["targetID"]].append((e["timestamp"], e.get("type"), e.get("abilityGameID"),
                                          e.get("sourceID"), e.get("absorb") or 0))
     talents = {}                        # (fightID, sourceID) -> {trait node entry ID: rank}
+    specs = {}                          # (fightID, sourceID) -> spec name that pull (players swap between pulls)
+    for e in raw.get("combatants", []):
+        if e.get("sourceID") is not None and SPEC_NAMES.get(e.get("specID")):
+            specs[(e.get("fight"), e["sourceID"])] = SPEC_NAMES[e["specID"]]
     for e in raw.get("combatants", []):
         tree = e.get("talentTree")
         if tree is None or e.get("sourceID") is None:
@@ -302,7 +330,7 @@ def index_defensive_events(raw, cat=None):
         lst.sort()
     for lst in buffs.values():
         lst.sort(key=lambda x: x[0])
-    return {"casts": dict(casts), "buffs": dict(buffs), "talents": talents, "heals": dict(heals)}
+    return {"casts": dict(casts), "buffs": dict(buffs), "talents": talents, "heals": dict(heals), "specs": specs}
 
 
 # =============================================================================
@@ -351,6 +379,22 @@ def _talented_cooldown(entry, talent_entries, spec):
         elif rank:
             mult *= 1 + (m["mult"] - 1) * rank
     return max(cd * mult, 0)
+
+
+def _talented_duration(entry, talent_entries, spec):
+    """How long the aura lasts after the player's talents and spec passives (Anti-Magic Barrier,
+    Improved Barkskin): checked on live logs, e.g. Anti-Magic Shell 5s -> 7s, Barkskin 8s -> 12s."""
+    ms = entry.get("aura_ms")
+    if not ms or ms < 0:
+        return ms
+    mult = 1.0
+    for m in entry.get("duration_mods", ()):
+        rank = _mod_rank(m, talent_entries, spec)
+        if rank and "add_ms" in m:
+            ms += m["add_ms"] * rank
+        elif rank:
+            mult *= 1 + (m["mult"] - 1) * rank
+    return max(ms * mult, 0)
 
 
 def _talented_charges(entry, talent_entries, spec):
@@ -622,7 +666,7 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
                                              ability_names, ability_schools or {},
                                              talent_entries=talent_entries, observed_absorbs=observed, spec=spec,
                                              aoe_known=aoe_known, ready_since=ready_since,
-                                             aura_ms={e["name"]: e.get("aura_ms") for e in ready_entries},
+                                             aura_ms={e["name"]: _talented_duration(e, talent_entries, spec) for e in ready_entries},
                                              forms=forms, armor_k=armor_k, form_armor=form_armor)
 
     for key in ("active", "available", "cooldown"):

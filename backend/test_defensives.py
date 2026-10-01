@@ -605,6 +605,21 @@ class HealOverTimeTests(unittest.TestCase):
         self.assertEqual(defensives._ready_since(100_000, [10_000], 1, 36_000), 46_000)
         self.assertIsNone(defensives._ready_since(100_000, [], 1, 36_000))
 
+class PullSpecTests(unittest.TestCase):
+    def test_spec_comes_from_each_pulls_record(self):
+        idx = defensives.index_defensive_events({"combatants": [
+            {"fight": 3, "sourceID": 1, "specID": 266, "talentTree": []},
+            {"fight": 4, "sourceID": 1, "specID": 267, "talentTree": []}]})
+        self.assertEqual(defensives.pull_spec(idx, 3, 1, "Demonology"), "Demonology")
+        self.assertEqual(defensives.pull_spec(idx, 4, 1, "Demonology"), "Destruction")
+        self.assertEqual(defensives.pull_spec(idx, 5, 1, "Demonology"), "Demonology")   # not recorded
+
+    def test_spec_names_match_the_catalog(self):
+        from defensive_catalog import CATALOGS
+        used = {s for c in CATALOGS.values() for d in c.values() for s in d.get("specs") or ()}
+        self.assertLessEqual(used, set(defensives.SPEC_NAMES.values()))
+
+
 class LethalWindowTests(unittest.TestCase):
     """The seconds before a death are replayed, not just the killing blow."""
 
