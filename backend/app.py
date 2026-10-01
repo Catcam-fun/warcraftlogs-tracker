@@ -314,7 +314,8 @@ def analyze():
                     instakills = recap_lru.get(ik_key) if finished else None
 
                     def def_key(dead):
-                        return (rid, tuple(fight_ids), tuple(sorted(dead)), cat.patch, defensives.CATALOG_FINGERPRINT)
+                        return (rid, tuple(fight_ids), tuple(sorted(dead)), cat.patch, defensives.CATALOG_FINGERPRINT,
+                                "pull-specs")
 
                     def dead_in(ds):
                         return {d.get("targetID") for dl in ds.values() for d in dl if d.get("targetID")}
@@ -515,7 +516,8 @@ def analyze():
                         death_args = dict(
                             player_id=target_id,
                             player_class=friendly_class.get(target_id),
-                            spec=player_spec,
+                            # The spec they played in this pull, not the report's main one.
+                            spec=defensives.pull_spec(def_data, fid, target_id, player_spec),
                             fight_id=fid,
                             fight_start=fight['start_time'],
                             death_ts=ev["timestamp"],
