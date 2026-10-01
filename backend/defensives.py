@@ -706,6 +706,12 @@ REACTION_MS = 1_000
 # A hit before the killing blow is named with the death (biggestHit) when it's
 # at least this share of max health and came after they were last at high health.
 SETUP_HIT_SHARE = 0.10
+# Rot: since they were last at high health, one ability hit them at least this
+# many times for at least this share of the damage, and none of its hits was a
+# big chunk (this share of max health or more).
+ROT_MIN_HITS = 3
+ROT_SHARE = 0.6
+ROT_MAX_HIT = 0.35
 # A killing blow can be logged this long after the death event.
 KILLING_BLOW_AFTER_MS = 50
 # Pulls whose death windows fall within this span share one event block.
@@ -1640,6 +1646,24 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     since = high[-1] if high else float("-inf")
     biggest = max((h for h in window[:kb_index] if h["timestamp"] > since
                    and _full_hit(h) >= SETUP_HIT_SHARE * max_hp), key=_full_hit, default=None)
+    # Rot: worn down by one ability's repeated damage (raid-wide ticks the
+    # healers have to keep up with), not set up by a single hit. A one-shot
+    # (high health under a second before) is never rot.
+    run = [h for h in window if h["timestamp"] > since]
+    by_ability = defaultdict(list)
+    for h in run:
+        by_ability[h.get("abilityGameID")].append(h)
+    rot = None
+    if by_ability:
+        aid, hs = max(by_ability.items(), key=lambda kv: sum(_full_hit(h) for h in kv[1]))
+        total = sum(_full_hit(h) for h in run) or 1
+        if not one_shot and len(hs) >= ROT_MIN_HITS and sum(_full_hit(h) for h in hs) >= ROT_SHARE * total \
+                and max(_full_hit(h) for h in hs) < ROT_MAX_HIT * max_hp:
+            rot = {"name": ability_names.get(aid, "Unknown"), "abilityId": aid, "school": ability_schools.get(aid),
+                   "hits": len(hs), "total": sum(_full_hit(h) for h in hs),
+                   "pctOfMax": round(100 * sum(_full_hit(h) for h in hs) / max_hp),
+                   "seconds": round((kb_ts - hs[0]["timestamp"]) / 1000, 1)}
+            biggest = None
     result = {
         "deathType": "oneShot" if one_shot else "wasLow",
         "killingHit": {
@@ -1665,6 +1689,8 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     if one_shot and from_pct is not None and from_pct > result["hpBeforePct"]:
         result["fromPct"] = from_pct
         result["burstMs"] = round(kb_ts - min(p[0] for p in recent_high))
+    if rot:
+        result["rot"] = rot
     if biggest is not None:
         result["biggestHit"] = {
             "name": ability_names.get(biggest.get("abilityGameID"), "Unknown"),
