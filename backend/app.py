@@ -114,6 +114,8 @@ def analyze():
             author_filters = config.get('authorFilters', [])
             character_groups = config.get('characterGroups', {})
             enable_cheat_death = bool(config.get('enableCheatDeath', False)) and signed_in
+            # Only players on the guild roster count (configs from before the toggle: on).
+            roster_only = config.get('rosterOnly', True) is not False
             
             # Validate required fields
             if not all([client_id, client_secret, guild_name, server, region]):
@@ -131,21 +133,24 @@ def analyze():
                 yield f"data: {json.dumps({'error': f'Authentication failed: {str(e)}'})}\n\n"
                 return
             
-            # Get guild roster for filtering
+            # Get guild roster for filtering (skipped when the roster filter is off)
             guild_roster = set()
-            try:
-                yield f"data: {json.dumps({'stage': 'roster', 'message': 'Fetching guild roster...'})}\n\n"
-                guild_roster = get_guild_roster(token, guild_name, server, region)
-                if guild_roster:
-                    yield f"data: {json.dumps({'stage': 'roster', 'message': f'Found {len(guild_roster)} guild members'})}\n\n"
-                else:
-                    yield f"data: {json.dumps({'stage': 'roster', 'message': 'Guild roster unavailable - processing all reports'})}\n\n"
-            except Exception as e:
-                print(f"Guild roster fetch error: {str(e)}")
-                yield f"data: {json.dumps({'stage': 'roster', 'message': 'Could not fetch guild roster - processing all reports'})}\n\n"
+            if not roster_only:
+                yield f"data: {json.dumps({'stage': 'roster', 'message': 'Counting everyone in the reports (guild roster filter off)'})}\n\n"
+            else:
+                try:
+                    yield f"data: {json.dumps({'stage': 'roster', 'message': 'Fetching guild roster...'})}\n\n"
+                    guild_roster = get_guild_roster(token, guild_name, server, region)
+                    if guild_roster:
+                        yield f"data: {json.dumps({'stage': 'roster', 'message': f'Found {len(guild_roster)} guild members'})}\n\n"
+                    else:
+                        yield f"data: {json.dumps({'stage': 'roster', 'message': 'Guild roster unavailable - processing all reports'})}\n\n"
+                except Exception as e:
+                    print(f"Guild roster fetch error: {str(e)}")
+                    yield f"data: {json.dumps({'stage': 'roster', 'message': 'Could not fetch guild roster - processing all reports'})}\n\n"
 
-            # Only count players who are on the guild roster. If the roster
-            # couldn't be fetched, fall back to counting everyone.
+            # Only count players who are on the guild roster. With the filter
+            # off, or if the roster couldn't be fetched, everyone counts.
             def is_guild_member(nm):
                 if not guild_roster:
                     return True
@@ -577,6 +582,7 @@ def analyze():
                     "characterGroups": character_groups,
                     "reportCount": len(reports),
                     "cheatDeathEnabled": enable_cheat_death,
+                    "rosterOnly": roster_only,
                     "failedReports": failed_reports,
                 },
                 "events": counted_death_events,
