@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 
 from armor_constants import ARMOR_K, IGNORES_ARMOR, REDUCED_BY_ARMOR
 from boss_spell_flags import IGNORES_IMMUNITY
+from raid_wide_damage import RAID_WIDE
 from defensive_catalog import CATALOGS, HEALING_TAKEN, LATEST, PATCHES
 from spell_icons import DESCRIPTIONS as CATALOG_DESCRIPTIONS, ICONS as CATALOG_ICONS
 from warcraftlogs import graphql_query
@@ -706,9 +707,9 @@ REACTION_MS = 1_000
 # A hit before the killing blow is named with the death (biggestHit) when it's
 # at least this share of max health and came after they were last at high health.
 SETUP_HIT_SHARE = 0.10
-# Rot: since they were last at high health, one ability hit them at least this
-# many times for at least this share of the damage, and none of its hits was a
-# big chunk (this share of max health or more).
+# Rot: since they were last at high health, one raid-wide ability (RAID_WIDE)
+# hit them at least this many times for at least this share of the damage, and
+# none of its hits was a big chunk (this share of max health or more).
 ROT_MIN_HITS = 3
 ROT_SHARE = 0.6
 ROT_MAX_HIT = 0.35
@@ -1646,9 +1647,11 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     since = high[-1] if high else float("-inf")
     biggest = max((h for h in window[:kb_index] if h["timestamp"] > since
                    and _full_hit(h) >= SETUP_HIT_SHARE * max_hp), key=_full_hit, default=None)
-    # Rot: worn down by one ability's repeated damage (raid-wide ticks the
-    # healers have to keep up with), not set up by a single hit. A one-shot
-    # (high health under a second before) is never rot.
+    # Rot: worn down by one raid-wide ability's repeated damage (what the
+    # healers have to keep up with; raid_wide_damage.py, measured from Mythic
+    # kills), not set up by a single hit. Soaks and mechanics a player walks
+    # into are never rot, and neither is a one-shot (high health under a
+    # second before).
     run = [h for h in window if h["timestamp"] > since]
     by_ability = defaultdict(list)
     for h in run:
@@ -1657,7 +1660,8 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     if by_ability:
         aid, hs = max(by_ability.items(), key=lambda kv: sum(_full_hit(h) for h in kv[1]))
         total = sum(_full_hit(h) for h in run) or 1
-        if not one_shot and len(hs) >= ROT_MIN_HITS and sum(_full_hit(h) for h in hs) >= ROT_SHARE * total \
+        if not one_shot and aid in RAID_WIDE and len(hs) >= ROT_MIN_HITS \
+                and sum(_full_hit(h) for h in hs) >= ROT_SHARE * total \
                 and max(_full_hit(h) for h in hs) < ROT_MAX_HIT * max_hp:
             rot = {"name": ability_names.get(aid, "Unknown"), "abilityId": aid, "school": ability_schools.get(aid),
                    "hits": len(hs), "total": sum(_full_hit(h) for h in hs),
@@ -1700,4 +1704,10 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
             "school": ability_schools.get(biggest.get("abilityGameID")),
             "ago": round((kb_ts - biggest["timestamp"]) / 1000, 1),
         }
+        # The same ability hitting them again and again since they were last high (soaking on).
+        same = [h for h in window[:kb_index + 1] if h["timestamp"] > since
+                and h.get("abilityGameID") == biggest.get("abilityGameID")]
+        if len(same) > 1:
+            result["biggestHit"].update(times=len(same), total=sum(_full_hit(h) for h in same),
+                                        over=round((kb_ts - same[0]["timestamp"]) / 1000, 1))
     return result

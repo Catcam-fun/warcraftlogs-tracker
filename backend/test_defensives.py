@@ -678,9 +678,16 @@ class LethalWindowTests(unittest.TestCase):
     def test_rot_is_named_instead_of_a_set_up_hit(self):
         # Ticks of one ability wear them down from full: rot, no set-up hit.
         ticks = [hit(93_000 + 1_000 * k, 150_000, 850_000 - 150_000 * k) for k in range(6)]
-        r = self.assess(ticks + [hit(100_000, 100_000, 0, overkill=40_000)])
+        wide = __import__("unittest.mock").mock.patch.dict(defensives.RAID_WIDE, {500: 1.0})
+        with wide:
+            r = self.assess(ticks + [hit(100_000, 100_000, 0, overkill=40_000)])
         self.assertEqual((r["rot"]["name"], r["rot"]["hits"]), ("Frost Bolt", 6))   # after the first they were still at 85%
         self.assertNotIn("biggestHit", r)
+        # The same hits from an ability that isn't raid-wide (a soak they kept taking): no rot,
+        # set up by its biggest hit, with how often it hit them.
+        r = self.assess(ticks + [hit(100_000, 100_000, 0, overkill=40_000)])
+        self.assertNotIn("rot", r)
+        self.assertEqual((r["biggestHit"]["times"], r["biggestHit"]["over"]), (6, 6.0))
         # Three ticks within a second from full health: a one-shot, not rot.
         r = self.assess([hit(99_200, 300_000, 700_000), hit(99_500, 300_000, 400_000),
                          hit(99_900, 400_000, 0, overkill=40_000)])

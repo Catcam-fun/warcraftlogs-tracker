@@ -255,7 +255,7 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
       : s.rot
         ? `worn down by ${s.rot.name} (rot, ${s.rot.hits} hits) · died by ${fmt(s.overkill)}`
       : s.biggestHit
-        ? `at ${s.hpBeforePct}% after ${s.biggestHit.name} (${s.biggestHit.pctOfMax}%${s.biggestHit.ago >= 0.1 ? `, ${s.biggestHit.ago}s before` : ''}) · died by ${fmt(s.overkill)}`
+        ? `at ${s.hpBeforePct}% after ${s.biggestHit.name}${s.biggestHit.times > 1 ? ` ×${s.biggestHit.times}` : ` (${s.biggestHit.pctOfMax}%${s.biggestHit.ago >= 0.1 ? `, ${s.biggestHit.ago}s before` : ''})`} · died by ${fmt(s.overkill)}`
         : `at ${s.hpBeforePct}%, hit for ${s.killingHit.pctOfMax}% · died by ${fmt(s.overkill)}`;
 
   const killTip = () => (
@@ -274,7 +274,9 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
           {s.biggestHit && (
             <Row a="Set up by" b={<span className="stack">
               <span><School mask={s.biggestHit.school}>{s.biggestHit.name}</School> {fmt(s.biggestHit.size)} <i>· {s.biggestHit.pctOfMax}%</i></span>
-              <small>{s.biggestHit.ago >= 0.1 ? `${s.biggestHit.ago}s before` : 'same moment'}</small></span>} />
+              <small>{s.biggestHit.times > 1
+                ? `${s.biggestHit.times} hits, ${fmt(s.biggestHit.total)} over ${s.biggestHit.over}s`
+                : s.biggestHit.ago >= 0.1 ? `${s.biggestHit.ago}s before` : 'same moment'}</small></span>} />
           )}
           <Row a="Health before it" b={<>{fmt(s.maxHp * s.hpBeforePct / 100)} <i>· {s.hpBeforePct}%</i></>} />
           <Row a="Died by" b={fmt(s.overkill)} />
