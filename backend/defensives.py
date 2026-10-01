@@ -278,6 +278,9 @@ SPEC_NAMES = {
 }
 
 
+_UNKNOWN_SPECS = set()
+
+
 def pull_spec(indexed, fight_id, player_id, fallback=None):
     """The spec a player played in one pull (they swap between pulls); `fallback` (the report's) if not recorded."""
     return ((indexed or {}).get("specs") or {}).get((fight_id, player_id)) or fallback
@@ -309,6 +312,9 @@ def index_defensive_events(raw, cat=None):
     for e in raw.get("combatants", []):
         if e.get("sourceID") is not None and SPEC_NAMES.get(e.get("specID")):
             specs[(e.get("fight"), e["sourceID"])] = SPEC_NAMES[e["specID"]]
+        elif e.get("specID") and e["specID"] not in _UNKNOWN_SPECS:
+            _UNKNOWN_SPECS.add(e["specID"])     # a new spec: falls back to the report's until added
+            print(f"[WARN] Unknown specID {e['specID']}: add it to defensives.SPEC_NAMES")
     for e in raw.get("combatants", []):
         tree = e.get("talentTree")
         if tree is None or e.get("sourceID") is None:
