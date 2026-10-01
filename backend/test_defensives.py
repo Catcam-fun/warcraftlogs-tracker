@@ -688,11 +688,21 @@ class LethalWindowTests(unittest.TestCase):
         r = self.assess(ticks + [hit(100_000, 100_000, 0, overkill=40_000)])
         self.assertNotIn("rot", r)
         self.assertEqual((r["biggestHit"]["times"], r["biggestHit"]["over"]), (6, 6.0))
-        # Three ticks within a second from full health: a one-shot, not rot.
+        # Three hits within a second from full health: a burst (no hit was 80% of their health), not rot.
         r = self.assess([hit(99_200, 300_000, 700_000), hit(99_500, 300_000, 400_000),
                          hit(99_900, 400_000, 0, overkill=40_000)])
-        self.assertEqual(r["deathType"], "oneShot")
+        self.assertEqual(r["deathType"], "burst")
+        self.assertEqual((r["burst"]["hits"], r["burst"]["total"], r["burst"]["abilities"][0]["times"]),
+                         (3, 1_040_000, 3))
         self.assertNotIn("rot", r)
+        # One 90% hit and a tick right after it: a one-shot.
+        r = self.assess([hit(99_200, 900_000, 100_000), hit(99_900, 100_000, 0, overkill=40_000)])
+        self.assertEqual(r["deathType"], "oneShot")
+        self.assertEqual(r["biggestHit"]["pctOfMax"], 90)           # the 90% hit is named
+        # A small tick, then a 120% killing blow: a one-shot, nothing set it up.
+        r = self.assess([hit(99_600, 100_000, 900_000), hit(99_900, 900_000, 0, overkill=300_000)])
+        self.assertEqual(r["deathType"], "oneShot")
+        self.assertNotIn("biggestHit", r)
         # One big chunk among them: a set-up hit, not rot.
         r = self.assess([hit(96_000, 600_000, 400_000), hit(98_000, 150_000, 250_000),
                          hit(100_000, 250_000, 0, overkill=40_000)])
@@ -756,6 +766,14 @@ class LethalWindowTests(unittest.TestCase):
         self.assertIn("fightIDs: [9]", queries[0])
         # 55s is in A's window; 80s and 120s are between deaths (not kept).
         self.assertEqual([h["timestamp"] for h in hits[1]], [55_000, 55_000])
+
+    def test_identical_hits_at_the_same_moment_all_count(self):
+        # Two droplets soaked in the same millisecond for the same amount are two hits.
+        same = [hit(99_978, 301_233, 698_767), hit(99_978, 301_233, 397_534)]      # from full health
+        merged = defensives.merge_hits({1: same}, {1: [hit(99_999, 397_534, 0, overkill=100_000)]})
+        self.assertEqual(len(merged[1]), 3)
+        r = self.assess(merged[1])
+        self.assertEqual((r["deathType"], r["burst"]["hits"]), ("burst", 3))
 
     def test_ready_too_late(self):
         r = self.assess([hit(100_000, 1_000_000, 0, overkill=300_000)], available=[SHIELD_WALL],

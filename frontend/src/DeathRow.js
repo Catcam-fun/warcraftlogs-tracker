@@ -251,7 +251,9 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
     : !s ? (current ? 'no killing blow recorded' : '')
     : instakill ? 'instant kill, with no damage to stop'
     : s.deathType === 'oneShot'
-      ? `one-shot from ${s.fromPct ?? s.hpBeforePct}%${s.burstMs ? ` in ${secsFine(s.burstMs)}` : ''} · died by ${fmt(s.overkill)}`
+      ? `one-shot from ${s.fromPct ?? s.hpBeforePct}% · died by ${fmt(s.overkill)}`
+    : s.deathType === 'burst' && s.burst
+      ? `burst from ${s.fromPct ?? s.hpBeforePct}%: ${s.burst.hits} hits ${s.burst.ms < 50 ? 'at once' : `in ${secsFine(s.burst.ms)}`} · died by ${fmt(s.overkill)}`
       : s.rot
         ? `worn down by ${s.rot.name} (rot, ${s.rot.hits} hits) · died by ${fmt(s.overkill)}`
       : s.biggestHit
@@ -271,11 +273,18 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
               <span><School mask={s.rot.school}>{s.rot.name}</School> <i>· rot</i></span>
               <small>{s.rot.hits} hits, {fmt(s.rot.total)} over {s.rot.seconds}s</small></span>} />
           )}
-          {s.biggestHit && (
+          {s.deathType === 'burst' && s.burst && (
+            <Row a="Burst" b={<span className="stack">
+              <span>{s.burst.abilities.slice(0, 3).map((x, i) => (
+                <React.Fragment key={i}>{i > 0 && ', '}<School mask={x.school}>{x.name}</School>{x.times > 1 && ` ×${x.times}`}</React.Fragment>
+              ))}{s.burst.abilities.length > 3 && ', …'}</span>
+              <small>{s.burst.hits} hits, {fmt(s.burst.total)} {s.burst.ms < 50 ? 'at once' : `in ${secsFine(s.burst.ms)}`}</small></span>} />
+          )}
+          {s.biggestHit && s.deathType !== 'burst' && (
             <Row a="Set up by" b={<span className="stack">
               <span><School mask={s.biggestHit.school}>{s.biggestHit.name}</School> {fmt(s.biggestHit.size)} <i>· {s.biggestHit.pctOfMax}%</i></span>
               <small>{s.biggestHit.times > 1
-                ? `${s.biggestHit.times} hits, ${fmt(s.biggestHit.total)} over ${s.biggestHit.over}s`
+                ? `${s.biggestHit.times} hits, ${fmt(s.biggestHit.total)} ${s.biggestHit.over >= 0.1 ? `over ${s.biggestHit.over}s` : 'at once'}`
                 : s.biggestHit.ago >= 0.1 ? `${s.biggestHit.ago}s before` : 'same moment'}</small></span>} />
           )}
           <Row a="Health before it" b={<>{fmt(s.maxHp * s.hpBeforePct / 100)} <i>· {s.hpBeforePct}%</i></>} />
