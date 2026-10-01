@@ -95,6 +95,7 @@ const BACKGROUNDS = [
 ];
 
 const UPDATES = [
+  ['Defensives judged on the whole burst', 'Each death replays the seconds before it, so a big hit followed by a finishing tick counts; analyses run about twice as fast.', 'OCT 1'],
   ['Midnight Season 2 support', "The Venomous Abyss and Nymrissa Wavecaller in the Tidebound Grotto are tracked as one combined tier.", 'AUG 18'],
   ['Midnight Season 1 support', "The Voidspire, The Dreamrift, and March on Quel'Danas are wired for raid-night review.", 'MAR 17'],
   ['Cheat Death detection', 'Signed-in accounts can isolate prevented lethal events with improved deduplication.', 'DEC 8'],

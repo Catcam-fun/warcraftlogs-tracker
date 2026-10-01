@@ -202,6 +202,11 @@ class AnalyzeFlowTests(unittest.TestCase):
             "abilities": {},
         }
 
+    def _windows(self, _token, _rid, pulls):
+        # Bob's killing blow, from full health.
+        return {10: [{"timestamp": 5_000, "type": "damage", "targetID": 10, "abilityGameID": 9, "amount": 900,
+                      "overkill": 100, "hitPoints": 0, "maxHitPoints": 900, "resourceActor": 2}]}
+
     def _run(self, **extra):
         from analysis import RAID_ENCOUNTERS
         raid = next(k for k, v in RAID_ENCOUNTERS.items() if 3129 in v)
@@ -214,10 +219,12 @@ class AnalyzeFlowTests(unittest.TestCase):
                 mock.patch.object(app_module, 'get_guild_reports', return_value=reports), \
                 mock.patch.object(app_module, 'get_fights', autospec=True, side_effect=self._fights) as fights, \
                 mock.patch.object(app_module, 'get_report_deaths_bulk', autospec=True, return_value=deaths) as bulk, \
-                mock.patch.object(app_module.defensives, 'fetch_defensive_events', autospec=True,
-                                  return_value={"casts": {}, "buffs": {}, "talents": {}}), \
-                mock.patch.object(app_module.defensives, 'fetch_killing_blows', autospec=True,
-                                  return_value={}):
+                mock.patch.object(app_module.defensives, 'fetch_defensive_raw', autospec=True,
+                                  return_value={}), \
+                mock.patch.object(app_module.defensives, 'fetch_instakills', autospec=True,
+                                  return_value={}), \
+                mock.patch.object(app_module.defensives, 'fetch_death_windows', autospec=True,
+                                  side_effect=self._windows) as windows:
             resp = app_module.app.test_client().post('/api/analyze', json={
                 "clientId": "a", "clientSecret": "b", "guildName": "G", "server": "S",
                 "region": "US", "fightZone": 0, "selectedRaid": raid, "difficulty": 5, **extra})
@@ -225,6 +232,7 @@ class AnalyzeFlowTests(unittest.TestCase):
         results = [l for l in body.split("\n\n") if '"result"' in l]
         self.assertEqual(len(results), 1, body)
         import json
+        self.window_calls = windows.call_args_list
         return json.loads(results[0][6:])["result"], fights.call_count, bulk.call_count
 
     def test_analysis_counts_deaths_and_caches_finished_reports(self):
@@ -239,7 +247,10 @@ class AnalyzeFlowTests(unittest.TestCase):
         self.assertNotIn("characterBreakdown", result)
         self.assertEqual(result["meta"]["failedReports"], [])
         self.assertIn("defensives", result["events"]["Bob"][0])
+        self.assertEqual(result["events"]["Bob"][0]["defensives"]["survival"]["deathType"], "oneShot")
         self.assertEqual((fights_calls, bulk_calls), (2, 2))
+        # Only the deaths that can count get their seconds fetched: Bob's, by his name in the log.
+        self.assertEqual(self.window_calls[0].args[2], [(1, [(5_000, "Bob")])])
 
         # Old reports are finished, so a second run is served from cache.
         _, fights_calls, bulk_calls = self._run()
