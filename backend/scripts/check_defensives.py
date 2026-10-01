@@ -30,7 +30,12 @@ def main():
     cat = defensives.catalog_for(meta.get("report_start"))
     print(f"Patch {cat.patch}")
     indexed = defensives.fetch_defensive_events(token, code, [f["id"] for f in fights], start, end, dead, cat)
-    killing = defensives.fetch_killing_blows(token, code, [f["id"] for f in fights])
+    log_names = {f["id"]: f.get("logName") or f["name"] for f in meta["friendlies"]}
+    windows = defensives.fetch_death_windows(token, code, [
+        (f["id"], [(d["timestamp"], log_names.get(d.get("targetID"))) for d in deaths.get(f["id"], [])])
+        for f in fights])
+    hits = defensives.merge_hits(windows, defensives.fetch_instakills(token, code, [f["id"] for f in fights],
+                                                                      start, end))
 
     talents = indexed["talents"]
     all_entries = {e for d in cat.all.values() for e in d["talent_entries"]}
@@ -48,9 +53,9 @@ def main():
             pid = d.get("targetID")
             spec = (meta["player_details"].get(pid) or {}).get("spec")
             r = defensives.analyze_death(pid, cls.get(pid), spec, f["id"], f["start_time"], d["timestamp"],
-                                         indexed, meta["abilities"], names, killing_blows=killing.get(pid, []),
+                                         indexed, meta["abilities"], names, hits=hits.get(pid, []),
                                          ability_schools=meta.get("ability_schools", {}), cat=cat,
-                                         aoe_known=defensives.logs_mark_aoe(killing),
+                                         aoe_known=defensives.logs_mark_aoe(hits),
                                          armor_k=defensives.armor_constant(f.get("boss"), f.get("difficulty")))
             t = (d["timestamp"] - f["start_time"]) / 1000
             print(f"[{f['name']} #{f['id']} +{t:.0f}s] {names.get(pid)} ({spec} {cls.get(pid)}) "
@@ -67,7 +72,11 @@ def main():
                     print(f"   instant kill: {sv['killingHit']['name']}")
                     continue
                 print(f"   killing blow: {sv['killingHit']['name']} {sv['killingHit']['pctOfMax']}% of max, "
-                      f"overkill {sv['overkill']:,}; would save: {sv['wouldSave']}")
+                      f"overkill {sv['overkill']:,}; {sv['deathType']}, {sv['window']['hits']} hits over "
+                      f"{sv['window']['fromAgo']}s; would save: {sv['wouldSave']}")
+                if sv.get("biggestHit"):
+                    b = sv["biggestHit"]
+                    print(f"   biggest hit before it: {b['name']} {b['pctOfMax']}% of max, {b['ago']}s before")
                 for name, det in sv["details"].items():
                     extra = []
                     if det.get("talents"):
@@ -77,6 +86,8 @@ def main():
                                      + ", ".join(f"{x['rank']} {x['heal']:,}" for x in det['rank']['ranks']) + ")")
                     if det.get("why"):
                         extra.append("why " + det["why"])
+                    if det.get("pressAgo") is not None:
+                        extra.append(f"pressed {det['pressAgo']}s before")
                     print(f"      {name}: {det['amount']:,}" + (" | " + "; ".join(extra) if extra else ""))
 
 

@@ -202,22 +202,30 @@ class AnalyzeFlowTests(unittest.TestCase):
             "abilities": {},
         }
 
-    def _run(self, **extra):
+    def _windows(self, _token, _rid, pulls):
+        # Bob's killing blow, from full health.
+        return {10: [{"timestamp": 5_000, "type": "damage", "targetID": 10, "abilityGameID": 9, "amount": 900,
+                      "overkill": 100, "hitPoints": 0, "maxHitPoints": 900, "resourceActor": 2}]}
+
+    def _run(self, roster_patch=True, **extra):
         from analysis import RAID_ENCOUNTERS
         raid = next(k for k, v in RAID_ENCOUNTERS.items() if 3129 in v)
         deaths = {1: [{"timestamp": 5_000, "targetName": "Bob", "targetID": 10,
                        "abilityName": "Zap"}]}
         reports = [{"id": "R1", "start": 1_000_000, "end": 1_100_000, "owner": "x"},
                    {"id": "R2", "start": 9_000_000, "end": 9_100_000, "owner": "x"}]
-        with mock.patch.object(app_module, 'get_access_token', return_value='t'), \
-                mock.patch.object(app_module, 'get_guild_roster', return_value={'bob', 'amy'}), \
+        roster = mock.patch.object(app_module, 'get_guild_roster', return_value={'bob', 'amy'}) if roster_patch \
+            else mock.MagicMock()
+        with mock.patch.object(app_module, 'get_access_token', return_value='t'), roster, \
                 mock.patch.object(app_module, 'get_guild_reports', return_value=reports), \
                 mock.patch.object(app_module, 'get_fights', autospec=True, side_effect=self._fights) as fights, \
                 mock.patch.object(app_module, 'get_report_deaths_bulk', autospec=True, return_value=deaths) as bulk, \
-                mock.patch.object(app_module.defensives, 'fetch_defensive_events', autospec=True,
-                                  return_value={"casts": {}, "buffs": {}, "talents": {}}), \
-                mock.patch.object(app_module.defensives, 'fetch_killing_blows', autospec=True,
-                                  return_value={}):
+                mock.patch.object(app_module.defensives, 'fetch_defensive_raw', autospec=True,
+                                  return_value={}), \
+                mock.patch.object(app_module.defensives, 'fetch_instakills', autospec=True,
+                                  return_value={}), \
+                mock.patch.object(app_module.defensives, 'fetch_death_windows', autospec=True,
+                                  side_effect=self._windows) as windows:
             resp = app_module.app.test_client().post('/api/analyze', json={
                 "clientId": "a", "clientSecret": "b", "guildName": "G", "server": "S",
                 "region": "US", "fightZone": 0, "selectedRaid": raid, "difficulty": 5, **extra})
@@ -225,6 +233,7 @@ class AnalyzeFlowTests(unittest.TestCase):
         results = [l for l in body.split("\n\n") if '"result"' in l]
         self.assertEqual(len(results), 1, body)
         import json
+        self.window_calls = windows.call_args_list
         return json.loads(results[0][6:])["result"], fights.call_count, bulk.call_count
 
     def test_analysis_counts_deaths_and_caches_finished_reports(self):
@@ -239,11 +248,29 @@ class AnalyzeFlowTests(unittest.TestCase):
         self.assertNotIn("characterBreakdown", result)
         self.assertEqual(result["meta"]["failedReports"], [])
         self.assertIn("defensives", result["events"]["Bob"][0])
+        self.assertEqual(result["events"]["Bob"][0]["defensives"]["survival"]["deathType"], "oneShot")
         self.assertEqual((fights_calls, bulk_calls), (2, 2))
+        # Only the deaths that can count get their seconds fetched: Bob's, by his name in the log.
+        self.assertEqual(self.window_calls[0].args[2], [(1, [(5_000, "Bob")])])
 
         # Old reports are finished, so a second run is served from cache.
         _, fights_calls, bulk_calls = self._run()
         self.assertEqual((fights_calls, bulk_calls), (0, 0))
+
+    def test_roster_filter_can_be_turned_off(self):
+        for c in (app_module.report_meta_cache, app_module.deaths_lru, app_module.defensive_lru, app_module.recap_lru):
+            c._data.clear()
+        with mock.patch.object(app_module, 'get_guild_roster', return_value={'amy'}) as roster:
+            # Default: only roster members count, so Bob (not on it) is left out.
+            result, _, _ = self._run(roster_patch=False)
+            self.assertNotIn("Bob", result["pullParticipation"])
+            self.assertTrue(result["meta"]["rosterOnly"])
+            self.assertEqual(roster.call_count, 1)
+            # Off: everyone in the reports counts, and the roster isn't fetched.
+            result, _, _ = self._run(roster_patch=False, rosterOnly=False)
+            self.assertEqual(len(result["events"]["Bob"]), 2)
+            self.assertFalse(result["meta"]["rosterOnly"])
+            self.assertEqual(roster.call_count, 1)
 
     def test_cheat_death_requires_sign_in(self):
         app_module.report_meta_cache._data.clear()

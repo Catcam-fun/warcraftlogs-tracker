@@ -92,7 +92,6 @@ report_meta_cache = SharedReportCache("meta", 200)
 report_deaths_cache = SharedReportCache("deaths", 400)
 # Casts, defensive buffs and talent loadouts, indexed by player.
 report_defensive_cache = SharedReportCache("defensives", 200)
-# Killing blows (hits with overkill) per report, indexed by player.
-report_recap_cache = SharedReportCache("killing-blows", 200)
-# A player's health in the seconds before a death (heals over time), per death.
-report_hp_window_cache = SharedReportCache("hp-window", 5000)
+# Per report, indexed by player: the hits before the deaths that can count
+# (lethal windows) and instant kills.
+report_recap_cache = SharedReportCache("killing-blows", 400)

@@ -34,8 +34,7 @@ import boss_spell_text
 from features import CHEAT_DEATH_ABILITY_IDS
 from auth import require_user, verify_token, forget_token, _bearer_token
 from cache import (report_meta_cache, report_deaths_cache as deaths_lru,
-                   report_defensive_cache as defensive_lru, report_recap_cache as recap_lru,
-                   report_hp_window_cache as hp_window_lru)
+                   report_defensive_cache as defensive_lru, report_recap_cache as recap_lru)
 from ratelimit import RateLimiter, limit
 import supabase_client
 
@@ -43,8 +42,8 @@ import supabase_client
 # its fights/deaths are cached; anything newer may still be live-logging.
 REPORT_CACHE_MIN_AGE_MS = 2 * 60 * 60 * 1000
 
-# Parallel WCL requests per analysis. WCL's own rate limit is per API key,
-# so this stays modest.
+# Reports read at once per analysis (each runs its own few queries at once).
+# WCL's own rate limit is per API key, so this stays modest.
 REPORT_FETCH_WORKERS = 6
 
 share_limiter = RateLimiter(max_calls=20, per_seconds=3600)
@@ -115,6 +114,8 @@ def analyze():
             author_filters = config.get('authorFilters', [])
             character_groups = config.get('characterGroups', {})
             enable_cheat_death = bool(config.get('enableCheatDeath', False)) and signed_in
+            # Only players on the guild roster count (configs from before the toggle: on).
+            roster_only = config.get('rosterOnly', True) is not False
             
             # Validate required fields
             if not all([client_id, client_secret, guild_name, server, region]):
@@ -132,21 +133,24 @@ def analyze():
                 yield f"data: {json.dumps({'error': f'Authentication failed: {str(e)}'})}\n\n"
                 return
             
-            # Get guild roster for filtering
+            # Get guild roster for filtering (skipped when the roster filter is off)
             guild_roster = set()
-            try:
-                yield f"data: {json.dumps({'stage': 'roster', 'message': 'Fetching guild roster...'})}\n\n"
-                guild_roster = get_guild_roster(token, guild_name, server, region)
-                if guild_roster:
-                    yield f"data: {json.dumps({'stage': 'roster', 'message': f'Found {len(guild_roster)} guild members'})}\n\n"
-                else:
-                    yield f"data: {json.dumps({'stage': 'roster', 'message': 'Guild roster unavailable - processing all reports'})}\n\n"
-            except Exception as e:
-                print(f"Guild roster fetch error: {str(e)}")
-                yield f"data: {json.dumps({'stage': 'roster', 'message': 'Could not fetch guild roster - processing all reports'})}\n\n"
+            if not roster_only:
+                yield f"data: {json.dumps({'stage': 'roster', 'message': 'Counting everyone in the reports (guild roster filter off)'})}\n\n"
+            else:
+                try:
+                    yield f"data: {json.dumps({'stage': 'roster', 'message': 'Fetching guild roster...'})}\n\n"
+                    guild_roster = get_guild_roster(token, guild_name, server, region)
+                    if guild_roster:
+                        yield f"data: {json.dumps({'stage': 'roster', 'message': f'Found {len(guild_roster)} guild members'})}\n\n"
+                    else:
+                        yield f"data: {json.dumps({'stage': 'roster', 'message': 'Guild roster unavailable - processing all reports'})}\n\n"
+                except Exception as e:
+                    print(f"Guild roster fetch error: {str(e)}")
+                    yield f"data: {json.dumps({'stage': 'roster', 'message': 'Could not fetch guild roster - processing all reports'})}\n\n"
 
-            # Only count players who are on the guild roster. If the roster
-            # couldn't be fetched, fall back to counting everyone.
+            # Only count players who are on the guild roster. With the filter
+            # off, or if the roster couldn't be fetched, everyone counts.
             def is_guild_member(nm):
                 if not guild_roster:
                     return True
@@ -257,8 +261,6 @@ def analyze():
             # what each defensive does (from the catalog of the report's patch).
             report_icons_by_id = {}
             ability_info = {}
-            # Deaths whose heal-over-time verdict needs the health before the hit.
-            hot_pending = []
             for fd in all_fights_deduped:
                 for aid, icon in fd.get('ability_icons', {}).items():
                     report_icons_by_id.setdefault(str(aid), icon)
@@ -275,57 +277,101 @@ def analyze():
             yield f"data: {json.dumps({'stage': 'deaths', 'message': f'Fetching deaths for {len(fights_by_report)} reports...'})}\n\n"
             report_deaths_cache = {}
             
+            def counted_by_fight(deaths, friendlies):
+                """{fightID: [(death ts, log name)]}: the deaths that can count (within the deaths
+                tracked, not in a wipe, guild members), the only ones whose defensives are shown."""
+                log_names = {f.get("id"): f.get("logName") or f.get("name") for f in friendlies}
+                out = {}
+                for fid, ds in deaths.items():
+                    ds = sorted(drop_saves_that_died(ds), key=lambda d: d["timestamp"])
+                    out[fid] = [(d["timestamp"], log_names.get(d.get("targetID")))
+                                for d, (slot, in_wipe) in zip(ds, rank_pull_deaths(ds))
+                                if slot <= max_cutoff and not in_wipe and not d.get("isCheatDeath")
+                                and is_guild_member(normalize_character_name(d.get("targetName") or ""))]
+                return out
+
             def fetch_report_deaths(rid, report_fights):
-                """Fetch deaths and defensive data (casts, buffs, talents) for one report"""
+                """Deaths, defensive data (casts, buffs, talents) and the hits before the deaths that
+                can count, for one report. Independent queries run at once; finished reports are cached."""
                 try:
                     sample_fight_data = report_fights[0]
                     friendlies = sample_fight_data['friendlies']
                     ability_map = sample_fight_data['ability_map']
                     fights_list = [fd['fight'] for fd in report_fights]
-                    
-                    # With cheat deaths on, the list of effects is part of the key, so adding one refetches.
-                    cache_key = (rid, tuple(sorted(f['id'] for f in fights_list)), bool(enable_cheat_death),
-                                 tuple(sorted(CHEAT_DEATH_ABILITY_IDS)) if enable_cheat_death else None)
-                    deaths = deaths_lru.get(cache_key) if report_finished.get(rid) else None
-                    if deaths is None:
-                        deaths = get_report_deaths_bulk(token, rid, fights_list, friendlies, ability_map, enable_cheat_death)
-                        if report_finished.get(rid):
-                            deaths_lru.set(cache_key, deaths)
-                    
-                    # Defensive casts, auras, talents and consumable heals for the
-                    # players who died, judged by the patch live when it was logged.
-                    cat = defensives.catalog_for(sample_fight_data.get('report_abs_start'))
-                    dead = {d.get("targetID") for ds in deaths.values() for d in ds if d.get("targetID")}
-                    def_key = (rid, tuple(sorted(f['id'] for f in fights_list)), tuple(sorted(dead)),
-                               cat.patch, defensives.CATALOG_FINGERPRINT)
-                    def_data = defensive_lru.get(def_key) if report_finished.get(rid) else None
-                    if def_data is None:
-                        try:
-                            def_data = defensives.fetch_defensive_events(
-                                token, rid, sorted(f['id'] for f in fights_list),
-                                min(f['start_time'] for f in fights_list),
-                                max(f['end_time'] for f in fights_list), dead, cat)
-                            if report_finished.get(rid):
-                                defensive_lru.set(def_key, def_data)
-                        except Exception as e:
-                            # Deaths still count; this report just lacks defensive detail.
-                            print(f"[WARN] Defensive data unavailable for report {rid}: {e}")
-                            def_data = None
-
-                    # Killing blows (one cheap request per report), for "would it have saved them".
                     fight_ids = sorted(f['id'] for f in fights_list)
-                    kb_key = (rid, tuple(fight_ids), "with-instakills-armor")
-                    recaps = recap_lru.get(kb_key) if report_finished.get(rid) else None
-                    if recaps is None:
-                        try:
-                            recaps = defensives.fetch_killing_blows(token, rid, fight_ids)
-                            if report_finished.get(rid):
-                                recap_lru.set(kb_key, recaps)
-                        except Exception as e:
-                            print(f"[WARN] Killing blows unavailable for report {rid}: {e}")
-                            recaps = None
+                    first_start = min(f['start_time'] for f in fights_list)
+                    last_end = max(f['end_time'] for f in fights_list)
+                    finished = report_finished.get(rid)
+                    # Defensive casts, auras, talents and consumable heals, judged by
+                    # the patch live when it was logged.
+                    cat = defensives.catalog_for(sample_fight_data.get('report_abs_start'))
 
-                    return rid, deaths, def_data, recaps, None
+                    # With cheat deaths on, the list of effects is part of the key, so adding one refetches.
+                    cache_key = (rid, tuple(fight_ids), bool(enable_cheat_death),
+                                 tuple(sorted(CHEAT_DEATH_ABILITY_IDS)) if enable_cheat_death else None)
+                    deaths = deaths_lru.get(cache_key) if finished else None
+                    ik_key = (rid, tuple(fight_ids), "instakills")
+                    instakills = recap_lru.get(ik_key) if finished else None
+
+                    def def_key(dead):
+                        return (rid, tuple(fight_ids), tuple(sorted(dead)), cat.patch, defensives.CATALOG_FINGERPRINT,
+                                "pull-specs")
+
+                    def dead_in(ds):
+                        return {d.get("targetID") for dl in ds.values() for d in dl if d.get("targetID")}
+
+                    def_data = defensive_lru.get(def_key(dead_in(deaths))) if finished and deaths is not None else None
+                    def_error = hits_error = None
+                    with ThreadPoolExecutor(max_workers=3) as pool:
+                        deaths_job = None if deaths is not None else pool.submit(
+                            get_report_deaths_bulk, token, rid, fights_list, friendlies, ability_map, enable_cheat_death)
+                        raw_job = None if def_data is not None else pool.submit(
+                            defensives.fetch_defensive_raw, token, rid, fight_ids, first_start, last_end, cat)
+                        ik_job = None if instakills is not None else pool.submit(
+                            defensives.fetch_instakills, token, rid, fight_ids, first_start, last_end)
+                        if deaths_job is not None:
+                            deaths = deaths_job.result()
+                            if finished:
+                                deaths_lru.set(cache_key, deaths)
+                        if raw_job is not None:
+                            try:
+                                dead = dead_in(deaths)
+                                def_data = defensives.filter_defensive_raw(raw_job.result(), dead, cat)
+                                if finished:
+                                    defensive_lru.set(def_key(dead), def_data)
+                            except Exception as e:
+                                # Deaths still count; this report just lacks defensive detail.
+                                def_error = e
+                                def_data = None
+                        if ik_job is not None:
+                            try:
+                                instakills = ik_job.result()
+                                if finished:
+                                    recap_lru.set(ik_key, instakills)
+                            except Exception as e:
+                                hits_error = e
+                    if def_error:
+                        print(f"[WARN] Defensive data unavailable for report {rid}: {def_error}")
+
+                    # The seconds before each death that can count: one request, one block per pull.
+                    hits = None
+                    counted = counted_by_fight(deaths, friendlies)
+                    win_key = (rid, tuple((fid, tuple(c)) for fid, c in sorted(counted.items()) if c),
+                               "lethal-window", defensives.LETHAL_WINDOW_MS)
+                    windows = recap_lru.get(win_key) if finished else None
+                    if windows is None and hits_error is None:
+                        try:
+                            windows = defensives.fetch_death_windows(token, rid, sorted(counted.items()))
+                            if finished:
+                                recap_lru.set(win_key, windows)
+                        except Exception as e:
+                            hits_error = e
+                    if hits_error is None:
+                        hits = defensives.merge_hits(windows, instakills)
+                    else:
+                        print(f"[WARN] Hits before deaths unavailable for report {rid}: {hits_error}")
+
+                    return rid, deaths, def_data, hits, None
                 except Exception as e:
                     print(f"[ERROR] Error fetching data for report {rid}: {str(e)}")
                     fights_list = [fd['fight'] for fd in report_fights]
@@ -336,7 +382,7 @@ def analyze():
             failed_reports = []
             
             report_defensive_data = {}
-            report_recaps = {}
+            report_hits = {}
             
             with ThreadPoolExecutor(max_workers=8) as executor:
                 future_to_rid = {
@@ -345,12 +391,12 @@ def analyze():
                 }
                 
                 for future in as_completed(future_to_rid):
-                    rid, deaths, def_data, recaps, error = future.result()
+                    rid, deaths, def_data, hits, error = future.result()
                     if error:
                         failed_reports.append(rid)
                     report_deaths_cache[rid] = deaths
                     report_defensive_data[rid] = def_data
-                    report_recaps[rid] = recaps
+                    report_hits[rid] = hits
                     completed += 1
                     
                     if completed % 5 == 0 or completed == total_reports:
@@ -359,13 +405,15 @@ def analyze():
             if failed_reports:
                 yield f"data: {json.dumps({'stage': 'deaths', 'message': f'Warning: {len(failed_reports)} report(s) could not be read; results may be incomplete'})}\n\n"
             partial = [r for r in fights_by_report
-                       if r not in failed_reports and (report_defensive_data.get(r) is None or report_recaps.get(r) is None)]
+                       if r not in failed_reports and (report_defensive_data.get(r) is None or report_hits.get(r) is None)]
             if partial:
                 msg = (f'Warning: defensive details missing for {len(partial)} report(s); '
                        'WarcraftLogs may be rate-limiting this API key. Try again in a while.')
                 yield f"data: {json.dumps({'stage': 'deaths', 'message': msg})}\n\n"
             yield f"data: {json.dumps({'stage': 'processing', 'message': f'Processing {len(all_fights_deduped)} fights...'})}\n\n"
             
+            # Whether each report marks AoE hits at all (older logs don't).
+            aoe_known = {rid: defensives.logs_mark_aoe(h) for rid, h in report_hits.items() if h is not None}
             total_deaths = 0
             pullCutoffTimestamps = {}
             
@@ -383,7 +431,6 @@ def analyze():
                 player_details = fight_data.get("player_details", {})
                 friendly_class = {f.get("id"): f.get("type") for f in friendlies}
                 friendly_names_by_id = {f.get("id"): f.get("name") for f in friendlies}
-                friendly_log_names = {f.get("id"): f.get("logName") for f in friendlies}
                 
                 pull_counter_by_boss[boss_id] += 1
                 seq_no = pull_counter_by_boss[boss_id]
@@ -463,30 +510,29 @@ def analyze():
                     }
                     
                     def_data = report_defensive_data.get(rid)
-                    if def_data and target_id and not death_event["isCheatDeath"]:
+                    # Defensives are shown only for deaths that can count.
+                    if def_data and target_id and not death_event["isCheatDeath"] and slot <= max_cutoff \
+                            and not in_wipe:
                         death_args = dict(
                             player_id=target_id,
                             player_class=friendly_class.get(target_id),
-                            spec=player_spec,
+                            # The spec they played in this pull, not the report's main one.
+                            spec=defensives.pull_spec(def_data, fid, target_id, player_spec),
                             fight_id=fid,
                             fight_start=fight['start_time'],
                             death_ts=ev["timestamp"],
                             indexed=def_data,
                             ability_names=fight_data['ability_map'],
                             actor_names=friendly_names_by_id,
-                            killing_blows=(report_recaps.get(rid) or {}).get(target_id, [])
-                            if report_recaps.get(rid) is not None else None,
+                            hits=(report_hits.get(rid) or {}).get(target_id, [])
+                            if report_hits.get(rid) is not None else None,
                             ability_schools=fight_data.get('ability_schools', {}),
                             cat=defensives.catalog_for(report_abs_start),
-                            aoe_known=defensives.logs_mark_aoe(report_recaps.get(rid)),
+                            aoe_known=aoe_known.get(rid, True),
                             armor_k=defensives.armor_constant(fight.get('boss'), fight.get('difficulty')),
                             soulwell=soulwell,
                         )
                         death_event['defensives'] = defensives.analyze_death(**death_args)
-                        # Only deaths that can count (within the deaths tracked, not in a wipe).
-                        if slot <= max_cutoff and not in_wipe and defensives.needs_hp_timeline(death_event['defensives']):
-                            hot_pending.append((death_event, death_args, rid,
-                                                friendly_log_names.get(target_id) or friendly_names_by_id.get(target_id)))
                         cat = defensives.catalog_for(report_abs_start)
                         d = death_event['defensives']
                         for name in ([x["name"] for k in ("active", "available", "cooldown") for x in d[k]]
@@ -517,32 +563,6 @@ def analyze():
                     else:
                         pullCutoffTimestamps[pull_key][cutoff_val] = real_deaths_only[cutoff_idx]["timestamp"]
             
-            # Heals over time (Frenzied Regeneration, Crimson Vial): fetch the
-            # few seconds before those deaths and redo just those verdicts.
-            if hot_pending:
-                yield f"data: {json.dumps({'stage': 'deaths', 'message': f'Checking heals over time for {len(hot_pending)} deaths...'})}\n\n"
-
-                def hp_window(item):
-                    _, args, rid, log_name = item
-                    key = (rid, args["player_id"], args["death_ts"])
-                    cached = hp_window_lru.get(key) if report_finished.get(rid) else None
-                    if cached is not None:
-                        return cached
-                    try:
-                        timeline = defensives.fetch_hp_timeline(token, rid, log_name, args["player_id"], args["death_ts"])
-                    except Exception as e:
-                        print(f"[WARN] Health before a death unavailable ({rid}): {e}")
-                        return None
-                    if report_finished.get(rid):
-                        hp_window_lru.set(key, timeline)
-                    return timeline
-
-                with ThreadPoolExecutor(max_workers=8) as executor:
-                    timelines = list(executor.map(hp_window, hot_pending))
-                for (death_event, args, _, _), timeline in zip(hot_pending, timelines):
-                    if timeline:
-                        death_event['defensives'] = defensives.analyze_death(**args, hp_timeline=timeline)
-
             yield f"data: {json.dumps({'stage': 'complete', 'message': f'Analysis complete! Tracked {total_deaths} deaths across {len(counted_death_events)} players'})}\n\n"
             
             pull_participation_json = {p: list(s) for p, s in pull_participation.items()}
@@ -564,6 +584,7 @@ def analyze():
                     "characterGroups": character_groups,
                     "reportCount": len(reports),
                     "cheatDeathEnabled": enable_cheat_death,
+                    "rosterOnly": roster_only,
                     "failedReports": failed_reports,
                 },
                 "events": counted_death_events,
