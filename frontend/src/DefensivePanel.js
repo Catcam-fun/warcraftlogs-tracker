@@ -5,7 +5,7 @@ import React from 'react';
    { active: [{name, kind, major?}], activeKnown, available: [{name, major}],
      cooldown: [{name, major, usedAgo, readyIn}], talentsKnown,
      healthstone: {usedAgo|null}, potion: {usedAgo|null},
-     survival?: { deathType: 'oneShot'|'wasLow'|'instakill', killingHit: {name, size, pctOfMax, school},
+     survival?: { deathType: 'oneShot'|'burst'|'wasLow'|'instakill', killingHit: {name, size, pctOfMax, school},
                   hpBeforePct, overkill, maxHp, ignoresReduction, ignoresImmunity,
                   wouldSave: {name: true|false|null}, allTogetherWouldSave,
                   window: {hits, fromAgo}, biggestHit?, fromPct?, burstMs? } }
