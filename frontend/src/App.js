@@ -1518,8 +1518,8 @@ export default function WarcraftLogsApp() {
                 <div className="fpx-load">
                   <div className="fpx-load-orb">
                     <video
-                      src={`${process.env.PUBLIC_URL}/art/lura-loader.webm`}
-                      poster={`${process.env.PUBLIC_URL}/art/lura-loader.jpg`}
+                      src={`${process.env.PUBLIC_URL}/art/ulatek-loader.webm`}
+                      poster={`${process.env.PUBLIC_URL}/art/ulatek-loader.jpg`}
                       autoPlay loop muted playsInline aria-hidden="true"
                     />
                   </div>
