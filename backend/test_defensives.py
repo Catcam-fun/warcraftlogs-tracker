@@ -620,6 +620,28 @@ class PullSpecTests(unittest.TestCase):
         self.assertLessEqual(used, set(defensives.SPEC_NAMES.values()))
 
 
+class DurationTalentTests(unittest.TestCase):
+    """Talents that lengthen a defensive, checked on live Midnight logs (players' own uses)."""
+
+    def entry(self, name):
+        return next(d for d in defensives._LATEST.all.values() if d["name"] == name)
+
+    def with_talent(self, name, talent):
+        e = self.entry(name)
+        mod = next(m for m in e["duration_mods"] if m["talent"] == talent)
+        loadout = {x: 1 for x in mod["entries"]}
+        # Loadouts are trimmed to the talents the catalog uses: these must survive that.
+        self.assertTrue(set(loadout) <= defensives._LATEST.relevant_talent_entries)
+        return defensives._talented_duration(e, loadout, None)
+
+    def test_anti_magic_barrier(self):
+        self.assertEqual(defensives._talented_duration(self.entry("Anti-Magic Shell"), {}, None), 5_000)
+        self.assertAlmostEqual(self.with_talent("Anti-Magic Shell", "Anti-Magic Barrier"), 7_000)
+
+    def test_improved_barkskin(self):
+        self.assertEqual(self.with_talent("Barkskin", "Improved Barkskin"), 12_000)
+
+
 class LethalWindowTests(unittest.TestCase):
     """The seconds before a death are replayed, not just the killing blow."""
 

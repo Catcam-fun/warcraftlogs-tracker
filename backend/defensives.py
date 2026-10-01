@@ -98,7 +98,7 @@ class Catalog:
                 if isinstance(c, dict) and c.get("needs"):
                     entries.update(c["needs"].get("entries", ()))
             for m in [m for c in (d.get("mitigation") or []) for m in _mods(c)] \
-                    + d.get("cooldown_mods", []) + d.get("charge_mods", []):
+                    + d.get("cooldown_mods", []) + d.get("charge_mods", []) + d.get("duration_mods", []):
                 entries.update(m.get("entries", ()))
         for m in self.heal_talents:
             entries.update(m.get("entries", ()))
