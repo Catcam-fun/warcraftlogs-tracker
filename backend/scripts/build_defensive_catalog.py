@@ -375,6 +375,7 @@ GOREBOUND = ("Gorebound Fortitude", 1.3)   # its tooltip: "increasing its healin
 # SpellModOp values that change one effect's value -> that effect's index.
 MOD_OP_EFFECT_INDEX = {3: 0, 12: 1, 23: 2, 32: 3, 33: 4}
 MOD_OP_ALL = 0          # percent modifier on all of a spell's healing / absorb amounts
+MOD_OP_DURATION = 1
 MOD_OP_COOLDOWN = 11
 AURA_ADD_MOD, AURA_PCT_MOD = "107", "108"
 # The same, for every spell carrying a label (misc value 1) instead of a class
@@ -633,6 +634,22 @@ class Modifiers:
                         value = float(r["EffectBasePointsF"])
                         found.append({"talent": self.gd.names.get(int(r["SpellID"])), **who,
                                       key: int(value) if key == "add_ms" else round(1 + value / 100, 4)})
+        return _dedupe(found)
+
+    def duration(self, spells):
+        """Aura duration modifiers (Anti-Magic Barrier, Improved Barkskin): {"add_ms"} or {"mult"}.
+        `spells`: the button and the spells its aura lives on."""
+        found = []
+        for aura in (AURA_ADD_MOD, AURA_PCT_MOD, AURA_ADD_MOD_LABEL, AURA_PCT_MOD_LABEL):
+            for r, who in self._source_rows(aura):
+                if int(r["EffectMiscValue_0"]) == MOD_OP_DURATION and any(self._covers(r, s) for s in spells):
+                    value = float(r["EffectBasePointsF"])
+                    mod = {"talent": self.gd.names.get(int(r["SpellID"])), **who}
+                    if aura in (AURA_PCT_MOD, AURA_PCT_MOD_LABEL):
+                        mod["mult"] = round(1 + value / 100, 4)
+                    else:
+                        mod["add_ms"] = int(value)
+                    found.append(mod)
         return _dedupe(found)
 
     def charges(self, spell):
@@ -939,6 +956,10 @@ def build_catalog(build):
                 entry["cooldown_mods"] = mods.cooldown(sid)
             if mods.charges(sid):
                 entry["charge_mods"] = mods.charges(sid)
+            if entry["aura_ms"] and entry["aura_ms"] > 0:
+                durations = mods.duration([sid] + list(AURA_SPELLS.get(name, ())))
+                if durations:
+                    entry["duration_mods"] = durations
         if kind == "potion" and POTION_TYPICAL.get(name):
             entry["mitigation"] = [{"heal_amount": POTION_TYPICAL[name], "observed": True}]
         if kind == "potion" and ranks.get(sid):
