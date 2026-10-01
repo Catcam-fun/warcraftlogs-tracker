@@ -207,15 +207,16 @@ class AnalyzeFlowTests(unittest.TestCase):
         return {10: [{"timestamp": 5_000, "type": "damage", "targetID": 10, "abilityGameID": 9, "amount": 900,
                       "overkill": 100, "hitPoints": 0, "maxHitPoints": 900, "resourceActor": 2}]}
 
-    def _run(self, **extra):
+    def _run(self, roster_patch=True, **extra):
         from analysis import RAID_ENCOUNTERS
         raid = next(k for k, v in RAID_ENCOUNTERS.items() if 3129 in v)
         deaths = {1: [{"timestamp": 5_000, "targetName": "Bob", "targetID": 10,
                        "abilityName": "Zap"}]}
         reports = [{"id": "R1", "start": 1_000_000, "end": 1_100_000, "owner": "x"},
                    {"id": "R2", "start": 9_000_000, "end": 9_100_000, "owner": "x"}]
-        with mock.patch.object(app_module, 'get_access_token', return_value='t'), \
-                mock.patch.object(app_module, 'get_guild_roster', return_value={'bob', 'amy'}), \
+        roster = mock.patch.object(app_module, 'get_guild_roster', return_value={'bob', 'amy'}) if roster_patch \
+            else mock.MagicMock()
+        with mock.patch.object(app_module, 'get_access_token', return_value='t'), roster, \
                 mock.patch.object(app_module, 'get_guild_reports', return_value=reports), \
                 mock.patch.object(app_module, 'get_fights', autospec=True, side_effect=self._fights) as fights, \
                 mock.patch.object(app_module, 'get_report_deaths_bulk', autospec=True, return_value=deaths) as bulk, \
@@ -255,6 +256,21 @@ class AnalyzeFlowTests(unittest.TestCase):
         # Old reports are finished, so a second run is served from cache.
         _, fights_calls, bulk_calls = self._run()
         self.assertEqual((fights_calls, bulk_calls), (0, 0))
+
+    def test_roster_filter_can_be_turned_off(self):
+        for c in (app_module.report_meta_cache, app_module.deaths_lru, app_module.defensive_lru, app_module.recap_lru):
+            c._data.clear()
+        with mock.patch.object(app_module, 'get_guild_roster', return_value={'amy'}) as roster:
+            # Default: only roster members count, so Bob (not on it) is left out.
+            result, _, _ = self._run(roster_patch=False)
+            self.assertNotIn("Bob", result["pullParticipation"])
+            self.assertTrue(result["meta"]["rosterOnly"])
+            self.assertEqual(roster.call_count, 1)
+            # Off: everyone in the reports counts, and the roster isn't fetched.
+            result, _, _ = self._run(roster_patch=False, rosterOnly=False)
+            self.assertEqual(len(result["events"]["Bob"]), 2)
+            self.assertFalse(result["meta"]["rosterOnly"])
+            self.assertEqual(roster.call_count, 1)
 
     def test_cheat_death_requires_sign_in(self):
         app_module.report_meta_cache._data.clear()
