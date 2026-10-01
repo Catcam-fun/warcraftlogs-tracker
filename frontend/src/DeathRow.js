@@ -252,6 +252,8 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
     : instakill ? 'instant kill, with no damage to stop'
     : s.deathType === 'oneShot'
       ? `one-shot from ${s.fromPct ?? s.hpBeforePct}%${s.burstMs ? ` in ${secsFine(s.burstMs)}` : ''} · died by ${fmt(s.overkill)}`
+      : s.rot
+        ? `worn down by ${s.rot.name} (rot, ${s.rot.hits} hits) · died by ${fmt(s.overkill)}`
       : s.biggestHit
         ? `at ${s.hpBeforePct}% after ${s.biggestHit.name} (${s.biggestHit.pctOfMax}%${s.biggestHit.ago >= 0.1 ? `, ${s.biggestHit.ago}s before` : ''}) · died by ${fmt(s.overkill)}`
         : `at ${s.hpBeforePct}%, hit for ${s.killingHit.pctOfMax}% · died by ${fmt(s.overkill)}`;
@@ -264,6 +266,11 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
       {s && !instakill && (
         <div className="kv">
           <Row a="Killing blow" b={<>{fmt(s.killingHit.size)} <i>· {s.killingHit.pctOfMax}% of max HP</i></>} />
+          {s.rot && (
+            <Row a="Worn down by" b={<span className="stack">
+              <span><School mask={s.rot.school}>{s.rot.name}</School> <i>· rot</i></span>
+              <small>{s.rot.hits} hits, {fmt(s.rot.total)} over {s.rot.seconds}s</small></span>} />
+          )}
           {s.biggestHit && (
             <Row a="Set up by" b={<span className="stack">
               <span><School mask={s.biggestHit.school}>{s.biggestHit.name}</School> {fmt(s.biggestHit.size)} <i>· {s.biggestHit.pctOfMax}%</i></span>
