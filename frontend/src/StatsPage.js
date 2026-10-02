@@ -14,6 +14,7 @@ const CLASS_COLORS = {
   Warrior: 'var(--fpx-c-warrior)',
 };
 const TOP_ABILITIES = 15;
+const NOT_LOGGED = "WarcraftLogs recorded no hit or instant kill for these deaths, so what killed them isn't known.";
 const pct = (x) => `${(x * 100).toFixed(x >= 0.1 ? 0 : 1)}%`;
 const num = (n) => n.toLocaleString('en-US');
 const fmtDate = (ms) => new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -126,12 +127,15 @@ export default function StatsPage({ raid }) {
           {abilities.length === 0 ? <div className="fpx-rempty">No deaths counted.</div> : (
             <ol className="fpx-stlist">
               {abilities.map((a, i) => {
-                const [id, name, icon, text] = data.abilities[a.index];
+                const [id, logged, icon, logText] = data.abilities[a.index];
+                // No killing blow in the log (ability 0): named as an analysis names it.
+                const name = id ? logged : 'Killing blow not in the log';
+                const text = id ? logText : NOT_LOGGED;
                 return (
                   <li key={`${a.boss}:${id}`}>
                     <Tip className="fpx-strow" content={() => (
                       <>
-                        <TipHead name={name} icon={icon} sub={bossName[a.boss]} />
+                        <TipHead name={name} icon={icon} glyph={id ? null : '?'} sub={bossName[a.boss]} />
                         {text && <p className="desc">{text}</p>}
                         <div className="kv">
                           <div className="r"><span>Deaths</span><span>{num(a.deaths)} of {num(t.deaths)}</span></div>
@@ -140,7 +144,7 @@ export default function StatsPage({ raid }) {
                       </>
                     )}>
                       <span className="rk">{i + 1}</span>
-                      <Icon name={name} icon={icon} />
+                      <Icon name={id ? name : '?'} icon={icon} />
                       <span className="nm">
                         <span className="t">{name}{!bossId && <small>{bossName[a.boss]}</small>}</span>
                         <Bar value={a.share} max={maxShare} color="linear-gradient(90deg,var(--fpx-kill-2),var(--fpx-kill))" />

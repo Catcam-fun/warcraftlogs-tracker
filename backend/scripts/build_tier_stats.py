@@ -132,9 +132,11 @@ def main():
                 try:
                     rec = fut.result()
                 except Exception as e:
-                    failed += 1
-                    print(f"  {k['code']}#{k['fight']}: {e}", flush=True)
-                    continue
+                    if "permission" not in str(e):
+                        failed += 1
+                        print(f"  {k['code']}#{k['fight']}: {e}", flush=True)
+                        continue
+                    rec = None  # the log was made private after it was ranked
                 # An unreadable kill is cached too (as empty), so it isn't retried every run.
                 rec = rec or {"specs": [], "deaths": []}
                 tier_stats.save_cached(cache, k["code"], k["fight"], rec)
