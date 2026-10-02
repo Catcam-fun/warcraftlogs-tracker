@@ -893,3 +893,34 @@ table.fpx-mtx{width:100%;border-collapse:collapse;font-size:12px;
 .fpx-qual{position:absolute;left:-3px;top:-3px;z-index:2;height:15px;width:auto;pointer-events:none;
   filter:drop-shadow(0 0 1px rgba(0,0,0,.9))}
 .fpx-qual-inline{height:13px;width:auto;vertical-align:-1px;margin-right:5px}
+
+/* ---- tier stats (/stats) ---------------------------------- */
+.fpx-stsum{font-size:12.5px;color:var(--fpx-ink-dim)}
+.fpx-stsum b{color:var(--fpx-ink)}
+.fpx-stsum span{color:var(--fpx-ink-faint)}
+.fpx-stgrid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;align-items:start}
+@media(max-width:980px){.fpx-stgrid{grid-template-columns:1fr}}
+.fpx-stlist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.fpx-strow{display:grid;grid-template-columns:22px 26px minmax(0,1fr) auto;align-items:center;gap:10px;
+  padding:6px 8px;border-radius:8px;outline:none;cursor:default}
+.fpx-strow:hover,.fpx-strow:focus-visible{background:rgba(255,255,255,.045)}
+.fpx-strow .rk{font-size:11.5px;color:var(--fpx-ink-faint);text-align:right}
+.fpx-strow .dot{width:10px;height:10px;border-radius:50%;justify-self:center;box-shadow:0 0 0 2px rgba(0,0,0,.5)}
+.fpx-strow .nm{display:flex;flex-direction:column;gap:5px;min-width:0}
+.fpx-strow .nm .t{font-size:13px;font-weight:600;color:var(--fpx-ink);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.fpx-strow .nm .t small,.fpx-strow .v small{font-size:11px;font-weight:500;color:var(--fpx-ink-faint);margin-left:7px}
+.fpx-strow .v{font-size:13px;font-weight:700;color:var(--fpx-ink);text-align:right;white-space:nowrap;min-width:64px}
+.fpx-stbar-track{display:block;height:6px;border-radius:3px;background:rgba(255,255,255,.06);overflow:hidden}
+.fpx-stbar-fill{display:block;height:100%;border-radius:3px;min-width:2px;transition:width .3s var(--fpx-ease)}
+.fpx-stmore{margin-top:12px}
+.fpx-stats .fpx-frow{gap:16px}
+@media(max-width:600px){.fpx-stats .fpx-flabel{flex:1 1 calc(50% - 16px)}.fpx-stats .fpx-flabel select{flex:1;min-width:0}}
+@media(max-width:600px){
+  .fpx-stats .fpx-rpanel{padding:14px 10px}
+  .fpx-strow{grid-template-columns:22px minmax(0,1fr) auto;gap:8px;padding:6px 4px}
+  .fpx-strow .rk{display:none}
+  .fpx-strow .nm .t{white-space:normal}
+  .fpx-strow .nm .t small{display:block;margin:1px 0 0}
+  .fpx-strow .v{min-width:0}
+}

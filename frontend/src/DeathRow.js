@@ -212,7 +212,7 @@ export function Tip({ content, className, children }) {
 // Blizzard's icon server doesn't have every new icon; WarcraftLogs hosts them all.
 const ICON_FALLBACK = (icon) => `https://assets.rpglogs.com/img/warcraft/abilities/${icon}.jpg`;
 
-function Icon({ name, icons, icon: given, className = '', quality }) {
+export function Icon({ name, icons, icon: given, className = '', quality }) {
   const icon = given || icons?.[name];
   const [tries, setTries] = useState(0);
   const img = !icon || tries > 1
@@ -224,7 +224,7 @@ function Icon({ name, icons, icon: given, className = '', quality }) {
   return <span className="fpx-qualwrap">{img}<img className="fpx-qual" src={quality} alt="" /></span>;
 }
 
-const TipHead = ({ name, icons, icon, sub, glyph, quality }) => (
+export const TipHead = ({ name, icons, icon, sub, glyph, quality }) => (
   <div className="th"><Icon name={glyph || name} icons={icons} icon={icon} quality={quality} />
     <div><b>{name}</b>{sub && <small>{sub}</small>}</div></div>
 );

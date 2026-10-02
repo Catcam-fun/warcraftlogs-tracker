@@ -1,10 +1,10 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Home, Crosshair, BarChart3, Bookmark, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { Home, Crosshair, BarChart3, Bookmark, Skull, ChevronsLeft, ChevronsRight } from 'lucide-react';
 
 /* Shared left rail — single source of truth so every surface (Analyze,
    Results, Terms, Privacy, Saved, loading) shows an identical nav.
-   `active` ∈ 'home' | 'analyze' | 'results' | 'saved' | null. */
+   `active` ∈ 'home' | 'analyze' | 'results' | 'saved' | 'stats' | null. */
 export default function FpxRail({ collapsed, onToggle, active, onHome, onAnalyze, onResults, onSaved }) {
   const navigate = useNavigate();
   return (
@@ -32,6 +32,9 @@ export default function FpxRail({ collapsed, onToggle, active, onHome, onAnalyze
         </button>
         <button className={`fpx-nav${active === 'saved' ? ' on' : ''}`} onClick={onSaved || (() => navigate('/saved'))} title="Saved Reports">
           <Bookmark /><span className="lbl">Saved</span>
+        </button>
+        <button className={`fpx-nav${active === 'stats' ? ' on' : ''}`} onClick={() => navigate('/stats')} title="Tier Stats">
+          <Skull /><span className="lbl">Tier Stats</span>
         </button>
       </nav>
     </aside>

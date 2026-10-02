@@ -1,0 +1,54 @@
+# Refreshes the Tier Stats page's data (frontend/public/stats/) from public
+# WarcraftLogs kills, once a day. Needs the repository secrets WCL_CLIENT_ID and
+# WCL_CLIENT_SECRET (a WarcraftLogs API client). Kills already read are kept in
+# the Actions cache, so a daily run only reads the new ones; the first runs read
+# the whole tier a few hours at a time (--max-minutes) until they've caught up.
+name: Tier stats
+
+on:
+  schedule:
+    - cron: "41 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tier-stats
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - name: Restore kills already read
+        uses: actions/cache/restore@v4
+        with:
+          path: .tier-stats-cache
+          key: tier-stats-${{ github.run_id }}
+          restore-keys: tier-stats-
+      - name: Read new kills
+        env:
+          WCL_CLIENT_ID: ${{ secrets.WCL_CLIENT_ID }}
+          WCL_CLIENT_SECRET: ${{ secrets.WCL_CLIENT_SECRET }}
+          STATS_CACHE: .tier-stats-cache
+        run: python backend/scripts/build_tier_stats.py --max-minutes 300
+      - name: Keep the kills read
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .tier-stats-cache
+          key: tier-stats-${{ github.run_id }}
+      - name: Commit the refreshed stats
+        run: |
+          git add frontend/public/stats
+          if git diff --cached --quiet; then echo "No new kills"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Tier stats: refresh from WarcraftLogs"
+          git push

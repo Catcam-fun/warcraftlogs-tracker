@@ -14,6 +14,7 @@ import PrivacyPolicy from './PrivacyPolicy';
 import { MOCK_RESULTS, MOCK_CONFIG } from './mockResults';
 import { API_URL, apiFetch, stripSecrets, loadLocalCredentials, saveLocalCredentials } from './api';
 import SavedReports from './SavedReports';
+import StatsPage from './StatsPage';
 import SaveReportDialog from './SaveReportDialog';
 import { countedDeaths, isCounted } from './deathCounting';
 import { DefensiveSummaryChip, DefensiveTopUnused, summarizeDefensives } from './DefensivePanel';
@@ -2202,6 +2203,32 @@ export default function WarcraftLogsApp() {
             </>
           } />
           
+          <Route path="/stats" element={
+            <>
+            <div className="fpx-atmos base" />
+            <div className="fpx-atmos vignette" />
+            <div className="fpx-atmos grain" />
+            <main className="fpx-land">
+              <div className={`fpx-shell${resultsRailCollapsed ? ' collapsed' : ''}`}>
+                <FpxRail
+                  collapsed={resultsRailCollapsed}
+                  onToggle={() => setResultsRailCollapsed((v) => !v)}
+                  active="stats"
+                  onHome={() => navigate('/')}
+                  onAnalyze={() => navigate('/analyze')}
+                  onResults={() => navigate('/results')}
+                />
+                <div className="fpx-main">
+                  <div className="fpx-top fpx-rv">
+                    <div className="fpx-crumbs">FLOOR POV&nbsp; /&nbsp; <b>TIER STATS</b></div>
+                  </div>
+                  <StatsPage raid={SEASON_TWO_RAIDS[0]} />
+                </div>
+              </div>
+            </main>
+            </>
+          } />
+
           <Route path="/saved" element={
             <>
             <div className="fpx-atmos base" />
