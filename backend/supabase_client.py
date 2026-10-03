@@ -369,6 +369,32 @@ def evict_report_cache(budget=None):
 
 
 # =============================================================================
+# RATE LIMITS (shared by every server copy; backend/migrations/003_rate_limits.sql)
+# =============================================================================
+
+_limits_disabled_until = 0.0
+
+
+def rate_limit_hit(bucket, client, max_calls, per_seconds):
+    """Count one request; True if it's within the limit, False if over it.
+
+    None when Supabase can't answer (not configured, function not created
+    yet, network): the caller then relies on its in-memory count.
+    """
+    global _limits_disabled_until
+    if db is None or time.time() < _limits_disabled_until:
+        return None
+    try:
+        result = db.rpc('rate_limit_hit', {'p_bucket': bucket, 'p_client': client,
+                                           'p_max': max_calls, 'p_window_seconds': per_seconds}).execute()
+        return bool(result.data)
+    except Exception as e:
+        _limits_disabled_until = time.time() + 300
+        print(f"[RateLimit] shared count failed, using in-memory limits for 5 min: {e}")
+        return None
+
+
+# =============================================================================
 # ACCOUNT DELETION
 # =============================================================================
 

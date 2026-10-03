@@ -1,0 +1,116 @@
+# Deploys Floor Pov to AWS on every merge to main (see aws/README.md).
+# Does nothing until the AWS_DEPLOY_ROLE_ARN variable is set in the repo's
+# GitHub settings, so it's safe to have before AWS is set up.
+name: Deploy to AWS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # lets GitHub prove its identity to AWS (no stored keys)
+  contents: read
+
+concurrency:
+  group: deploy-aws
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  STACK_NAME: floorpov
+
+jobs:
+  deploy:
+    if: vars.AWS_DEPLOY_ROLE_ARN != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'   # same as the Lambda runtime in aws/template.yaml
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Backend tests
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt
+          python -m unittest
+
+      - name: Frontend tests and build
+        working-directory: frontend
+        env:
+          # The site calls the API on its own address; CloudFront routes /api/*.
+          REACT_APP_API_URL: same-origin
+        run: |
+          npm ci
+          npx react-scripts test --watchAll=false
+          CI=false npm run build
+
+      - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy the stack (API, bucket, CloudFront, DNS)
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ORIGIN_SECRET: ${{ secrets.ORIGIN_SECRET }}
+          DOMAIN_NAME: ${{ vars.DOMAIN_NAME }}
+          HOSTED_ZONE_ID: ${{ vars.HOSTED_ZONE_ID }}
+          POINT_DOMAIN: ${{ vars.POINT_DOMAIN_AT_AWS || 'false' }}
+        run: |
+          params=(
+            "SupabaseUrl=$SUPABASE_URL"
+            "SupabaseKey=$SUPABASE_KEY"
+            "SupabaseServiceRoleKey=$SUPABASE_SERVICE_ROLE_KEY"
+            "OriginSecret=$ORIGIN_SECRET"
+            "PointDomainAtCloudFront=$POINT_DOMAIN"
+          )
+          # Domain settings only once they're filled in (SAM refuses empty values).
+          if [ -n "$DOMAIN_NAME" ]; then
+            params+=("DomainName=$DOMAIN_NAME" "HostedZoneId=$HOSTED_ZONE_ID")
+          fi
+          sam build --template-file aws/template.yaml
+          sam deploy \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION" \
+            --resolve-s3 \
+            --capabilities CAPABILITY_IAM \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides "${params[@]}"
+
+      - name: Upload the website
+        run: |
+          output() {
+            aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
+              --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text
+          }
+          BUCKET=$(output SiteBucketName)
+          DISTRIBUTION=$(output DistributionId)
+          # Built JS/CSS have a content hash in their names: cache for a year.
+          aws s3 sync frontend/build/static "s3://$BUCKET/static" \
+            --cache-control "public,max-age=31536000,immutable"
+          # Art and other files: a day. Files no longer in the build are removed
+          # (old static/ files stay, for visitors still on the previous version).
+          aws s3 sync frontend/build "s3://$BUCKET" --delete \
+            --exclude "static/*" --exclude "index.html" \
+            --cache-control "public,max-age=86400"
+          # The page itself: always checked, so a deploy shows up right away.
+          aws s3 cp frontend/build/index.html "s3://$BUCKET/index.html" \
+            --cache-control "no-cache"
+          aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION" --paths "/*"
+          echo "Site: $(output SiteUrl)" >> "$GITHUB_STEP_SUMMARY"

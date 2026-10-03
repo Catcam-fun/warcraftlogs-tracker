@@ -58,3 +58,12 @@ test('unreadable stored credentials start the form empty', () => {
   expect(loadLocalCredentials()).toEqual({ clientId: '', clientSecret: '' });
   localStorage.clear();
 });
+
+test('bodies go as plain JSON where the browser cannot gzip', async () => {
+  session(null);
+  const big = { data: 'x'.repeat(5000) };
+  await apiFetch('/api/share', { method: 'POST', body: big });
+  const sent = global.fetch.mock.calls[0][1];
+  expect(sent.body).toBe(JSON.stringify(big));
+  expect(sent.headers['Content-Encoding']).toBeUndefined();
+});

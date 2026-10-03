@@ -1,0 +1,306 @@
+# Floor Pov on AWS: the website on S3, the Flask API on Lambda, and one
+# CloudFront distribution in front of both. See aws/README.md.
+#
+#   visitor -> CloudFront -+- floorpov.gg/*      -> S3 bucket (built React site)
+#                          +- floorpov.gg/api/*  -> Lambda function URL (Flask)
+#
+# Deployed by .github/workflows/deploy-aws.yml with the AWS SAM CLI. SAM is
+# CloudFormation plus shortcuts for Lambda (the "Transform" line below).
+# Must be deployed in us-east-1: CloudFront only accepts certificates from there.
+
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Floor Pov - website (S3 + CloudFront) and API (Lambda)
+
+Parameters:
+  DomainName:
+    Type: String
+    Default: ''
+    Description: Site address, e.g. floorpov.gg. Leave empty to use only CloudFront's own *.cloudfront.net address.
+  HostedZoneId:
+    Type: String
+    Default: ''
+    Description: Route 53 hosted zone ID for DomainName. Needed when DomainName is set.
+  PointDomainAtCloudFront:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+    Description: The cutover switch. true creates the DNS records that send DomainName to this site (delete the old website records in Route 53 first).
+  SupabaseUrl:
+    Type: String
+  SupabaseKey:
+    Type: String
+    NoEcho: true
+  SupabaseServiceRoleKey:
+    Type: String
+    NoEcho: true
+  OriginSecret:
+    Type: String
+    NoEcho: true
+    MinLength: 32
+    Description: Random value CloudFront adds to every API request; the API refuses requests without it.
+  WebAdapterLayerVersion:
+    Type: Number
+    Default: 27
+    Description: Version of AWS's Lambda Web Adapter layer, which runs the Flask app on Lambda.
+
+Conditions:
+  HasDomain: !Not [!Equals [!Ref DomainName, '']]
+  PointDomain: !And
+    - !Condition HasDomain
+    - !Equals [!Ref PointDomainAtCloudFront, 'true']
+
+Resources:
+  # ---------------------------------------------------------------- API ---
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: Floor Pov API (Flask, run by the Lambda Web Adapter)
+      CodeUri: ../backend
+      Handler: run.sh
+      Runtime: python3.12
+      Architectures: [x86_64]
+      # CPU scales with memory; 1 GB also holds a big guild's analysis.
+      MemorySize: 1024
+      # Longest an analysis may run. A full season takes about a minute.
+      Timeout: 300
+      Layers:
+        - !Sub arn:aws:lambda:${AWS::Region}:753240598075:layer:LambdaAdapterLayerX86:${WebAdapterLayerVersion}
+      Environment:
+        Variables:
+          AWS_LAMBDA_EXEC_WRAPPER: /opt/bootstrap
+          AWS_LWA_INVOKE_MODE: response_stream
+          AWS_LWA_PORT: '8080'
+          AWS_LWA_READINESS_CHECK_PATH: /api/health
+          PORT: '8080'
+          WEB_CONCURRENCY: '1'
+          GUNICORN_TIMEOUT: '0'
+          PYTHONDONTWRITEBYTECODE: '1'
+          SUPABASE_URL: !Ref SupabaseUrl
+          SUPABASE_KEY: !Ref SupabaseKey
+          SUPABASE_SERVICE_ROLE_KEY: !Ref SupabaseServiceRoleKey
+          ORIGIN_SECRET: !Ref OriginSecret
+      FunctionUrlConfig:
+        AuthType: NONE
+        InvokeMode: RESPONSE_STREAM
+
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${ApiFunction}
+      RetentionInDays: 30
+
+  # Puts the visitor's real address on API requests (X-Viewer-Ip), so hourly
+  # limits count per visitor; whatever the visitor sent in it is replaced.
+  ApiViewerIpFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub ${AWS::StackName}-api-viewer-ip
+      AutoPublish: true
+      FunctionConfig:
+        Comment: Add the viewer IP to API requests
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+          var request = event.request;
+          request.headers['x-viewer-ip'] = { value: event.viewer.ip };
+          return request;
+        }
+
+  # ------------------------------------------------------------ WEBSITE ---
+
+  SiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  # Only this CloudFront distribution may read the bucket.
+  SiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref SiteBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: CloudFrontReadsSite
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub ${SiteBucket.Arn}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}
+
+  SiteOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub ${AWS::StackName}-site
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # Page addresses (/results, /saved) have no file in the bucket: they all
+  # load index.html and React picks the page. Files (/static/x.js) pass through.
+  SpaRoutingFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub ${AWS::StackName}-spa-routing
+      AutoPublish: true
+      FunctionConfig:
+        Comment: Serve index.html for page addresses
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+          var request = event.request;
+          var last = request.uri.split('/').pop();
+          if (last.indexOf('.') === -1) {
+            request.uri = '/index.html';
+          }
+          return request;
+        }
+
+  # ----------------------------------------------------------- DOMAIN ---
+
+  Certificate:
+    Type: AWS::CertificateManager::Certificate
+    Condition: HasDomain
+    Properties:
+      DomainName: !Ref DomainName
+      SubjectAlternativeNames:
+        - !Sub www.${DomainName}
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Ref DomainName
+          HostedZoneId: !Ref HostedZoneId
+        - DomainName: !Sub www.${DomainName}
+          HostedZoneId: !Ref HostedZoneId
+
+  # ------------------------------------------------------- CLOUDFRONT ---
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: Floor Pov
+        Enabled: true
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        PriceClass: PriceClass_100
+        DefaultRootObject: index.html
+        Aliases: !If
+          - HasDomain
+          - [!Ref DomainName, !Sub 'www.${DomainName}']
+          - !Ref AWS::NoValue
+        ViewerCertificate: !If
+          - HasDomain
+          - AcmCertificateArn: !Ref Certificate
+            SslSupportMethod: sni-only
+            MinimumProtocolVersion: TLSv1.2_2021
+          - CloudFrontDefaultCertificate: true
+        Origins:
+          - Id: site
+            DomainName: !GetAtt SiteBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt SiteOriginAccessControl.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+          - Id: api
+            # The function URL is https://<id>.lambda-url.<region>.on.aws/
+            DomainName: !Select [2, !Split ['/', !GetAtt ApiFunctionUrl.FunctionUrl]]
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+              # Seconds CloudFront waits between pieces of the analysis
+              # stream; progress messages arrive well within this.
+              OriginReadTimeout: 60
+            OriginCustomHeaders:
+              - HeaderName: X-Origin-Verify
+                HeaderValue: !Ref OriginSecret
+        DefaultCacheBehavior:
+          TargetOriginId: site
+          ViewerProtocolPolicy: redirect-to-https
+          Compress: true
+          # Managed policy CachingOptimized
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt SpaRoutingFunction.FunctionMetadata.FunctionARN
+        CacheBehaviors:
+          - PathPattern: /api/*
+            TargetOriginId: api
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            # The API compresses its own replies.
+            Compress: false
+            # Managed policy CachingDisabled
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            # Managed policy AllViewerExceptHostHeader: every header (login
+            # token, Accept-Encoding) except Host, which the function URL needs.
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ApiViewerIpFunction.FunctionMetadata.FunctionARN
+
+  # --------------------------------------------------------------- DNS ---
+
+  SiteDnsRecords:
+    Type: AWS::Route53::RecordSetGroup
+    Condition: PointDomain
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      # Z2FDTNDATAQYW2 is the fixed hosted zone ID of every CloudFront distribution.
+      RecordSets:
+        - Name: !Ref DomainName
+          Type: A
+          AliasTarget:
+            DNSName: !GetAtt Distribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2
+        - Name: !Ref DomainName
+          Type: AAAA
+          AliasTarget:
+            DNSName: !GetAtt Distribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2
+        - Name: !Sub www.${DomainName}
+          Type: A
+          AliasTarget:
+            DNSName: !GetAtt Distribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2
+        - Name: !Sub www.${DomainName}
+          Type: AAAA
+          AliasTarget:
+            DNSName: !GetAtt Distribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2
+
+Outputs:
+  SiteUrl:
+    Description: Where the site is served
+    Value: !If
+      - HasDomain
+      - !Sub https://${DomainName}
+      - !Sub https://${Distribution.DomainName}
+  CloudFrontAddress:
+    Description: CloudFront's own address (works before the domain is moved)
+    Value: !Sub https://${Distribution.DomainName}
+  DistributionId:
+    Description: Used by the deploy to clear CloudFront's cache
+    Value: !Ref Distribution
+  SiteBucketName:
+    Description: Bucket the built website is uploaded to
+    Value: !Ref SiteBucket
+  ApiFunctionName:
+    Description: Lambda function (logs are under this name in CloudWatch)
+    Value: !Ref ApiFunction

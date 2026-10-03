@@ -11,7 +11,7 @@ Supabase (SharedReportCache), so each one is downloaded from WCL only once.
 
 import threading
 from collections import OrderedDict
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 
 
 class LRUCache:
@@ -76,7 +76,10 @@ class SharedReportCache:
 
     def set(self, key, value):
         self.memory.set(key, value)
-        _WRITER.submit(self._backend().cache_put, self._key(key), value)
+        future = _WRITER.submit(self._backend().cache_put, self._key(key), value)
+        with _pending_lock:
+            _pending.add(future)
+        future.add_done_callback(_forget)
 
     def __len__(self):
         return len(self.memory)
@@ -84,6 +87,27 @@ class SharedReportCache:
 
 CACHE_VERSION = "v2"
 _WRITER = ThreadPoolExecutor(max_workers=2, thread_name_prefix="report-cache")
+_pending = set()
+_pending_lock = threading.Lock()
+
+
+def _forget(future):
+    with _pending_lock:
+        _pending.discard(future)
+
+
+def wait_for_writes(timeout=30):
+    """Block until the background Supabase writes queued so far are done.
+
+    On AWS Lambda the server is frozen as soon as a request finishes, so
+    writes still queued then would stall until some later request (or never
+    run). An analysis calls this after sending its result, before its
+    stream closes.
+    """
+    with _pending_lock:
+        futures = list(_pending)
+    if futures:
+        wait(futures, timeout=timeout)
 
 
 # Sized for Render's small instances: a report's fights+abilities entry is

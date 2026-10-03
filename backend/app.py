@@ -13,6 +13,7 @@ import json
 import os
 import re
 import secrets
+import threading
 import time
 from dotenv import load_dotenv
 
@@ -34,8 +35,9 @@ import boss_spell_text
 from features import CHEAT_DEATH_ABILITY_IDS
 from auth import require_user, verify_token, forget_token, _bearer_token
 from cache import (report_meta_cache, report_deaths_cache as deaths_lru,
-                   report_defensive_cache as defensive_lru, report_recap_cache as recap_lru)
-from ratelimit import RateLimiter, limit
+                   report_defensive_cache as defensive_lru, report_recap_cache as recap_lru,
+                   wait_for_writes)
+from ratelimit import RateLimiter, limit, from_cloudfront
 import supabase_client
 
 # A report whose last event is older than this is treated as finished and
@@ -46,9 +48,9 @@ REPORT_CACHE_MIN_AGE_MS = 2 * 60 * 60 * 1000
 # WCL's own rate limit is per API key, so this stays modest.
 REPORT_FETCH_WORKERS = 6
 
-share_limiter = RateLimiter(max_calls=20, per_seconds=3600)
-analyze_limiter = RateLimiter(max_calls=60, per_seconds=3600)
-save_limiter = RateLimiter(max_calls=30, per_seconds=3600)
+share_limiter = RateLimiter(max_calls=20, per_seconds=3600, name='share')
+analyze_limiter = RateLimiter(max_calls=60, per_seconds=3600, name='analyze')
+save_limiter = RateLimiter(max_calls=30, per_seconds=3600, name='save')
 
 # =============================================================================
 # FLASK SETUP
@@ -64,8 +66,66 @@ app.config['MAX_CONTENT_LENGTH'] = 25 * 1024 * 1024
 _origins = [o.strip() for o in os.environ.get('ALLOWED_ORIGINS', '*').split(',') if o.strip()]
 CORS(app,
      resources={r"/api/*": {"origins": _origins}},
-     allow_headers=["Content-Type", "Authorization"],
+     allow_headers=["Content-Type", "Content-Encoding", "Authorization"],
      methods=["GET", "POST", "DELETE", "OPTIONS"])
+
+# On AWS the API's Lambda has a public URL of its own; CloudFront adds the
+# ORIGIN_SECRET header to every request it forwards, so requests that skip
+# CloudFront are turned away. Unset (Render, local): no check. The health
+# check is exempt because Lambda's own startup probe calls it directly.
+ORIGIN_SECRET = os.environ.get('ORIGIN_SECRET')
+
+
+@app.before_request
+def _check_origin_and_decode_body():
+    if ORIGIN_SECRET and request.path != '/api/health' and not from_cloudfront():
+        return jsonify({"error": "Not found"}), 404
+    # Saves and shares send the whole analysis (several MB of JSON), so the
+    # browser gzips it; Lambda refuses request bodies over 6 MB.
+    if request.headers.get('Content-Encoding', '').lower() == 'gzip':
+        import zlib
+        inflater = zlib.decompressobj(31)
+        limit_bytes = app.config['MAX_CONTENT_LENGTH']
+        try:
+            body = inflater.decompress(request.get_data(cache=False), limit_bytes + 1)
+        except zlib.error:
+            return jsonify({"error": "Invalid request"}), 400
+        if len(body) > limit_bytes or inflater.unconsumed_tail:
+            return jsonify({"error": "Request too large"}), 413
+        request._cached_data = body
+
+
+def _accepted_encodings():
+    header = request.headers.get('Accept-Encoding', '')
+    return {e.split(';')[0].strip().lower() for e in header.split(',')}
+
+
+@app.after_request
+def _compress_json(response):
+    """Compress JSON replies (a loaded saved analysis is megabytes).
+
+    Render's Cloudflare front did this on its own; CloudFront doesn't for
+    uncached API responses. The analysis stream compresses itself.
+    """
+    if (response.direct_passthrough or response.is_streamed or response.mimetype != 'application/json'
+            or 'Content-Encoding' in response.headers):
+        return response
+    data = response.get_data()
+    if len(data) < 1024:
+        return response
+    accepted = _accepted_encodings()
+    if 'br' in accepted:
+        import brotli
+        response.set_data(brotli.compress(data, quality=5))
+        response.headers['Content-Encoding'] = 'br'
+    elif 'gzip' in accepted:
+        import gzip
+        response.set_data(gzip.compress(data, 6))
+        response.headers['Content-Encoding'] = 'gzip'
+    else:
+        return response
+    response.vary.add('Accept-Encoding')
+    return response
 
 
 # =============================================================================
@@ -604,6 +664,9 @@ def analyze():
             }
             
             yield f"data: {json.dumps({'result': response})}\n\n"
+            # The browser already has the result; finish the shared-cache
+            # writes before the stream closes (see wait_for_writes).
+            wait_for_writes()
         
         except Exception as e:
             print(f"Error in analyze: {str(e)}")
@@ -611,21 +674,56 @@ def analyze():
             traceback.print_exc()
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
     
-    stream, encoding = _compress_stream(generate(), request.headers.get('Accept-Encoding', ''))
+    stream, encoding = _compress_stream(_with_heartbeat(generate()), _accepted_encodings())
     headers = {'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no', 'Vary': 'Accept-Encoding'}
     if encoding:
         headers['Content-Encoding'] = encoding
     return Response(stream, mimetype='text/event-stream', headers=headers)
 
 
-def _compress_stream(events, accept_encoding):
+def _with_heartbeat(events, every=15):
+    """Pass the events through, adding an SSE comment after `every` quiet seconds.
+
+    CloudFront (on AWS) drops a stream that sends nothing for 60 seconds,
+    and one slow WarcraftLogs report can take a while. The browser ignores
+    comment lines. The analysis runs on a helper thread; if the client goes
+    away, it is stopped at its next progress message, as before.
+    """
+    import queue
+    pipe, finished, stop = queue.Queue(), object(), threading.Event()
+
+    def pump():
+        try:
+            for event in events:
+                if stop.is_set():
+                    break
+                pipe.put(event)
+        finally:
+            events.close()
+            pipe.put(finished)
+
+    threading.Thread(target=pump, daemon=True, name="analysis").start()
+    try:
+        while True:
+            try:
+                event = pipe.get(timeout=every)
+            except queue.Empty:
+                yield ": still working\n\n"
+                continue
+            if event is finished:
+                return
+            yield event
+    finally:
+        stop.set()
+
+
+def _compress_stream(events, accepted):
     """Compress an SSE stream without holding events back.
 
     The final result can be megabytes of JSON; compressed it is a fraction of
     that. Each event is flushed as it is written, so progress messages still
     arrive live. Returns (stream, Content-Encoding or None).
     """
-    accepted = {e.split(';')[0].strip().lower() for e in accept_encoding.split(',')}
     if 'br' in accepted:
         import brotli
         def br():

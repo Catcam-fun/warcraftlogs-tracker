@@ -187,6 +187,114 @@ class RateLimiterTests(unittest.TestCase):
         self.assertTrue(limiter.allow('other-ip'))
 
 
+class SharedRateLimitTests(unittest.TestCase):
+    def test_shared_count_can_refuse(self):
+        store = mock.Mock()
+        store.rate_limit_hit.return_value = False
+        limiter = RateLimiter(max_calls=5, per_seconds=60, name='share', store=store)
+        self.assertFalse(limiter.allow('1.2.3.4'))
+        bucket, client, max_calls, per = store.rate_limit_hit.call_args.args
+        self.assertEqual((bucket, max_calls, per), ('share', 5, 60))
+        self.assertNotIn('1.2.3.4', client)   # only a hash is sent
+
+    def test_memory_decides_when_shared_count_is_unavailable(self):
+        store = mock.Mock()
+        store.rate_limit_hit.return_value = None
+        limiter = RateLimiter(max_calls=1, per_seconds=60, name='share', store=store)
+        self.assertTrue(limiter.allow('ip'))
+        self.assertFalse(limiter.allow('ip'))
+
+
+class AwsHostingTests(unittest.TestCase):
+    """Behind CloudFront + Lambda (ORIGIN_SECRET set)."""
+
+    def setUp(self):
+        self.client = app_module.app.test_client()
+
+    def test_requests_that_skip_cloudfront_are_refused(self):
+        with mock.patch.dict('os.environ', {'ORIGIN_SECRET': 's3cret'}), \
+                mock.patch.object(app_module, 'ORIGIN_SECRET', 's3cret'):
+            self.assertEqual(self.client.get('/api/shared/abcdef12').status_code, 404)
+            self.assertEqual(self.client.get('/api/health').status_code, 200)
+            resp = self.client.get('/api/shared/abcdef12', headers={'X-Origin-Verify': 'wrong'})
+            self.assertEqual(resp.status_code, 404)
+            share = {"data": ANALYSIS, "config": {}, "created_at": "now"}
+            with mock.patch.object(supabase_client, 'get_share', return_value=share):
+                resp = self.client.get('/api/shared/abcdef12', headers={'X-Origin-Verify': 's3cret'})
+            self.assertEqual(resp.status_code, 200)
+
+    def test_client_ip_trusts_cloudfront_header_only_with_secret(self):
+        from ratelimit import client_ip
+        headers = {'X-Forwarded-For': '6.6.6.6, 1.1.1.1', 'X-Viewer-Ip': '9.9.9.9'}
+        with app_module.app.test_request_context('/', headers=headers):
+            self.assertEqual(client_ip(), '6.6.6.6')
+        with mock.patch.dict('os.environ', {'ORIGIN_SECRET': 's3cret'}), \
+                app_module.app.test_request_context('/', headers={**headers, 'X-Origin-Verify': 's3cret'}):
+            self.assertEqual(client_ip(), '9.9.9.9')
+
+    def test_gzipped_request_bodies_are_read(self):
+        import gzip, json
+        body = gzip.compress(json.dumps({"data": ANALYSIS, "config": SECRET_CONFIG}).encode())
+        with mock.patch.object(supabase_client, 'store_share', return_value={"expires_at": "later"}) as store:
+            resp = self.client.post('/api/share', data=body, headers={
+                'Content-Type': 'application/json', 'Content-Encoding': 'gzip'})
+        self.assertEqual(resp.status_code, 200, resp.get_data(as_text=True))
+        self.assertEqual(store.call_args.args[1], ANALYSIS)
+
+    def test_bad_gzip_is_rejected(self):
+        resp = self.client.post('/api/share', data=b'not gzip', headers={
+            'Content-Type': 'application/json', 'Content-Encoding': 'gzip'})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_large_json_replies_are_compressed(self):
+        import brotli, json
+        big = {"meta": {"guild_name": "G"}, "events": {f"P{i}": [] for i in range(500)}}
+        with mock.patch.object(supabase_client, 'get_share', return_value={"data": big, "config": {}, "created_at": "now"}):
+            plain = self.client.get('/api/shared/abcdef12')
+            packed = self.client.get('/api/shared/abcdef12', headers={'Accept-Encoding': 'gzip, br'})
+        self.assertIsNone(plain.headers.get('Content-Encoding'))
+        self.assertEqual(packed.headers.get('Content-Encoding'), 'br')
+        self.assertEqual(json.loads(brotli.decompress(packed.get_data())), plain.get_json())
+
+    def test_quiet_streams_get_heartbeats(self):
+        import time
+        def slow():
+            yield "data: 1\n\n"
+            time.sleep(0.35)
+            yield "data: 2\n\n"
+        out = list(app_module._with_heartbeat(slow(), every=0.1))
+        self.assertEqual(out[0], "data: 1\n\n")
+        self.assertEqual(out[-1], "data: 2\n\n")
+        self.assertTrue(all(e.startswith(":") for e in out[1:-1]) and len(out) >= 3)
+
+    def test_closing_the_stream_stops_the_analysis(self):
+        import threading
+        closed = threading.Event()
+        def endless():
+            try:
+                while True:
+                    yield "data: x\n\n"
+            finally:
+                closed.set()
+        stream = app_module._with_heartbeat(endless(), every=1)
+        next(stream)
+        stream.close()
+        self.assertTrue(closed.wait(2))
+
+    def test_wait_for_writes_finishes_queued_cache_writes(self):
+        import threading, cache
+        release, done = threading.Event(), []
+        def slow_put(key, value):
+            release.wait(5)
+            done.append(key)
+        store = mock.Mock(cache_put=slow_put)
+        shared = cache.SharedReportCache("test", 10, store=store)
+        shared.set("k", 1)
+        threading.Timer(0.1, release.set).start()
+        cache.wait_for_writes(timeout=5)
+        self.assertEqual(len(done), 1)
+
+
 class AnalyzeFlowTests(unittest.TestCase):
     """Runs /api/analyze end to end with WarcraftLogs mocked out."""
 

@@ -1,0 +1,123 @@
+# One-time setup, created by hand in the AWS console (CloudFormation ->
+# Create stack -> Upload this file). See aws/README.md, step 2.
+#
+# Lets the GitHub Actions workflow .github/workflows/deploy-aws.yml deploy
+# the site without any AWS keys stored in GitHub: GitHub proves who it is
+# (OpenID Connect) and AWS hands it short-lived credentials for the role
+# below, only for pushes to this repository's main branch.
+#
+# Also creates a monthly budget that emails you when spending passes the
+# limit, so a surprise bill can't sneak up on you.
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Floor Pov - GitHub deploy role and budget alert
+
+Parameters:
+  GitHubRepo:
+    Type: String
+    Default: Catcam-fun/warcraftlogs-tracker
+    Description: owner/repo allowed to deploy
+  BudgetEmail:
+    Type: String
+    Description: Email that gets budget alerts
+  MonthlyBudgetUsd:
+    Type: Number
+    Default: 10
+    Description: Alert when the month's AWS bill is on track to pass this (USD)
+  CreateGitHubOidcProvider:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+    Description: "false only if this AWS account already has the token.actions.githubusercontent.com identity provider"
+
+Conditions:
+  CreateProvider: !Equals [!Ref CreateGitHubOidcProvider, 'true']
+
+Resources:
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: CreateProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: github-deploy-floorpov
+      Description: Assumed by GitHub Actions to deploy Floor Pov
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepo}:ref:refs/heads/main
+      # Everything a deploy touches (CloudFormation, Lambda, S3, CloudFront,
+      # Route 53, certificates, logs), but no general IAM access...
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/PowerUserAccess
+      Policies:
+        # ...except managing the API's own Lambda role, which the template
+        # creates (named floorpov-ApiFunctionRole-...). This deploy role's own
+        # name doesn't match, so it can't widen its own permissions.
+        - PolicyName: manage-floorpov-lambda-role
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:GetRole
+                  - iam:PassRole
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:UpdateRole
+                  - iam:UpdateAssumeRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/floorpov-ApiFunctionRole-*
+
+  MonthlyBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: floorpov-monthly
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref MonthlyBudgetUsd
+          Unit: USD
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref BudgetEmail
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 50
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref BudgetEmail
+
+Outputs:
+  DeployRoleArn:
+    Description: Paste into GitHub as the AWS_DEPLOY_ROLE_ARN variable
+    Value: !GetAtt DeployRole.Arn
