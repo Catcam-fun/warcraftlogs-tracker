@@ -1,0 +1,25 @@
+# Project Atlas sync gate. Verify-only: fails a pull request when a docs/atlas
+# page was edited without regenerating its HTML (or the HTML was hand-edited).
+# Fix locally: node docs/atlas/scripts/build-atlas.mjs, then commit both.
+name: Atlas sync
+
+on:
+  pull_request:
+    paths:
+      - 'docs/atlas/**'
+
+jobs:
+  atlas-sync:
+    name: Verify Project Atlas is in sync
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Verify the committed HTML matches its canonical Markdown
+        run: node docs/atlas/scripts/verify-atlas.mjs
