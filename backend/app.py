@@ -611,10 +611,38 @@ def analyze():
             traceback.print_exc()
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
     
-    return Response(generate(), mimetype='text/event-stream', headers={
-        'Cache-Control': 'no-cache',
-        'X-Accel-Buffering': 'no'
-    })
+    stream, encoding = _compress_stream(generate(), request.headers.get('Accept-Encoding', ''))
+    headers = {'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no', 'Vary': 'Accept-Encoding'}
+    if encoding:
+        headers['Content-Encoding'] = encoding
+    return Response(stream, mimetype='text/event-stream', headers=headers)
+
+
+def _compress_stream(events, accept_encoding):
+    """Compress an SSE stream without holding events back.
+
+    The final result can be megabytes of JSON; compressed it is a fraction of
+    that. Each event is flushed as it is written, so progress messages still
+    arrive live. Returns (stream, Content-Encoding or None).
+    """
+    accepted = {e.split(';')[0].strip().lower() for e in accept_encoding.split(',')}
+    if 'br' in accepted:
+        import brotli
+        def br():
+            c = brotli.Compressor(quality=5)
+            for event in events:
+                yield c.process(event.encode('utf-8')) + c.flush()
+            yield c.finish()
+        return br(), 'br'
+    if 'gzip' in accepted:
+        import zlib
+        def gz():
+            c = zlib.compressobj(6, zlib.DEFLATED, 31)
+            for event in events:
+                yield c.compress(event.encode('utf-8')) + c.flush(zlib.Z_SYNC_FLUSH)
+            yield c.flush()
+        return gz(), 'gzip'
+    return events, None
 
 
 # =============================================================================

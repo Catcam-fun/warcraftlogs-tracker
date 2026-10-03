@@ -207,7 +207,7 @@ class AnalyzeFlowTests(unittest.TestCase):
         return {10: [{"timestamp": 5_000, "type": "damage", "targetID": 10, "abilityGameID": 9, "amount": 900,
                       "overkill": 100, "hitPoints": 0, "maxHitPoints": 900, "resourceActor": 2}]}
 
-    def _run(self, roster_patch=True, **extra):
+    def _run(self, roster_patch=True, encoding=None, **extra):
         from analysis import RAID_ENCOUNTERS
         raid = next(k for k, v in RAID_ENCOUNTERS.items() if 3129 in v)
         deaths = {1: [{"timestamp": 5_000, "targetName": "Bob", "targetID": 10,
@@ -228,8 +228,17 @@ class AnalyzeFlowTests(unittest.TestCase):
                                   side_effect=self._windows) as windows:
             resp = app_module.app.test_client().post('/api/analyze', json={
                 "clientId": "a", "clientSecret": "b", "guildName": "G", "server": "S",
-                "region": "US", "fightZone": 0, "selectedRaid": raid, "difficulty": 5, **extra})
-            body = resp.get_data(as_text=True)
+                "region": "US", "fightZone": 0, "selectedRaid": raid, "difficulty": 5, **extra},
+                headers={"Accept-Encoding": encoding} if encoding else {})
+            raw = resp.get_data()
+        self.assertEqual(resp.headers.get("Content-Encoding"), encoding)
+        if encoding == "br":
+            import brotli
+            raw = brotli.decompress(raw)
+        elif encoding == "gzip":
+            import gzip
+            raw = gzip.decompress(raw)
+        body = raw.decode("utf-8")
         results = [l for l in body.split("\n\n") if '"result"' in l]
         self.assertEqual(len(results), 1, body)
         import json
@@ -256,6 +265,12 @@ class AnalyzeFlowTests(unittest.TestCase):
         # Old reports are finished, so a second run is served from cache.
         _, fights_calls, bulk_calls = self._run()
         self.assertEqual((fights_calls, bulk_calls), (0, 0))
+
+    def test_analysis_stream_is_compressed_when_accepted(self):
+        plain = self._run()[0]
+        for encoding in ("br", "gzip"):
+            app_module.report_meta_cache._data.clear()
+            self.assertEqual(self._run(encoding=encoding)[0], plain)
 
     def test_roster_filter_can_be_turned_off(self):
         for c in (app_module.report_meta_cache, app_module.deaths_lru, app_module.defensive_lru, app_module.recap_lru):
