@@ -5,35 +5,172 @@
     "ribbon": "Generated · Project Atlas",
     "lang": "en"
   },
-  "paths": { "root": "docs/atlas", "domains": "domains", "build": "build" },
-  "options": { "agentIndex": true, "maxDepth": 3, "subpages": true, "sources": "all", "search": true },
+  "paths": {
+    "root": "docs/atlas",
+    "domains": "domains",
+    "build": "build"
+  },
+  "options": {
+    "agentIndex": true,
+    "maxDepth": 3,
+    "subpages": true,
+    "sources": "all",
+    "search": true
+  },
   "nav": {
-    "layer": { "label": "By Layer", "blurb": "Technical domains: frontend, backend API, WarcraftLogs, data, auth, game data, hosting." },
-    "feature": { "label": "By Feature", "blurb": "What a raid officer does on the site, end to end." }
+    "layer": {
+      "label": "By Layer",
+      "blurb": "Technical domains: frontend, backend API, WarcraftLogs, data, auth, game data, hosting."
+    },
+    "feature": {
+      "label": "By Feature",
+      "blurb": "What a raid officer does on the site, end to end."
+    }
   },
   "flows": [
-    { "id": "request-path", "label": "Analysis request path" },
-    { "id": "share-path", "label": "Save & share path" },
-    { "id": "data-build-path", "label": "Game-data build path" }
+    {
+      "id": "request-path",
+      "label": "Analysis request path"
+    },
+    {
+      "id": "share-path",
+      "label": "Save & share path"
+    },
+    {
+      "id": "data-build-path",
+      "label": "Game-data build path"
+    }
   ],
-  "environments": ["local", "production"],
+  "environments": [
+    "local",
+    "production"
+  ],
   "domains": [
-    { "id": "overview", "title": "Overview", "axis": "layer", "color": "teal", "kicker": "Domain · Orientation" },
-    { "id": "frontend", "title": "Frontend", "axis": "layer", "color": "blue", "kicker": "Domain · React site" },
-    { "id": "backend", "title": "Backend API", "axis": "layer", "color": "green", "kicker": "Domain · Flask engine" },
-    { "id": "warcraftlogs", "title": "WarcraftLogs Integration", "axis": "layer", "color": "teal", "kicker": "Domain · External API" },
-    { "id": "data-model", "title": "Data Model", "axis": "layer", "color": "teal", "kicker": "Domain · Supabase" },
-    { "id": "auth", "title": "Accounts & Auth", "axis": "layer", "color": "blue", "kicker": "Domain · Access" },
-    { "id": "game-data", "title": "Game Data Catalogs", "axis": "layer", "color": "green", "kicker": "Domain · Generated data" },
-    { "id": "deployment", "title": "Hosting & Deploy", "axis": "layer", "color": "blue", "kicker": "Domain · Release" },
-    { "id": "security", "title": "Security", "axis": "layer", "color": "red", "kicker": "Domain · Trust" },
-    { "id": "testing", "title": "Testing & Checks", "axis": "layer", "color": "green", "kicker": "Domain · Confidence" },
-    { "id": "operations", "title": "Operations & New Tier", "axis": "layer", "color": "amber", "kicker": "Domain · Ops" },
-
-    { "id": "feat-analyze", "title": "Analyze a Guild", "axis": "feature", "color": "blue", "kicker": "Feature · Analyze" },
-    { "id": "feat-results", "title": "Results & Death Breakdown", "axis": "feature", "color": "green", "kicker": "Feature · Results" },
-    { "id": "feat-saved", "title": "Saved Analyses", "axis": "feature", "color": "teal", "kicker": "Feature · Saved" },
-    { "id": "feat-share", "title": "Share Links", "axis": "feature", "color": "teal", "kicker": "Feature · Share" },
-    { "id": "feat-account", "title": "Account & Settings", "axis": "feature", "color": "amber", "kicker": "Feature · Account" }
+    {
+      "id": "overview",
+      "title": "Overview",
+      "axis": "layer",
+      "color": "teal",
+      "kicker": "Domain · Orientation"
+    },
+    {
+      "id": "frontend",
+      "title": "Frontend",
+      "axis": "layer",
+      "color": "blue",
+      "kicker": "Domain · React site"
+    },
+    {
+      "id": "backend",
+      "title": "Backend API",
+      "axis": "layer",
+      "color": "green",
+      "kicker": "Domain · Flask engine"
+    },
+    {
+      "id": "warcraftlogs",
+      "title": "WarcraftLogs Integration",
+      "axis": "layer",
+      "color": "teal",
+      "kicker": "Domain · External API"
+    },
+    {
+      "id": "data-model",
+      "title": "Data Model",
+      "axis": "layer",
+      "color": "teal",
+      "kicker": "Domain · Supabase"
+    },
+    {
+      "id": "auth",
+      "title": "Accounts & Auth",
+      "axis": "layer",
+      "color": "blue",
+      "kicker": "Domain · Access"
+    },
+    {
+      "id": "game-data",
+      "title": "Game Data Catalogs",
+      "axis": "layer",
+      "color": "green",
+      "kicker": "Domain · Generated data"
+    },
+    {
+      "id": "deployment",
+      "title": "Hosting & Deploy",
+      "axis": "layer",
+      "color": "blue",
+      "kicker": "Domain · Release"
+    },
+    {
+      "id": "security",
+      "title": "Security",
+      "axis": "layer",
+      "color": "red",
+      "kicker": "Domain · Trust"
+    },
+    {
+      "id": "testing",
+      "title": "Testing & Checks",
+      "axis": "layer",
+      "color": "green",
+      "kicker": "Domain · Confidence"
+    },
+    {
+      "id": "operations",
+      "title": "Operations & New Tier",
+      "axis": "layer",
+      "color": "amber",
+      "kicker": "Domain · Ops"
+    },
+    {
+      "id": "reconciliation",
+      "title": "Docs ⇄ Code Reconciliation",
+      "axis": "layer",
+      "color": "amber",
+      "kicker": "Meta · Docs vs code drift"
+    },
+    {
+      "id": "doc-remediation",
+      "title": "Documentation Remediation",
+      "axis": "layer",
+      "color": "amber",
+      "kicker": "Meta · Remove / consolidate / keep"
+    },
+    {
+      "id": "feat-analyze",
+      "title": "Analyze a Guild",
+      "axis": "feature",
+      "color": "blue",
+      "kicker": "Feature · Analyze"
+    },
+    {
+      "id": "feat-results",
+      "title": "Results & Death Breakdown",
+      "axis": "feature",
+      "color": "green",
+      "kicker": "Feature · Results"
+    },
+    {
+      "id": "feat-saved",
+      "title": "Saved Analyses",
+      "axis": "feature",
+      "color": "teal",
+      "kicker": "Feature · Saved"
+    },
+    {
+      "id": "feat-share",
+      "title": "Share Links",
+      "axis": "feature",
+      "color": "teal",
+      "kicker": "Feature · Share"
+    },
+    {
+      "id": "feat-account",
+      "title": "Account & Settings",
+      "axis": "feature",
+      "color": "amber",
+      "kicker": "Feature · Account"
+    }
   ]
 }
