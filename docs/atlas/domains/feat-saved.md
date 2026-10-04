@@ -50,7 +50,7 @@ invariants:
   - "MUST: every saved_analyses read and delete filter on both id and user_id (backend/supabase_client.py:141, backend/supabase_client.py:167)."
   - "NEVER: store or return WarcraftLogs credentials in a save; the config is stripped in the browser and again on write and read (frontend/src/SaveReportDialog.js:27, backend/supabase_client.py:101, backend/supabase_client.py:154)."
   - "MUST: keep at most MAX_SAVED_PER_USER (5) saves per user and clamp retention to 1-30 days (backend/supabase_client.py:93, backend/supabase_client.py:97)."
-content_hash: sha256:db5d7405e919011b73efdb0f85b5d86d9c426e31c38b49a156476892b16598c8
+content_hash: sha256:27792402726945aafa16629be230e2ef8f9c8afb89381fa904974a6e72f05027
 ---
 ## Summary
 
@@ -148,7 +148,7 @@ relied-on-by: [[feat-account]] — account deletion removes every save
 ## Gotchas
 
 - **Expiry is lazy.** Expired rows are deleted only when that user lists or saves (`backend/supabase_client.py:94`, `backend/supabase_client.py:126`). `load_analysis` does not check `expires_at` (`backend/supabase_client.py:140`), so a stale row opened by id before the next list still loads.
-- **The limiter is per IP and per process.** It keys on the first `X-Forwarded-For` entry (`backend/ratelimit.py:18`) and lives in memory (`backend/ratelimit.py:26`).
+- **The limiter is per IP and per process.** It keys on Cloudflare's `CF-Connecting-IP` (`backend/ratelimit.py:21`) and lives in memory (`backend/ratelimit.py:29`).
 - **Alt groups are not saved with the result.** Grouping made on the Results page lives in page state; a save carries `data` and the analysis config only (`frontend/src/SaveReportDialog.js:27`).
 - **No schema migration creates `saved_analyses`.** The migrations only enable RLS on it (`backend/migrations/001_shares_and_rls.sql:24`); the table predates them.
 

@@ -47,7 +47,7 @@ invariants:
   - "MUST: migrations 001 and 002 be run in the Supabase SQL editor before the features that use them are expected to persist."
   - "NEVER: commit backend/.env; it is gitignored and holds the backend's secrets."
   - "NEVER: rely on in-process state (rate limits, memory shares, caches) across workers or restarts."
-content_hash: sha256:d9b935b41a07c9fd161f54792cf10b8ea66b3d768839005c9aaf4bd528d437d6
+content_hash: sha256:94d940173efc8059584e100af188b4e769f71ea7ed0f4e4b43f943f2c7b59508
 ---
 # Deployment & Environments
 
@@ -134,7 +134,7 @@ edge static -> supa color=process "anon key"
 - **MUST** `SUPABASE_SERVICE_ROLE_KEY` be set on the production backend. Without it the client falls back to the anon key (`backend/supabase_client.py:38`) and RLS blocks saves and shares; migration 001 says so in its header (`backend/migrations/001_shares_and_rls.sql:11`).
 - **MUST** migrations 001 and 002 be run in the Supabase SQL editor before shares and the shared report cache are expected to persist (`backend/migrations/001_shares_and_rls.sql:2`, `backend/migrations/002_report_cache.sql:2`).
 - **NEVER** commit `backend/.env`; it is gitignored (`.gitignore:2`) and holds the backend's Supabase keys.
-- **NEVER** rely on in-process state across workers or restarts: rate limits (`backend/ratelimit.py:26`), memory shares (`backend/supabase_client.py:193`), the token cache (`backend/auth.py:25`) and the memory layer of the report caches all live in one process.
+- **NEVER** rely on in-process state across workers or restarts: rate limits (`backend/ratelimit.py:29`), memory shares (`backend/supabase_client.py:193`), the token cache (`backend/auth.py:25`) and the memory layer of the report caches all live in one process.
 
 ## Gotchas
 

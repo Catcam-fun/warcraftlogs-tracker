@@ -46,7 +46,7 @@ invariants:
   - "MUST: rebuild spell_icons.py after rebuilding defensive_catalog.py; the icon script reads every catalog ability."
   - "MUST: bump CACHE_VERSION in cache.py when what gets fetched or how it is indexed changes, so old shared-cache rows are never served to new code."
   - "NEVER: hand-edit the generated modules (defensive_catalog.py, boss_spell_flags.py, boss_spell_text.py, spell_icons.py, armor_constants.py, raid_wide_damage.py); edit the script and rerun it."
-content_hash: sha256:87909df2abda0aabcaf17ff3bcd1b9888d152a28a2736fe6bbdb677cde39aa8f
+content_hash: sha256:8ab43023ff5bcf61fb5f63bf0c00e383dead7d3a148bc9c3c4453797955ead35
 ---
 ## Summary
 
@@ -120,7 +120,7 @@ Failure modes visible in the code, and what the user sees:
 | Supabase insert for a share fails {supabase} | `backend/supabase_client.py:231` | falls back to memory; the response carries `ephemeral: true` |
 | Shared report cache errors {supabase} | `backend/supabase_client.py:306` | treated as a miss, and the shared cache is skipped for 5 minutes |
 | Sign-in check unreachable {supabase} | `backend/auth.py:38` | treated as signed out: cheat-death detection is off and signed-in routes refuse |
-| Too many requests from one IP {limits} | `backend/ratelimit.py:49`, `backend/app.py:49` | HTTP 429; 60 analyses, 20 shares and 30 saves per hour per IP |
+| Too many requests from one IP {limits} | `backend/ratelimit.py:52`, `backend/app.py:49` | HTTP 429; 60 analyses, 20 shares and 30 saves per hour per IP |
 
 ## Standing it up
 

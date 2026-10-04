@@ -27,8 +27,8 @@ anchors:
   evict: "backend/supabase_client.py:353"
   report_cache_table: "backend/migrations/002_report_cache.sql:12"
   client_ip: "backend/ratelimit.py:16"
-  rate_limiter: "backend/ratelimit.py:22"
-  limit: "backend/ratelimit.py:44"
+  rate_limiter: "backend/ratelimit.py:25"
+  limit: "backend/ratelimit.py:47"
 links:
   - backend
   - backend-analysis-pipeline
@@ -44,14 +44,14 @@ invariants:
   - "MUST: treat every shared-cache failure as a miss; an analysis never fails because Supabase is down."
   - "NEVER: make an analysis wait on a Supabase cache write; writes run on a background pool."
   - "NEVER: give the anon or authenticated roles access to report_cache; only the service role reads and writes it."
-content_hash: sha256:9fd95536863471b9de34ad2884c8cf56a7f9e49c9ece40506a5421557323773a
+content_hash: sha256:0e55a004b80bd22b0b5933f47fe07b27a054ac72623dcffd8d099aa575714960
 ---
 ## Summary
 
 - An analysis can touch dozens of reports. The caches make a second analysis of the same guild, or another officer's analysis, cost few or no WarcraftLogs API points. The module docstring states the idea: a finished report never changes (`backend/cache.py:4`).
 - There are four caches, one per kind of report data (`backend/cache.py:91`). Each is a **SharedReportCache**: memory first, then the shared Supabase table `report_cache` ([[data-model]]).
 - "Finished" means the report's end time is more than two hours old (`REPORT_CACHE_MIN_AGE_MS`, `backend/app.py:43`, `backend/app.py:181`). Anything newer may still be live-logging, so it is always fetched.
-- Rate limits are separate: `RateLimiter` windows in process memory, keyed by client IP (`backend/ratelimit.py:22`), applied by the `limit` decorator (`backend/ratelimit.py:44`).
+- Rate limits are separate: `RateLimiter` windows in process memory, keyed by client IP (`backend/ratelimit.py:25`), applied by the `limit` decorator (`backend/ratelimit.py:47`).
 
 ## How it works
 
@@ -92,9 +92,9 @@ Cached values are Python structures with integer and tuple keys, tuples and sets
 
 #### Rate limits
 
-`RateLimiter.allow(key)` keeps a deque of hit times per key (`backend/ratelimit.py:29`). It drops hits older than the window, refuses when the window already holds `max_calls` hits, and otherwise records the hit. When more than 10,000 keys are tracked, keys with no hits left are deleted so memory stays bounded (`backend/ratelimit.py:38`).
+`RateLimiter.allow(key)` keeps a deque of hit times per key (`backend/ratelimit.py:32`). It drops hits older than the window, refuses when the window already holds `max_calls` hits, and otherwise records the hit. When more than 10,000 keys are tracked, keys with no hits left are deleted so memory stays bounded (`backend/ratelimit.py:41`).
 
-`limit(limiter, message)` wraps a route: a non-OPTIONS request over the limit gets 429 `{"success": false, "error": message}` before the route runs (`backend/ratelimit.py:44`, `backend/ratelimit.py:48`). The key is `client_ip()`: the first entry of `X-Forwarded-For`, else the socket address, else `unknown` (`backend/ratelimit.py:16`).
+`limit(limiter, message)` wraps a route: a non-OPTIONS request over the limit gets 429 `{"success": false, "error": message}` before the route runs (`backend/ratelimit.py:47`, `backend/ratelimit.py:51`). The key is `client_ip()`: the first entry of `X-Forwarded-For`, else the socket address, else `unknown` (`backend/ratelimit.py:16`).
 
 ## Diagram
 
@@ -133,7 +133,7 @@ edge pipe -> wcl color=caution "both miss"
 | `analyze_limiter` {limit} | 60 per hour per IP | `backend/app.py:50` |
 | `share_limiter` {limit} | 20 per hour per IP | `backend/app.py:49` |
 | `save_limiter` {limit} | 30 per hour per IP | `backend/app.py:51` |
-| Tracked-key cleanup {limit} | above 10,000 keys | `backend/ratelimit.py:38` |
+| Tracked-key cleanup {limit} | above 10,000 keys | `backend/ratelimit.py:41` |
 
 The `report_cache` table (`backend/migrations/002_report_cache.sql:12`): `key` text primary key, `payload` text, `size_bytes` integer, `created_at` and `last_used_at` timestamps, an index on `last_used_at`, and row-level security on with no policies, so only the service role can use it (`backend/migrations/002_report_cache.sql:21`).
 
@@ -165,12 +165,12 @@ relied-on-by: [[feat-analyze]] — repeat analyses come back faster and cheaper
 | Shared cache | used only if `SUPABASE_URL` and a key are set (`backend/supabase_client.py:39`); otherwise memory only | on, through the service-role key |
 | Table missing | first error pauses the shared cache for 5 minutes, repeatedly | same; run `backend/migrations/002_report_cache.sql` once |
 | Rate limits | same numbers, per process | same; per gunicorn process |
-| `client_ip` | usually `127.0.0.1` (no proxy header) | first `X-Forwarded-For` entry from Render's proxy |
+| `client_ip` | the socket address, usually `127.0.0.1` | `CF-Connecting-IP` set by Cloudflare in front of Render |
 
 ## Gotchas
 
 - **Memory caches and limits are per process**: with more than one gunicorn worker, each has its own LRU and its own rate-limit windows, so the effective limit multiplies (see [[backend]]).
-- **`X-Forwarded-For` is trusted as given**: `client_ip` takes the first entry (`backend/ratelimit.py:18`). If the proxy in front appends to a client-supplied header instead of replacing it, a client can choose its own rate-limit key.
+- **The key is `CF-Connecting-IP`, not `X-Forwarded-For`**: Render appends to a client-supplied `X-Forwarded-For`, so its first entry can be forged; Cloudflare sets `CF-Connecting-IP` itself (`backend/ratelimit.py:17-22`). Without Cloudflare in front, every client would share the proxy's address and one limit.
 - **A memory hit for a deaths entry decides whether defensives are looked up**: the defensive cache is consulted only when the deaths came from cache, because its key needs the set of dead players (`backend/app.py:323`).
 - **The 2-hour rule uses the report's end time**: a report still being logged tonight is fetched in full on every analysis until two hours after its last event (`backend/app.py:180`).
 - **Eviction reads every row's key and size**: `evict_report_cache` selects the whole table's `key, size_bytes` each time it runs (`backend/supabase_client.py:357`). That is cheap at 200 MB of large rows but grows with row count.

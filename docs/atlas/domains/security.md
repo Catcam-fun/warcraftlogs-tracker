@@ -20,8 +20,8 @@ anchors:
   share_id_re: backend/app.py:624
   cheat_death_gate: backend/app.py:116
   client_ip: backend/ratelimit.py:16
-  rate_limiter: backend/ratelimit.py:22
-  limit_decorator: backend/ratelimit.py:44
+  rate_limiter: backend/ratelimit.py:25
+  limit_decorator: backend/ratelimit.py:47
   verify_token: backend/auth.py:36
   require_user: backend/auth.py:79
   strip_secrets_py: backend/supabase_client.py:61
@@ -51,7 +51,7 @@ invariants:
   - "MUST: share and save bodies pass _looks_like_analysis before anything is stored."
   - "NEVER: the browser reads saved_analyses, shared_results or report_cache; RLS is on and no policies grant it."
   - "NEVER: a WarcraftLogs secret is used as a cache key in plain form; the token cache keys on a SHA-256 of id and secret."
-content_hash: sha256:cd321f24c39ad51e3f30739f8dc57f8358bcab4df9ee818990b93afb438afe34
+content_hash: sha256:72d6493449acc0c3a87a38825498683ef183ec380ec7f2bf3ba073235f408695
 ---
 # Security & Trust Boundaries
 
@@ -106,7 +106,7 @@ A request crosses the same gates in the same order. The steps follow one analysi
   body: flask-cors allows the origins listed in ALLOWED_ORIGINS for /api/* paths, with only the Content-Type and Authorization headers and the GET, POST, DELETE and OPTIONS methods (backend/app.py:64). Flask rejects any body over 25 MB with 413 before a route runs (backend/app.py:59).
   gotcha: With ALLOWED_ORIGINS unset the default is '*'. The comment at backend/app.py:62 explains why that is tolerable: requests use bearer tokens, not cookies, so a foreign page cannot ride a user's session.
 - title: Rate limit | short: Rate limit | sub: sliding window per IP
-  body: Each write route is wrapped by limit(), which keys a RateLimiter on client_ip() and returns 429 when the window is full (backend/ratelimit.py:44). OPTIONS preflights are never counted. The limiter drops idle keys once it tracks more than 10,000 clients (backend/ratelimit.py:38).
+  body: Each write route is wrapped by limit(), which keys a RateLimiter on client_ip() and returns 429 when the window is full (backend/ratelimit.py:47). OPTIONS preflights are never counted. The limiter drops idle keys once it tracks more than 10,000 clients (backend/ratelimit.py:41).
 - title: Validate input | short: Validate | sub: shape checks, id patterns
   body: /api/analyze rejects a non-object body with 400 (backend/app.py:89) and clamps maxCutoff to 1-10 (backend/app.py:107). Share and save bodies must have data.events as an object (_looks_like_analysis, backend/app.py:628). Share ids must match ^[A-Za-z0-9_-]{6,32}$ and saved ids a 36-character UUID pattern before any lookup (backend/app.py:624, :625).
 - title: Identify the caller | short: Auth | sub: Supabase decides
@@ -151,8 +151,8 @@ Who holds which secret.
 
 ## Gotchas
 
-- **Rate limits are per process**: each `RateLimiter` is an in-memory dict (`backend/ratelimit.py:26`). A restart clears it, and with `WEB_CONCURRENCY` above 1 every gunicorn worker keeps its own count, so the effective limit multiplies (see [[deployment]]).
-- **The limiter trusts the first X-Forwarded-For entry**: `client_ip()` takes the leftmost value of the header (`backend/ratelimit.py:19`). That entry is whatever the client sent, so a caller who sets the header can choose a new key per request and avoid the limit, unless the host strips or rewrites it.
+- **Rate limits are per process**: each `RateLimiter` is an in-memory dict (`backend/ratelimit.py:29`). A restart clears it, and with `WEB_CONCURRENCY` above 1 every gunicorn worker keeps its own count, so the effective limit multiplies (see [[deployment]]).
+- **The limiter keys on Cloudflare's client address**: `client_ip()` reads `CF-Connecting-IP`, which Cloudflare (in front of Render) sets and overwrites, and falls back to the socket address (`backend/ratelimit.py:17-22`). `X-Forwarded-For` is ignored because Render appends to a client-sent value, so its first entry can be forged. `backend/test_ratelimit.py` checks that a forged header doesn't change the key. If the API ever stops being served through Cloudflare, every client would share the proxy's address and one limit.
 - **Reads and failed sign-ins are not rate-limited**: `GET /api/shared/<id>` and the `require_user` routes have no limiter, and `POST /api/saved` checks the session before the limiter (`backend/app.py:678`). Only successful token checks are cached (`backend/auth.py:68`), so each request with a bad bearer token costs one call to Supabase.
 - **CORS defaults to any origin**: `ALLOWED_ORIGINS` falls back to `'*'` (`backend/app.py:64`). This is safe for session theft because auth is a bearer header, but any site can call the API from a visitor's browser and spend that visitor's IP's rate-limit budget.
 - **WarcraftLogs traffic goes through a Cloudflare Worker outside this repo**: both the OAuth exchange and every GraphQL query use `wcl-proxy.catcam-fun.workers.dev` (`backend/warcraftlogs.py:15`, `:16`), and the sign-in CAPTCHA check uses the same host (`frontend/src/Auth.js:73`). The Worker's code is not in this repo, so its behavior can't be reviewed here, and it sees every officer's client ID and secret.

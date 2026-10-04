@@ -118,7 +118,7 @@
   - saved_id_re: backend/app.py:625
   - storage_response: backend/app.py:664
   - require_user: backend/auth.py:79
-  - limit_decorator: backend/ratelimit.py:44
+  - limit_decorator: backend/ratelimit.py:47
   - frontend_sse_reader: frontend/src/App.js:734
 - links: backend, backend-analysis-pipeline, backend-death-counting, backend-caching-and-limits, backend-defensive-analysis, auth, data-model, frontend, feat-analyze, feat-share, feat-saved, feat-account
 
@@ -155,8 +155,8 @@
   - evict: backend/supabase_client.py:353
   - report_cache_table: backend/migrations/002_report_cache.sql:12
   - client_ip: backend/ratelimit.py:16
-  - rate_limiter: backend/ratelimit.py:22
-  - limit: backend/ratelimit.py:44
+  - rate_limiter: backend/ratelimit.py:25
+  - limit: backend/ratelimit.py:47
 - links: backend, backend-analysis-pipeline, backend-api-endpoints, backend-defensive-analysis, warcraftlogs, data-model, frontend-results-view, feat-analyze
 
 ## Death Counting
@@ -893,8 +893,8 @@
   - share_id_re: backend/app.py:624
   - cheat_death_gate: backend/app.py:116
   - client_ip: backend/ratelimit.py:16
-  - rate_limiter: backend/ratelimit.py:22
-  - limit_decorator: backend/ratelimit.py:44
+  - rate_limiter: backend/ratelimit.py:25
+  - limit_decorator: backend/ratelimit.py:47
   - verify_token: backend/auth.py:36
   - require_user: backend/auth.py:79
   - strip_secrets_py: backend/supabase_client.py:61
