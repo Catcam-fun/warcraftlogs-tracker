@@ -46,7 +46,7 @@ links:
   - feat-results
   - game-data
   - testing
-content_hash: sha256:9c1d7d1f494b303502f0e889290bde034dff8f02dd3e6a3d2f75da46fdb2a47e
+content_hash: sha256:ebaa784603fe7be46adcf69e742a5f6db96317450e4dc47685bbe671e2ce42e1
 ---
 ## Summary
 
@@ -166,6 +166,10 @@ relied-on-by: [[frontend-results-view]] — BOSS_ORDER sorts boss chips and per-
 | Boss tile script | `python frontend/scripts/fetch-boss-renders.py ["Boss Name" ...]`; needs Pillow and outbound access to `wago.tools` and `render.worldofwarcraft.com` | `frontend/scripts/fetch-boss-renders.py:3`, `frontend/scripts/fetch-boss-renders.py:8` |
 | Tile format | Transparent WebP, 300px tall, width follows the model | `frontend/scripts/fetch-boss-renders.py:146-148` |
 | Loader file | `frontend/public/art/ulatek-loader.webm` is 512x512 VP9 with an alpha channel at 30 fps (read from the file's stream headers); its poster is `ulatek-loader.jpg` | `frontend/src/App.js:1521-1522` |
+| Background files | `frontend/public/art/backgrounds/<slug>.jpg`, 2200px wide, JPEG quality 72, progressive (read from the files themselves); the slug is what goes in `CURRENT_TIER_BACKGROUNDS` or `BACKGROUNDS` | `frontend/src/LandingPage.js:84-95`, `frontend/src/LandingPage.js:127` |
+| Hosting | All art is committed under `frontend/public/art/` and served from the site itself, never hotlinked, so a source page moving or disappearing can't break the landing page and no third party sees visitors' requests | `frontend/src/LandingPage.js:127` |
+| Fallback | `landing-keyart.svg` sits behind the chosen photo and shows only if that image fails to load | `frontend/src/LandingPage.js:128` |
+| Attribution | The footer carries the Blizzard non-affiliation, trademark and key-art notice that fan use of the art relies on; revisit the art's use if the site ever becomes commercial | `frontend/src/LandingPage.js:274-276` |
 | Secrets | None. The script sends a browser User-Agent and Referer and no credentials | `frontend/scripts/fetch-boss-renders.py:10`, `frontend/scripts/fetch-boss-renders.py:47` |
 
 ## Invariants
