@@ -20,6 +20,7 @@ import { analyzedAt } from './analyzedAt';
 import { groupPulls } from './groupPulls';
 import { fitFiltersToResult } from './resultFilters';
 import { prefersReducedMotion } from './reducedMotion';
+import { shareNote } from './shareNote';
 import { DefensiveSummaryChip, DefensiveTopUnused, summarizeDefensives } from './DefensivePanel';
 import { DeathRow } from './DeathRow';
 
@@ -229,6 +230,7 @@ export default function WarcraftLogsApp() {
   const [overviewCollapsed, setOverviewCollapsed] = useState(true);
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareLink, setShareLink] = useState('');
+  const [shareWarning, setShareWarning] = useState(null);
   const [copied, setCopied] = useState(false);
   const [sharingData, setSharingData] = useState(false);
   const [abortController, setAbortController] = useState(null);
@@ -635,6 +637,7 @@ export default function WarcraftLogsApp() {
       }
 
       setShareLink(`${window.location.origin}/results?share=${body.shareId}`);
+      setShareWarning(shareNote(body));
       setShowShareModal(true);
     } catch (err) {
       setError(`Failed to create shareable link: ${err.message}`);
@@ -1452,6 +1455,9 @@ export default function WarcraftLogsApp() {
             <p style={{ color: '#8b92a0', marginBottom: '15px' }}>
               Copy this link to share your analysis with others:
             </p>
+            {shareWarning && (
+              <p role="alert" style={{ color: '#ffae3b', marginBottom: '15px' }}>{shareWarning}</p>
+            )}
             <div style={{
               background: '#0f1419',
               padding: '12px',

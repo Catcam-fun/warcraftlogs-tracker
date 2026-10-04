@@ -646,8 +646,11 @@ def share_results():
     share_id = secrets.token_urlsafe(9)
     result = supabase_client.store_share(share_id, data, body.get('config'), user_id)
     if "error" in result:
-        return jsonify({"success": False, "error": result["error"]}), 413
-    return jsonify({"success": True, "shareId": share_id, "expiresAt": result["expires_at"]})
+        return _storage_response(result)
+    # `ephemeral`: kept only in this server's memory (database unavailable),
+    # so the link stops working when the server restarts or sleeps.
+    return jsonify({"success": True, "shareId": share_id, "expiresAt": result["expires_at"],
+                    "ephemeral": bool(result.get("ephemeral"))})
 
 
 @app.route('/api/shared/<share_id>', methods=['GET'])
