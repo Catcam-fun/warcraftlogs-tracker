@@ -218,7 +218,7 @@ class AnalyzeFlowTests(unittest.TestCase):
         return {10: [{"timestamp": 5_000, "type": "damage", "targetID": 10, "abilityGameID": 9, "amount": 900,
                       "overkill": 100, "hitPoints": 0, "maxHitPoints": 900, "resourceActor": 2}]}
 
-    def _run(self, roster_patch=True, **extra):
+    def _run(self, roster_patch=True, bulk_effect=None, **extra):
         from analysis import RAID_ENCOUNTERS
         raid = next(k for k, v in RAID_ENCOUNTERS.items() if 3129 in v)
         deaths = {1: [{"timestamp": 5_000, "targetName": "Bob", "targetID": 10,
@@ -230,7 +230,8 @@ class AnalyzeFlowTests(unittest.TestCase):
         with mock.patch.object(app_module, 'get_access_token', return_value='t'), roster, \
                 mock.patch.object(app_module, 'get_guild_reports', return_value=reports), \
                 mock.patch.object(app_module, 'get_fights', autospec=True, side_effect=self._fights) as fights, \
-                mock.patch.object(app_module, 'get_report_deaths_bulk', autospec=True, return_value=deaths) as bulk, \
+                mock.patch.object(app_module, 'get_report_deaths_bulk', autospec=True, return_value=deaths,
+                                  side_effect=bulk_effect) as bulk, \
                 mock.patch.object(app_module.defensives, 'fetch_defensive_raw', autospec=True,
                                   return_value={}), \
                 mock.patch.object(app_module.defensives, 'fetch_instakills', autospec=True,
@@ -282,6 +283,22 @@ class AnalyzeFlowTests(unittest.TestCase):
             self.assertEqual(len(result["events"]["Bob"]), 2)
             self.assertFalse(result["meta"]["rosterOnly"])
             self.assertEqual(roster.call_count, 1)
+
+    def test_unreadable_report_adds_no_pulls(self):
+        for c in (app_module.report_meta_cache, app_module.deaths_lru, app_module.defensive_lru, app_module.recap_lru):
+            c._data.clear()
+        deaths = {1: [{"timestamp": 5_000, "targetName": "Bob", "targetID": 10, "abilityName": "Zap"}]}
+
+        def bulk(_token, rid, *_a, **_k):
+            if rid == "R2":
+                raise RuntimeError("WCL unavailable")
+            return deaths
+        result, _, _ = self._run(bulk_effect=bulk)
+        self.assertEqual(result["meta"]["failedReports"], ["R2"])
+        # R2's pull is unknown, not deathless: it must not count toward anyone's pulls.
+        self.assertEqual(len(result["pullParticipation"]["Amy"]), 1)
+        self.assertEqual(len(result["pullParticipation"]["Bob"]), 1)
+        self.assertEqual(len(result["events"]["Bob"]), 1)
 
     def test_cheat_death_requires_sign_in(self):
         app_module.report_meta_cache._data.clear()

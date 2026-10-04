@@ -435,6 +435,10 @@ def analyze():
                 pull_counter_by_boss[boss_id] += 1
                 seq_no = pull_counter_by_boss[boss_id]
                 fid = fight['id']
+                # A report we couldn't read has unknown deaths, not zero:
+                # leave its pulls out rather than count them as deathless.
+                if rid in failed_reports:
+                    continue
                 
                 # FIXED: Only count players who were ACTUALLY in this fight
                 fight_parts = set()
