@@ -19,12 +19,12 @@ anchors:
   test_boss_spell_text: backend/test_boss_spell_text.py:24
   analyze_config_test: frontend/src/AnalyzeConfig.test.js:22
   api_test: frontend/src/api.test.js:14
-  npm_test: frontend/package.json:21
-  check_deaths: backend/scripts/check_deaths.py:25
+  npm_test: frontend/package.json:22
+  check_deaths: backend/scripts/check_deaths.py:24
   check_deaths_exit: backend/scripts/check_deaths.py:55
-  check_durations: backend/scripts/check_durations.py:28
+  check_durations: backend/scripts/check_durations.py:27
   check_mitigation: backend/scripts/check_mitigation.py:30
-  check_defensives: backend/scripts/check_defensives.py:19
+  check_defensives: backend/scripts/check_defensives.py:18
   only_workflow: .github/workflows/atlas-sync.yml:1
 links:
   - backend
@@ -58,17 +58,17 @@ Every test file and check script. Filter by kind.
 | `backend/test_boss_spell_text.py` {backend} | `render` in `scripts/build_boss_spell_text.py` and the generated `boss_spell_text.py` (`backend/test_boss_spell_text.py:24`) | description templates filled only where game data is exact; the generated file has Sever's text |
 | `frontend/src/AnalyzeConfig.test.js` {frontend} | The raid picker (`frontend/src/AnalyzeConfig.test.js:22`) | five raid cards; Season 2 is one combined card; clicking sends `selectedRaid` and shows the right lineup (9, 9 and 8 bosses) |
 | `frontend/src/api.test.js` {frontend} | `api.js` helpers (`frontend/src/api.test.js:14`) | `stripSecrets`; bearer token on signed-in calls; fail fast without a session; network failure gives a readable error; credentials remembered in `localStorage` and cleared when emptied |
-| `backend/scripts/check_deaths.py` {check} | Deaths the site reads vs WarcraftLogs' own Deaths table (`backend/scripts/check_deaths.py:25`) | Mythic pulls of the raid key only (`backend/scripts/check_deaths.py:32`); compares player, pull, timestamp and killing-blow name |
-| `backend/scripts/check_durations.py` {check} | How long personal defensives with duration talents last, predicted vs real aura uses (`backend/scripts/check_durations.py:28`) | Mythic pulls; within 350 ms is exact (`backend/scripts/check_durations.py:24`) |
+| `backend/scripts/check_deaths.py` {check} | Deaths the site reads vs WarcraftLogs' own Deaths table (`backend/scripts/check_deaths.py:24`) | Mythic pulls of the raid key only (`backend/scripts/check_deaths.py:32`); compares player, pull, timestamp and killing-blow name |
+| `backend/scripts/check_durations.py` {check} | How long personal defensives with duration talents last, predicted vs real aura uses (`backend/scripts/check_durations.py:27`) | Mythic pulls; within 350 ms is exact (`backend/scripts/check_durations.py:24`) |
 | `backend/scripts/check_mitigation.py` {check} | Catalog damage reductions vs real hits with and without the defensive up (`backend/scripts/check_mitigation.py:30`) | boss pulls, optionally a list of fight IDs |
-| `backend/scripts/check_defensives.py` {check} | Prints one report's full defensive picture per death (`backend/scripts/check_defensives.py:19`) | warns if talent entry IDs never match the catalog (`backend/scripts/check_defensives.py:45`) |
+| `backend/scripts/check_defensives.py` {check} | Prints one report's full defensive picture per death (`backend/scripts/check_defensives.py:18`) | warns if talent entry IDs never match the catalog (`backend/scripts/check_defensives.py:45`) |
 
 What each check takes and what passing looks like:
 
 | Script {check} | Arguments | Passing looks like |
 |---|---|---|
 | `check_deaths.py` {check} | `<reportCode>:<raid key> ...` | `missing 0, extra 0, different killing blow 0` for every report; exit code 1 otherwise (`backend/scripts/check_deaths.py:55`). Stops if a pull has 200 deaths, the table's cap (`backend/scripts/check_deaths.py:42`). |
-| `check_durations.py` {check} | `<reportCode>:<raid key> ...` | no `<-- LONGER` flag; a defensive is flagged when more than a tenth of its uses outlast the prediction (`backend/scripts/check_durations.py:70`). "Ended early" is normal. Raid cooldowns other players cast, Dancing Rune Weapon and Metamorphosis can read longer without affecting a verdict (docstring, `backend/scripts/check_durations.py:9`). |
+| `check_durations.py` {check} | `<reportCode>:<raid key> ...` | no `<-- LONGER` flag; a defensive is flagged when more than a tenth of its uses outlast the prediction (`backend/scripts/check_durations.py:70`). "Ended early" is normal. Raid cooldowns other players cast, Dancing Rune Weapon and Metamorphosis can read longer without affecting a verdict (docstring, `backend/scripts/check_durations.py:10`). |
 | `check_mitigation.py` {check} | `<reportCode> [fightID,...]` | no `<-- check` flag: measured and catalog reduction within 0.03 for any defensive with 20 or more hits (`backend/scripts/check_mitigation.py:26`, `backend/scripts/check_mitigation.py:97`). Reads all damage taken, so pass a few fight IDs on a big report. |
 | `check_defensives.py` {check} | `<reportCode> [fightID]` | no pass/fail; read the printed deaths. A `!! Talent entry IDs never match` line means the talent format changed. |
 
@@ -79,7 +79,7 @@ What each check takes and what passing looks like:
 | Backend runner | `cd backend && python -m unittest` (every test is a `unittest.TestCase`; imports such as `import app` need `backend/` as the working directory) | `backend/test_*.py` |
 | Backend dependencies | `pip install -r backend/requirements.txt` first: tests import `supabase_client`, which needs `brotli` and `supabase` | `backend/requirements.txt` |
 | pytest | not listed in `requirements.txt`; install it separately if you prefer it | `backend/requirements.txt` |
-| Frontend runner | `cd frontend && npm test` (`react-scripts test`, watch mode; `CI=true` runs once) | `frontend/package.json:21` |
+| Frontend runner | `cd frontend && npm test` (`react-scripts test`, watch mode; `CI=true` runs once) | `frontend/package.json:22` |
 | Check scripts | `WCL_CLIENT_ID` and `WCL_CLIENT_SECRET` in the environment (`backend/scripts/check_deaths.py:27`) | your own WarcraftLogs API client |
 | Check cost | each check spends the key's WarcraftLogs points; `check_mitigation.py` reads all damage taken in the chosen pulls | script docstrings |
 | CI | none for tests; `.github/workflows/atlas-sync.yml` only verifies the Atlas | `.github/workflows/` |
@@ -87,18 +87,18 @@ What each check takes and what passing looks like:
 ## Invariants
 
 - **MUST** keep `check_deaths.py` at zero missing, zero extra and zero different killing blows on a Mythic log of every raid key after any change to how deaths are fetched; its exit code is the only automated pass/fail among the checks (`backend/scripts/check_deaths.py:55`).
-- **NEVER** let the unit tests reach WarcraftLogs or Supabase: they patch `get_access_token`, `get_fights`, `get_report_deaths_bulk` and the `defensives` fetchers (`backend/test_api.py:217`), and swap `supabase_client.db` for a fake (`backend/test_api.py:81`), so they run without keys.
+- **NEVER** let the unit tests reach WarcraftLogs or Supabase: they patch `get_access_token`, `get_fights`, `get_report_deaths_bulk` and the `defensives` fetchers (`backend/test_api.py:219`), and swap `supabase_client.db` for a fake (`backend/test_api.py:83`), so they run without keys.
 
 ## Gotchas
 
 - **No test runs on its own**: there is no CI job for backend or frontend tests. A broken test is only found when someone runs it locally.
 - **Frontend death counting has no test**: `frontend/src/deathCounting.js` decides what counts when you change "first X" on the Results page, including the fallback for results saved before slots existed. Only the backend half (`rank_pull_deaths`) is tested.
-- **The WarcraftLogs retry path is untested**: `make_request_with_retry` (`backend/warcraftlogs.py:31`), with its 4xx-no-retry rule and `Retry-After` handling, has no test. Only the token cache is (`backend/test_api.py:161`).
+- **The WarcraftLogs retry path is untested**: `make_request_with_retry` (`backend/warcraftlogs.py:30`), with its 4xx-no-retry rule and `Retry-After` handling, has no test. Only the token cache is (`backend/test_api.py:161`).
 - **Report-cache eviction is untested**: `evict_report_cache` (`backend/supabase_client.py:353`) and the five-minute back-off after an error have no test.
 - **Date windows are tested for one raid**: `test_season_two_default_and_custom_date_windows` covers `midnight-s2-all` only. The other seven windows in `RAID_DATE_WINDOWS` are not asserted.
 - **Some tests read generated data**: `test_defensives.py` runs against the committed `defensive_catalog.py`, and `test_generated_file` expects Sever's text in `boss_spell_text.py` (`backend/test_boss_spell_text.py:34`). Rebuilding those modules can change what these tests see.
 - **The checks only look at Mythic**: `check_deaths.py` and `check_durations.py` pass difficulty 5 to `analyze_fights`. They also pass `None` as the zone, so a raid key missing from `RAID_ENCOUNTERS` fails with a type error rather than a clear message.
-- **The Analyze form test is pinned to today's raid list**: it expects exactly five raid cards (`frontend/src/AnalyzeConfig.test.js:27`), so adding a tier means updating it.
+- **The Analyze form test is pinned to today's raid list**: it expects exactly five raid cards (`frontend/src/AnalyzeConfig.test.js:28`), so adding a tier means updating it.
 
 ## Related
 
