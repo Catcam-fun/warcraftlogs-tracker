@@ -16,13 +16,13 @@ anchors:
   turnstile_verify: "frontend/src/Auth.js:72"
   password_reset: "frontend/src/Auth.js:84"
   session_only: "frontend/src/supabaseClient.js:15"
-  session_restore: "frontend/src/App.js:254"
-  auth_listener: "frontend/src/App.js:277"
+  session_restore: "frontend/src/App.js:267"
+  auth_listener: "frontend/src/App.js:290"
   local_credentials: "frontend/src/api.js:18"
-  remember_local: "frontend/src/App.js:213"
-  load_db_credentials: "frontend/src/App.js:546"
-  save_db_credentials: "frontend/src/App.js:572"
-  logout: "frontend/src/App.js:600"
+  remember_local: "frontend/src/App.js:216"
+  load_db_credentials: "frontend/src/App.js:559"
+  save_db_credentials: "frontend/src/App.js:585"
+  logout: "frontend/src/App.js:613"
   settings_modal: "frontend/src/Settings.js:6"
   settings_save_creds: "frontend/src/Settings.js:60"
   delete_account_ui: "frontend/src/Settings.js:187"
@@ -31,8 +31,8 @@ anchors:
   require_user: "backend/auth.py:79"
   verify_token: "backend/auth.py:36"
   credentials_rls: "backend/migrations/001_shares_and_rls.sql:36"
-  terms_route: "frontend/src/App.js:1387"
-  privacy_route: "frontend/src/App.js:1396"
+  terms_route: "frontend/src/App.js:1400"
+  privacy_route: "frontend/src/App.js:1409"
 links:
   - frontend
   - frontend-pages-and-routing
@@ -50,37 +50,37 @@ invariants:
   - "NEVER: delete an account without the service-role key; the call refuses instead (backend/supabase_client.py:381)."
   - "MUST: a signed-in user read and write only their own api_credentials row (backend/migrations/001_shares_and_rls.sql:36)."
   - "MUST: cheat-death detection run only for a request with a valid session (backend/app.py:116)."
-content_hash: sha256:4ad091bc37c9d52aeb4aeab9ceb47bce0d5975e0c8790245a4b740e95e85a2ff
+content_hash: sha256:1ad7626c689c22df007d00fee0e9f0851706d8e4f8a3eb27e12d1188c4a10936
 ---
 ## Summary
 
-- **What it is.** Optional email-and-password accounts on Supabase Auth (`frontend/src/Auth.js:135`, `frontend/src/Auth.js:139`). The header shows Sign In or Settings and Logout depending on `user` (`frontend/src/App.js:1625`).
+- **What it is.** Optional email-and-password accounts on Supabase Auth (`frontend/src/Auth.js:135`, `frontend/src/Auth.js:139`). The header shows Sign In or Settings and Logout depending on `user` (`frontend/src/App.js:1638`).
 - **What an account unlocks.** Saved reports, which every `/api/saved` route gates with `require_user` (`backend/app.py:676`), and cheat-death detection, which the server turns off for calls without a valid session (`backend/app.py:93`, `backend/app.py:116`). Credentials also follow the user between browsers.
-- **Where credentials live.** Always in this browser's localStorage under `fpx.wclCredentials` (`frontend/src/api.js:18`); for signed-in users also in `api_credentials`, which the browser reaches directly with the public anon key (`frontend/src/App.js:546`).
+- **Where credentials live.** Always in this browser's localStorage under `fpx.wclCredentials` (`frontend/src/api.js:18`); for signed-in users also in `api_credentials`, which the browser reaches directly with the public anon key (`frontend/src/App.js:559`).
 - **Leaving.** Settings deletes the account through the backend, which uses the service-role key (`frontend/src/Settings.js:199`, `backend/supabase_client.py:377`).
 
 ## How it works
 
 ```steps
 - title: Open Sign In | short: Auth modal | sub: sign in, sign up, reset
-  body: Sign In buttons open the Auth modal (frontend/src/App.js:2252). It loads Cloudflare Turnstile explicitly so the widget renders every time the modal opens (frontend/src/Auth.js:26).
+  body: Sign In buttons open the Auth modal (frontend/src/App.js:2265). It loads Cloudflare Turnstile explicitly so the widget renders every time the modal opens (frontend/src/Auth.js:26).
 - title: Sign up | short: Sign up | sub: age, terms, CAPTCHA
   body: Sign-up requires the "at least 13" box and the Terms and Privacy box (frontend/src/Auth.js:111), a Turnstile token (frontend/src/Auth.js:123) and a password of at least 6 characters (frontend/src/Auth.js:202). The token is verified by a separate Cloudflare Worker before supabase.auth.signUp runs (frontend/src/Auth.js:72, frontend/src/Auth.js:135). Supabase then sends a confirmation email.
   gotcha: The CAPTCHA check happens in the browser against the Worker; the token is not passed to Supabase, so it does not guard direct Supabase Auth calls.
 - title: Sign in | short: Sign in | sub: stay logged in or not
-  body: signInWithPassword, then setSessionOnly(!stayLoggedIn) (frontend/src/Auth.js:139). Unchecked, a localStorage flag plus a session cookie mark the login; on the next visit, flag set and cookie gone means the browser was closed, and the app signs out locally (frontend/src/supabaseClient.js:15, frontend/src/App.js:262).
+  body: signInWithPassword, then setSessionOnly(!stayLoggedIn) (frontend/src/Auth.js:139). Unchecked, a localStorage flag plus a session cookie mark the login; on the next visit, flag set and cookie gone means the browser was closed, and the app signs out locally (frontend/src/supabaseClient.js:15, frontend/src/App.js:275).
 - title: Forgot password | short: Reset | sub: email link
-  body: After the CAPTCHA, resetPasswordForEmail sends a link back to the site origin (frontend/src/Auth.js:94). Arriving from it fires PASSWORD_RECOVERY, which opens Settings to set a new password (frontend/src/App.js:280).
+  body: After the CAPTCHA, resetPasswordForEmail sends a link back to the site origin (frontend/src/Auth.js:94). Arriving from it fires PASSWORD_RECOVERY, which opens Settings to set a new password (frontend/src/App.js:293).
 - title: Credentials follow you | short: Credentials | sub: localStorage and Supabase
-  body: The form starts from localStorage (frontend/src/App.js:195) and every change is written back (frontend/src/App.js:213). On sign-in the api_credentials row, if any, fills the form (frontend/src/App.js:290). Each analysis by a signed-in user writes changed credentials back to the row without waiting (frontend/src/App.js:671, frontend/src/App.js:572).
+  body: The form starts from localStorage (frontend/src/App.js:198) and every change is written back (frontend/src/App.js:216). On sign-in the api_credentials row, if any, fills the form (frontend/src/App.js:303). Each analysis by a signed-in user writes changed credentials back to the row without waiting (frontend/src/App.js:684, frontend/src/App.js:585).
 - title: Settings | short: Settings modal | sub: credentials, password, email
-  body: Shown only when signed in (frontend/src/App.js:2267). It loads and saves the user's own api_credentials row (frontend/src/Settings.js:38, frontend/src/Settings.js:60), changes the password with updateUser after a 6-character and match check (frontend/src/Settings.js:119), and requests an email change that Supabase confirms by email (frontend/src/Settings.js:156).
+  body: Shown only when signed in (frontend/src/App.js:2280). It loads and saves the user's own api_credentials row (frontend/src/Settings.js:38, frontend/src/Settings.js:60), changes the password with updateUser after a 6-character and match check (frontend/src/Settings.js:119), and requests an email change that Supabase confirms by email (frontend/src/Settings.js:156).
 - title: Delete the account | short: Delete | sub: type DELETE
   body: The confirm button stays disabled until the box reads DELETE (frontend/src/Settings.js:411). It calls DELETE /api/account with the session token (frontend/src/Settings.js:199). The server deletes saved_analyses and api_credentials rows, the user's shared_results rows, then the auth user (backend/supabase_client.py:385). On success it drops the token from its verification cache (backend/app.py:731); the browser signs out locally and reloads at / (frontend/src/Settings.js:204).
 - title: Log out | short: Logout | sub: clear session and data
-  body: handleLogout signs out, clears the session-only flag, forgets the stored-credentials snapshot, clears the loaded result and turns cheat-death off in the form (frontend/src/App.js:600).
+  body: handleLogout signs out, clears the session-only flag, forgets the stored-credentials snapshot, clears the loaded result and turns cheat-death off in the form (frontend/src/App.js:613).
 - title: Read the terms | short: /terms, /privacy | sub: static pages
-  body: TermsOfService and PrivacyPolicy are full routes (frontend/src/App.js:1387, frontend/src/App.js:1396), linked from the sign-up checkbox (frontend/src/Auth.js:241) and the landing footer (frontend/src/LandingPage.js:269).
+  body: TermsOfService and PrivacyPolicy are full routes (frontend/src/App.js:1400, frontend/src/App.js:1409), linked from the sign-up checkbox (frontend/src/Auth.js:241) and the landing footer (frontend/src/LandingPage.js:269).
 ```
 
 ## Diagram
@@ -151,11 +151,11 @@ relied-on-by: [[feat-analyze]] — credentials pre-fill and the cheat-death gate
 
 ## Gotchas
 
-- **Credentials outlive logout and deletion in the browser.** Neither `handleLogout` (`frontend/src/App.js:600`) nor account deletion (`frontend/src/Settings.js:204`) clears `fpx.wclCredentials` (`frontend/src/api.js:30`) or the IndexedDB copy of the last result and Recent runs.
+- **Credentials outlive logout and deletion in the browser.** Neither `handleLogout` (`frontend/src/App.js:613`) nor account deletion (`frontend/src/Settings.js:204`) clears `fpx.wclCredentials` (`frontend/src/api.js:30`) or the IndexedDB copy of the last result and Recent runs.
 - **Saved credentials are protected by the database, not the app.** The browser writes `client_secret` to the row as plain text (`frontend/src/Settings.js:96`); row-level security keeps other accounts from reading it (`backend/migrations/001_shares_and_rls.sql:36-43`) and Supabase encrypts its storage at rest. Settings and the Privacy Policy say exactly that (`frontend/src/Settings.js:237-238`, `frontend/src/PrivacyPolicy.js:70`), and `frontend/src/credentialsCopy.test.js` fails if either promises more.
 - **Privacy Policy retention differs from the code.** It says analysis history is kept until you delete your account (`frontend/src/PrivacyPolicy.js:142`); saves expire after at most 30 days (`backend/supabase_client.py:93`).
 - **Deleted tokens can linger up to a minute elsewhere.** `forget_token` clears only the token used for the delete, in the process that handled it (`backend/auth.py:72`); the cache TTL is 60 s (`backend/auth.py:23`).
-- **A terms modal that never opens.** `showTermsModal` renders a combined Terms and Privacy modal dated November 21, 2025 (`frontend/src/App.js:2283`), but nothing sets it to true; the live pages say November 21, 2024 (`frontend/src/PrivacyPolicy.js:46`).
+- **A terms modal that never opens.** `showTermsModal` renders a combined Terms and Privacy modal dated November 21, 2025 (`frontend/src/App.js:2296`), but nothing sets it to true; the live pages say November 21, 2024 (`frontend/src/PrivacyPolicy.js:46`).
 
 ## Related
 
