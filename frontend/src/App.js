@@ -17,6 +17,9 @@ import SavedReports from './SavedReports';
 import SaveReportDialog from './SaveReportDialog';
 import { countedDeaths, isCounted } from './deathCounting';
 import { analyzedAt } from './analyzedAt';
+import { groupPulls } from './groupPulls';
+import { fitFiltersToResult } from './resultFilters';
+import { prefersReducedMotion } from './reducedMotion';
 import { DefensiveSummaryChip, DefensiveTopUnused, summarizeDefensives } from './DefensivePanel';
 import { DeathRow } from './DeathRow';
 
@@ -240,6 +243,16 @@ export default function WarcraftLogsApp() {
   const [showRecentMenu, setShowRecentMenu] = useState(false);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
 
+
+  // A newly loaded result keeps the filters that still apply to it: the
+  // cutoff can't exceed its maximum and boss choices must be its bosses.
+  useEffect(() => {
+    const fitted = fitFiltersToResult({ cutoff, selectedBosses }, data);
+    if (fitted.cutoff !== cutoff) setCutoff(fitted.cutoff);
+    if (fitted.selectedBosses !== selectedBosses) setSelectedBosses(fitted.selectedBosses);
+    // Only when the result changes, not on every filter change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
 
   // Wake the backend as soon as the site opens. Render's free tier sleeps
   // after ~15 idle minutes and the first request then takes 30-60s; this
@@ -1521,7 +1534,7 @@ export default function WarcraftLogsApp() {
                     <video
                       src={`${process.env.PUBLIC_URL}/art/ulatek-loader.webm`}
                       poster={`${process.env.PUBLIC_URL}/art/ulatek-loader.jpg`}
-                      autoPlay loop muted playsInline aria-hidden="true"
+                      autoPlay={!prefersReducedMotion()} loop muted playsInline aria-hidden="true"
                     />
                   </div>
                   <h2>ANALYZING REPORTS</h2>
@@ -2113,7 +2126,7 @@ export default function WarcraftLogsApp() {
                           <DefensiveTopUnused s={defensiveSummary} />
                           {sortBossesByOrder(Object.keys(showBothStats ? totalDeathsByBoss : deathsByBoss), config.selectedRaid).map(boss => {
                             const bossDeaths = deathsByBoss[boss] || [];
-                            const bossPulls = data.bossParticipation[boss]?.[player]?.length || 0;
+                            const bossPulls = groupPulls(data.bossParticipation[boss], player, characterGroups);
                             const realDeathCount = bossDeaths.length;
                             const totalBossDeaths = totalDeathsByBoss[boss] || [];
                             const totalDeathCount = totalBossDeaths.length;
