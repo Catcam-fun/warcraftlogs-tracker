@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
-import { apiFetch } from './api';
+import { apiFetch, saveLocalCredentials } from './api';
 import { X, Save, Eye, EyeOff, Key, Mail, Trash2 } from 'lucide-react';
 
 export default function Settings({ user, onClose, onCredentialsUpdate, onShowPrivacy }) {
@@ -202,6 +202,8 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
       }
 
       await supabase.auth.signOut({ scope: 'local' });
+      // The WarcraftLogs key this browser remembers goes with the account.
+      saveLocalCredentials('', '');
       setDeleteMessage('Account deleted successfully');
       setTimeout(() => {
         onClose();
