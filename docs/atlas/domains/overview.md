@@ -28,7 +28,7 @@ anchors:
   max_cutoff_clamp: backend/app.py:107
   frontend_counting: frontend/src/deathCounting.js:22
   raid_cards: frontend/src/AnalyzeConfig.js:12
-  raid_zones: frontend/src/App.js:25
+  raid_zones: frontend/src/App.js:26
   season_two_entry: frontend/src/seasonTwoRaids.js:6
 links:
   - hub
@@ -44,7 +44,7 @@ links:
   - operations
   - feat-analyze
   - feat-results
-content_hash: sha256:ec8cc36bbb0f1d98b28bf8f0894afa10a2d94834d477bb44551f8132adcc5d31
+content_hash: sha256:af9266e9e9f486f639b007a1d69f55ee93fa94102e3900cbcbf9d357d573c853
 ---
 ## Summary
 
@@ -87,14 +87,14 @@ Supported raids. A raid key is what the Analyze page writes to `selectedRaid`. T
 |---|---|---|---|---|
 | `midnight-s2-all` {midnight} | Midnight Season 2 (The Venomous Abyss + Nymrissa Wavecaller in the Tidebound Grotto) | 9 (`backend/analysis.py:199`) | 2026-08-13, open-ended (`backend/analysis.py:227`) | yes, via `frontend/src/seasonTwoRaids.js:6` |
 | `midnight-all` {midnight} | Midnight Season 1 (Voidspire, Dreamrift, March on Quel'Danas) | 9 (`backend/analysis.py:208`) | 2026-03-12 to 2026-08-23 (`backend/analysis.py:234`) | yes (`frontend/src/AnalyzeConfig.js:19`) |
-| `voidspire` {midnight} | The Voidspire | 6 (`backend/analysis.py:205`) | 2026-03-12 to 2026-08-23 | no; only in `RAID_ZONES` (`frontend/src/App.js:29`) |
+| `voidspire` {midnight} | The Voidspire | 6 (`backend/analysis.py:205`) | 2026-03-12 to 2026-08-23 | no; only in `RAID_ZONES` (`frontend/src/App.js:30`) |
 | `dreamrift` {midnight} | The Dreamrift | 1 (`backend/analysis.py:206`) | 2026-03-12 to 2026-08-23 | no; only in `RAID_ZONES` |
 | `queldanas` {midnight} | March on Quel'Danas | 2 (`backend/analysis.py:207`) | 2026-03-12 to 2026-08-23 | no; only in `RAID_ZONES` |
-| `manaforge` {tww} | Manaforge Omega | 8 (`backend/analysis.py:201`) | 2025-08-07 to 2026-03-22 (`backend/analysis.py:230`) | yes, and the form's default (`frontend/src/App.js:198`) |
+| `manaforge` {tww} | Manaforge Omega | 8 (`backend/analysis.py:201`) | 2025-08-07 to 2026-03-22 (`backend/analysis.py:230`) | yes, and the form's default (`frontend/src/App.js:199`) |
 | `undermine` {tww} | Liberation of Undermine | 8 (`backend/analysis.py:202`) | 2025-02-27 to 2025-08-17 (`backend/analysis.py:229`) | yes |
 | `nerubar` {tww} | Nerub'ar Palace | 8 (`backend/analysis.py:203`) | 2024-09-05 to 2025-03-09 (`backend/analysis.py:228`) | yes |
 
-The Analyze page's raid cards come from `RAIDS` (`frontend/src/AnalyzeConfig.js:12`), which spreads in `SEASON_TWO_RAIDS`. The names and boss order the Results page uses come from `RAID_ZONES` and `BOSS_ORDER` in `frontend/src/App.js:25` and `frontend/src/App.js:68`, which spread in the same entry. A raid key the backend does not know falls back to the older zone-and-difficulty filter (`backend/analysis.py:280`).
+The Analyze page's raid cards come from `RAIDS` (`frontend/src/AnalyzeConfig.js:12`), which spreads in `SEASON_TWO_RAIDS`. The names and boss order the Results page uses come from `RAID_ZONES` and `BOSS_ORDER` in `frontend/src/App.js:26` and `frontend/src/App.js:69`, which spread in the same entry. A raid key the backend does not know falls back to the older zone-and-difficulty filter (`backend/analysis.py:280`).
 
 The parts of the system, and where each is documented:
 
@@ -131,7 +131,7 @@ The parts of the system, and where each is documented:
 ## Gotchas
 
 - **Three raid keys exist only on the server side**: `voidspire`, `dreamrift` and `queldanas` are in `RAID_ENCOUNTERS` and in `RAID_ZONES` but not in the Analyze page's `RAIDS`, so the page never offers them. `midnight-all` covers all three.
-- **The form defaults to an old tier**: the initial config selects `manaforge` (`frontend/src/App.js:198`), not the current season.
+- **The form defaults to an old tier**: the initial config selects `manaforge` (`frontend/src/App.js:199`), not the current season.
 - **Only the newest tier is open-ended**: when a tier's successor opens, its window must get an end date (successor's raid opening plus 5 days), or analyses of the old tier keep listing every report up to today. Midnight Season 1 ends 2026-08-23 (`backend/analysis.py:231`); `test_only_the_newest_tier_is_open_ended` fails if a tier is left open (`backend/test_raid_selection.py`).
 
 ## Related

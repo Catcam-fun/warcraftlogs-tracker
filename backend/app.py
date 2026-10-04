@@ -7,7 +7,7 @@ Imports from: warcraftlogs, analysis, features, supabase_client, auth
 from flask import Flask, request, jsonify, Response, g
 from flask_cors import CORS
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import os
@@ -584,7 +584,7 @@ def analyze():
                     "endDate": end_date,
                     "zone": fight_zone,
                     "difficulty": difficulty,
-                    "generatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "generatedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "characterGroups": character_groups,
                     "reportCount": len(reports),
                     "cheatDeathEnabled": enable_cheat_death,

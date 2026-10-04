@@ -11,15 +11,15 @@ summary:
   - "On success the result is kept in the browser (IndexedDB, plus a five-run Recent list) and the app moves to /results."
 tagline: The form that starts a death review, and the streamed request it sends.
 anchors:
-  route: "frontend/src/App.js:1548"
+  route: "frontend/src/App.js:1549"
   form_component: "frontend/src/AnalyzeConfig.js:28"
   raid_cards: "frontend/src/AnalyzeConfig.js:12"
-  default_config: "frontend/src/App.js:193"
-  raid_change: "frontend/src/App.js:651"
-  submit: "frontend/src/App.js:662"
-  stream_reader: "frontend/src/App.js:717"
-  loader: "frontend/src/App.js:1506"
-  cancel: "frontend/src/App.js:638"
+  default_config: "frontend/src/App.js:194"
+  raid_change: "frontend/src/App.js:652"
+  submit: "frontend/src/App.js:663"
+  stream_reader: "frontend/src/App.js:718"
+  loader: "frontend/src/App.js:1507"
+  cancel: "frontend/src/App.js:639"
   local_credentials: "frontend/src/api.js:18"
   analyze_endpoint: "backend/app.py:82"
   max_cutoff_clamp: "backend/app.py:107"
@@ -50,41 +50,41 @@ invariants:
   - "MUST: user dates only narrow the raid's tier window, never widen it (backend/analysis.py:242)."
   - "NEVER: run cheat-death detection for a caller without a valid Supabase session, whatever the request body says (backend/app.py:116)."
   - "MUST: fights be kept only when their encounter ID is in the selected raid's RAID_ENCOUNTERS set (backend/analysis.py:277)."
-  - "NEVER: store the Client ID or Secret in the browser's analysis history; stripSecrets removes them before IndexedDB writes (frontend/src/App.js:536)."
-content_hash: sha256:315975520f965fe30f9a607a94875dfe48543c3307af848eeaeaa3a34c835578
+  - "NEVER: store the Client ID or Secret in the browser's analysis history; stripSecrets removes them before IndexedDB writes (frontend/src/App.js:537)."
+content_hash: sha256:62e74830bb16b89d68510cdafced87e53617454dbe51848bb24cf7b844485570
 ---
 ## Summary
 
-- **What it is.** The `/analyze` route renders `AnalyzeConfig` (`frontend/src/App.js:1548`, `frontend/src/AnalyzeConfig.js:28`). You pick a raid card, fill in your WarcraftLogs API client and guild, and press **Analyze Reports**.
-- **What it sends.** `handleSubmit` (`frontend/src/App.js:662`) posts the whole config to `POST /api/analyze` and reads the response as a stream of `data:` lines (`frontend/src/App.js:717`).
+- **What it is.** The `/analyze` route renders `AnalyzeConfig` (`frontend/src/App.js:1549`, `frontend/src/AnalyzeConfig.js:28`). You pick a raid card, fill in your WarcraftLogs API client and guild, and press **Analyze Reports**.
+- **What it sends.** `handleSubmit` (`frontend/src/App.js:663`) posts the whole config to `POST /api/analyze` and reads the response as a stream of `data:` lines (`frontend/src/App.js:718`).
 - **What the server does.** `analyze()` (`backend/app.py:82`) authenticates with WarcraftLogs, fetches the roster and reports, filters fights to the raid, ranks deaths and builds the result. See [[backend-analysis-pipeline]] for the internals.
 - **What it trusts.** Very little. The server clamps deaths tracked, narrows dates to the tier, and decides cheat-death detection from the bearer token, not from the checkbox.
 - **What it leaves alone.** Nothing is written to Supabase by an analysis except the shared report cache. Results live in your browser until you save or share them ([[feat-saved]], [[feat-share]]).
 
 ## How it works
 
-You reach the page from the landing page's run button (`frontend/src/App.js:1539`) or the left rail. The form state lives in `App.js`, not in the form component, so it survives moving between pages.
+You reach the page from the landing page's run button (`frontend/src/App.js:1540`) or the left rail. The form state lives in `App.js`, not in the form component, so it survives moving between pages.
 
 ```steps
 - title: Pick a raid | short: Pick a raid | sub: raid card sets the key
-  body: The raid grid comes from the RAIDS list in frontend/src/AnalyzeConfig.js:12 (Manaforge Omega, Liberation of Undermine, Nerub'ar Palace, Midnight Season 1, and the Season 2 entries from frontend/src/seasonTwoRaids.js:6). Clicking a card calls handleRaidChange (frontend/src/App.js:651), which writes selectedRaid plus that raid's reportZone and fightZone from RAID_ZONES (frontend/src/App.js:25). The lineup under the grid shows the selected raid's bosses.
-  gotcha: The initial config selects 'manaforge' (frontend/src/App.js:198), not the newest tier. If selectedRaid is not in RAIDS, the lineup falls back to RAIDS[0] (frontend/src/AnalyzeConfig.js:34).
+  body: The raid grid comes from the RAIDS list in frontend/src/AnalyzeConfig.js:12 (Manaforge Omega, Liberation of Undermine, Nerub'ar Palace, Midnight Season 1, and the Season 2 entries from frontend/src/seasonTwoRaids.js:6). Clicking a card calls handleRaidChange (frontend/src/App.js:652), which writes selectedRaid plus that raid's reportZone and fightZone from RAID_ZONES (frontend/src/App.js:26). The lineup under the grid shows the selected raid's bosses.
+  gotcha: The initial config selects 'manaforge' (frontend/src/App.js:199), not the newest tier. If selectedRaid is not in RAIDS, the lineup falls back to RAIDS[0] (frontend/src/AnalyzeConfig.js:34).
 - title: Fill credentials and scope | short: Credentials & scope | sub: client, guild, server, region
-  body: Client ID and Secret are required. Signed out, they are remembered in this browser under localStorage key fpx.wclCredentials (frontend/src/api.js:18, saved on every change at frontend/src/App.js:212). Signed in, they also load from and save to the api_credentials table (frontend/src/App.js:545, frontend/src/App.js:571). Guild name, server and region (us, eu, kr, tw, cn) identify the guild; difficulty is Normal (3), Heroic (4) or Mythic (5) (frontend/src/AnalyzeConfig.js:160).
-  gotcha: handleSubmit only checks that Client ID, Secret, guild and server are filled (frontend/src/App.js:663). A wrong guild name is discovered only when WarcraftLogs returns no reports.
+  body: Client ID and Secret are required. Signed out, they are remembered in this browser under localStorage key fpx.wclCredentials (frontend/src/api.js:18, saved on every change at frontend/src/App.js:213). Signed in, they also load from and save to the api_credentials table (frontend/src/App.js:546, frontend/src/App.js:572). Guild name, server and region (us, eu, kr, tw, cn) identify the guild; difficulty is Normal (3), Heroic (4) or Mythic (5) (frontend/src/AnalyzeConfig.js:160).
+  gotcha: handleSubmit only checks that Client ID, Secret, guild and server are filled (frontend/src/App.js:664). A wrong guild name is discovered only when WarcraftLogs returns no reports.
 - title: Set dates and deaths tracked | short: Dates & first X | sub: optional window, 1-10
   body: Start and end dates are optional; blank means the start of the tier and today (frontend/src/AnalyzeConfig.js:171). Max Deaths to Track is the "first X deaths per pull" ceiling, 1 to 10 (frontend/src/AnalyzeConfig.js:191). On the server the date range is intersected with RAID_DATE_WINDOWS (backend/analysis.py:224) by resolve_report_window (backend/analysis.py:242), and maxCutoff is clamped to 1-10 (backend/app.py:107).
   gotcha: maxCutoff also decides which deaths get defensive analysis at all (backend/app.py:518). Raising the Results page's slider above it later shows deaths without a defensive panel.
 - title: Roster and cheat deaths | short: Toggles | sub: who counts, cheat deaths
-  body: Guild Roster (on by default, frontend/src/App.js:208) means only players on the guild's WarcraftLogs roster count; off, everyone in the reports counts and the roster is not fetched (backend/app.py:118, backend/app.py:137). Cheat Death Detection is disabled for signed-out users (frontend/src/AnalyzeConfig.js:195) and enforced on the server from the bearer token (backend/app.py:93, backend/app.py:116).
+  body: Guild Roster (on by default, frontend/src/App.js:209) means only players on the guild's WarcraftLogs roster count; off, everyone in the reports counts and the roster is not fetched (backend/app.py:118, backend/app.py:137). Cheat Death Detection is disabled for signed-out users (frontend/src/AnalyzeConfig.js:195) and enforced on the server from the bearer token (backend/app.py:93, backend/app.py:116).
   gotcha: If the roster fetch fails or returns nobody, is_guild_member lets everyone through (backend/app.py:154) and the stream says so.
 - title: Submit and stream | short: Submit | sub: POST /api/analyze
-  body: handleSubmit builds the payload, splitting authorFilters on commas and parsing characterGroups JSON (frontend/src/App.js:684), attaches the Supabase access token when signed in (frontend/src/App.js:700) and fetches /api/analyze. Each SSE line carries either message (shown in the loader), error (thrown) or result (frontend/src/App.js:733).
-  gotcha: The analyze route is limited to 60 calls per client IP per hour (backend/app.py:50); the 429 JSON body becomes the form's error (frontend/src/App.js:711).
+  body: handleSubmit builds the payload, splitting authorFilters on commas and parsing characterGroups JSON (frontend/src/App.js:685), attaches the Supabase access token when signed in (frontend/src/App.js:701) and fetches /api/analyze. Each SSE line carries either message (shown in the loader), error (thrown) or result (frontend/src/App.js:734).
+  gotcha: The analyze route is limited to 60 calls per client IP per hour (backend/app.py:50); the 429 JSON body becomes the form's error (frontend/src/App.js:712).
 - title: Watch the loader | short: Loader | sub: progress, Cancel
-  body: While loading is true, an overlay with the current tier's boss video, the latest stage message and a Cancel button covers the page (frontend/src/App.js:1506). Cancel aborts the fetch through its AbortController (frontend/src/App.js:638) and the form shows "Analysis cancelled" (frontend/src/App.js:926).
+  body: While loading is true, an overlay with the current tier's boss video, the latest stage message and a Cancel button covers the page (frontend/src/App.js:1507). Cancel aborts the fetch through its AbortController (frontend/src/App.js:639) and the form shows "Analysis cancelled" (frontend/src/App.js:927).
 - title: Land on results | short: Results | sub: store, navigate
-  body: On the result line the app copies meta.cheatDeathEnabled back into the form (frontend/src/App.js:742), sets the data, writes it to IndexedDB (frontend/src/App.js:534) and to the Recent runs list (frontend/src/App.js:916), then navigates to /results (frontend/src/App.js:919).
+  body: On the result line the app copies meta.cheatDeathEnabled back into the form (frontend/src/App.js:743), sets the data, writes it to IndexedDB (frontend/src/App.js:535) and to the Recent runs list (frontend/src/App.js:917), then navigates to /results (frontend/src/App.js:920).
 ```
 
 ## Diagram
@@ -133,11 +133,11 @@ relied-on-by: [[feat-share]] — shares the result and its config
 
 | Item {kind} | Where | Notes |
 |---|---|---|
-| `/analyze` {route} | `frontend/src/App.js:1548` | renders `AnalyzeConfig` with config, handlers, user |
+| `/analyze` {route} | `frontend/src/App.js:1549` | renders `AnalyzeConfig` with config, handlers, user |
 | `AnalyzeConfig` {component} | `frontend/src/AnalyzeConfig.js:28` | raid grid, lineup, form, run button |
 | `RAIDS` {component} | `frontend/src/AnalyzeConfig.js:12` | raid cards; `final` is card art, `bosses` the lineup |
-| `RAID_ZONES` {component} | `frontend/src/App.js:25` | raid key to reportZone and fightZone |
-| `handleSubmit` {component} | `frontend/src/App.js:662` | validation, payload, stream reader |
+| `RAID_ZONES` {component} | `frontend/src/App.js:26` | raid key to reportZone and fightZone |
+| `handleSubmit` {component} | `frontend/src/App.js:663` | validation, payload, stream reader |
 | `POST /api/analyze` {api} | `backend/app.py:82` | SSE stream; limited 60/hour per IP |
 | `clientId`, `clientSecret` {field} | `backend/app.py:98` | WarcraftLogs V2 client; required |
 | `guildName`, `server`, `region` {field} | `backend/app.py:100` | required |
@@ -151,8 +151,8 @@ relied-on-by: [[feat-share]] — shares the result and its config
 | `RAID_ENCOUNTERS` {server} | `backend/analysis.py:196` | per-raid encounter ID allowlist |
 | `RAID_DATE_WINDOWS` {server} | `backend/analysis.py:224` | per-raid outer date bounds |
 | `fpx.wclCredentials` {storage} | `frontend/src/api.js:18` | localStorage, this browser only |
-| `sharedAnalysisData` {storage} | `frontend/src/App.js:536` | IndexedDB `FloorPovDB`, last result |
-| `recentRuns` {storage} | `frontend/src/App.js:437` | IndexedDB, last 5 runs |
+| `sharedAnalysisData` {storage} | `frontend/src/App.js:537` | IndexedDB `FloorPovDB`, last result |
+| `recentRuns` {storage} | `frontend/src/App.js:438` | IndexedDB, last 5 runs |
 
 ## Invariants
 
@@ -160,7 +160,7 @@ relied-on-by: [[feat-share]] — shares the result and its config
 - **MUST** user dates only narrow the raid's tier window, never widen it (`backend/analysis.py:242`), so a run never pages through a guild's whole history.
 - **NEVER** run cheat-death detection for a caller without a valid Supabase session, whatever the request body says (`backend/app.py:116`). The stream tells the caller it was skipped (`backend/app.py:125`).
 - **MUST** fights be kept only when their encounter ID is in the selected raid's `RAID_ENCOUNTERS` set (`backend/analysis.py:277`); dungeon bosses never enter a raid's numbers.
-- **NEVER** store the Client ID or Secret in the browser's analysis history: `stripSecrets` removes them before the IndexedDB writes (`frontend/src/App.js:465`, `frontend/src/App.js:536`).
+- **NEVER** store the Client ID or Secret in the browser's analysis history: `stripSecrets` removes them before the IndexedDB writes (`frontend/src/App.js:466`, `frontend/src/App.js:537`).
 
 ## Gotchas
 

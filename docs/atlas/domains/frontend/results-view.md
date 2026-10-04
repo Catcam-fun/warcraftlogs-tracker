@@ -14,16 +14,16 @@ anchors:
   is_counted: frontend/src/deathCounting.js:22
   counted_deaths: frontend/src/deathCounting.js:31
   legacy_cutoff: frontend/src/deathCounting.js:14
-  cutoff_state: frontend/src/App.js:220
-  filtered_stats: frontend/src/App.js:967
-  overview_data: frontend/src/App.js:1117
-  memos: frontend/src/App.js:1240
-  kill_counts: frontend/src/App.js:1250
-  sort_overview: frontend/src/App.js:1262
-  percentage_color: frontend/src/App.js:1315
-  results_route: frontend/src/App.js:1566
-  cutoff_select: frontend/src/App.js:1664
-  player_list: frontend/src/App.js:2070
+  cutoff_state: frontend/src/App.js:221
+  filtered_stats: frontend/src/App.js:968
+  overview_data: frontend/src/App.js:1118
+  memos: frontend/src/App.js:1241
+  kill_counts: frontend/src/App.js:1251
+  sort_overview: frontend/src/App.js:1263
+  percentage_color: frontend/src/App.js:1316
+  results_route: frontend/src/App.js:1567
+  cutoff_select: frontend/src/App.js:1665
+  player_list: frontend/src/App.js:2071
   death_row: frontend/src/DeathRow.js:235
   death_context: frontend/src/DeathRow.js:249
   ready_tip: frontend/src/DeathRow.js:309
@@ -46,13 +46,13 @@ links:
   - feat-analyze
   - feat-share
   - feat-saved
-content_hash: sha256:470b965210a7feaa5505b9b9eca8746398a54edd900d5b8eba212fc2cc71f828
+content_hash: sha256:75bd7c63b527abd454d379442d8050dea294871811b78eb6fa1d3f378ceab221
 ---
 ## Summary
 
-The **Results view** is what a raid officer reads after an analysis. It lives inside the `/results` route in `frontend/src/App.js:1566`, with two leaf components for the detail: `DeathRow.js` and `DefensivePanel.js`.
+The **Results view** is what a raid officer reads after an analysis. It lives inside the `/results` route in `frontend/src/App.js:1567`, with two leaf components for the detail: `DeathRow.js` and `DefensivePanel.js`.
 
-- The page reads one stored object, `data`, and a handful of filter states. All tables are derived with `useMemo` from those (`frontend/src/App.js:1240-1247`).
+- The page reads one stored object, `data`, and a handful of filter states. All tables are derived with `useMemo` from those (`frontend/src/App.js:1241-1248`).
 - "First X deaths per pull" is decided by `isCounted` (`frontend/src/deathCounting.js:22`), using the `slot` and `inWipe` fields the backend put on each death.
 - Each death row is a `DeathRow` (`frontend/src/DeathRow.js:235`); a player's defensive rollup is `summarizeDefensives` plus two small chips (`frontend/src/DefensivePanel.js:20`).
 - What it deliberately does not do: it never decides a slot, a wipe, a death type or whether a defensive would have saved someone. Those come from the backend; this page counts, filters, sorts and explains.
@@ -63,18 +63,18 @@ Changing any filter re-runs the same pipeline. You can think of it as a sieve: e
 
 ```steps
 - title: Choose X | short: Deaths to count | sub: 1 to meta.maxCutoff
-  body: The "Deaths to count" select sets cutoff (default 2, App.js:220). Its options run from 1 to data.meta.maxCutoff (App.js:1664-1669), which the backend clamps to 1-10 from the Analyze form (backend/app.py:107).
+  body: The "Deaths to count" select sets cutoff (default 2, App.js:221). Its options run from 1 to data.meta.maxCutoff (App.js:1665-1670), which the backend clamps to 1-10 from the Analyze form (backend/app.py:107).
   gotcha: cutoff is never reset when a different result loads. If a new result has a smaller maxCutoff than the current cutoff, the select has no matching option while counting still uses the old value.
 - title: Decide what counts | short: isCounted | sub: slot <= X and not inWipe
   body: For each death, isCounted returns slot <= cutoff && !inWipe (deathCounting.js:22-25). Results saved before slot existed fall back to data.pullCutoffTimestamps[reportId_fightId][X], or the largest X stored, and count deaths at or before that time (deathCounting.js:14-27). countedDeaths then splits the survivors into real and cheat lists (deathCounting.js:31-38).
 - title: Apply filters | short: Filters | sub: bosses, pulls, search, hidden, alts
-  body: Boss chips limit events and pulls to the selected bosses (App.js:998, App.js:1011). Alt groups merge each main's characters' events and pulls (App.js:992-996). Search drops non-matching names; Minimum pulls and Hide drop players afterwards (App.js:1031, App.js:1110).
+  body: Boss chips limit events and pulls to the selected bosses (App.js:999, App.js:1012). Alt groups merge each main's characters' events and pulls (App.js:993-997). Search drops non-matching names; Minimum pulls and Hide drop players afterwards (App.js:1032, App.js:1111).
 - title: Build the matrix | short: Matrix | sub: player x boss rates
-  body: computeOverviewData builds grid[player][boss] with counted real deaths over that player's pulls of the boss, plus an overall column (App.js:1117-1233). Cheat deaths enter totalRate only when cheat detection was on (App.js:1172, App.js:1204). The matrix is collapsed by default (App.js:225).
+  body: computeOverviewData builds grid[player][boss] with counted real deaths over that player's pulls of the boss, plus an overall column (App.js:1118-1234). Cheat deaths enter totalRate only when cheat detection was on (App.js:1173, App.js:1205). The matrix is collapsed by default (App.js:226).
 - title: Build the player list | short: Players | sub: sorted by real rate
-  body: computeFilteredStats builds one row per player with real deaths, pulls, rate, deaths grouped by boss, the top 5 killing abilities per boss (Unknown excluded) and a defensive summary of the counted real deaths (App.js:967-1106). The list is sorted by real rate, then real deaths, both descending (App.js:1114).
+  body: computeFilteredStats builds one row per player with real deaths, pulls, rate, deaths grouped by boss, the top 5 killing abilities per boss (Unknown excluded) and a defensive summary of the counted real deaths (App.js:968-1107). The list is sorted by real rate, then real deaths, both descending (App.js:1115).
 - title: Expand a player | short: Death rows | sub: per boss, DeathRow each
-  body: Expanding a player shows DefensiveTopUnused, then one section per boss in Adventure-Guide order with counts, top abilities and a DeathRow per counted death (App.js:2110-2155). With cheat deaths shown, real and cheat deaths are merged and sorted by absTs (App.js:2149).
+  body: Expanding a player shows DefensiveTopUnused, then one section per boss in Adventure-Guide order with counts, top abilities and a DeathRow per counted death (App.js:2111-2156). With cheat deaths shown, real and cheat deaths are merged and sorted by absTs (App.js:2150).
 ```
 
 ### What a death row shows
@@ -82,7 +82,7 @@ Changing any filter re-runs the same pipeline. You can think of it as a sieve: e
 `DeathRow` has four columns (`frontend/src/fp-design.css:725`): the killing blow, a health bar, the defensive strip, and a "View log" link with the time.
 
 - **Killing blow line**: `#pullNo · ability name`, a CHEAT badge for a cheat death, then one context line chosen in this order (`frontend/src/DeathRow.js:249-261`): cheat death, no hit in the log, no killing blow recorded, instant kill, one-shot ("one-shot from N%"), burst ("burst from N%: K hits in Ts"), rot ("worn down by X (rot, K hits)"), set up by the biggest hit, and finally plain "at N%, hit for M%". The label itself comes from `survival.deathType`, `burst`, `rot` and `biggestHit`, set by the backend.
-- **Killing-blow tooltip**: the spell's in-game description from `data.abilityText` (by spell ID), the killing blow size, rot / burst / set-up rows, health before it and overkill, warnings for "ignores immunity" and "ignores reduction", and how many counted raiders that ability killed in these results (`frontend/src/DeathRow.js:263-306`). The kill count is `killCounts`, built with the same `isCounted` rule (`frontend/src/App.js:1250-1258`).
+- **Killing-blow tooltip**: the spell's in-game description from `data.abilityText` (by spell ID), the killing blow size, rot / burst / set-up rows, health before it and overkill, warnings for "ignores immunity" and "ignores reduction", and how many counted raiders that ability killed in these results (`frontend/src/DeathRow.js:263-306`). The kill count is `killCounts`, built with the same `isCounted` rule (`frontend/src/App.js:1251-1259`).
 - **Health bar**: width is `hpBeforePct`, capped at 100; hidden for instant kills (`frontend/src/DeathRow.js:420-423`).
 - **Defensive strip**, left to right (`frontend/src/DeathRow.js:363-407`):
   - **Active** (gold ring, "ON" tag): auras up when they died, including externals with who cast them.
@@ -129,18 +129,18 @@ The pieces of the Results view. Filter by kind.
 |---|---|---|
 | `isCounted` {counting} | `slot <= cutoff && !inWipe`; legacy fallback to `pullCutoffTimestamps` | `frontend/src/deathCounting.js:22` |
 | `countedDeaths` {counting} | Splits counted events into `{ real, cheat }` by `isCheatDeath` | `frontend/src/deathCounting.js:31` |
-| `killCounts` {counting} | Counted real deaths per `"boss|ability"`, for the killing-blow tooltip | `frontend/src/App.js:1250` |
-| `computeFilteredStats` {table} | Player list rows: deaths, pulls, rate, per-boss deaths, top abilities, defensive summary | `frontend/src/App.js:967` |
-| `computeOverviewData` {table} | Matrix grid and overall column; bosses in `BOSS_ORDER` order | `frontend/src/App.js:1117` |
-| `sortOverviewData` / `handleSort` {table} | Matrix sort by Player, a boss column or Overall; a second click flips to descending; no-rate cells sort as -1 | `frontend/src/App.js:1262`, `frontend/src/App.js:1288` |
-| `getPercentageColor` {table} | Colors a rate against its column: IQR outliers get the end colors, the rest a green-yellow-red scale around the median | `frontend/src/App.js:1315` |
-| `getWCLLink` {table} | `warcraftlogs.com/reports/<id>#fight=<fightId>&type=deaths` | `frontend/src/App.js:1310` |
-| Deaths to count {filter} | `cutoff`, default 2, options 1 to `meta.maxCutoff` | `frontend/src/App.js:1664` |
-| Boss filters {filter} | Chips in `BOSS_ORDER` order; none selected means all | `frontend/src/App.js:1697` |
-| Minimum pulls {filter} | Hides players with fewer pulls (digits only) | `frontend/src/App.js:1709` |
-| Search {filter} | Case-insensitive substring on player name | `frontend/src/App.js:1726` |
-| Hidden players {filter} | "Hide" on a row; a pill list restores them | `frontend/src/App.js:1736` |
-| Group characters {filter} | Merge alts into a main for both tables, this session only | `frontend/src/App.js:1773` |
+| `killCounts` {counting} | Counted real deaths per `"boss|ability"`, for the killing-blow tooltip | `frontend/src/App.js:1251` |
+| `computeFilteredStats` {table} | Player list rows: deaths, pulls, rate, per-boss deaths, top abilities, defensive summary | `frontend/src/App.js:968` |
+| `computeOverviewData` {table} | Matrix grid and overall column; bosses in `BOSS_ORDER` order | `frontend/src/App.js:1118` |
+| `sortOverviewData` / `handleSort` {table} | Matrix sort by Player, a boss column or Overall; a second click flips to descending; no-rate cells sort as -1 | `frontend/src/App.js:1263`, `frontend/src/App.js:1289` |
+| `getPercentageColor` {table} | Colors a rate against its column: IQR outliers get the end colors, the rest a green-yellow-red scale around the median | `frontend/src/App.js:1316` |
+| `getWCLLink` {table} | `warcraftlogs.com/reports/<id>#fight=<fightId>&type=deaths` | `frontend/src/App.js:1311` |
+| Deaths to count {filter} | `cutoff`, default 2, options 1 to `meta.maxCutoff` | `frontend/src/App.js:1665` |
+| Boss filters {filter} | Chips in `BOSS_ORDER` order; none selected means all | `frontend/src/App.js:1698` |
+| Minimum pulls {filter} | Hides players with fewer pulls (digits only) | `frontend/src/App.js:1710` |
+| Search {filter} | Case-insensitive substring on player name | `frontend/src/App.js:1727` |
+| Hidden players {filter} | "Hide" on a row; a pill list restores them | `frontend/src/App.js:1737` |
+| Group characters {filter} | Merge alts into a main for both tables, this session only | `frontend/src/App.js:1774` |
 | `DeathRow` {row} | One death: killing blow, context line, health bar, defensive strip, log link | `frontend/src/DeathRow.js:235` |
 | `Tip` / `TipBox` {row} | Hover or focus tooltip, portaled to `document.body` and kept inside the viewport | `frontend/src/DeathRow.js:198`, `frontend/src/DeathRow.js:183` |
 | `Icon` {row} | Blizzard icon, then WarcraftLogs' copy, then the name's first letter | `frontend/src/DeathRow.js:215` |
@@ -172,22 +172,22 @@ relied-on-by: [[feat-saved]] — an opened saved report renders through this sam
 
 ## Invariants
 
-- **MUST** count through `isCounted` / `countedDeaths` everywhere: the matrix (`frontend/src/App.js:1169`, `frontend/src/App.js:1202`), the player list (`frontend/src/App.js:1022`) and `killCounts` (`frontend/src/App.js:1253`). A second rule anywhere would make the tables disagree.
+- **MUST** count through `isCounted` / `countedDeaths` everywhere: the matrix (`frontend/src/App.js:1170`, `frontend/src/App.js:1203`), the player list (`frontend/src/App.js:1023`) and `killCounts` (`frontend/src/App.js:1254`). A second rule anywhere would make the tables disagree.
 - **NEVER** count a death with `inWipe`, whatever X is (`frontend/src/deathCounting.js:24`). Mass deaths at a wipe say nothing about who failed first.
 - **NEVER** recompute `slot`, `inWipe`, `deathType` or `wouldSave` in the browser. They come from the backend (`backend/analysis.py:150`, `backend/app.py:510-511`, `backend/defensives.py:1656`); the view only reads them.
 - **MUST** skip defensive data without the current shape (`active` and `available` arrays) so saves and shares from older versions still render (`frontend/src/DeathRow.js:21`, `frontend/src/DefensivePanel.js:17`).
 
 ## Gotchas
 
-- **Grouped alts undercount per-boss pulls in the player list**: the per-boss header uses `data.bossParticipation[boss]?.[player]` for the main only (`frontend/src/App.js:2115`), while deaths and the matrix include every grouped character (`frontend/src/App.js:1165-1167`). A grouped player's per-boss rate in the expanded list can read higher than in the matrix.
-- **Filters survive a new result**: `cutoff`, `selectedBosses`, `hiddenPlayers`, `minPulls`, `searchQuery` and `characterGroups` are never reset when another result loads; only `expandedPlayers` and `sortConfig` are (`frontend/src/App.js:323-324`, `frontend/src/App.js:490-491`). Boss chips from the previous raid can silently empty the tables.
-- **"Analyzed" shows the current time**: the page header formats `new Date()` at render, not when the analysis ran (`frontend/src/App.js:1643`). A saved report opened a week later reads as analyzed today.
-- **Matrix sort only affects the matrix**: the player list is always ordered by real rate (`frontend/src/App.js:1114`). With no sort chosen, matrix rows are alphabetical (`frontend/src/App.js:1127`).
-- **Color scale ignores the search box**: matrix colors are computed over all visible players, not just the searched ones, so a cell keeps its color while you search (`frontend/src/App.js:1939-1950`).
-- **Cheat deaths in the player list are not gated by the toggle**: `computeFilteredStats` counts cheat deaths whatever `enableCheatDeath` says, and only hides them in the display (`frontend/src/App.js:1021-1026`, `frontend/src/App.js:2079`); the matrix gates them (`frontend/src/App.js:1172`). In practice the backend only sends cheat deaths when detection ran.
+- **Grouped alts undercount per-boss pulls in the player list**: the per-boss header uses `data.bossParticipation[boss]?.[player]` for the main only (`frontend/src/App.js:2116`), while deaths and the matrix include every grouped character (`frontend/src/App.js:1166-1168`). A grouped player's per-boss rate in the expanded list can read higher than in the matrix.
+- **Filters survive a new result**: `cutoff`, `selectedBosses`, `hiddenPlayers`, `minPulls`, `searchQuery` and `characterGroups` are never reset when another result loads; only `expandedPlayers` and `sortConfig` are (`frontend/src/App.js:324-325`, `frontend/src/App.js:491-492`). Boss chips from the previous raid can silently empty the tables.
+- **"Analyzed" is when the analysis ran**: the header shows the result's `meta.generatedAt` (`frontend/src/App.js:1644`, `frontend/src/analyzedAt.js`), which the backend stamps in UTC (`backend/app.py:587`), so a saved or shared report keeps its original date. Older results stamped without a zone are read as UTC; a result with no stamp shows no date rather than today's.
+- **Matrix sort only affects the matrix**: the player list is always ordered by real rate (`frontend/src/App.js:1115`). With no sort chosen, matrix rows are alphabetical (`frontend/src/App.js:1128`).
+- **Color scale ignores the search box**: matrix colors are computed over all visible players, not just the searched ones, so a cell keeps its color while you search (`frontend/src/App.js:1940-1951`).
+- **Cheat deaths in the player list are not gated by the toggle**: `computeFilteredStats` counts cheat deaths whatever `enableCheatDeath` says, and only hides them in the display (`frontend/src/App.js:1022-1027`, `frontend/src/App.js:2080`); the matrix gates them (`frontend/src/App.js:1173`). In practice the backend only sends cheat deaths when detection ran.
 - **One-shots include instant kills**: the "one-shots" chip counts `deathType` `oneShot` and `instakill` together (`frontend/src/DefensivePanel.js:33`).
 - **Potion quality art ignores PUBLIC_URL**: `qualityArt` returns `/art/quality/<name>.png` (`frontend/src/DeathRow.js:162`), unlike the other art paths. It breaks only if the site is served under a sub-path.
-- **Death rows are keyed by index**: `DeathRow` gets `key={idx}` (`frontend/src/App.js:2151`), so open tooltips can attach to a different row when the list changes under them.
+- **Death rows are keyed by index**: `DeathRow` gets `key={idx}` (`frontend/src/App.js:2152`), so open tooltips can attach to a different row when the list changes under them.
 
 ## Glossary
 

@@ -22,7 +22,7 @@ anchors:
   storage_response: backend/app.py:668
   require_user: backend/auth.py:79
   limit_decorator: backend/ratelimit.py:47
-  frontend_sse_reader: frontend/src/App.js:734
+  frontend_sse_reader: frontend/src/App.js:735
 links:
   - backend
   - backend-analysis-pipeline
@@ -40,7 +40,7 @@ invariants:
   - "MUST: an /api/analyze stream ends with exactly one result event or one error event; the client treats the first error as final."
   - "MUST: cheat-death detection runs only for a request with a valid bearer token, whatever enableCheatDeath says."
   - "NEVER: return stored credentials; shares and saves pass config through strip_secrets on the way in and out."
-content_hash: sha256:21c2fcb9fc63abac48fe36b4b82d63115c01f7b41c03a8f543de53f8a3853d79
+content_hash: sha256:ec23799efb66490b858dce7902904971df2a3b4ff4ae72625f4fe6476a3d5c82
 ---
 ## Summary
 
@@ -86,7 +86,7 @@ Storage routes share one mapper, `_storage_response` (`backend/app.py:668`): a r
 
 #### The /api/analyze SSE protocol
 
-The route returns `Response(generate(), mimetype='text/event-stream')` with `Cache-Control: no-cache` and `X-Accel-Buffering: no` so proxies do not buffer the stream (`backend/app.py:618`). Each event is a single `data: <json>` line followed by a blank line. There are no `event:` names or ids; the JSON keys say what the event is. The frontend splits on blank lines and dispatches on `error`, then `message`, then `result` (`frontend/src/App.js:734`).
+The route returns `Response(generate(), mimetype='text/event-stream')` with `Cache-Control: no-cache` and `X-Accel-Buffering: no` so proxies do not buffer the stream (`backend/app.py:618`). Each event is a single `data: <json>` line followed by a blank line. There are no `event:` names or ids; the JSON keys say what the event is. The frontend splits on blank lines and dispatches on `error`, then `message`, then `result` (`frontend/src/App.js:735`).
 
 | Event {sse} | Shape | When |
 |---|---|---|
@@ -133,7 +133,7 @@ relied-on-by: [[feat-account]] — account deletion
 
 ## Invariants
 
-- **MUST** end an `/api/analyze` stream with exactly one `result` event or one `error` event; the client throws on the first `error` (`frontend/src/App.js:737`).
+- **MUST** end an `/api/analyze` stream with exactly one `result` event or one `error` event; the client throws on the first `error` (`frontend/src/App.js:738`).
 - **MUST** gate cheat-death detection on a valid bearer token, whatever `enableCheatDeath` says, since a shared config or a direct call can set the flag (`backend/app.py:91`).
 - **NEVER** return stored credentials: shares and saves pass `config` through `strip_secrets` when stored and when read (`backend/supabase_client.py:216`, `backend/supabase_client.py:252`).
 

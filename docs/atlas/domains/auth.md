@@ -16,8 +16,8 @@ anchors:
   sign_in: frontend/src/Auth.js:139
   captcha: frontend/src/Auth.js:72
   api_fetch: frontend/src/api.js:52
-  analyze_header: frontend/src/App.js:701
-  session_restore: frontend/src/App.js:261
+  analyze_header: frontend/src/App.js:702
+  session_restore: frontend/src/App.js:262
   bearer: backend/auth.py:29
   verify_token: backend/auth.py:36
   cache_ttl: backend/auth.py:23
@@ -41,7 +41,7 @@ invariants:
   - "MUST: verify_token return None on any non-200 or network failure, so the route answers 401."
   - "NEVER: store raw tokens in the verification cache; keys are SHA-256 hashes."
   - "NEVER: honor enableCheatDeath without a verified session."
-content_hash: sha256:4a1d10cdc5e15be885fd73a2ce819622ccec5425a88797bf74834d759bc08577
+content_hash: sha256:31d97ee61f5a196655c3eee77edfc40a9a2dc0c065a2e45568ffdba3cad246e1
 ---
 # Accounts & Auth
 
@@ -81,9 +81,9 @@ edge req -> apifetch color=never "401"
   body: The modal requires a Cloudflare Turnstile token, posts it to a verify-turnstile worker (frontend/src/Auth.js:73), then calls supabase.auth.signUp or signInWithPassword directly (frontend/src/Auth.js:135, :139). Sign-up also requires the age and terms checkboxes (frontend/src/Auth.js:111).
   gotcha: The CAPTCHA check happens in the browser before the Supabase call. Nothing in this repo makes Supabase itself demand the CAPTCHA, so a script calling Supabase directly skips it unless the Supabase project enforces one.
 - title: Stay logged in | short: Session length | sub: localStorage flag + cookie
-  body: Supabase always persists the session. Unchecking "Stay logged in" sets a localStorage flag and a session cookie (frontend/src/supabaseClient.js:15). On the next load, flag set and cookie gone means the browser was closed, and App.js signs out locally (frontend/src/App.js:261).
+  body: Supabase always persists the session. Unchecking "Stay logged in" sets a localStorage flag and a session cookie (frontend/src/supabaseClient.js:15). On the next load, flag set and cookie gone means the browser was closed, and App.js signs out locally (frontend/src/App.js:262).
 - title: Call the backend | short: Send token | sub: apiFetch
-  body: apiFetch with auth true reads the current session and adds the Bearer header; with no session it returns a local 401 without a network call. auth 'optional' attaches a token only if there is one (frontend/src/api.js:52). The analyze stream uses fetch directly and adds the same header when signed in (frontend/src/App.js:701).
+  body: apiFetch with auth true reads the current session and adds the Bearer header; with no session it returns a local 401 without a network call. auth 'optional' attaches a token only if there is one (frontend/src/api.js:52). The analyze stream uses fetch directly and adds the same header when signed in (frontend/src/App.js:702).
 - title: Verify the token | short: Verify | sub: GET /auth/v1/user
   body: verify_token (backend/auth.py:36) hashes the token, returns a cached user id if it is under 60 seconds old, otherwise calls SUPABASE_URL/auth/v1/user with the anon key as apikey and a 10 second timeout. Only a 200 with an id counts.
   gotcha: The cache holds up to 1000 entries; when full it drops expired ones, or half the cache if none have expired (backend/auth.py:65).
@@ -111,7 +111,7 @@ Which backend endpoints use a session (`backend/app.py`).
 | `GET /api/shared/<id>` {public} | none | shares are public by link |
 | `GET /api/health`, `GET /` {public} | none | status only |
 
-The browser also reads and writes its own `api_credentials` row directly with the Supabase client (`frontend/src/App.js:547`, `frontend/src/Settings.js:40`); RLS limits that to `auth.uid() = user_id` (`backend/migrations/001_shares_and_rls.sql:36`).
+The browser also reads and writes its own `api_credentials` row directly with the Supabase client (`frontend/src/App.js:548`, `frontend/src/Settings.js:40`); RLS limits that to `auth.uid() = user_id` (`backend/migrations/001_shares_and_rls.sql:36`).
 
 ## Invariants
 
@@ -126,7 +126,7 @@ The browser also reads and writes its own `api_credentials` row directly with th
 - **auth.py does not load .env itself**: it reads `os.environ` at import (`backend/auth.py:20`); it works because `backend/app.py:20` calls `load_dotenv()` before importing it.
 - **Account deletion needs the service-role key**: without `SUPABASE_SERVICE_ROLE_KEY` the backend refuses with "Account deletion isn't configured on the server." (`backend/supabase_client.py:381`).
 - **Partial deletion reports an error**: if any table or the auth delete fails, the response is an error asking to retry (`backend/supabase_client.py:400`); share cleanup failures are only logged.
-- **Password reset lands back on the site**: the reset link redirects to `window.location.origin` (`frontend/src/Auth.js:95`), and the `PASSWORD_RECOVERY` event opens Settings (`frontend/src/App.js:279`).
+- **Password reset lands back on the site**: the reset link redirects to `window.location.origin` (`frontend/src/Auth.js:95`), and the `PASSWORD_RECOVERY` event opens Settings (`frontend/src/App.js:280`).
 
 ## Glossary
 
