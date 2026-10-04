@@ -113,6 +113,13 @@ def save_analysis(user_id, analysis_name, guild_name, analysis_data, config=None
             'size_bytes': len(blob),
             'expires_at': (_now() + timedelta(days=retention_days)).isoformat(),
         }).execute()
+        # Two saves at once can both pass the count above; recount, and the
+        # one that went over takes its row back out.
+        after = db.table('saved_analyses').select('id', count='exact').eq('user_id', user_id).execute()
+        if (after.count or 0) > MAX_SAVED_PER_USER:
+            db.table('saved_analyses').delete().eq('id', analysis_id).execute()
+            return {"error": f"You can keep {MAX_SAVED_PER_USER} saved reports. Delete one to save another.",
+                    "code": "limit"}
         return {"success": True, "id": analysis_id, "size_bytes": len(blob)}
     except Exception as e:
         print(f"[Saved] save failed: {e}")

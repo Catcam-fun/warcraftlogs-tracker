@@ -92,6 +92,23 @@ class StorageTests(unittest.TestCase):
         # Another user's quota is independent.
         self.assertTrue(supabase_client.save_analysis('u2', 'x', 'G', ANALYSIS).get('success'))
 
+    def test_concurrent_saves_cannot_exceed_the_limit(self):
+        for i in range(4):
+            supabase_client.save_analysis('u1', f'r{i}', 'G', ANALYSIS)
+        rows = self.db.tables['saved_analyses']
+        real_insert = FakeQuery.insert
+
+        def racing_insert(query, payload):
+            # Another request's save lands between this one's count and insert.
+            if payload.get('analysis_name') == 'late':
+                rows.append(dict(payload, id='other', analysis_name='concurrent'))
+            return real_insert(query, payload)
+        with mock.patch.object(FakeQuery, 'insert', racing_insert):
+            result = supabase_client.save_analysis('u1', 'late', 'G', ANALYSIS)
+        self.assertEqual(result.get('code'), 'limit')
+        self.assertEqual(len([r for r in rows if r['user_id'] == 'u1']), 5)
+        self.assertNotIn('late', [r['analysis_name'] for r in rows])
+
     def test_saved_reports_are_scoped_to_owner_and_strip_secrets(self):
         saved = supabase_client.save_analysis('u1', 'mine', 'G', ANALYSIS, config=SECRET_CONFIG)
         rid = saved['id']
@@ -159,6 +176,20 @@ class EndpointAuthTests(unittest.TestCase):
             self.client.delete('/api/account', headers={'Authorization': 'Bearer t'})
         listed.assert_called_once_with('real-user')
         deleted.assert_called_once_with('real-user')
+
+    def test_share_route_reports_memory_only_links_and_real_status(self):
+        payload = {"data": ANALYSIS, "config": {}}
+        with mock.patch.object(app_module.supabase_client, 'store_share',
+                               return_value={"success": True, "expires_at": "x", "ephemeral": True}):
+            resp = self.client.post('/api/share', json=payload)
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json["ephemeral"])
+        with mock.patch.object(app_module.supabase_client, 'store_share',
+                               return_value={"error": "This analysis is too large to share.", "code": "too_large"}):
+            self.assertEqual(self.client.post('/api/share', json=payload).status_code, 413)
+        with mock.patch.object(app_module.supabase_client, 'store_share',
+                               return_value={"error": "Could not create the share link."}):
+            self.assertEqual(self.client.post('/api/share', json=payload).status_code, 500)
 
     def test_share_rejects_non_analysis_payloads(self):
         resp = self.client.post('/api/share', json={"data": "junk"})
