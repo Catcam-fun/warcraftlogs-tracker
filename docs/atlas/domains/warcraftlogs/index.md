@@ -16,7 +16,7 @@ anchors:
   guild_reports: backend/warcraftlogs.py:176
   guild_roster: backend/warcraftlogs.py:252
   fights: backend/warcraftlogs.py:333
-  deaths_bulk: backend/analysis.py:317
+  deaths_bulk: backend/analysis.py:319
   defensive_raw: backend/defensives.py:207
   death_windows: backend/defensives.py:768
   instakills: backend/defensives.py:811
@@ -40,7 +40,7 @@ invariants:
   - "NEVER: a guild-reports query filters by zoneID; mixed raid and dungeon reports would be dropped."
 flows:
   - request-path
-content_hash: sha256:8d7c21cdfefa02757b3fb341b61fd20f6f7a2eea0c9b7a1a435cd1870d38374c
+content_hash: sha256:2c85e8ee7398ddba941501778f1a18de221c1e8dc8417b9e386879c7cacb794b
 ---
 ## Summary
 
@@ -61,12 +61,12 @@ One Analyze request walks through the WCL reads below, in the order `generate()`
   body: With rosterOnly on, get_guild_roster reads guildData.guild.members 100 at a time, the first 3 pages at once, then any remaining pages up to last_page (backend/warcraftlogs.py:321-323). Names are accent-stripped and lowercased into a set (backend/warcraftlogs.py:317-319). With the toggle off, the roster is not fetched at all (backend/app.py:138-139).
   gotcha: The roster is best-effort. A failed page is skipped, and an empty roster means everyone counts (backend/app.py:154-157).
 - title: Guild reports | short: Reports | sub: scoped to the tier window
-  body: get_guild_reports pages reportData.reports 100 at a time with startTime and endTime pushed into the query, up to 50 pages (backend/warcraftlogs.py:200-246). The window is the tier's RAID_DATE_WINDOWS entry, which the user's dates can only narrow (backend/analysis.py:240, backend/app.py:162-164).
+  body: get_guild_reports pages reportData.reports 100 at a time with startTime and endTime pushed into the query, up to 50 pages (backend/warcraftlogs.py:200-246). The window is the tier's RAID_DATE_WINDOWS entry, which the user's dates can only narrow (backend/analysis.py:242, backend/app.py:162-164).
   gotcha: There is no zoneID filter on purpose. WCL gives a report one zone, so a night that mixes a raid and Mythic+ would be classified as the dungeon and dropped (docstring at backend/warcraftlogs.py:177-186).
 - title: Fights and players | short: Fights | sub: one query per report
-  body: get_fights reads fights, Player actors, ability names, school bitmasks and icons, and playerDetails (spec per player) in one GraphQL round trip (backend/warcraftlogs.py:341-377). analyze_fights then keeps only pulls whose encounter ID is in the raid's RAID_ENCOUNTERS set at the chosen difficulty (backend/analysis.py:262-276).
+  body: get_fights reads fights, Player actors, ability names, school bitmasks and icons, and playerDetails (spec per player) in one GraphQL round trip (backend/warcraftlogs.py:341-377). analyze_fights then keeps only pulls whose encounter ID is in the raid's RAID_ENCOUNTERS set at the chosen difficulty (backend/analysis.py:264-278).
 - title: Deaths | short: Deaths | sub: whole report, one call
-  body: get_report_deaths_bulk asks for Deaths events from the first kept pull's start to the last one's end, plus (signed-in, cheat-death on) Debuffs and Healing filtered to cheat-death ability IDs, all as aliases of one query (backend/analysis.py:355-430). Extra pages are followed with nextPageTimestamp (backend/analysis.py:435-444).
+  body: get_report_deaths_bulk asks for Deaths events from the first kept pull's start to the last one's end, plus (signed-in, cheat-death on) Debuffs and Healing filtered to cheat-death ability IDs, all as aliases of one query (backend/analysis.py:357-432). Extra pages are followed with nextPageTimestamp (backend/analysis.py:437-446).
 - title: Defensive data | short: Defensives | sub: four queries at once
   body: fetch_defensive_raw runs Casts, Buffs, Healing and CombatantInfo queries in parallel (backend/defensives.py:229-239). Casts and buffs cover the time range from 3 minutes before the first pull; heals and talent loadouts are scoped to the boss pulls.
 - title: Hits before deaths | short: Death windows | sub: DamageTaken by name
@@ -108,7 +108,7 @@ What is read from WCL, and where.
 | Guild roster {query} | `guildData.guild.members` | `get_guild_roster` (`backend/warcraftlogs.py:252`) |
 | Guild reports {query} | `reportData.reports` | `get_guild_reports` (`backend/warcraftlogs.py:176`) |
 | Fights, actors, abilities, specs {query} | `reportData.report` (`fights`, `masterData`, `playerDetails`) | `get_fights` (`backend/warcraftlogs.py:333`) |
-| Deaths and cheat deaths {events} | `report.events` (Deaths, Debuffs, Healing) | `get_report_deaths_bulk` (`backend/analysis.py:317`) |
+| Deaths and cheat deaths {events} | `report.events` (Deaths, Debuffs, Healing) | `get_report_deaths_bulk` (`backend/analysis.py:319`) |
 | Defensive casts, buffs, heals, talents {events} | `report.events` (Casts, Buffs, Healing, CombatantInfo) | `fetch_defensive_raw` (`backend/defensives.py:207`) |
 | Hits before deaths {events} | `report.events` (DamageTaken) | `fetch_death_windows` (`backend/defensives.py:768`) |
 | Instant kills {events} | `report.events` (All, `type = 'instakill'`) | `fetch_instakills` (`backend/defensives.py:811`) |

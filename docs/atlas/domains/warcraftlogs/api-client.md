@@ -21,8 +21,8 @@ anchors:
   reports: backend/warcraftlogs.py:176
   roster: backend/warcraftlogs.py:252
   fights: backend/warcraftlogs.py:333
-  remaining_events: backend/analysis.py:289
-  deaths_bulk: backend/analysis.py:317
+  remaining_events: backend/analysis.py:291
+  deaths_bulk: backend/analysis.py:319
   paged: backend/defensives.py:180
   fetch_blocks: backend/defensives.py:742
   token_test: backend/test_api.py:173
@@ -37,7 +37,7 @@ invariants:
   - "MUST: a GraphQL response with an errors array raises, never returns partial data silently."
   - "MUST: every event fetch follows nextPageTimestamp so long reports don't lose events past the first page."
   - "NEVER: use an accent-stripped name in a WCL filter expression; it matches nobody."
-content_hash: sha256:d7ab93cb13cfc49e0399a828d393a50d9219136c174603607fec382cb705c047
+content_hash: sha256:2f2c41a16412ffcadbb60c84a65f9fdbf340b78797a8764181b3fd6b52ddfd59
 ---
 ## Summary
 
@@ -87,8 +87,8 @@ The cache is a module-level dict guarded by a lock (`backend/warcraftlogs.py:26-
   body: One query for fights (id, times, name, encounterID, difficulty, kill, gameZone, friendlyPlayers), Player actors, abilities (name, school bitmask, icon) and playerDetails (backend/warcraftlogs.py:341-377). Returns report_start, fights, friendlies, player_details, abilities, ability_schools and ability_icons.
   gotcha: Any error returns the same shape with empty values (backend/warcraftlogs.py:445-447), so an unreadable report just contributes no fights.
 - title: get_report_deaths_bulk | short: Deaths | sub: one query per report
-  body: Queries Deaths events over the span of the kept pulls; with cheat-death detection it adds Debuffs and Healing blocks filtered by ability.id in the same query via aliases (backend/analysis.py:355-430). Deaths are grouped by fight, named from the actor map and the ability map (backend/analysis.py:595-631).
-  gotcha: On failure it re-raises (backend/analysis.py:675) so the caller records the report as failed and does not cache an empty result.
+  body: Queries Deaths events over the span of the kept pulls; with cheat-death detection it adds Debuffs and Healing blocks filtered by ability.id in the same query via aliases (backend/analysis.py:357-432). Deaths are grouped by fight, named from the actor map and the ability map (backend/analysis.py:597-633).
+  gotcha: On failure it re-raises (backend/analysis.py:677) so the caller records the report as failed and does not cache an empty result.
 ```
 
 #### Pagination
@@ -97,7 +97,7 @@ WCL returns at most `limit: 10000` events and a `nextPageTimestamp` when more re
 
 | Helper {paging} | Used by | Shape |
 |---|---|---|
-| `_fetch_remaining_events` {paging} | death, debuff and save-heal blocks | one event type, startTime/endTime, optional filter, max 50 pages (`backend/analysis.py:289-314`) |
+| `_fetch_remaining_events` {paging} | death, debuff and save-heal blocks | one event type, startTime/endTime, optional filter, max 50 pages (`backend/analysis.py:291-316`) |
 | `_paged` {paging} | `fetch_defensive_raw` | builds the query from optional `fightIDs`, `startTime`, `endTime`, filter and `includeResources`, max 50 pages (`backend/defensives.py:180-204`) |
 | `_fetch_blocks` {paging} | `fetch_death_windows`, `fetch_instakills`, `build_raid_wide.py` | many aliased blocks per request, 20 per request; only blocks with a next page are asked again, max 50 rounds (`backend/defensives.py:742-765`) |
 
@@ -117,7 +117,7 @@ relied-on-by: the build and check scripts in backend/scripts
 
 - **MUST** fail 4xx responses other than 429 without retrying (`backend/warcraftlogs.py:48`); retrying cannot fix bad credentials or a bad query, and would only burn time.
 - **MUST** raise when the GraphQL response carries `errors` (`backend/warcraftlogs.py:169`), so partial data is never treated as complete.
-- **MUST** follow `nextPageTimestamp` on every event fetch, so long reports don't silently lose events past the first page (`backend/analysis.py:433-444`).
+- **MUST** follow `nextPageTimestamp` on every event fetch, so long reports don't silently lose events past the first page (`backend/analysis.py:435-446`).
 - **NEVER** put an accent-stripped name into a WCL filter: filters use the raw `logName` (`backend/defensives.py:791-792`).
 
 ## Gotchas

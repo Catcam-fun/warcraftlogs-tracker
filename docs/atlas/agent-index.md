@@ -84,11 +84,11 @@
   - processing_loop: backend/app.py:420
   - result: backend/app.py:574
   - raid_encounters: backend/analysis.py:196
-  - raid_date_windows: backend/analysis.py:222
-  - resolve_report_window: backend/analysis.py:240
-  - analyze_fights: backend/analysis.py:262
+  - raid_date_windows: backend/analysis.py:224
+  - resolve_report_window: backend/analysis.py:242
+  - analyze_fights: backend/analysis.py:264
   - is_duplicate_pull: backend/analysis.py:56
-  - deaths_bulk: backend/analysis.py:317
+  - deaths_bulk: backend/analysis.py:319
   - cheat_debuff_ids: backend/features.py:14
   - cheat_heal_ids: backend/features.py:26
 - links: backend, backend-api-endpoints, backend-death-counting, backend-caching-and-limits, backend-defensive-analysis, warcraftlogs, data-model, frontend-results-view, feat-analyze
@@ -420,9 +420,9 @@
   - On success the result is kept in the browser (IndexedDB, plus a five-run Recent list) and the app moves to /results.
 - invariants:
   - MUST: the server clamp maxCutoff to 1-10 (backend/app.py:107); the form's min/max are only a hint.
-  - MUST: user dates only narrow the raid's tier window, never widen it (backend/analysis.py:240).
+  - MUST: user dates only narrow the raid's tier window, never widen it (backend/analysis.py:242).
   - NEVER: run cheat-death detection for a caller without a valid Supabase session, whatever the request body says (backend/app.py:116).
-  - MUST: fights be kept only when their encounter ID is in the selected raid's RAID_ENCOUNTERS set (backend/analysis.py:275).
+  - MUST: fights be kept only when their encounter ID is in the selected raid's RAID_ENCOUNTERS set (backend/analysis.py:277).
   - NEVER: store the Client ID or Secret in the browser's analysis history; stripSecrets removes them before IndexedDB writes (frontend/src/App.js:536).
 - anchors:
   - route: frontend/src/App.js:1548
@@ -439,7 +439,7 @@
   - max_cutoff_clamp: backend/app.py:107
   - cheat_death_gate: backend/app.py:116
   - roster_toggle: backend/app.py:118
-  - date_window: backend/analysis.py:240
+  - date_window: backend/analysis.py:242
   - encounter_allowlist: backend/analysis.py:196
   - analyze_rate_limit: backend/app.py:50
 - links: frontend, frontend-pages-and-routing, frontend-landing-and-art, backend, backend-api-endpoints, backend-analysis-pipeline, backend-death-counting, backend-caching-and-limits, warcraftlogs, data-model, auth, security, feat-results, feat-account
@@ -804,7 +804,7 @@
   - NEVER: hand-edit the generated modules (defensive_catalog.py, boss_spell_flags.py, boss_spell_text.py, spell_icons.py, armor_constants.py, raid_wide_damage.py); edit the script and rerun it.
 - anchors:
   - raid_encounters: backend/analysis.py:196
-  - raid_date_windows: backend/analysis.py:222
+  - raid_date_windows: backend/analysis.py:224
   - season_two_entry: frontend/src/seasonTwoRaids.js:6
   - raid_cards_spread: frontend/src/AnalyzeConfig.js:21
   - raid_zones_spread: frontend/src/App.js:26
@@ -842,8 +842,8 @@
   - api_module: backend/app.py:3
   - analyze_route: backend/app.py:82
   - raid_encounters: backend/analysis.py:196
-  - raid_date_windows: backend/analysis.py:222
-  - analyze_fights: backend/analysis.py:262
+  - raid_date_windows: backend/analysis.py:224
+  - analyze_fights: backend/analysis.py:264
   - rank_pull_deaths: backend/analysis.py:150
   - wipe_window: backend/analysis.py:119
   - wipe_threshold: backend/analysis.py:19
@@ -962,8 +962,8 @@
   - reports: backend/warcraftlogs.py:176
   - roster: backend/warcraftlogs.py:252
   - fights: backend/warcraftlogs.py:333
-  - remaining_events: backend/analysis.py:289
-  - deaths_bulk: backend/analysis.py:317
+  - remaining_events: backend/analysis.py:291
+  - deaths_bulk: backend/analysis.py:319
   - paged: backend/defensives.py:180
   - fetch_blocks: backend/defensives.py:742
   - token_test: backend/test_api.py:173
@@ -989,7 +989,7 @@
   - guild_reports: backend/warcraftlogs.py:176
   - guild_roster: backend/warcraftlogs.py:252
   - fights: backend/warcraftlogs.py:333
-  - deaths_bulk: backend/analysis.py:317
+  - deaths_bulk: backend/analysis.py:319
   - defensive_raw: backend/defensives.py:207
   - death_windows: backend/defensives.py:768
   - instakills: backend/defensives.py:811
@@ -1023,8 +1023,8 @@
   - deaths_cache_key: backend/app.py:310
   - window_cache_key: backend/app.py:359
   - deaths_pool: backend/app.py:387
-  - deaths_bulk: backend/analysis.py:317
-  - remaining_events: backend/analysis.py:289
+  - deaths_bulk: backend/analysis.py:319
+  - remaining_events: backend/analysis.py:291
   - defensive_raw: backend/defensives.py:207
   - paged: backend/defensives.py:180
   - fetch_blocks: backend/defensives.py:742

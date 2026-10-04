@@ -25,7 +25,7 @@ anchors:
   max_cutoff_clamp: "backend/app.py:107"
   cheat_death_gate: "backend/app.py:116"
   roster_toggle: "backend/app.py:118"
-  date_window: "backend/analysis.py:240"
+  date_window: "backend/analysis.py:242"
   encounter_allowlist: "backend/analysis.py:196"
   analyze_rate_limit: "backend/app.py:50"
 links:
@@ -47,11 +47,11 @@ flows:
   - request-path
 invariants:
   - "MUST: the server clamp maxCutoff to 1-10 (backend/app.py:107); the form's min/max are only a hint."
-  - "MUST: user dates only narrow the raid's tier window, never widen it (backend/analysis.py:240)."
+  - "MUST: user dates only narrow the raid's tier window, never widen it (backend/analysis.py:242)."
   - "NEVER: run cheat-death detection for a caller without a valid Supabase session, whatever the request body says (backend/app.py:116)."
-  - "MUST: fights be kept only when their encounter ID is in the selected raid's RAID_ENCOUNTERS set (backend/analysis.py:275)."
+  - "MUST: fights be kept only when their encounter ID is in the selected raid's RAID_ENCOUNTERS set (backend/analysis.py:277)."
   - "NEVER: store the Client ID or Secret in the browser's analysis history; stripSecrets removes them before IndexedDB writes (frontend/src/App.js:536)."
-content_hash: sha256:a99d9bb8eab6c29a7455719fbf78aa02e28c2ce272ee39cf1c356535b2e6ec2f
+content_hash: sha256:279bace056a71aa04a6946fbb20ab862c32978d0eca41c327f35952d35e29b82
 ---
 ## Summary
 
@@ -73,7 +73,7 @@ You reach the page from the landing page's run button (`frontend/src/App.js:1539
   body: Client ID and Secret are required. Signed out, they are remembered in this browser under localStorage key fpx.wclCredentials (frontend/src/api.js:18, saved on every change at frontend/src/App.js:212). Signed in, they also load from and save to the api_credentials table (frontend/src/App.js:545, frontend/src/App.js:571). Guild name, server and region (us, eu, kr, tw, cn) identify the guild; difficulty is Normal (3), Heroic (4) or Mythic (5) (frontend/src/AnalyzeConfig.js:160).
   gotcha: handleSubmit only checks that Client ID, Secret, guild and server are filled (frontend/src/App.js:663). A wrong guild name is discovered only when WarcraftLogs returns no reports.
 - title: Set dates and deaths tracked | short: Dates & first X | sub: optional window, 1-10
-  body: Start and end dates are optional; blank means the start of the tier and today (frontend/src/AnalyzeConfig.js:171). Max Deaths to Track is the "first X deaths per pull" ceiling, 1 to 10 (frontend/src/AnalyzeConfig.js:191). On the server the date range is intersected with RAID_DATE_WINDOWS (backend/analysis.py:222) by resolve_report_window (backend/analysis.py:240), and maxCutoff is clamped to 1-10 (backend/app.py:107).
+  body: Start and end dates are optional; blank means the start of the tier and today (frontend/src/AnalyzeConfig.js:171). Max Deaths to Track is the "first X deaths per pull" ceiling, 1 to 10 (frontend/src/AnalyzeConfig.js:191). On the server the date range is intersected with RAID_DATE_WINDOWS (backend/analysis.py:224) by resolve_report_window (backend/analysis.py:242), and maxCutoff is clamped to 1-10 (backend/app.py:107).
   gotcha: maxCutoff also decides which deaths get defensive analysis at all (backend/app.py:514). Raising the Results page's slider above it later shows deaths without a defensive panel.
 - title: Roster and cheat deaths | short: Toggles | sub: who counts, cheat deaths
   body: Guild Roster (on by default, frontend/src/App.js:208) means only players on the guild's WarcraftLogs roster count; off, everyone in the reports counts and the roster is not fetched (backend/app.py:118, backend/app.py:137). Cheat Death Detection is disabled for signed-out users (frontend/src/AnalyzeConfig.js:195) and enforced on the server from the bearer token (backend/app.py:93, backend/app.py:116).
@@ -149,7 +149,7 @@ relied-on-by: [[feat-share]] — shares the result and its config
 | `enableCheatDeath` {field} | `backend/app.py:116` | honored only with a valid session |
 | `rosterOnly` {field} | `backend/app.py:118` | default on; off skips the roster fetch |
 | `RAID_ENCOUNTERS` {server} | `backend/analysis.py:196` | per-raid encounter ID allowlist |
-| `RAID_DATE_WINDOWS` {server} | `backend/analysis.py:222` | per-raid outer date bounds |
+| `RAID_DATE_WINDOWS` {server} | `backend/analysis.py:224` | per-raid outer date bounds |
 | `fpx.wclCredentials` {storage} | `frontend/src/api.js:18` | localStorage, this browser only |
 | `sharedAnalysisData` {storage} | `frontend/src/App.js:536` | IndexedDB `FloorPovDB`, last result |
 | `recentRuns` {storage} | `frontend/src/App.js:437` | IndexedDB, last 5 runs |
@@ -157,9 +157,9 @@ relied-on-by: [[feat-share]] — shares the result and its config
 ## Invariants
 
 - **MUST** the server clamp `maxCutoff` to 1-10 (`backend/app.py:107`); the form's `min`/`max` are only a hint.
-- **MUST** user dates only narrow the raid's tier window, never widen it (`backend/analysis.py:240`), so a run never pages through a guild's whole history.
+- **MUST** user dates only narrow the raid's tier window, never widen it (`backend/analysis.py:242`), so a run never pages through a guild's whole history.
 - **NEVER** run cheat-death detection for a caller without a valid Supabase session, whatever the request body says (`backend/app.py:116`). The stream tells the caller it was skipped (`backend/app.py:125`).
-- **MUST** fights be kept only when their encounter ID is in the selected raid's `RAID_ENCOUNTERS` set (`backend/analysis.py:275`); dungeon bosses never enter a raid's numbers.
+- **MUST** fights be kept only when their encounter ID is in the selected raid's `RAID_ENCOUNTERS` set (`backend/analysis.py:277`); dungeon bosses never enter a raid's numbers.
 - **NEVER** store the Client ID or Secret in the browser's analysis history: `stripSecrets` removes them before the IndexedDB writes (`frontend/src/App.js:465`, `frontend/src/App.js:536`).
 
 ## Gotchas

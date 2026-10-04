@@ -23,11 +23,11 @@ anchors:
   processing_loop: "backend/app.py:420"
   result: "backend/app.py:574"
   raid_encounters: "backend/analysis.py:196"
-  raid_date_windows: "backend/analysis.py:222"
-  resolve_report_window: "backend/analysis.py:240"
-  analyze_fights: "backend/analysis.py:262"
+  raid_date_windows: "backend/analysis.py:224"
+  resolve_report_window: "backend/analysis.py:242"
+  analyze_fights: "backend/analysis.py:264"
   is_duplicate_pull: "backend/analysis.py:56"
-  deaths_bulk: "backend/analysis.py:317"
+  deaths_bulk: "backend/analysis.py:319"
   cheat_debuff_ids: "backend/features.py:14"
   cheat_heal_ids: "backend/features.py:26"
 links:
@@ -45,12 +45,12 @@ invariants:
   - "MUST: user dates may only narrow RAID_DATE_WINDOWS, never widen it."
   - "MUST: drop duplicate pulls before fetching deaths, so a pull logged by three raiders is counted once."
   - "NEVER: cache the deaths of a report that failed to load; get_report_deaths_bulk re-raises so the caller records the failure instead."
-content_hash: sha256:7c2cf45f3df4e96f56abfa3cb0efadc7e8f56bf7e6ef16f9c4cf598d8d77e886
+content_hash: sha256:24ddf7e495168597419c6cd0ddde9dd3c59ab3316b7bf662c92c234462afacf0
 ---
 ## Summary
 
 - `POST /api/analyze` (`backend/app.py:82`) reads its JSON body, checks the bearer token, then returns a streaming response driven by the inner `generate()` function (`backend/app.py:95`). Everything on this page happens inside that generator. The stream format is on [[backend-api-endpoints]].
-- The **raid key** (`selectedRaid`) is the main input. It selects the allowed boss encounter IDs (`RAID_ENCOUNTERS`, `backend/analysis.py:196`) and the tier's date window (`RAID_DATE_WINDOWS`, `backend/analysis.py:222`).
+- The **raid key** (`selectedRaid`) is the main input. It selects the allowed boss encounter IDs (`RAID_ENCOUNTERS`, `backend/analysis.py:196`) and the tier's date window (`RAID_DATE_WINDOWS`, `backend/analysis.py:224`).
 - WarcraftLogs is read in a fixed order: token, roster, report list, each report's fights, then each report's deaths and defensive events. The client functions live in [[warcraftlogs]].
 - Finished reports are served from cache instead of WarcraftLogs; see [[backend-caching-and-limits]]. Slot and wipe rules are on [[backend-death-counting]].
 
@@ -84,9 +84,9 @@ The generator yields a progress event at each stage. Click each step to see what
 
 #### Raid selection
 
-`analyze_fights` (`backend/analysis.py:262`) is the gate that decides which pulls exist at all. When the raid key is in `RAID_ENCOUNTERS`, a fight is kept only if its `boss` encounter ID is in that raid's set and its `difficulty` equals the requested one (`backend/analysis.py:273`). This is what isolates one Midnight raid from the others that share a WarcraftLogs zone, and what keeps Mythic+ dungeon bosses out of mixed reports (comment at `backend/analysis.py:189`). Only an unknown raid key falls back to filtering by `fightZone` and difficulty (`backend/analysis.py:278`).
+`analyze_fights` (`backend/analysis.py:264`) is the gate that decides which pulls exist at all. When the raid key is in `RAID_ENCOUNTERS`, a fight is kept only if its `boss` encounter ID is in that raid's set and its `difficulty` equals the requested one (`backend/analysis.py:275`). This is what isolates one Midnight raid from the others that share a WarcraftLogs zone, and what keeps Mythic+ dungeon bosses out of mixed reports (comment at `backend/analysis.py:189`). Only an unknown raid key falls back to filtering by `fightZone` and difficulty (`backend/analysis.py:280`).
 
-`resolve_report_window` (`backend/analysis.py:240`) treats the tier window as the outer bound. A user start date is used only if it is later than the tier start, and a user end date only if it is earlier than the tier end (`backend/analysis.py:249`). A `None` tier end means the tier is still open, so the user's end date (or none) is used. An unknown raid key passes the user's dates through unchanged (`backend/analysis.py:247`).
+`resolve_report_window` (`backend/analysis.py:242`) treats the tier window as the outer bound. A user start date is used only if it is later than the tier start, and a user end date only if it is earlier than the tier end (`backend/analysis.py:251`). A `None` tier end means the tier is still open, so the user's end date (or none) is used. An unknown raid key passes the user's dates through unchanged (`backend/analysis.py:249`).
 
 #### Duplicate pulls
 
@@ -94,15 +94,15 @@ When several raiders log the same night, each report contains the same pulls. `i
 
 #### The bulk death query
 
-`get_report_deaths_bulk` (`backend/analysis.py:317`) asks for every `Deaths` event between the first kept pull's start and the last one's end in one GraphQL request (`backend/analysis.py:343`). With cheat deaths on, the same request uses GraphQL aliases to also fetch `Debuffs` filtered to `CHEAT_DEATH_DEBUFF_IDS` and `Healing` filtered to `CHEAT_DEATH_HEAL_IDS` (`backend/analysis.py:348`, `backend/analysis.py:355`). Each block that has a `nextPageTimestamp` is followed page by page (`backend/analysis.py:435`, `backend/analysis.py:289`).
+`get_report_deaths_bulk` (`backend/analysis.py:319`) asks for every `Deaths` event between the first kept pull's start and the last one's end in one GraphQL request (`backend/analysis.py:345`). With cheat deaths on, the same request uses GraphQL aliases to also fetch `Debuffs` filtered to `CHEAT_DEATH_DEBUFF_IDS` and `Healing` filtered to `CHEAT_DEATH_HEAL_IDS` (`backend/analysis.py:350`, `backend/analysis.py:357`). Each block that has a `nextPageTimestamp` is followed page by page (`backend/analysis.py:437`, `backend/analysis.py:291`).
 
-Deaths are grouped by fight id, but only for fights that survived filtering and dedup (`backend/analysis.py:450`, `backend/analysis.py:603`). Each death records its timestamp, `targetID`, the player name from the report's actors, and the killing ability's id and name (`backend/analysis.py:617`).
+Deaths are grouped by fight id, but only for fights that survived filtering and dedup (`backend/analysis.py:452`, `backend/analysis.py:605`). Each death records its timestamp, `targetID`, the player name from the report's actors, and the killing ability's id and name (`backend/analysis.py:619`).
 
 #### Cheat deaths
 
-A **cheat death** is a lethal hit the player survived because of an effect such as Cheat Death or Cauterize. `backend/features.py` lists the effects: debuffs left on the saved player (`backend/features.py:14`) and two saves that show only as a heal on them, Guardian Spirit and Ardent Defender (`backend/features.py:26`). An `applydebuff` of a listed debuff, or a `heal` from a listed heal spell, becomes a cheat-death event (`backend/analysis.py:491`).
+A **cheat death** is a lethal hit the player survived because of an effect such as Cheat Death or Cauterize. `backend/features.py` lists the effects: debuffs left on the saved player (`backend/features.py:14`) and two saves that show only as a heal on them, Guardian Spirit and Ardent Defender (`backend/features.py:26`). An `applydebuff` of a listed debuff, or a `heal` from a listed heal spell, becomes a cheat-death event (`backend/analysis.py:493`).
 
-Two cleanup passes follow. First, only the earliest cheat death per player per fight is kept (`backend/analysis.py:519`). Second, events for the same player and ability within 100 ms of each other are merged (`backend/analysis.py:552`). Later, `drop_saves_that_died` removes saves the player died from within 5 seconds; see [[backend-death-counting]].
+Two cleanup passes follow. First, only the earliest cheat death per player per fight is kept (`backend/analysis.py:521`). Second, events for the same player and ability within 100 ms of each other are merged (`backend/analysis.py:554`). Later, `drop_saves_that_died` removes saves the player died from within 5 seconds; see [[backend-death-counting]].
 
 #### What the result carries
 
@@ -142,15 +142,15 @@ edge wcl -> deaths color=caution "live reports"
 
 ## Reference
 
-The raid keys the backend knows, from `backend/analysis.py:196` and `backend/analysis.py:222`.
+The raid keys the backend knows, from `backend/analysis.py:196` and `backend/analysis.py:224`.
 
 | Raid key {midnight} | Encounter IDs | Date window |
 |---|---|---|
 | `midnight-s2-all` {midnight} | 9 IDs (Venomous Abyss and lairs) | 2026-08-13 to open |
-| `voidspire` {midnight} | 3176-3181 | 2026-03-12 to open |
-| `dreamrift` {midnight} | 3306 | 2026-03-12 to open |
-| `queldanas` {midnight} | 3182, 3183 | 2026-03-12 to open |
-| `midnight-all` {midnight} | the 9 Midnight Season 1 IDs | 2026-03-12 to open |
+| `voidspire` {midnight} | 3176-3181 | 2026-03-12 to 2026-08-23 |
+| `dreamrift` {midnight} | 3306 | 2026-03-12 to 2026-08-23 |
+| `queldanas` {midnight} | 3182, 3183 | 2026-03-12 to 2026-08-23 |
+| `midnight-all` {midnight} | the 9 Midnight Season 1 IDs | 2026-03-12 to 2026-08-23 |
 | `manaforge` {tww} | 3122, 3129-3135 | 2025-08-07 to 2026-03-22 |
 | `undermine` {tww} | 3009-3016 | 2025-02-27 to 2025-08-17 |
 | `nerubar` {tww} | 2898, 2902, 2917-2922 | 2024-09-05 to 2025-03-09 |
@@ -164,8 +164,8 @@ Pipeline constants:
 | `REPORT_CACHE_MIN_AGE_MS` {const} | 2 hours; older reports count as finished | `backend/app.py:43` |
 | `MIN_ABS_OVERLAP_MS` {dedup} | 15000 ms | `backend/analysis.py:58` |
 | `MIN_IOU_FOR_DUP` {dedup} | 0.50 | `backend/analysis.py:59` |
-| cheat-death merge window {cheat} | 100 ms, same player and ability | `backend/analysis.py:552` |
-| `max_pages` {const} | 50 pages per event type | `backend/analysis.py:289` |
+| cheat-death merge window {cheat} | 100 ms, same player and ability | `backend/analysis.py:554` |
+| `max_pages` {const} | 50 pages per event type | `backend/analysis.py:291` |
 
 ## Context map
 
@@ -182,18 +182,18 @@ relied-on-by: [[feat-analyze]] — the Analyze button runs this pipeline
 
 ## Invariants
 
-- **MUST** keep only fights whose boss encounter ID is in `RAID_ENCOUNTERS` for the selected raid; the zone filter is a fallback for unknown raid keys only (`backend/analysis.py:273`).
-- **MUST** let user dates only narrow `RAID_DATE_WINDOWS`, never widen it (`backend/analysis.py:240`).
+- **MUST** keep only fights whose boss encounter ID is in `RAID_ENCOUNTERS` for the selected raid; the zone filter is a fallback for unknown raid keys only (`backend/analysis.py:275`).
+- **MUST** let user dates only narrow `RAID_DATE_WINDOWS`, never widen it (`backend/analysis.py:242`).
 - **MUST** drop duplicate pulls before fetching deaths, so a pull logged by three raiders is counted once (`backend/app.py:249`).
-- **NEVER** cache the deaths of a report that failed to load; `get_report_deaths_bulk` re-raises (`backend/analysis.py:675`) and the cache write happens only after a successful result (`backend/app.py:333`).
+- **NEVER** cache the deaths of a report that failed to load; `get_report_deaths_bulk` re-raises (`backend/analysis.py:677`) and the cache write happens only after a successful result (`backend/app.py:333`).
 
 ## Gotchas
 
 - **Reports are not filtered by zone**: `get_guild_reports` fetches by date only, because WarcraftLogs gives each report one zone and a raid night mixed with dungeons can be filed under the dungeon zone (`backend/warcraftlogs.py:176`). The encounter allowlist does the filtering.
-- **Open tiers page through everything since their start**: a `None` end date means no upper bound. Midnight Season 1 keys still have no end date (`backend/analysis.py:229`), although Season 2 has opened (`backend/analysis.py:225`).
+- **Open tiers page through everything since their start**: a `None` end date means no upper bound. Only the newest tier (Midnight Season 2, `backend/analysis.py:227`) is open; Midnight Season 1 ends 2026-08-23 (`backend/analysis.py:231`), and a test fails if an older tier is left open (`backend/test_raid_selection.py`).
 - **The first log of a pull wins**: dedup keeps whichever report's pull starts earliest (`backend/app.py:229`). It does not pick the most complete log.
-- **"Cross-report" cheat-death dedup is per report**: `get_report_deaths_bulk` runs once per report, so its second pass (`backend/analysis.py:544`) only merges events within one report. Duplicates across reports are removed earlier, by pull dedup.
-- **One save per player per pull**: the first cleanup pass keeps only the earliest cheat death per player per fight (`backend/analysis.py:519`), so a player saved twice in one pull shows one cheat death.
+- **"Cross-report" cheat-death dedup is per report**: `get_report_deaths_bulk` runs once per report, so its second pass (`backend/analysis.py:546`) only merges events within one report. Duplicates across reports are removed earlier, by pull dedup.
+- **One save per player per pull**: the first cleanup pass keeps only the earliest cheat death per player per fight (`backend/analysis.py:521`), so a player saved twice in one pull shows one cheat death.
 - **Failed reports still count as attended pulls**: a report that throws returns empty death lists (`backend/app.py:378`) while its pulls remain in the processing loop, which adds them to `pullParticipation` (`backend/app.py:466`).
 - **Unreadable defensive data is a warning, not an error**: deaths still count; the stream sends a progress message naming how many reports lack detail (`backend/app.py:407`).
 

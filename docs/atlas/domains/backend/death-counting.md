@@ -39,7 +39,7 @@ invariants:
   - "MUST: a player who dies, is battle-rezzed and dies again takes two slots."
   - "NEVER: let a cheat death take a slot from a real death, or count toward a wipe."
   - "NEVER: count anything inside a wipe, real or cheat."
-content_hash: sha256:35e07723ff6362ca063fa09f7c0fac71ea790d9113eb677b4cd471bbafef4793
+content_hash: sha256:e0369c574c0b7b77110b11b1780ed5b91eecc795f4b55c22243210167ce0e7df
 ---
 ## Summary
 
@@ -56,7 +56,7 @@ Each pull's deaths go through three steps, in `backend/app.py:473` and `backend/
   body: A cheat death is removed when the same player (by `targetID`) has a real death more than 0 and at most `CHEAT_DEATH_SURVIVE_MS` (5000 ms) after it (`backend/analysis.py:137`, `backend/analysis.py:140`). The comment at `backend/analysis.py:133` records why 5 seconds: on live Mythic logs, Purgatory that is not healed off kills 3-5 seconds after it triggers.
   gotcha: The check uses `targetID`, which is per report. That is fine because ranking always runs on one pull of one report.
 - title: Sort by time | short: Sort | sub: stable, log order kept
-  body: The remaining deaths are sorted by timestamp (`backend/app.py:473`). Python's sort is stable, so deaths on the same millisecond keep the order they arrived in. Real deaths are added to each fight's list in combat-log order, and cheat deaths are appended after them (`backend/analysis.py:595`, `backend/analysis.py:634`), so on a tie a real death ranks before a cheat death.
+  body: The remaining deaths are sorted by timestamp (`backend/app.py:473`). Python's sort is stable, so deaths on the same millisecond keep the order they arrived in. Real deaths are added to each fight's list in combat-log order, and cheat deaths are appended after them (`backend/analysis.py:597`, `backend/analysis.py:636`), so on a tie a real death ranks before a cheat death.
 - title: Rank | short: Rank | sub: rank_pull_deaths
   body: Walking the sorted list, each real death increments a counter and takes it as its slot; each cheat death takes the counter plus one without incrementing it (`backend/analysis.py:165`). Every death, real or cheat, is then checked against the wipe windows built from real deaths only (`backend/analysis.py:163`, `backend/analysis.py:171`). The function returns one `(slot, in_wipe)` pair per death, in the same order.
 ```

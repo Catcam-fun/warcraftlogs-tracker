@@ -214,9 +214,11 @@ RAID_ENCOUNTERS = {
 # minus 5 days; end = the day the *next* tier's first raid opened (which
 # already covers the prepatch tail) plus 5 days. The +/-5d margin absorbs
 # the NA/EU regional release split. A None end means "current tier, still
-# open". Midnight's three raids opened on different days (Voidspire/Dreamrift
-# 2026-03-17, March on Quel'Danas 2026-03-31); per spec the whole Midnight
-# window uses the earliest (2026-03-17) and has no end yet.
+# open". Midnight Season 1's three raids opened on different days
+# (Voidspire/Dreamrift 2026-03-17, March on Quel'Danas 2026-03-31); per spec
+# its window uses the earliest (2026-03-17). It ends 2026-08-23: Season 2's
+# raids opened 2026-08-18 (patch 12.1 had ended the season on 2026-08-11,
+# but there was no new raid until the 18th).
 # These bounds are authoritative: user-supplied dates may narrow the window
 # but never widen it past the tier.
 RAID_DATE_WINDOWS = {
@@ -226,10 +228,10 @@ RAID_DATE_WINDOWS = {
     'nerubar':      ('2024-09-05', '2025-03-09'),  # Nerub-ar Palace, TWW S1
     'undermine':    ('2025-02-27', '2025-08-17'),  # Liberation of Undermine, S2
     'manaforge':    ('2025-08-07', '2026-03-22'),  # Manaforge Omega, S3
-    'voidspire':    ('2026-03-12', None),          # Midnight S1 (current)
-    'dreamrift':    ('2026-03-12', None),
-    'queldanas':    ('2026-03-12', None),
-    'midnight-all': ('2026-03-12', None),
+    'voidspire':    ('2026-03-12', '2026-08-23'),  # Midnight S1
+    'dreamrift':    ('2026-03-12', '2026-08-23'),
+    'queldanas':    ('2026-03-12', '2026-08-23'),
+    'midnight-all': ('2026-03-12', '2026-08-23'),
 }
 
 
