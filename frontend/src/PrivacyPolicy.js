@@ -67,7 +67,7 @@ export default function PrivacyPolicy({ user, onShowAuthModal, onShowSettings, o
             <ul>
               <li><strong>Email Address:</strong> Used for account creation, authentication, and password resets</li>
               <li><strong>Password:</strong> Encrypted and never stored in plain text using bcrypt hashing</li>
-              <li><strong>WarcraftLogs API Credentials:</strong> If you choose to save your Client ID and Client Secret, these are encrypted at rest and used solely to fetch data on your behalf</li>
+              <li><strong>WarcraftLogs API Credentials:</strong> If you choose to save your Client ID and Client Secret, they are stored with your account in our database, which is encrypted at rest; no other account can read them, and they are used solely to fetch data on your behalf</li>
             </ul>
             <p>
               <strong>Analysis Configurations:</strong>
