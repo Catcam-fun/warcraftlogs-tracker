@@ -23,3 +23,12 @@ test('the Privacy Policy describes how saved credentials are actually protected'
   expect(screen.queryByText(/these are encrypted at rest and used solely/i)).not.toBeInTheDocument();
   expect(screen.getByText(/no other account can read them/i)).toBeInTheDocument();
 });
+
+// Saves expire after the period chosen when saving (backend clamps to 30 days)
+// and shares after 72 hours; the policy must not promise longer.
+test('the Privacy Policy states how long saved analyses and shares are kept', () => {
+  render(<PrivacyPolicy user={null} />);
+  expect(screen.queryByText(/Analysis history: Retained until you delete your account/i)).not.toBeInTheDocument();
+  expect(screen.getByText(/Saved analyses: kept for the period you choose when saving \(7, 14 or 30 days\)/i)).toBeInTheDocument();
+  expect(screen.getByText(/Share links: expire 72 hours after they are created/i)).toBeInTheDocument();
+});
