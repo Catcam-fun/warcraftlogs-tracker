@@ -1,70 +1,27 @@
-# Getting Started with Create React App
+# Floor Pov — frontend
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+The React site for Floor Pov, a WarcraftLogs death-analysis tool for WoW raid
+guilds. It was bootstrapped with Create React App.
 
-## Available Scripts
+## Commands
 
-In the project directory, you can run:
+Run these in `frontend/`:
 
-### `npm start`
+- `npm start` — dev server at http://localhost:3000
+- `npm test` — Jest tests in watch mode
+- `npm run build` — production build into `build/`
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+## Which backend it talks to
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+`src/api.js` picks the Flask API URL:
 
-### `npm test`
+- `REACT_APP_API_URL`, if it was set when the site was built;
+- otherwise `http://localhost:5000` when the page is on `localhost` or `127.0.0.1`
+  (run the backend locally from `backend/`);
+- otherwise the production API, `https://deathwarcraftlogs-api.onrender.com`.
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+## More
 
-### `npm run build`
-
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
-
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
-
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
-
-### `npm run eject`
-
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
-
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
-
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
-
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
-
-## Learn More
-
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
-
-### Code Splitting
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+How the site works, page by page and down to file and line, is documented in the
+Project Atlas: `docs/atlas/` (open `docs/atlas/build/index.html`). See its
+Frontend section in particular.
