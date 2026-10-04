@@ -16,13 +16,13 @@ anchors:
   result_payload: backend/app.py:578
   death_event: backend/app.py:494
   share_create: backend/app.py:636
-  share_read: backend/app.py:653
+  share_read: backend/app.py:656
   share_id_re: backend/app.py:628
   saved_id_re: backend/app.py:629
-  storage_response: backend/app.py:668
+  storage_response: backend/app.py:671
   require_user: backend/auth.py:79
   limit_decorator: backend/ratelimit.py:47
-  frontend_sse_reader: frontend/src/App.js:748
+  frontend_sse_reader: frontend/src/App.js:751
 links:
   - backend
   - backend-analysis-pipeline
@@ -40,7 +40,7 @@ invariants:
   - "MUST: an /api/analyze stream ends with exactly one result event or one error event; the client treats the first error as final."
   - "MUST: cheat-death detection runs only for a request with a valid bearer token, whatever enableCheatDeath says."
   - "NEVER: return stored credentials; shares and saves pass config through strip_secrets on the way in and out."
-content_hash: sha256:dfcd7237d9f6500791190e0a1d8f29561a4e93e968a86c398017fb9524e8eea8
+content_hash: sha256:98f127f4286c5e5fe5f86777903370c44f4a6edaaa65ef46cf380a92a642a773
 ---
 ## Summary
 
@@ -60,11 +60,11 @@ content_hash: sha256:dfcd7237d9f6500791190e0a1d8f29561a4e93e968a86c398017fb9524e
 | `GET /api/saved/<id>` {saved} | required | none | `id` is a 36-char UUID (`backend/app.py:629`) | `{success, analysis_name, guild_name, data, config, created_at, expires_at}` | 404 if malformed or not the user's |
 | `DELETE /api/saved/<id>` {saved} | required | none | UUID | `{success: true}` | 404 if malformed |
 | `DELETE /api/saved` {saved} | required | none | none | `{success: true}` | 500 on storage failure |
-| `DELETE /api/account` {account} | required | none | none | `{success: true}`; the token is dropped from the verify cache (`backend/app.py:731`) | 500 if deletion is not configured or partly failed |
+| `DELETE /api/account` {account} | required | none | none | `{success: true}`; the token is dropped from the verify cache (`backend/app.py:734`) | 500 if deletion is not configured or partly failed |
 | `GET /api/health` {status} | none | none | none | `{status: "healthy", supabase: <bool>}` | none |
 | `GET /` {status} | none | none | none | `{service: "Floor Pov API", status: "running"}` | none |
 
-Storage routes share one mapper, `_storage_response` (`backend/app.py:668`): a result without `error` passes through; otherwise the `code` picks the status (`limit` 409, `too_large` 413, `not_found` 404, anything else 500) and the body is `{"success": false, "error", "code"?}`.
+Storage routes share one mapper, `_storage_response` (`backend/app.py:671`): a result without `error` passes through; otherwise the `code` picks the status (`limit` 409, `too_large` 413, `not_found` 404, anything else 500) and the body is `{"success": false, "error", "code"?}`.
 
 #### The analysis request body
 
@@ -86,7 +86,7 @@ Storage routes share one mapper, `_storage_response` (`backend/app.py:668`): a r
 
 #### The /api/analyze SSE protocol
 
-The route returns `Response(generate(), mimetype='text/event-stream')` with `Cache-Control: no-cache` and `X-Accel-Buffering: no` so proxies do not buffer the stream (`backend/app.py:618`). Each event is a single `data: <json>` line followed by a blank line. There are no `event:` names or ids; the JSON keys say what the event is. The frontend splits on blank lines and dispatches on `error`, then `message`, then `result` (`frontend/src/App.js:748`).
+The route returns `Response(generate(), mimetype='text/event-stream')` with `Cache-Control: no-cache` and `X-Accel-Buffering: no` so proxies do not buffer the stream (`backend/app.py:618`). Each event is a single `data: <json>` line followed by a blank line. There are no `event:` names or ids; the JSON keys say what the event is. The frontend splits on blank lines and dispatches on `error`, then `message`, then `result` (`frontend/src/App.js:751`).
 
 | Event {sse} | Shape | When |
 |---|---|---|
@@ -133,15 +133,15 @@ relied-on-by: [[feat-account]] — account deletion
 
 ## Invariants
 
-- **MUST** end an `/api/analyze` stream with exactly one `result` event or one `error` event; the client throws on the first `error` (`frontend/src/App.js:751`).
+- **MUST** end an `/api/analyze` stream with exactly one `result` event or one `error` event; the client throws on the first `error` (`frontend/src/App.js:754`).
 - **MUST** gate cheat-death detection on a valid bearer token, whatever `enableCheatDeath` says, since a shared config or a direct call can set the flag (`backend/app.py:91`).
-- **NEVER** return stored credentials: shares and saves pass `config` through `strip_secrets` when stored and when read (`backend/supabase_client.py:216`, `backend/supabase_client.py:252`).
+- **NEVER** return stored credentials: shares and saves pass `config` through `strip_secrets` when stored and when read (`backend/supabase_client.py:223`, `backend/supabase_client.py:259`).
 
 ## Gotchas
 
 - **A 200 does not mean success**: `/api/analyze` commits to 200 before any work. Read the stream for an `error` event.
-- **Any share storage error becomes 413**: `share_results` maps every error from `store_share` to 413 (`backend/app.py:649`), although today the only error it returns is "too large".
-- **Shares can live only in memory**: if the Supabase insert fails, the share is kept in process memory and the response gains `ephemeral: true` (`backend/supabase_client.py:235`); it disappears on restart.
+- **Share errors use the shared status mapper**: `share_results` answers a storage error through `_storage_response` (`backend/app.py:649`), so too large is 413 and anything else 500.
+- **Shares can live only in memory**: if the Supabase insert fails, the share is kept in process memory (`backend/supabase_client.py:241`) and the route passes `ephemeral: true` to the browser (`backend/app.py:653`), which warns that the link stops working when the server restarts (`frontend/src/App.js:1458`, `frontend/src/shareNote.js`).
 - **Cutoff keys become strings**: `pullCutoffTimestamps` uses integer keys in Python, which JSON turns into strings.
 
 ## Related

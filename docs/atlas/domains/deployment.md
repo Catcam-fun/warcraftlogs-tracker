@@ -16,10 +16,10 @@ anchors:
   gunicorn_threads: backend/gunicorn.conf.py:15
   gunicorn_timeout: backend/gunicorn.conf.py:18
   requirements: backend/requirements.txt:1
-  dev_server: backend/app.py:749
+  dev_server: backend/app.py:752
   load_dotenv: backend/app.py:20
   allowed_origins: backend/app.py:64
-  health: backend/app.py:739
+  health: backend/app.py:742
   supabase_env: backend/supabase_client.py:27
   api_url: frontend/src/api.js:7
   wake_message: frontend/src/api.js:70
@@ -28,7 +28,7 @@ anchors:
   migration_001: backend/migrations/001_shares_and_rls.sql:2
   migration_002: backend/migrations/002_report_cache.sql:2
   ci_atlas: .github/workflows/atlas-sync.yml:6
-  mem_shares: backend/supabase_client.py:195
+  mem_shares: backend/supabase_client.py:202
 links:
   - backend
   - frontend
@@ -47,7 +47,7 @@ invariants:
   - "MUST: migrations 001 and 002 be run in the Supabase SQL editor before the features that use them are expected to persist."
   - "NEVER: commit backend/.env; it is gitignored and holds the backend's secrets."
   - "NEVER: rely on in-process state (rate limits, memory shares, caches) across workers or restarts."
-content_hash: sha256:e13cd51633fb7ffb2a110ad63660007d37177cd172d0633917aa547df27653dc
+content_hash: sha256:34c58a12f339d987a89364f808585f52961dfbdd02e0807b392f10f13733c7fe
 ---
 # Deployment & Environments
 
@@ -90,11 +90,11 @@ edge static -> supa color=process "anon key"
   body: app.py calls load_dotenv() before importing anything that reads env (backend/app.py:20), and supabase_client.py calls it again (backend/supabase_client.py:25). Locally that reads backend/.env; in production the variables come from the host. At startup the backend logs whether Supabase storage and the service role are configured (backend/supabase_client.py:40).
 - title: Apply migrations | short: Migrations | sub: by hand, re-runnable
   body: Each file says to run it once in the Supabase dashboard SQL editor and that it is safe to re-run (backend/migrations/001_shares_and_rls.sql:2, backend/migrations/002_report_cache.sql:2). 001 creates shared_results and turns on RLS and credential policies; 002 creates report_cache. Both use create if not exists and drop policy if exists.
-  gotcha: Missing tables fail soft. Without 001 shares fall back to process memory (backend/supabase_client.py:232); without 002 the shared report cache is skipped. The app looks healthy while not persisting.
+  gotcha: Missing tables fail soft. Without 001 shares fall back to process memory (backend/supabase_client.py:239); without 002 the shared report cache is skipped. The app looks healthy while not persisting.
 - title: Build the frontend | short: Static build | sub: react-scripts build
   body: npm run build runs react-scripts build (frontend/package.json:21). REACT_APP_API_URL, if set, is baked into the bundle at this point (frontend/src/api.js:7). Everything in frontend/public, including art and _redirects.txt, is copied into build/. The Supabase URL and anon key are constants in the source (frontend/src/supabaseClient.js:3), not build variables.
 - title: Route every path to the app | short: SPA rewrite | sub: /* to /index.html 200
-  body: The app uses BrowserRouter (frontend/src/index.js:11) with paths like /analyze, /results and /saved (frontend/src/App.js:1562, :1566, :2205). frontend/public/_redirects.txt holds one rule, /* /index.html 200, so a direct visit or refresh on those paths serves the app instead of a 404.
+  body: The app uses BrowserRouter (frontend/src/index.js:11) with paths like /analyze, /results and /saved (frontend/src/App.js:1568, :1566, :2205). frontend/public/_redirects.txt holds one rule, /* /index.html 200, so a direct visit or refresh on those paths serves the app instead of a 404.
 - title: Point the site at the API | short: API base URL | sub: by hostname
   body: API_URL is the only place the backend address appears (frontend/src/api.js:3). The backend in turn must allow the site's origin in ALLOWED_ORIGINS, or leave it unset to allow any origin (backend/app.py:64).
 ```
@@ -108,7 +108,7 @@ edge static -> supa color=process "anon key"
 | Backend dependencies | `backend/requirements.txt` | pip |
 | Backend config | `PORT`, `WEB_CONCURRENCY`, `GUNICORN_THREADS`, `ALLOWED_ORIGINS`, `SUPABASE_URL` | host env; `backend/.env` locally |
 | Backend secrets | `SUPABASE_KEY` (anon), `SUPABASE_SERVICE_ROLE_KEY` | host env; `backend/.env` locally (gitignored, `.gitignore:2`) |
-| Health check | `GET /api/health` returns status and whether Supabase is configured | `backend/app.py:739` |
+| Health check | `GET /api/health` returns status and whether Supabase is configured | `backend/app.py:742` |
 | Frontend build | `react-scripts build` to `frontend/build/` (gitignored) | `frontend/package.json:21`, `frontend/.gitignore:12` |
 | Frontend config | `REACT_APP_API_URL` (optional, build time) | build env |
 | Frontend public values | Supabase URL and anon key | constants in `frontend/src/supabaseClient.js:3` |
@@ -123,7 +123,7 @@ edge static -> supa color=process "anon key"
 | Frontend | `react-scripts start` (`frontend/package.json:20`) on localhost | static build of `frontend/` |
 | API the site calls | `http://localhost:5000` (`frontend/src/api.js:8`) | `https://deathwarcraftlogs-api.onrender.com` (`frontend/src/api.js:8`) |
 | Override | `REACT_APP_API_URL` | same, at build time |
-| Backend server | `python app.py`: Flask dev server, threaded, debug off (`backend/app.py:749`), or gunicorn | gunicorn with `backend/gunicorn.conf.py` |
+| Backend server | `python app.py`: Flask dev server, threaded, debug off (`backend/app.py:752`), or gunicorn | gunicorn with `backend/gunicorn.conf.py` |
 | Backend env | `backend/.env` via `load_dotenv()` | host environment variables |
 | Supabase | same project: the frontend URL and anon key are hard-coded (`frontend/src/supabaseClient.js:3`) | same |
 | CORS | `ALLOWED_ORIGINS` usually unset, so `*` | `ALLOWED_ORIGINS` if set, else `*` |
@@ -134,7 +134,7 @@ edge static -> supa color=process "anon key"
 - **MUST** `SUPABASE_SERVICE_ROLE_KEY` be set on the production backend. Without it the client falls back to the anon key (`backend/supabase_client.py:38`) and RLS blocks saves and shares; migration 001 says so in its header (`backend/migrations/001_shares_and_rls.sql:11`).
 - **MUST** migrations 001 and 002 be run in the Supabase SQL editor before shares and the shared report cache are expected to persist (`backend/migrations/001_shares_and_rls.sql:2`, `backend/migrations/002_report_cache.sql:2`).
 - **NEVER** commit `backend/.env`; it is gitignored (`.gitignore:2`) and holds the backend's Supabase keys.
-- **NEVER** rely on in-process state across workers or restarts: rate limits (`backend/ratelimit.py:29`), memory shares (`backend/supabase_client.py:195`), the token cache (`backend/auth.py:25`) and the memory layer of the report caches all live in one process.
+- **NEVER** rely on in-process state across workers or restarts: rate limits (`backend/ratelimit.py:29`), memory shares (`backend/supabase_client.py:202`), the token cache (`backend/auth.py:25`) and the memory layer of the report caches all live in one process.
 
 ## Gotchas
 

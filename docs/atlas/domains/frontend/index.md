@@ -12,15 +12,15 @@ summary:
 tagline: The React site raid officers use, from landing page to the per-death breakdown.
 anchors:
   entry: frontend/src/index.js:9
-  app_shell: frontend/src/App.js:186
+  app_shell: frontend/src/App.js:187
   api_url: frontend/src/api.js:6
   api_fetch: frontend/src/api.js:52
   strip_secrets: frontend/src/api.js:40
   local_creds: frontend/src/api.js:18
   supabase_client: frontend/src/supabaseClient.js:6
   session_only: frontend/src/supabaseClient.js:12
-  warmup: frontend/src/App.js:260
-  indexeddb: frontend/src/App.js:378
+  warmup: frontend/src/App.js:262
+  indexeddb: frontend/src/App.js:380
   design_tokens: frontend/src/fp-design.css:6
   rail: frontend/src/FpxRail.js:8
 invariants:
@@ -43,14 +43,14 @@ links:
   - feat-saved
   - feat-share
   - feat-account
-content_hash: sha256:621acdf508e62faa6d48d2156a45ea902b9c0753f61a1442c1c7f64a9f874923
+content_hash: sha256:4f1d71ef2d5737cc2d779ca75a9350af9a8b3901f5089edf1c466c44601b0130
 ---
 ## Summary
 
 The **frontend** is the React (Create React App) site at the top of Floor Pov. It renders the landing page, the Analyze form, the Results breakdown and the Saved list, and it consumes the backend's streamed analysis directly in the browser.
 
 - The app mounts in `frontend/src/index.js:9` inside a `BrowserRouter`, and loads two style sheets: the older `index.css` and the `fpx-` design system in `fp-design.css` (`frontend/src/index.js:4`).
-- Almost all state lives in one component, `WarcraftLogsApp` in `frontend/src/App.js:186`. Child surfaces receive props and callbacks; there is no global store.
+- Almost all state lives in one component, `WarcraftLogsApp` in `frontend/src/App.js:187`. Child surfaces receive props and callbacks; there is no global store.
 - Two network partners: the Flask API through `apiFetch` (`frontend/src/api.js:52`) and Supabase through the shared client (`frontend/src/supabaseClient.js:6`).
 - What it deliberately does not do: it never computes deaths, slots or defensive verdicts itself. Those arrive pre-computed from the backend; the browser only counts, filters and displays them.
 
@@ -60,16 +60,16 @@ You can think of `App.js` as the switchboard. It owns the analysis config, the l
 
 ```steps
 - title: Boot and warm the API | short: Boot | sub: wake Render, restore session
-  body: On mount the app fires a fire-and-forget GET /api/health so a sleeping Render instance starts waking while the user reads (App.js:260). In parallel it restores the Supabase session, or signs out locally if a "stay logged in = off" session outlived its browser (App.js:275).
+  body: On mount the app fires a fire-and-forget GET /api/health so a sleeping Render instance starts waking while the user reads (App.js:262). In parallel it restores the Supabase session, or signs out locally if a "stay logged in = off" session outlived its browser (App.js:277).
   gotcha: The health ping swallows every error on purpose. A slow or down backend never blocks the page from rendering.
 - title: Restore last results | short: Restore | sub: IndexedDB, unless a share link
-  body: Unless the URL carries ?share=, the app reads the last analysis from IndexedDB (database FloorPovDB, store analysisData, key sharedAnalysisData) and puts it back on screen (App.js:529). The recent-runs list is loaded the same way and re-saved to scrub credentials older versions stored (App.js:513).
+  body: Unless the URL carries ?share=, the app reads the last analysis from IndexedDB (database FloorPovDB, store analysisData, key sharedAnalysisData) and puts it back on screen (App.js:531). The recent-runs list is loaded the same way and re-saved to scrub credentials older versions stored (App.js:515).
 - title: Fill credentials | short: Credentials | sub: browser first, then account
-  body: The config starts with credentials remembered in localStorage under fpx.wclCredentials (api.js:18, App.js:198). When a user signs in, their stored row in the Supabase api_credentials table overrides those (App.js:559).
+  body: The config starts with credentials remembered in localStorage under fpx.wclCredentials (api.js:18, App.js:199). When a user signs in, their stored row in the Supabase api_credentials table overrides those (App.js:561).
 - title: Run the analysis | short: Analyze | sub: POST and read the stream
-  body: handleSubmit POSTs the config to /api/analyze and reads the response body as a server-sent-event stream, updating the loader text on each message and storing the final result (App.js:676). See frontend-pages-and-routing for the stream format.
+  body: handleSubmit POSTs the config to /api/analyze and reads the response body as a server-sent-event stream, updating the loader text on each message and storing the final result (App.js:679). See frontend-pages-and-routing for the stream format.
 - title: Render and persist | short: Results | sub: count, filter, display
-  body: The result is stored in state, saved to IndexedDB and to the recent-runs list, and the app navigates to /results (App.js:930). Every table on that page is derived from the stored result plus the current filters.
+  body: The result is stored in state, saved to IndexedDB and to the recent-runs list, and the app navigates to /results (App.js:933). Every table on that page is derived from the stored result plus the current filters.
 ```
 
 ## Diagram
@@ -117,7 +117,7 @@ The main modules. Filter by role.
 
 | Module {shell} | What it does | Anchor |
 |---|---|---|
-| `App.js` {shell} | The shell: config, results, user, modals, both route tables, the analysis stream reader, and the Results page markup | `frontend/src/App.js:186` |
+| `App.js` {shell} | The shell: config, results, user, modals, both route tables, the analysis stream reader, and the Results page markup | `frontend/src/App.js:187` |
 | `index.js` {shell} | Mounts `<App />` in `React.StrictMode` and `BrowserRouter`; imports both style sheets | `frontend/src/index.js:9` |
 | `FpxRail.js` {shell} | The shared collapsible left nav (Home, Run Analysis, Results, Saved) | `frontend/src/FpxRail.js:8` |
 | `AppHeader.js` {shell} | A small top header with brand and auth buttons | `frontend/src/AppHeader.js:5` |
@@ -146,7 +146,7 @@ The main modules. Filter by role.
 | Runs on | Static CRA build (`react-scripts build`) served as a single-page app; React 19, React Router 7 | `frontend/package.json` scripts and dependencies |
 | Local dev | `npm start` (CRA dev server); talks to a local Flask API on port 5000 | `frontend/src/api.js:7` |
 | API base URL | `REACT_APP_API_URL` if set at build time; else `http://localhost:5000` when the host is `localhost` or `127.0.0.1`; else `https://deathwarcraftlogs-api.onrender.com` | `frontend/src/api.js:6` |
-| Asset prefix | `PUBLIC_URL` (CRA built-in) prefixes art paths: backgrounds, boss tiles, loader video | `frontend/src/LandingPage.js:127`, `frontend/src/App.js:1535` |
+| Asset prefix | `PUBLIC_URL` (CRA built-in) prefixes art paths: backgrounds, boss tiles, loader video | `frontend/src/LandingPage.js:127`, `frontend/src/App.js:1541` |
 | Supabase | Project URL and the public anon key are constants in code, not env vars | `frontend/src/supabaseClient.js:3` |
 | CAPTCHA | Turnstile site key is a constant; tokens are checked by an external Cloudflare Worker before calling Supabase auth | `frontend/src/Auth.js:6`, `frontend/src/Auth.js:72` |
 | Secrets | None in the bundle. WarcraftLogs credentials are typed by the user and kept in their own browser or their Supabase row | `frontend/src/api.js:18` |
@@ -158,24 +158,24 @@ The main modules. Filter by role.
 |---|---|---|
 | API base | `http://localhost:5000` (unless `REACT_APP_API_URL` is set) | `https://deathwarcraftlogs-api.onrender.com` (unless `REACT_APP_API_URL` is set) |
 | Supabase | Same hard-coded project as production | Same |
-| `?mock=1` fixture results | Works: seeds Results with `MOCK_RESULTS` (`frontend/src/App.js:360`) | Ignored: gated to localhost |
-| `?loader=1` loader preview | Works: shows the analysis loader overlay (`frontend/src/App.js:371`) | Ignored |
-| Backend warm-up ping | Fires against the local API | Fires against Render on every page load (`frontend/src/App.js:260`) |
+| `?mock=1` fixture results | Works: seeds Results with `MOCK_RESULTS` (`frontend/src/App.js:362`) | Ignored: gated to localhost |
+| `?loader=1` loader preview | Works: shows the analysis loader overlay (`frontend/src/App.js:373`) | Ignored |
+| Backend warm-up ping | Fires against the local API | Fires against Render on every page load (`frontend/src/App.js:262`) |
 
 ## Invariants
 
 - **MUST** every request to the Flask API resolve its base URL through `API_URL` in `frontend/src/api.js:7`; the analyze call, the health ping and `apiFetch` all use it.
-- **NEVER** write `clientId` or `clientSecret` into a share, a saved report, the recent-runs list or the persisted last analysis. `stripSecrets` (`frontend/src/api.js:40`) runs on each path: `frontend/src/App.js:631`, `frontend/src/SaveReportDialog.js:30`, `frontend/src/App.js:479`, `frontend/src/App.js:550`.
-- **MUST** merge a config loaded from a share, a saved report or a recent run through `stripSecrets`, so it cannot overwrite the viewer's own credentials (`frontend/src/App.js:323`, `frontend/src/App.js:339`, `frontend/src/App.js:506`).
+- **NEVER** write `clientId` or `clientSecret` into a share, a saved report, the recent-runs list or the persisted last analysis. `stripSecrets` (`frontend/src/api.js:40`) runs on each path: `frontend/src/App.js:633`, `frontend/src/SaveReportDialog.js:30`, `frontend/src/App.js:481`, `frontend/src/App.js:552`.
+- **MUST** merge a config loaded from a share, a saved report or a recent run through `stripSecrets`, so it cannot overwrite the viewer's own credentials (`frontend/src/App.js:325`, `frontend/src/App.js:341`, `frontend/src/App.js:508`).
 - **MUST** wrap storage access in try/catch so blocked storage leaves an empty form instead of a crash (`frontend/src/api.js:21`, `frontend/src/supabaseClient.js:15`).
 
 ## Gotchas
 
 - **App.js is one 2,500-line component**: the Results page, the share modal and a legacy Terms modal are all inline JSX in `frontend/src/App.js`. A change to results layout is a change to the shell.
-- **The legacy Terms modal is unreachable**: `showTermsModal` is declared at `frontend/src/App.js:240` and rendered at `frontend/src/App.js:2296`, but nothing ever sets it to true. The real legal pages are the `/terms` and `/privacy` routes.
+- **The legacy Terms modal is unreachable**: `showTermsModal` is declared at `frontend/src/App.js:242` and rendered at `frontend/src/App.js:2302`, but nothing ever sets it to true. The real legal pages are the `/terms` and `/privacy` routes.
 - **Supabase settings are not env-driven**: switching Supabase projects means editing `frontend/src/supabaseClient.js:3`, not setting a variable. The anon key there is the public key Supabase expects in browsers.
 - **The CAPTCHA check is client-side**: `Auth.js` verifies the Turnstile token with an external Worker and then calls Supabase directly (`frontend/src/Auth.js:72`, `frontend/src/Auth.js:139`). Anything enforcing CAPTCHA server-side has to live in Supabase or the Worker, not this code.
-- **Debug globals on window**: each completed analysis sets `window.deathTrackerData`, `window.exportDeathData` and `window.exportAndCopy` (`frontend/src/App.js:762`). `exportDeathData` hard-codes a cutoff of 2 (`frontend/src/App.js:766`), so its "included" flags can differ from what the page shows.
+- **Debug globals on window**: each completed analysis sets `window.deathTrackerData`, `window.exportDeathData` and `window.exportAndCopy` (`frontend/src/App.js:765`). `exportDeathData` hard-codes a cutoff of 2 (`frontend/src/App.js:769`), so its "included" flags can differ from what the page shows.
 - **SPA rewrite file name**: the rewrite rule lives in `_redirects.txt`. Hosts that read Netlify-style rules look for a file named exactly `_redirects`; check the host's behavior before relying on it for deep links like `/results?share=`.
 
 ## Glossary
