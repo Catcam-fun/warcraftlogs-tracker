@@ -48,7 +48,7 @@ invariants:
   - "NEVER: serve a cached defensive entry built with a different catalog; the key carries the catalog fingerprint."
 flows:
   - request-path
-content_hash: sha256:3da5ad329a4a9800a5812fa3fe98d1a0ee7ba6cd6e82096e73ee99e0f7a2ce4a
+content_hash: sha256:fe788fe3eac55975e8328b9b6760ca102753356f1dce46a5a0061142e3023b88
 ---
 ## Summary
 
@@ -154,7 +154,7 @@ band structural "Officer's WCL key"
 - **Two different concurrency limits**: the fights phase uses `REPORT_FETCH_WORKERS = 6` (`backend/app.py:195`), but the deaths phase hard-codes `max_workers=8` (`backend/app.py:387`). Each of those report jobs opens a pool of 3 (`backend/app.py:325`), and the defensive job opens 4 more (`backend/defensives.py:235`), so many requests can be in flight on one key at once.
 - **Casts and Buffs cover more than the pulls**: they start 3 minutes (`ENCOUNTER_RESET_MS`) before the first pull and run to the last pull's end, trash included (`backend/defensives.py:34`, `backend/defensives.py:225`). This costs more pages than a pull-scoped query but catches a defensive pressed just before a pull.
 - **Deaths are scoped by time, not by pull**: `get_report_deaths_bulk` sends `startTime` and `endTime` but no `fightIDs` (`backend/analysis.py:357-430`), so trash deaths between kept pulls come back too and are dropped in code.
-- **A build script skips the endTime rule**: `_events` in `backend/scripts/build_armor_constants.py:46-57` queries DamageTaken with `fightIDs` and a `startTime` but no `endTime`, the shape `backend/defensives.py:745-746` says WCL answers with an empty second page.
+- **Build scripts follow the endTime rule too**: `_events` in `backend/scripts/build_armor_constants.py:46-61` costs one extra small query per fight to fetch its `endTime`, because a `fightIDs`-scoped events query without one gets an empty second page (`backend/defensives.py:745-746`).
 - **No live cost reading**: nothing reads `rateLimitData`, so the site cannot tell an officer how many points an analysis used or how many are left.
 
 ## Context map

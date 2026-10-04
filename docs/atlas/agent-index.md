@@ -709,8 +709,8 @@
   - flags_attribute: backend/scripts/build_boss_spell_flags.py:25
   - text_render: backend/scripts/build_boss_spell_text.py:67
   - text_main: backend/scripts/build_boss_spell_text.py:119
-  - armor_measure: backend/scripts/build_armor_constants.py:66
-  - armor_main: backend/scripts/build_armor_constants.py:105
+  - armor_measure: backend/scripts/build_armor_constants.py:70
+  - armor_main: backend/scripts/build_armor_constants.py:109
   - raid_wide_kills: backend/scripts/build_raid_wide.py:33
   - raid_wide_shares: backend/scripts/build_raid_wide.py:49
   - raid_wide_main: backend/scripts/build_raid_wide.py:78

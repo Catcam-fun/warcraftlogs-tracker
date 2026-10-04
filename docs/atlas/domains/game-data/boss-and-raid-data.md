@@ -14,8 +14,8 @@ anchors:
   flags_attribute: backend/scripts/build_boss_spell_flags.py:25
   text_render: backend/scripts/build_boss_spell_text.py:67
   text_main: backend/scripts/build_boss_spell_text.py:119
-  armor_measure: backend/scripts/build_armor_constants.py:66
-  armor_main: backend/scripts/build_armor_constants.py:105
+  armor_measure: backend/scripts/build_armor_constants.py:70
+  armor_main: backend/scripts/build_armor_constants.py:109
   raid_wide_kills: backend/scripts/build_raid_wide.py:33
   raid_wide_shares: backend/scripts/build_raid_wide.py:49
   raid_wide_main: backend/scripts/build_raid_wide.py:78
@@ -42,7 +42,7 @@ invariants:
   - "NEVER: store boss damage amounts in boss spell text; the game scales them at run time, so the tooltip shows the real hit from the log."
 flows:
   - data-build-path
-content_hash: sha256:5be44faa39f6507fd00bc5df5d1a0cce9fa1b25b3ad0b3ccfd82f449ac8eb774
+content_hash: sha256:ef034a3e3bcd2c99fc7239fbf52c492aaf9595f36af2eb30ac857e31abd379a9
 ---
 ## Summary
 
@@ -78,10 +78,10 @@ Run as `python backend/scripts/build_boss_spell_text.py` after the raid is in `R
 
 Run as `WCL_CLIENT_ID=... WCL_CLIENT_SECRET=... python backend/scripts/build_armor_constants.py` (`backend/scripts/build_armor_constants.py:21`).
 
-1. For each difficulty (Mythic, Heroic, Normal) and each encounter in `RAID_ENCOUNTERS`, reads `fightRankings` and measures the first 5 ranked kills; private or deleted reports are skipped (`backend/scripts/build_armor_constants.py:35-36`, `backend/scripts/build_armor_constants.py:108-122`).
-2. `measure()` groups a pull's hits by player and active buffs. Two or more agreeing magic hits set the baseline; a melee swing's share of it is armor's share alone, which solves for K given the player's armor on that hit (`backend/scripts/build_armor_constants.py:66-102`, method in the docstring at `backend/scripts/build_armor_constants.py:3-13`).
-3. Stores the median K per boss, falling back to the raid's pooled median when a boss has fewer than 10 samples (`backend/scripts/build_armor_constants.py:37`, `backend/scripts/build_armor_constants.py:126-133`).
-4. Physical boss spells with at least 5 samples are sorted into `IGNORES_ARMOR` (median share at least 0.97) or `REDUCED_BY_ARMOR` (at most 0.9) (`backend/scripts/build_armor_constants.py:41-43`, `backend/scripts/build_armor_constants.py:137-145`).
+1. For each difficulty (Mythic, Heroic, Normal) and each encounter in `RAID_ENCOUNTERS`, reads `fightRankings` and measures the first 5 ranked kills; private or deleted reports are skipped (`backend/scripts/build_armor_constants.py:35-36`, `backend/scripts/build_armor_constants.py:112-126`).
+2. `measure()` groups a pull's hits by player and active buffs. Two or more agreeing magic hits set the baseline; a melee swing's share of it is armor's share alone, which solves for K given the player's armor on that hit (`backend/scripts/build_armor_constants.py:70-106`, method in the docstring at `backend/scripts/build_armor_constants.py:3-13`).
+3. Stores the median K per boss, falling back to the raid's pooled median when a boss has fewer than 10 samples (`backend/scripts/build_armor_constants.py:37`, `backend/scripts/build_armor_constants.py:130-137`).
+4. Physical boss spells with at least 5 samples are sorted into `IGNORES_ARMOR` (median share at least 0.97) or `REDUCED_BY_ARMOR` (at most 0.9) (`backend/scripts/build_armor_constants.py:41-43`, `backend/scripts/build_armor_constants.py:141-149`).
 
 `armor_constant()` reads K with a Mythic, then Heroic, then Normal fallback, and `_armor_reduction()` uses the two spell lists (`backend/defensives.py:906-911`, `backend/defensives.py:915-928`). The docstring names the use: how much more a druid's Bear Form armor would have reduced a physical killing blow (`backend/scripts/build_armor_constants.py:18-19`).
 
@@ -125,8 +125,8 @@ Run as `python backend/scripts/build_spell_icons.py` after rebuilding the catalo
 ## Gotchas
 
 - **The flags script reads live tables, the others a pinned build**: `build_boss_spell_flags.py` calls `table(name)` with no build (`backend/scripts/build_boss_spell_flags.py:33`, `backend/scripts/build_boss_spell_flags.py:55`), while the text and icon scripts pass `patches()[-1][2]` (`backend/scripts/build_boss_spell_text.py:120`, `backend/scripts/build_spell_icons.py:65`). With `WAGO_CACHE` set, the live tables are cached as `{name}_live` and reused on every later run (`backend/scripts/build_defensive_catalog.py:415-418`).
-- **Armor events are fetched without an endTime**: `_events` scopes DamageTaken by `fightIDs` and `startTime` only (`backend/scripts/build_armor_constants.py:49-51`), the shape `backend/defensives.py:745-746` says WCL answers with an empty second page. `build_raid_wide.py` goes through `_fetch_blocks` and does send one.
-- **Measured tables depend on public kills**: both WCL scripts read whatever `fightRankings` returns today. A boss with too few samples falls back to its raid's pooled K, or gets no entry at all (`backend/scripts/build_armor_constants.py:129-133`).
+- **Armor events need the fight's endTime**: WCL answers a `fightIDs`-scoped events query without an `endTime` with an empty second page (`backend/defensives.py:745-746`). `_events` therefore looks up the fight's `endTime` first and sends it with every page (`backend/scripts/build_armor_constants.py:47-55`); before that fix, a pull with more than 10,000 DamageTaken events was measured from its first page only. `backend/test_armor_build.py` checks that every page is read. `build_raid_wide.py` goes through `_fetch_blocks`, which also sends one.
+- **Measured tables depend on public kills**: both WCL scripts read whatever `fightRankings` returns today. A boss with too few samples falls back to its raid's pooled K, or gets no entry at all (`backend/scripts/build_armor_constants.py:133-137`).
 - **The boss text is tested on a real spell**: `backend/test_boss_spell_text.py:34-36` checks that Sever's text mentions a frontal cone, so a regenerated file that loses it fails the suite.
 
 ## Context map

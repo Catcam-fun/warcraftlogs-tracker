@@ -40,7 +40,7 @@ invariants:
   - "NEVER: a guild-reports query filters by zoneID; mixed raid and dungeon reports would be dropped."
 flows:
   - request-path
-content_hash: sha256:2c85e8ee7398ddba941501778f1a18de221c1e8dc8417b9e386879c7cacb794b
+content_hash: sha256:c6d8c6b0166f94018ceadb5662280b10fb757708d6faaa7b0cd11def1ece9632
 ---
 ## Summary
 
@@ -112,7 +112,7 @@ What is read from WCL, and where.
 | Defensive casts, buffs, heals, talents {events} | `report.events` (Casts, Buffs, Healing, CombatantInfo) | `fetch_defensive_raw` (`backend/defensives.py:207`) |
 | Hits before deaths {events} | `report.events` (DamageTaken) | `fetch_death_windows` (`backend/defensives.py:768`) |
 | Instant kills {events} | `report.events` (All, `type = 'instakill'`) | `fetch_instakills` (`backend/defensives.py:811`) |
-| Top kills per boss {scripts} | `worldData.encounter.fightRankings` | `build_armor_constants.py:114`, `build_raid_wide.py:33` |
+| Top kills per boss {scripts} | `worldData.encounter.fightRankings` | `build_armor_constants.py:118`, `build_raid_wide.py:33` |
 
 ## Standing it up
 

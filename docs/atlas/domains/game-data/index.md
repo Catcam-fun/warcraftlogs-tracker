@@ -36,7 +36,7 @@ invariants:
   - "MUST: a new raid is added to RAID_ENCOUNTERS before the boss-side scripts run, since all four read it."
 flows:
   - data-build-path
-content_hash: sha256:b2d632d1911c6d7b4c7d64952e14c60032b102c9b9356e90d7cfab573d087582
+content_hash: sha256:a3a16748095a507ac07f170e3de64659fe8401a5408a1737e4dc74c40e78b55e
 ---
 ## Summary
 
@@ -105,7 +105,7 @@ band structural "Committed to the repo"
 | Runs on | A developer's shell; nothing builds at deploy time | `python backend/scripts/build_*.py`, usage in each script's docstring |
 | Depends on (wago) | `https://wago.tools/db2/{table}/csv` and `https://wago.tools/api/builds` | `backend/scripts/build_defensive_catalog.py:404-405` |
 | Depends on (WCL) | the WCL GraphQL proxy, via `backend/warcraftlogs.py` | `backend/scripts/build_armor_constants.py:33`, `backend/scripts/build_raid_wide.py:24` |
-| Credentials | `WCL_CLIENT_ID`, `WCL_CLIENT_SECRET` (WCL scripts only) | shell environment, `backend/scripts/build_armor_constants.py:106`, `backend/scripts/build_raid_wide.py:79` |
+| Credentials | `WCL_CLIENT_ID`, `WCL_CLIENT_SECRET` (WCL scripts only) | shell environment, `backend/scripts/build_armor_constants.py:110`, `backend/scripts/build_raid_wide.py:79` |
 | Config | `WAGO_CACHE`: optional folder for downloaded wago tables | `backend/scripts/build_defensive_catalog.py:406` |
 | Output | overwrites the module in `backend/` | e.g. `backend/scripts/build_raid_wide.py:30` |
 
