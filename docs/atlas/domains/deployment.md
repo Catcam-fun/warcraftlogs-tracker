@@ -16,10 +16,10 @@ anchors:
   gunicorn_threads: backend/gunicorn.conf.py:15
   gunicorn_timeout: backend/gunicorn.conf.py:18
   requirements: backend/requirements.txt:1
-  dev_server: backend/app.py:745
+  dev_server: backend/app.py:749
   load_dotenv: backend/app.py:20
   allowed_origins: backend/app.py:64
-  health: backend/app.py:735
+  health: backend/app.py:739
   supabase_env: backend/supabase_client.py:27
   api_url: frontend/src/api.js:7
   wake_message: frontend/src/api.js:70
@@ -47,7 +47,7 @@ invariants:
   - "MUST: migrations 001 and 002 be run in the Supabase SQL editor before the features that use them are expected to persist."
   - "NEVER: commit backend/.env; it is gitignored and holds the backend's secrets."
   - "NEVER: rely on in-process state (rate limits, memory shares, caches) across workers or restarts."
-content_hash: sha256:d3eb953cce1890e10bb94635fc6d398be3547598bf0b6a3d450fe4efed5c996c
+content_hash: sha256:2a16fdd96d75ceaf42b31e4d1562a4fd507d486a465bada926ce4848c935f266
 ---
 # Deployment & Environments
 
@@ -108,7 +108,7 @@ edge static -> supa color=process "anon key"
 | Backend dependencies | `backend/requirements.txt` | pip |
 | Backend config | `PORT`, `WEB_CONCURRENCY`, `GUNICORN_THREADS`, `ALLOWED_ORIGINS`, `SUPABASE_URL` | host env; `backend/.env` locally |
 | Backend secrets | `SUPABASE_KEY` (anon), `SUPABASE_SERVICE_ROLE_KEY` | host env; `backend/.env` locally (gitignored, `.gitignore:2`) |
-| Health check | `GET /api/health` returns status and whether Supabase is configured | `backend/app.py:735` |
+| Health check | `GET /api/health` returns status and whether Supabase is configured | `backend/app.py:739` |
 | Frontend build | `react-scripts build` to `frontend/build/` (gitignored) | `frontend/package.json:21`, `frontend/.gitignore:12` |
 | Frontend config | `REACT_APP_API_URL` (optional, build time) | build env |
 | Frontend public values | Supabase URL and anon key | constants in `frontend/src/supabaseClient.js:3` |
@@ -123,7 +123,7 @@ edge static -> supa color=process "anon key"
 | Frontend | `react-scripts start` (`frontend/package.json:20`) on localhost | static build of `frontend/` |
 | API the site calls | `http://localhost:5000` (`frontend/src/api.js:8`) | `https://deathwarcraftlogs-api.onrender.com` (`frontend/src/api.js:8`) |
 | Override | `REACT_APP_API_URL` | same, at build time |
-| Backend server | `python app.py`: Flask dev server, threaded, debug off (`backend/app.py:745`), or gunicorn | gunicorn with `backend/gunicorn.conf.py` |
+| Backend server | `python app.py`: Flask dev server, threaded, debug off (`backend/app.py:749`), or gunicorn | gunicorn with `backend/gunicorn.conf.py` |
 | Backend env | `backend/.env` via `load_dotenv()` | host environment variables |
 | Supabase | same project: the frontend URL and anon key are hard-coded (`frontend/src/supabaseClient.js:3`) | same |
 | CORS | `ALLOWED_ORIGINS` usually unset, so `*` | `ALLOWED_ORIGINS` if set, else `*` |

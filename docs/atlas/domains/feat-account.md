@@ -26,7 +26,7 @@ anchors:
   settings_modal: "frontend/src/Settings.js:6"
   settings_save_creds: "frontend/src/Settings.js:60"
   delete_account_ui: "frontend/src/Settings.js:187"
-  account_endpoint: "backend/app.py:721"
+  account_endpoint: "backend/app.py:725"
   delete_user_account: "backend/supabase_client.py:377"
   require_user: "backend/auth.py:79"
   verify_token: "backend/auth.py:36"
@@ -45,17 +45,17 @@ links:
   - feat-saved
   - feat-share
 invariants:
-  - "MUST: the server identify the account to delete from the verified bearer token, never from the URL or body (backend/app.py:722, backend/auth.py:88)."
+  - "MUST: the server identify the account to delete from the verified bearer token, never from the URL or body (backend/app.py:726, backend/auth.py:88)."
   - "MUST: account deletion remove saved_analyses and api_credentials rows and the auth user, and report failure if any of those fail (backend/supabase_client.py:385, backend/supabase_client.py:400)."
   - "NEVER: delete an account without the service-role key; the call refuses instead (backend/supabase_client.py:381)."
   - "MUST: a signed-in user read and write only their own api_credentials row (backend/migrations/001_shares_and_rls.sql:36)."
   - "MUST: cheat-death detection run only for a request with a valid session (backend/app.py:116)."
-content_hash: sha256:ffaa684670386af28c13d647324f0904b27871f5446114f41c301b69d06240be
+content_hash: sha256:db3e563758863a2c5bc2dfac9be953a0ca0455e6b4562be1b75a951000790ac4
 ---
 ## Summary
 
 - **What it is.** Optional email-and-password accounts on Supabase Auth (`frontend/src/Auth.js:135`, `frontend/src/Auth.js:139`). The header shows Sign In or Settings and Logout depending on `user` (`frontend/src/App.js:1624`).
-- **What an account unlocks.** Saved reports, which every `/api/saved` route gates with `require_user` (`backend/app.py:672`), and cheat-death detection, which the server turns off for calls without a valid session (`backend/app.py:93`, `backend/app.py:116`). Credentials also follow the user between browsers.
+- **What an account unlocks.** Saved reports, which every `/api/saved` route gates with `require_user` (`backend/app.py:676`), and cheat-death detection, which the server turns off for calls without a valid session (`backend/app.py:93`, `backend/app.py:116`). Credentials also follow the user between browsers.
 - **Where credentials live.** Always in this browser's localStorage under `fpx.wclCredentials` (`frontend/src/api.js:18`); for signed-in users also in `api_credentials`, which the browser reaches directly with the public anon key (`frontend/src/App.js:545`).
 - **Leaving.** Settings deletes the account through the backend, which uses the service-role key (`frontend/src/Settings.js:199`, `backend/supabase_client.py:377`).
 
@@ -76,7 +76,7 @@ content_hash: sha256:ffaa684670386af28c13d647324f0904b27871f5446114f41c301b69d06
 - title: Settings | short: Settings modal | sub: credentials, password, email
   body: Shown only when signed in (frontend/src/App.js:2266). It loads and saves the user's own api_credentials row (frontend/src/Settings.js:38, frontend/src/Settings.js:60), changes the password with updateUser after a 6-character and match check (frontend/src/Settings.js:119), and requests an email change that Supabase confirms by email (frontend/src/Settings.js:156).
 - title: Delete the account | short: Delete | sub: type DELETE
-  body: The confirm button stays disabled until the box reads DELETE (frontend/src/Settings.js:411). It calls DELETE /api/account with the session token (frontend/src/Settings.js:199). The server deletes saved_analyses and api_credentials rows, the user's shared_results rows, then the auth user (backend/supabase_client.py:385). On success it drops the token from its verification cache (backend/app.py:727); the browser signs out locally and reloads at / (frontend/src/Settings.js:204).
+  body: The confirm button stays disabled until the box reads DELETE (frontend/src/Settings.js:411). It calls DELETE /api/account with the session token (frontend/src/Settings.js:199). The server deletes saved_analyses and api_credentials rows, the user's shared_results rows, then the auth user (backend/supabase_client.py:385). On success it drops the token from its verification cache (backend/app.py:731); the browser signs out locally and reloads at / (frontend/src/Settings.js:204).
 - title: Log out | short: Logout | sub: clear session and data
   body: handleLogout signs out, clears the session-only flag, forgets the stored-credentials snapshot, clears the loaded result and turns cheat-death off in the form (frontend/src/App.js:599).
 - title: Read the terms | short: /terms, /privacy | sub: static pages
@@ -127,7 +127,7 @@ relied-on-by: [[feat-analyze]] — credentials pre-fill and the cheat-death gate
 
 | Item {kind} | Where | Meaning |
 |---|---|---|
-| `DELETE /api/account` {route} | `backend/app.py:721` | delete the caller's data and login |
+| `DELETE /api/account` {route} | `backend/app.py:725` | delete the caller's data and login |
 | `delete_user_account` {code} | `backend/supabase_client.py:377` | rows, shares, then auth user |
 | `verify_token` {code} | `backend/auth.py:36` | asks Supabase `/auth/v1/user`; caches 60 s by token hash |
 | `forget_token` {code} | `backend/auth.py:72` | drop a token from that cache |
@@ -143,7 +143,7 @@ relied-on-by: [[feat-analyze]] — credentials pre-fill and the cheat-death gate
 
 ## Invariants
 
-- **MUST** the server identify the account to delete from the verified bearer token, never from the URL or body (`backend/app.py:722`, `backend/auth.py:88`). A test confirms an old `/api/delete-user-account/<id>` path is gone (`backend/test_api.py:157`).
+- **MUST** the server identify the account to delete from the verified bearer token, never from the URL or body (`backend/app.py:726`, `backend/auth.py:88`). A test confirms an old `/api/delete-user-account/<id>` path is gone (`backend/test_api.py:157`).
 - **MUST** account deletion remove `saved_analyses` and `api_credentials` rows and the auth user, and answer with an error if any of those fail (`backend/supabase_client.py:385`, `backend/supabase_client.py:400`). Share cleanup failures are logged but do not fail the call (`backend/supabase_client.py:393`).
 - **NEVER** delete an account without the service-role key; the function refuses (`backend/supabase_client.py:381`).
 - **MUST** a signed-in user reach only their own `api_credentials` row (`backend/migrations/001_shares_and_rls.sql:36`).

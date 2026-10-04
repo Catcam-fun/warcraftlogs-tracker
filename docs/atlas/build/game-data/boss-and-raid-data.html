@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Boss &amp; Raid Data Builds — Floor Pov</title>
 <meta name="generator" content="project-atlas">
-<meta name="atlas-content-hash" content="sha256:ef034a3e3bcd2c99fc7239fbf52c492aaf9595f36af2eb30ac857e31abd379a9">
-<meta name="atlas-html-integrity" content="sha256:f500210f36021f260a8dc80d111bacf1b0edaac556b6d3b72ceb1e42c93c2c68">
+<meta name="atlas-content-hash" content="sha256:a64ced382edc9b83d4e8edec292c9c7aa11a96416788f3a5e10030092494ca10">
+<meta name="atlas-html-integrity" content="sha256:718c7b5aa8f6df856e196226533e4a905aacc4cd2d3620983d4df1f103d01e23">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -466,7 +466,7 @@
 <p><code>defensives.py</code> uses it so an immunity never zeroes such a hit, and labels the verdict <code>pierces</code> (<code>backend/defensives.py:1182-1184</code>, <code>backend/defensives.py:1455-1456</code>, <code>backend/defensives.py:1702</code>).</p>
 <h5>build_boss_spell_text.py: killing-blow descriptions</h5>
 <p>Run as <code>python backend/scripts/build_boss_spell_text.py</code> after the raid is in <code>RAID_ENCOUNTERS</code>; needs wago.tools (<code>backend/scripts/build_boss_spell_text.py:15-20</code>).</p>
-<p><code>app.py</code> sends <code>text_for(abilityId)</code> for each counted killing blow as <code>abilityText</code> (<code>backend/app.py:600-603</code>).</p>
+<p><code>app.py</code> sends <code>text_for(abilityId)</code> for each counted killing blow as <code>abilityText</code> (<code>backend/app.py:604-607</code>).</p>
 <h5>build_armor_constants.py: armor per boss</h5>
 <p>Run as <code>WCL_CLIENT_ID=... WCL_CLIENT_SECRET=... python backend/scripts/build_armor_constants.py</code> (<code>backend/scripts/build_armor_constants.py:21</code>).</p>
 <p><code>armor_constant()</code> reads K with a Mythic, then Heroic, then Normal fallback, and <code>_armor_reduction()</code> uses the two spell lists (<code>backend/defensives.py:906-911</code>, <code>backend/defensives.py:915-928</code>). The docstring names the use: how much more a druid's Bear Form armor would have reduced a physical killing blow (<code>backend/scripts/build_armor_constants.py:18-19</code>).</p>
@@ -485,7 +485,7 @@
 <section id="related"><div class="wrap reveal"><div class="sec-head"><span class="num">08</span><h3>Related</h3></div><ul class="clean"><li><a class="inline" href="../game-data/index.html">game-data</a> — the inventory of all generated modules</li><li><a class="inline" href="../game-data/defensive-catalog.html">game-data-defensive-catalog</a> — the catalog these scripts build on</li><li><a class="inline" href="../backend/defensive-analysis.html">backend-defensive-analysis</a> — reads immunity, armor and icon data</li><li><a class="inline" href="../backend/death-descriptions.html">backend-death-descriptions</a> — reads <code>RAID_WIDE</code></li><li><a class="inline" href="../backend/index.html">backend</a> — serves the spell text in each result</li><li><a class="inline" href="../warcraftlogs/api-client.html">warcraftlogs-api-client</a> — the client the WCL scripts use</li><li><a class="inline" href="../warcraftlogs/point-budget.html">warcraftlogs-point-budget</a> — the WCL scripts spend points too</li><li><a class="inline" href="../operations.html">operations</a> — when each script is rerun</li><li><a class="inline" href="../testing.html">testing</a> — tests over the generated output</li></ul>
 <div class="related"><a class="relcard" href="../game-data/index.html"><span class="arr">→</span><span class="rt">Game Data Catalogs</span><span class="rd">documented</span></a><a class="relcard" href="../game-data/defensive-catalog.html"><span class="arr">→</span><span class="rt">Defensive Catalog Build</span><span class="rd">documented</span></a><a class="relcard" href="../backend/defensive-analysis.html"><span class="arr">→</span><span class="rt">Defensive Analysis</span><span class="rd">documented</span></a><a class="relcard" href="../backend/death-descriptions.html"><span class="arr">→</span><span class="rt">Death Descriptions</span><span class="rd">documented</span></a><a class="relcard" href="../backend/index.html"><span class="arr">→</span><span class="rt">Backend API</span><span class="rd">documented</span></a><a class="relcard" href="../warcraftlogs/api-client.html"><span class="arr">→</span><span class="rt">WCL API Client</span><span class="rd">documented</span></a><a class="relcard" href="../warcraftlogs/point-budget.html"><span class="arr">→</span><span class="rt">WCL Point Budget</span><span class="rd">documented</span></a><a class="relcard" href="../operations.html"><span class="arr">→</span><span class="rt">Operations &amp; New Tier</span><span class="rd">documented</span></a><a class="relcard" href="../testing.html"><span class="arr">→</span><span class="rt">Testing &amp; Checks</span><span class="rd">documented</span></a></div></div></section>
 
-    <footer><span class="lvlnote">Level 3 of 3</span><p>Floor Pov — Boss &amp; Raid Data Builds · generated by project-atlas</p><p>Content hash <code>sha256:ef034a3e3bcd2c99fc7239fbf52c492aaf9595f36af2eb30ac857e31abd379a9</code></p></footer>
+    <footer><span class="lvlnote">Level 3 of 3</span><p>Floor Pov — Boss &amp; Raid Data Builds · generated by project-atlas</p><p>Content hash <code>sha256:a64ced382edc9b83d4e8edec292c9c7aa11a96416788f3a5e10030092494ca10</code></p></footer>
   </main>
 </div>
 

@@ -46,7 +46,7 @@ links:
   - feat-analyze
   - feat-share
   - feat-saved
-content_hash: sha256:23ba85d2dcb1ac73f28d0e621e5befd2161f1209f59a5d93a79a5b85057bd1f5
+content_hash: sha256:470b965210a7feaa5505b9b9eca8746398a54edd900d5b8eba212fc2cc71f828
 ---
 ## Summary
 
@@ -151,7 +151,7 @@ The pieces of the Results view. Filter by kind.
 
 ### Data fields the view reads
 
-From the backend's result (`backend/app.py:590-603`): `events` (deaths per player, each with `boss`, `pullNo`, `reportId`, `fightId`, `absTs`, `abilityName`, `abilityId`, `isCheatDeath`, `slot`, `inWipe`, `class`, `spec`, `defensives`), `pullParticipation`, `bossParticipation`, `pullCutoffTimestamps`, `icons`, `abilityIcons`, `abilityInfo`, `abilityText`, and `meta.maxCutoff`. The defensive shape is documented in the comment at `frontend/src/DefensivePanel.js:3-14`.
+From the backend's result (`backend/app.py:594-607`): `events` (deaths per player, each with `boss`, `pullNo`, `reportId`, `fightId`, `absTs`, `abilityName`, `abilityId`, `isCheatDeath`, `slot`, `inWipe`, `class`, `spec`, `defensives`), `pullParticipation`, `bossParticipation`, `pullCutoffTimestamps`, `icons`, `abilityIcons`, `abilityInfo`, `abilityText`, and `meta.maxCutoff`. The defensive shape is documented in the comment at `frontend/src/DefensivePanel.js:3-14`.
 
 ## Context map
 
@@ -174,7 +174,7 @@ relied-on-by: [[feat-saved]] — an opened saved report renders through this sam
 
 - **MUST** count through `isCounted` / `countedDeaths` everywhere: the matrix (`frontend/src/App.js:1169`, `frontend/src/App.js:1202`), the player list (`frontend/src/App.js:1022`) and `killCounts` (`frontend/src/App.js:1253`). A second rule anywhere would make the tables disagree.
 - **NEVER** count a death with `inWipe`, whatever X is (`frontend/src/deathCounting.js:24`). Mass deaths at a wipe say nothing about who failed first.
-- **NEVER** recompute `slot`, `inWipe`, `deathType` or `wouldSave` in the browser. They come from the backend (`backend/analysis.py:150`, `backend/app.py:506-507`, `backend/defensives.py:1656`); the view only reads them.
+- **NEVER** recompute `slot`, `inWipe`, `deathType` or `wouldSave` in the browser. They come from the backend (`backend/analysis.py:150`, `backend/app.py:510-511`, `backend/defensives.py:1656`); the view only reads them.
 - **MUST** skip defensive data without the current shape (`active` and `available` arrays) so saves and shares from older versions still render (`frontend/src/DeathRow.js:21`, `frontend/src/DefensivePanel.js:17`).
 
 ## Gotchas

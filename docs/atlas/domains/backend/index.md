@@ -19,7 +19,7 @@ anchors:
   gunicorn_threads: backend/gunicorn.conf.py:15
   supabase_env: backend/supabase_client.py:27
   auth_env: backend/auth.py:20
-  dev_server: backend/app.py:745
+  dev_server: backend/app.py:749
   frontend_api_url: frontend/src/api.js:7
 links:
   - backend-api-endpoints
@@ -37,7 +37,7 @@ invariants:
   - "MUST: run under a threaded worker (gthread); a sync worker lets one analysis stream block every other request."
   - "MUST: keep WEB_CONCURRENCY at 1 unless shared state moves out of process; caches and rate limits live in process memory."
   - "NEVER: hard-code a WarcraftLogs API key on the server; each analysis brings the caller's own clientId and clientSecret."
-content_hash: sha256:362ddb75656aff792e8f204f7c8308b30016d8526e8fc16934e0662f09ed1edc
+content_hash: sha256:f831883f480e55a30c2b05dc814869c48ea95c11ad522cdac0d8359014437ea7
 ---
 ## Summary
 
@@ -88,16 +88,16 @@ Every route, at a glance. Full request and response shapes are on [[backend-api-
 | Route {analysis} | Auth | Rate limit | Purpose |
 |---|---|---|---|
 | `POST /api/analyze` {analysis} | optional (unlocks cheat deaths) | 60 / hour / IP | Stream an analysis as SSE (`backend/app.py:82`) |
-| `POST /api/share` {sharing} | optional (links share to account) | 20 / hour / IP | Create a 72-hour share link (`backend/app.py:632`) |
-| `GET /api/shared/<share_id>` {sharing} | none | none | Read a share link (`backend/app.py:649`) |
-| `GET /api/saved` {saved} | required | none | List the user's saved analyses (`backend/app.py:671`) |
-| `POST /api/saved` {saved} | required | 30 / hour / IP | Save an analysis (`backend/app.py:677`) |
-| `GET /api/saved/<id>` {saved} | required | none | Load one saved analysis (`backend/app.py:695`) |
-| `DELETE /api/saved/<id>` {saved} | required | none | Delete one (`backend/app.py:703`) |
-| `DELETE /api/saved` {saved} | required | none | Delete all of the user's saves (`backend/app.py:711`) |
-| `DELETE /api/account` {account} | required | none | Delete the user's data and auth account (`backend/app.py:721`) |
-| `GET /api/health` {status} | none | none | Liveness plus whether Supabase is configured (`backend/app.py:735`) |
-| `GET /` {status} | none | none | Service banner (`backend/app.py:740`) |
+| `POST /api/share` {sharing} | optional (links share to account) | 20 / hour / IP | Create a 72-hour share link (`backend/app.py:636`) |
+| `GET /api/shared/<share_id>` {sharing} | none | none | Read a share link (`backend/app.py:653`) |
+| `GET /api/saved` {saved} | required | none | List the user's saved analyses (`backend/app.py:675`) |
+| `POST /api/saved` {saved} | required | 30 / hour / IP | Save an analysis (`backend/app.py:681`) |
+| `GET /api/saved/<id>` {saved} | required | none | Load one saved analysis (`backend/app.py:699`) |
+| `DELETE /api/saved/<id>` {saved} | required | none | Delete one (`backend/app.py:707`) |
+| `DELETE /api/saved` {saved} | required | none | Delete all of the user's saves (`backend/app.py:715`) |
+| `DELETE /api/account` {account} | required | none | Delete the user's data and auth account (`backend/app.py:725`) |
+| `GET /api/health` {status} | none | none | Liveness plus whether Supabase is configured (`backend/app.py:739`) |
+| `GET /` {status} | none | none | Service banner (`backend/app.py:744`) |
 
 The module map, for finding code:
 
@@ -133,7 +133,7 @@ The repository holds no `render.yaml` or `Procfile`; the Render start command an
 
 | Aspect | Local | Production |
 |---|---|---|
-| Server | `python app.py`: Flask's threaded dev server on `PORT` or 5000 (`backend/app.py:745`) | gunicorn with `backend/gunicorn.conf.py` on Render |
+| Server | `python app.py`: Flask's threaded dev server on `PORT` or 5000 (`backend/app.py:749`) | gunicorn with `backend/gunicorn.conf.py` on Render |
 | URL the frontend uses | `http://localhost:5000` when the site runs on localhost (`frontend/src/api.js:8`) | `https://deathwarcraftlogs-api.onrender.com` (`frontend/src/api.js:8`), unless `REACT_APP_API_URL` overrides it at build time (`frontend/src/api.js:7`) |
 | Env source | `backend/.env` loaded by `load_dotenv()` | Render environment settings |
 | Supabase | optional: without it, saves fail, shares fall back to process memory, the shared report cache is skipped | configured; service-role key preferred (`backend/supabase_client.py:38`) |

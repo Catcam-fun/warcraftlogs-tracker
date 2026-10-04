@@ -51,7 +51,7 @@ invariants:
   - "NEVER: run cheat-death detection for a caller without a valid Supabase session, whatever the request body says (backend/app.py:116)."
   - "MUST: fights be kept only when their encounter ID is in the selected raid's RAID_ENCOUNTERS set (backend/analysis.py:277)."
   - "NEVER: store the Client ID or Secret in the browser's analysis history; stripSecrets removes them before IndexedDB writes (frontend/src/App.js:536)."
-content_hash: sha256:279bace056a71aa04a6946fbb20ab862c32978d0eca41c327f35952d35e29b82
+content_hash: sha256:315975520f965fe30f9a607a94875dfe48543c3307af848eeaeaa3a34c835578
 ---
 ## Summary
 
@@ -74,7 +74,7 @@ You reach the page from the landing page's run button (`frontend/src/App.js:1539
   gotcha: handleSubmit only checks that Client ID, Secret, guild and server are filled (frontend/src/App.js:663). A wrong guild name is discovered only when WarcraftLogs returns no reports.
 - title: Set dates and deaths tracked | short: Dates & first X | sub: optional window, 1-10
   body: Start and end dates are optional; blank means the start of the tier and today (frontend/src/AnalyzeConfig.js:171). Max Deaths to Track is the "first X deaths per pull" ceiling, 1 to 10 (frontend/src/AnalyzeConfig.js:191). On the server the date range is intersected with RAID_DATE_WINDOWS (backend/analysis.py:224) by resolve_report_window (backend/analysis.py:242), and maxCutoff is clamped to 1-10 (backend/app.py:107).
-  gotcha: maxCutoff also decides which deaths get defensive analysis at all (backend/app.py:514). Raising the Results page's slider above it later shows deaths without a defensive panel.
+  gotcha: maxCutoff also decides which deaths get defensive analysis at all (backend/app.py:518). Raising the Results page's slider above it later shows deaths without a defensive panel.
 - title: Roster and cheat deaths | short: Toggles | sub: who counts, cheat deaths
   body: Guild Roster (on by default, frontend/src/App.js:208) means only players on the guild's WarcraftLogs roster count; off, everyone in the reports counts and the roster is not fetched (backend/app.py:118, backend/app.py:137). Cheat Death Detection is disabled for signed-out users (frontend/src/AnalyzeConfig.js:195) and enforced on the server from the bearer token (backend/app.py:93, backend/app.py:116).
   gotcha: If the roster fetch fails or returns nobody, is_guild_member lets everyone through (backend/app.py:154) and the stream says so.

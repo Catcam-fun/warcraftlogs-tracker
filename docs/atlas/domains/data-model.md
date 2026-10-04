@@ -44,7 +44,7 @@ invariants:
   - "MUST: retention_days is clamped to 1-30 before a save is written."
   - "NEVER: the browser reads saved_analyses, shared_results or report_cache directly; they have RLS on and no policies."
   - "NEVER: a report_cache failure breaks an analysis; every cache call is best-effort."
-content_hash: sha256:c5d69fd7320d9fa1214f539a922767f75454a4d43f7dea7007bbe0d401b4b617
+content_hash: sha256:7ff4bc9eac79bbf5b81d7a4eeb88e37d6f09db4fad0e6d9b662f346e57215c30
 ---
 # Data Model
 
@@ -94,9 +94,9 @@ Columns as defined by the migrations, or, for tables created outside this repo, 
 | `retention_days`, `expires_at` {saved} | int 1-30; timestamp | Clamped at `backend/supabase_client.py:93` |
 | `size_bytes`, `created_at` {saved} | int; timestamp | Listing returns these without the payload (`backend/supabase_client.py:128`) |
 | `shared_results` {share} | `001_shares_and_rls.sql:13` | No policies; backend only |
-| `id` {share} | text PK | `secrets.token_urlsafe(9)` from `backend/app.py:642` |
+| `id` {share} | text PK | `secrets.token_urlsafe(9)` from `backend/app.py:646` |
 | `payload`, `size_bytes` {share} | `br64:` text; int | Max 2 MB compressed (`backend/supabase_client.py:33`) |
-| `created_by` {share} | uuid FK `auth.users`, `on delete set null` | Only set when the sharer was signed in (`backend/app.py:641`) |
+| `created_by` {share} | uuid FK `auth.users`, `on delete set null` | Only set when the sharer was signed in (`backend/app.py:645`) |
 | `created_at`, `expires_at` {share} | timestamps; index on `expires_at` | `expires_at` = now + 72h (`SHARE_TTL_HOURS`, `backend/supabase_client.py:34`) |
 | `report_cache` {cache} | `002_report_cache.sql:12` | No policies; backend only |
 | `key` {cache} | text PK, `v2:<namespace>:<repr(key)>` | Built in `backend/cache.py:61` |
