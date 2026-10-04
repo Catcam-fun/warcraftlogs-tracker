@@ -14,9 +14,12 @@ from flask import jsonify, request
 
 
 def client_ip():
-    # Render (and most hosts) put the real client first in X-Forwarded-For.
-    forwarded = request.headers.get('X-Forwarded-For', '')
-    return forwarded.split(',')[0].strip() or request.remote_addr or 'unknown'
+    # Render sits behind Cloudflare, which sets CF-Connecting-IP to the real
+    # client and overwrites any value the client sent. X-Forwarded-For is not
+    # usable: Render appends to whatever the client put there, so its first
+    # entry can be forged. Without Cloudflare (local dev), use the socket.
+    return (request.headers.get('CF-Connecting-IP', '').strip()
+            or request.remote_addr or 'unknown')
 
 
 class RateLimiter:
