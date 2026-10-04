@@ -137,6 +137,8 @@ def load_analysis(analysis_id, user_id):
     if not db:
         return {"error": "Database not configured"}
     try:
+        # An expired save is gone, even when opened directly by its id.
+        _purge_expired_saves(user_id)
         result = db.table('saved_analyses').select('*') \
             .eq('id', analysis_id).eq('user_id', user_id).limit(1).execute()
         if not result.data:
