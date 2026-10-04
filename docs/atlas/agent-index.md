@@ -52,7 +52,7 @@
   - cache_ttl: backend/auth.py:23
   - require_user: backend/auth.py:79
   - delete_route: backend/app.py:721
-  - delete_impl: backend/supabase_client.py:375
+  - delete_impl: backend/supabase_client.py:377
   - delete_client: frontend/src/Settings.js:187
 - links: frontend, backend, data-model, security, feat-account, feat-saved, feat-share
 
@@ -148,11 +148,11 @@
   - cache_version: backend/cache.py:85
   - writer_pool: backend/cache.py:86
   - report_caches: backend/cache.py:91
-  - budget: backend/supabase_client.py:264
-  - enc: backend/supabase_client.py:272
-  - cache_get: backend/supabase_client.py:312
-  - cache_put: backend/supabase_client.py:331
-  - evict: backend/supabase_client.py:353
+  - budget: backend/supabase_client.py:266
+  - enc: backend/supabase_client.py:274
+  - cache_get: backend/supabase_client.py:314
+  - cache_put: backend/supabase_client.py:333
+  - evict: backend/supabase_client.py:355
   - report_cache_table: backend/migrations/002_report_cache.sql:12
   - client_ip: backend/ratelimit.py:16
   - rate_limiter: backend/ratelimit.py:25
@@ -311,11 +311,11 @@
   - pack: backend/supabase_client.py:68
   - unpack: backend/supabase_client.py:73
   - save_analysis: backend/supabase_client.py:89
-  - store_share: backend/supabase_client.py:213
-  - mem_fallback: backend/supabase_client.py:193
-  - cache_budget: backend/supabase_client.py:264
-  - evict: backend/supabase_client.py:353
-  - delete_account: backend/supabase_client.py:375
+  - store_share: backend/supabase_client.py:215
+  - mem_fallback: backend/supabase_client.py:195
+  - cache_budget: backend/supabase_client.py:266
+  - evict: backend/supabase_client.py:355
+  - delete_account: backend/supabase_client.py:377
   - creds_client_write: frontend/src/App.js:584
 - links: backend, auth, security, deployment, feat-saved, feat-share, feat-account
 
@@ -352,7 +352,7 @@
   - migration_001: backend/migrations/001_shares_and_rls.sql:2
   - migration_002: backend/migrations/002_report_cache.sql:2
   - ci_atlas: .github/workflows/atlas-sync.yml:6
-  - mem_shares: backend/supabase_client.py:193
+  - mem_shares: backend/supabase_client.py:195
 - links: backend, frontend, auth, data-model, security, feat-share, feat-saved, operations, game-data, testing
 
 ## Documentation Remediation
@@ -379,8 +379,8 @@
   - Terms of Service and Privacy Policy are static pages at /terms and /privacy, linked from sign-up and the landing page footer.
 - invariants:
   - MUST: the server identify the account to delete from the verified bearer token, never from the URL or body (backend/app.py:722, backend/auth.py:88).
-  - MUST: account deletion remove saved_analyses and api_credentials rows and the auth user, and report failure if any of those fail (backend/supabase_client.py:383, backend/supabase_client.py:398).
-  - NEVER: delete an account without the service-role key; the call refuses instead (backend/supabase_client.py:379).
+  - MUST: account deletion remove saved_analyses and api_credentials rows and the auth user, and report failure if any of those fail (backend/supabase_client.py:385, backend/supabase_client.py:400).
+  - NEVER: delete an account without the service-role key; the call refuses instead (backend/supabase_client.py:381).
   - MUST: a signed-in user read and write only their own api_credentials row (backend/migrations/001_shares_and_rls.sql:36).
   - MUST: cheat-death detection run only for a request with a valid session (backend/app.py:116).
 - anchors:
@@ -400,7 +400,7 @@
   - settings_save_creds: frontend/src/Settings.js:60
   - delete_account_ui: frontend/src/Settings.js:187
   - account_endpoint: backend/app.py:721
-  - delete_user_account: backend/supabase_client.py:375
+  - delete_user_account: backend/supabase_client.py:377
   - require_user: backend/auth.py:79
   - verify_token: backend/auth.py:36
   - credentials_rls: backend/migrations/001_shares_and_rls.sql:36
@@ -489,8 +489,8 @@
   - Opening a save puts it back into app state and routes to /results, the same page a fresh analysis uses.
 - invariants:
   - MUST: every /api/saved route run behind require_user and use g.user_id from the verified token (backend/app.py:672, backend/auth.py:88).
-  - MUST: every saved_analyses read and delete filter on both id and user_id (backend/supabase_client.py:141, backend/supabase_client.py:167).
-  - NEVER: store or return WarcraftLogs credentials in a save; the config is stripped in the browser and again on write and read (frontend/src/SaveReportDialog.js:27, backend/supabase_client.py:101, backend/supabase_client.py:154).
+  - MUST: every saved_analyses read and delete filter on both id and user_id (backend/supabase_client.py:141, backend/supabase_client.py:169).
+  - NEVER: store or return WarcraftLogs credentials in a save; the config is stripped in the browser and again on write and read (frontend/src/SaveReportDialog.js:27, backend/supabase_client.py:101, backend/supabase_client.py:156).
   - MUST: keep at most MAX_SAVED_PER_USER (5) saves per user and clamp retention to 1-30 days (backend/supabase_client.py:93, backend/supabase_client.py:97).
 - anchors:
   - save_button: frontend/src/App.js:1613
@@ -526,9 +526,9 @@
   - If the Supabase insert fails, the share is kept in the API process's memory instead, and it disappears on restart.
   - Shares are rate limited to 20 per hour per client IP and capped at 2 MB compressed.
 - invariants:
-  - NEVER: put WarcraftLogs credentials in a share; they are stripped in the browser, on write and on read (frontend/src/App.js:617, backend/supabase_client.py:214, backend/supabase_client.py:250).
+  - NEVER: put WarcraftLogs credentials in a share; they are stripped in the browser, on write and on read (frontend/src/App.js:617, backend/supabase_client.py:216, backend/supabase_client.py:252).
   - NEVER: let a shared config overwrite the viewer's own credentials (frontend/src/App.js:309).
-  - MUST: serve a share only before its expires_at; Supabase rows are filtered on expires_at and memory entries on their own deadline (backend/supabase_client.py:241, backend/supabase_client.py:208).
+  - MUST: serve a share only before its expires_at; Supabase rows are filtered on expires_at and memory entries on their own deadline (backend/supabase_client.py:243, backend/supabase_client.py:210).
   - MUST: reject share ids outside [A-Za-z0-9_-]{6,32} before any lookup (backend/app.py:651).
   - MUST: try each ?share= id once per page; a failed load must not loop (frontend/src/App.js:335).
 - anchors:
@@ -544,9 +544,9 @@
   - share_id_re: backend/app.py:624
   - share_limiter: backend/app.py:49
   - share_limits: backend/supabase_client.py:33
-  - store_share: backend/supabase_client.py:213
-  - get_share: backend/supabase_client.py:236
-  - mem_fallback: backend/supabase_client.py:193
+  - store_share: backend/supabase_client.py:215
+  - get_share: backend/supabase_client.py:238
+  - mem_fallback: backend/supabase_client.py:195
   - shares_table: backend/migrations/001_shares_and_rls.sql:13
 - links: frontend, frontend-pages-and-routing, backend, backend-api-endpoints, backend-caching-and-limits, data-model, auth, security, feat-results, feat-saved, feat-account
 
@@ -813,9 +813,9 @@
   - dev_server: backend/app.py:745
   - supabase_client: backend/supabase_client.py:39
   - supabase_startup_log: backend/supabase_client.py:40
-  - report_cache_budget: backend/supabase_client.py:264
-  - report_cache_eviction: backend/supabase_client.py:353
-  - report_cache_backoff: backend/supabase_client.py:306
+  - report_cache_budget: backend/supabase_client.py:266
+  - report_cache_eviction: backend/supabase_client.py:355
+  - report_cache_backoff: backend/supabase_client.py:308
   - memory_caches: backend/cache.py:91
   - cache_version: backend/cache.py:85
   - wcl_retry: backend/warcraftlogs.py:30

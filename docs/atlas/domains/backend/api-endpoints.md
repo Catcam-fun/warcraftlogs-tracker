@@ -40,7 +40,7 @@ invariants:
   - "MUST: an /api/analyze stream ends with exactly one result event or one error event; the client treats the first error as final."
   - "MUST: cheat-death detection runs only for a request with a valid bearer token, whatever enableCheatDeath says."
   - "NEVER: return stored credentials; shares and saves pass config through strip_secrets on the way in and out."
-content_hash: sha256:f67ab22bed963ff4d8da810d1ebbd7674211239113fac1c8adc68a5b1dc56ee7
+content_hash: sha256:dbade66583b8de38aaea2cf375da2772e79cd564bbed032489cb33f7de2efeda
 ---
 ## Summary
 
@@ -135,13 +135,13 @@ relied-on-by: [[feat-account]] — account deletion
 
 - **MUST** end an `/api/analyze` stream with exactly one `result` event or one `error` event; the client throws on the first `error` (`frontend/src/App.js:737`).
 - **MUST** gate cheat-death detection on a valid bearer token, whatever `enableCheatDeath` says, since a shared config or a direct call can set the flag (`backend/app.py:91`).
-- **NEVER** return stored credentials: shares and saves pass `config` through `strip_secrets` when stored and when read (`backend/supabase_client.py:214`, `backend/supabase_client.py:250`).
+- **NEVER** return stored credentials: shares and saves pass `config` through `strip_secrets` when stored and when read (`backend/supabase_client.py:216`, `backend/supabase_client.py:252`).
 
 ## Gotchas
 
 - **A 200 does not mean success**: `/api/analyze` commits to 200 before any work. Read the stream for an `error` event.
 - **Any share storage error becomes 413**: `share_results` maps every error from `store_share` to 413 (`backend/app.py:645`), although today the only error it returns is "too large".
-- **Shares can live only in memory**: if the Supabase insert fails, the share is kept in process memory and the response gains `ephemeral: true` (`backend/supabase_client.py:233`); it disappears on restart.
+- **Shares can live only in memory**: if the Supabase insert fails, the share is kept in process memory and the response gains `ephemeral: true` (`backend/supabase_client.py:235`); it disappears on restart.
 - **Cutoff keys become strings**: `pullCutoffTimestamps` uses integer keys in Python, which JSON turns into strings.
 
 ## Related

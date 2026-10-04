@@ -47,10 +47,10 @@ flows:
   - share-path
 invariants:
   - "MUST: every /api/saved route run behind require_user and use g.user_id from the verified token (backend/app.py:672, backend/auth.py:88)."
-  - "MUST: every saved_analyses read and delete filter on both id and user_id (backend/supabase_client.py:141, backend/supabase_client.py:167)."
-  - "NEVER: store or return WarcraftLogs credentials in a save; the config is stripped in the browser and again on write and read (frontend/src/SaveReportDialog.js:27, backend/supabase_client.py:101, backend/supabase_client.py:154)."
+  - "MUST: every saved_analyses read and delete filter on both id and user_id (backend/supabase_client.py:141, backend/supabase_client.py:169)."
+  - "NEVER: store or return WarcraftLogs credentials in a save; the config is stripped in the browser and again on write and read (frontend/src/SaveReportDialog.js:27, backend/supabase_client.py:101, backend/supabase_client.py:156)."
   - "MUST: keep at most MAX_SAVED_PER_USER (5) saves per user and clamp retention to 1-30 days (backend/supabase_client.py:93, backend/supabase_client.py:97)."
-content_hash: sha256:27792402726945aafa16629be230e2ef8f9c8afb89381fa904974a6e72f05027
+content_hash: sha256:e35bc49228a2c5c326cd7f09b3b9a6ba0d55162de8031ea350de2ed179957d60
 ---
 ## Summary
 
@@ -76,7 +76,7 @@ content_hash: sha256:27792402726945aafa16629be230e2ef8f9c8afb89381fa904974a6e72f
 - title: Reopen one | short: Open | sub: GET /api/saved/<id>
   body: openReport fetches the full row (frontend/src/SavedReports.js:35). The id must look like a UUID (backend/app.py:625). load_analysis selects by id and user_id, unpacks it, wraps rows from older versions that stored the bare analysis, and strips secrets from the config again (backend/supabase_client.py:136). handleLoadSavedReport merges that config into the form, sets data and navigates to /results (frontend/src/App.js:321).
 - title: Delete one | short: Delete | sub: confirm, then DELETE
-  body: The trash button asks window.confirm, then calls DELETE /api/saved/<id> and drops the card locally (frontend/src/SavedReports.js:47). The server deletes by id and user_id (backend/supabase_client.py:163).
+  body: The trash button asks window.confirm, then calls DELETE /api/saved/<id> and drops the card locally (frontend/src/SavedReports.js:47). The server deletes by id and user_id (backend/supabase_client.py:165).
 ```
 
 ## Diagram
@@ -141,13 +141,13 @@ relied-on-by: [[feat-account]] — account deletion removes every save
 ## Invariants
 
 - **MUST** every `/api/saved` route run behind `require_user` and act on `g.user_id` from the verified token (`backend/app.py:672`, `backend/auth.py:88`). A test sends `?user_id=victim` and checks it is ignored (`backend/test_api.py:141`).
-- **MUST** every `saved_analyses` read and delete filter on both `id` and `user_id` (`backend/supabase_client.py:141`, `backend/supabase_client.py:167`).
-- **NEVER** store or return WarcraftLogs credentials in a save: the browser strips them (`frontend/src/SaveReportDialog.js:27`), the server strips them on write (`backend/supabase_client.py:101`) and again on read (`backend/supabase_client.py:154`).
+- **MUST** every `saved_analyses` read and delete filter on both `id` and `user_id` (`backend/supabase_client.py:141`, `backend/supabase_client.py:169`).
+- **NEVER** store or return WarcraftLogs credentials in a save: the browser strips them (`frontend/src/SaveReportDialog.js:27`), the server strips them on write (`backend/supabase_client.py:101`) and again on read (`backend/supabase_client.py:156`).
 - **MUST** keep at most 5 saves per user and clamp retention to 1-30 days (`backend/supabase_client.py:93`, `backend/supabase_client.py:97`).
 
 ## Gotchas
 
-- **Expiry is lazy.** Expired rows are deleted only when that user lists or saves (`backend/supabase_client.py:94`, `backend/supabase_client.py:126`). `load_analysis` does not check `expires_at` (`backend/supabase_client.py:140`), so a stale row opened by id before the next list still loads.
+- **Expiry is lazy but never visible.** Expired rows stay in the table until that user lists, saves or opens a save; each of those first deletes the user's expired rows (`backend/supabase_client.py:94`, `backend/supabase_client.py:126`, `backend/supabase_client.py:141`), so an expired save opened by id answers 404 (`backend/test_api.py`, `test_expired_saves_do_not_load`).
 - **The limiter is per IP and per process.** It keys on Cloudflare's `CF-Connecting-IP` (`backend/ratelimit.py:21`) and lives in memory (`backend/ratelimit.py:29`).
 - **Alt groups are not saved with the result.** Grouping made on the Results page lives in page state; a save carries `data` and the analysis config only (`frontend/src/SaveReportDialog.js:27`).
 - **No schema migration creates `saved_analyses`.** The migrations only enable RLS on it (`backend/migrations/001_shares_and_rls.sql:24`); the table predates them.

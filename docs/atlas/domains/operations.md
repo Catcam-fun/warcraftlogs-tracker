@@ -20,9 +20,9 @@ anchors:
   dev_server: backend/app.py:745
   supabase_client: backend/supabase_client.py:39
   supabase_startup_log: backend/supabase_client.py:40
-  report_cache_budget: backend/supabase_client.py:264
-  report_cache_eviction: backend/supabase_client.py:353
-  report_cache_backoff: backend/supabase_client.py:306
+  report_cache_budget: backend/supabase_client.py:266
+  report_cache_eviction: backend/supabase_client.py:355
+  report_cache_backoff: backend/supabase_client.py:308
   memory_caches: backend/cache.py:91
   cache_version: backend/cache.py:85
   wcl_retry: backend/warcraftlogs.py:30
@@ -46,7 +46,7 @@ invariants:
   - "MUST: rebuild spell_icons.py after rebuilding defensive_catalog.py; the icon script reads every catalog ability."
   - "MUST: bump CACHE_VERSION in cache.py when what gets fetched or how it is indexed changes, so old shared-cache rows are never served to new code."
   - "NEVER: hand-edit the generated modules (defensive_catalog.py, boss_spell_flags.py, boss_spell_text.py, spell_icons.py, armor_constants.py, raid_wide_damage.py); edit the script and rerun it."
-content_hash: sha256:8ab43023ff5bcf61fb5f63bf0c00e383dead7d3a148bc9c3c4453797955ead35
+content_hash: sha256:08fdebd1c452446dba005c30e4f93a686fe4083c7c9005dddd51ad55bab907f1
 ---
 ## Summary
 
@@ -94,7 +94,7 @@ Environment variables, from every `os.environ` lookup in the code.
 |---|---|---|---|
 | `SUPABASE_URL` {runtime} | `backend/supabase_client.py:27`, `backend/auth.py:20` | none | Supabase project URL |
 | `SUPABASE_KEY` {runtime} | `backend/supabase_client.py:28`, `backend/auth.py:21` | none | Supabase key; used for token checks, and for storage when no service-role key is set |
-| `SUPABASE_SERVICE_ROLE_KEY` {runtime} | `backend/supabase_client.py:29` | none | preferred storage key (`backend/supabase_client.py:38`); account deletion requires it (`backend/supabase_client.py:379`) |
+| `SUPABASE_SERVICE_ROLE_KEY` {runtime} | `backend/supabase_client.py:29` | none | preferred storage key (`backend/supabase_client.py:38`); account deletion requires it (`backend/supabase_client.py:381`) |
 | `ALLOWED_ORIGINS` {runtime} | `backend/app.py:64` | `*` | comma list of site origins for CORS |
 | `PORT` {runtime} | `backend/gunicorn.conf.py:12`, `backend/app.py:746` | `5000` | listen port |
 | `WEB_CONCURRENCY` {runtime} | `backend/gunicorn.conf.py:13` | `1` | gunicorn worker processes |
@@ -116,9 +116,9 @@ Failure modes visible in the code, and what the user sees:
 | Defensive or hit data fails {wcl} | `backend/app.py:342`, `backend/app.py:409` | deaths still count; a warning says WarcraftLogs may be rate-limiting the key |
 | No reports, or no fights at that difficulty {wcl} | `backend/app.py:173`, `backend/app.py:233` | the stream ends with an error message |
 | Anything else inside the analysis {wcl} | `backend/app.py:608` | traceback printed; the stream ends with `{"error": ...}`, HTTP status stays 200 |
-| Supabase not configured {supabase} | `backend/supabase_client.py:39` | `db` is `None`; saves return "Database not configured" as HTTP 500 (`backend/app.py:667`); shares are kept in process memory for 72 h (`backend/supabase_client.py:213`); the report cache is skipped |
-| Supabase insert for a share fails {supabase} | `backend/supabase_client.py:231` | falls back to memory; the response carries `ephemeral: true` |
-| Shared report cache errors {supabase} | `backend/supabase_client.py:306` | treated as a miss, and the shared cache is skipped for 5 minutes |
+| Supabase not configured {supabase} | `backend/supabase_client.py:39` | `db` is `None`; saves return "Database not configured" as HTTP 500 (`backend/app.py:667`); shares are kept in process memory for 72 h (`backend/supabase_client.py:215`); the report cache is skipped |
+| Supabase insert for a share fails {supabase} | `backend/supabase_client.py:233` | falls back to memory; the response carries `ephemeral: true` |
+| Shared report cache errors {supabase} | `backend/supabase_client.py:308` | treated as a miss, and the shared cache is skipped for 5 minutes |
 | Sign-in check unreachable {supabase} | `backend/auth.py:38` | treated as signed out: cheat-death detection is off and signed-in routes refuse |
 | Too many requests from one IP {limits} | `backend/ratelimit.py:52`, `backend/app.py:49` | HTTP 429; 60 analyses, 20 shares and 30 saves per hour per IP |
 
@@ -131,8 +131,8 @@ Failure modes visible in the code, and what the user sees:
 | Log prefixes | `[Retry]`, `[WARN]`, `[ERROR]`, `[ReportCache]`, `[Share]`, `[Saved]`, `[Auth]`, `[Delete Account]`; `analysis.py` also prints per-report `[DEBUG]` lines (`backend/analysis.py:457`) | stdout via `print` |
 | Finished reports | a report whose last event is over 2 hours old is treated as finished and cached (`backend/app.py:43`) | code |
 | In-memory caches | LRU per process: 200 report metas, 400 death sets, 200 defensive sets, 400 hit windows (`backend/cache.py:91`) | code |
-| Shared cache | Supabase `report_cache`: rows over 4 MB are not stored; every 20th write deletes least-recently-used rows past 200 MB (`backend/supabase_client.py:264`, `backend/supabase_client.py:353`) | code |
-| Shares | expired rows are deleted whenever a new share is stored (`backend/supabase_client.py:221`) | code |
+| Shared cache | Supabase `report_cache`: rows over 4 MB are not stored; every 20th write deletes least-recently-used rows past 200 MB (`backend/supabase_client.py:266`, `backend/supabase_client.py:355`) | code |
+| Shares | expired rows are deleted whenever a new share is stored (`backend/supabase_client.py:223`) | code |
 | WarcraftLogs host | the API calls a Cloudflare Worker proxy for both OAuth and GraphQL (`backend/warcraftlogs.py:15`) | code |
 | Game data host | `wago.tools` for catalog, icons and boss spells (`backend/scripts/build_defensive_catalog.py:404`) | build scripts |
 | Boss art hosts | `wago.tools` and `render.worldofwarcraft.com` (`frontend/scripts/fetch-boss-renders.py:97`, `frontend/scripts/fetch-boss-renders.py:123`) | art script |

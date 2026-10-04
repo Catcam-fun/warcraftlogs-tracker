@@ -28,7 +28,7 @@ anchors:
   migration_001: backend/migrations/001_shares_and_rls.sql:2
   migration_002: backend/migrations/002_report_cache.sql:2
   ci_atlas: .github/workflows/atlas-sync.yml:6
-  mem_shares: backend/supabase_client.py:193
+  mem_shares: backend/supabase_client.py:195
 links:
   - backend
   - frontend
@@ -47,7 +47,7 @@ invariants:
   - "MUST: migrations 001 and 002 be run in the Supabase SQL editor before the features that use them are expected to persist."
   - "NEVER: commit backend/.env; it is gitignored and holds the backend's secrets."
   - "NEVER: rely on in-process state (rate limits, memory shares, caches) across workers or restarts."
-content_hash: sha256:94d940173efc8059584e100af188b4e769f71ea7ed0f4e4b43f943f2c7b59508
+content_hash: sha256:d3eb953cce1890e10bb94635fc6d398be3547598bf0b6a3d450fe4efed5c996c
 ---
 # Deployment & Environments
 
@@ -90,7 +90,7 @@ edge static -> supa color=process "anon key"
   body: app.py calls load_dotenv() before importing anything that reads env (backend/app.py:20), and supabase_client.py calls it again (backend/supabase_client.py:25). Locally that reads backend/.env; in production the variables come from the host. At startup the backend logs whether Supabase storage and the service role are configured (backend/supabase_client.py:40).
 - title: Apply migrations | short: Migrations | sub: by hand, re-runnable
   body: Each file says to run it once in the Supabase dashboard SQL editor and that it is safe to re-run (backend/migrations/001_shares_and_rls.sql:2, backend/migrations/002_report_cache.sql:2). 001 creates shared_results and turns on RLS and credential policies; 002 creates report_cache. Both use create if not exists and drop policy if exists.
-  gotcha: Missing tables fail soft. Without 001 shares fall back to process memory (backend/supabase_client.py:230); without 002 the shared report cache is skipped. The app looks healthy while not persisting.
+  gotcha: Missing tables fail soft. Without 001 shares fall back to process memory (backend/supabase_client.py:232); without 002 the shared report cache is skipped. The app looks healthy while not persisting.
 - title: Build the frontend | short: Static build | sub: react-scripts build
   body: npm run build runs react-scripts build (frontend/package.json:21). REACT_APP_API_URL, if set, is baked into the bundle at this point (frontend/src/api.js:7). Everything in frontend/public, including art and _redirects.txt, is copied into build/. The Supabase URL and anon key are constants in the source (frontend/src/supabaseClient.js:3), not build variables.
 - title: Route every path to the app | short: SPA rewrite | sub: /* to /index.html 200
@@ -134,7 +134,7 @@ edge static -> supa color=process "anon key"
 - **MUST** `SUPABASE_SERVICE_ROLE_KEY` be set on the production backend. Without it the client falls back to the anon key (`backend/supabase_client.py:38`) and RLS blocks saves and shares; migration 001 says so in its header (`backend/migrations/001_shares_and_rls.sql:11`).
 - **MUST** migrations 001 and 002 be run in the Supabase SQL editor before shares and the shared report cache are expected to persist (`backend/migrations/001_shares_and_rls.sql:2`, `backend/migrations/002_report_cache.sql:2`).
 - **NEVER** commit `backend/.env`; it is gitignored (`.gitignore:2`) and holds the backend's Supabase keys.
-- **NEVER** rely on in-process state across workers or restarts: rate limits (`backend/ratelimit.py:29`), memory shares (`backend/supabase_client.py:193`), the token cache (`backend/auth.py:25`) and the memory layer of the report caches all live in one process.
+- **NEVER** rely on in-process state across workers or restarts: rate limits (`backend/ratelimit.py:29`), memory shares (`backend/supabase_client.py:195`), the token cache (`backend/auth.py:25`) and the memory layer of the report caches all live in one process.
 
 ## Gotchas
 

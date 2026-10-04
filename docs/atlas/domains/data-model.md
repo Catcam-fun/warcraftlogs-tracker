@@ -21,11 +21,11 @@ anchors:
   pack: backend/supabase_client.py:68
   unpack: backend/supabase_client.py:73
   save_analysis: backend/supabase_client.py:89
-  store_share: backend/supabase_client.py:213
-  mem_fallback: backend/supabase_client.py:193
-  cache_budget: backend/supabase_client.py:264
-  evict: backend/supabase_client.py:353
-  delete_account: backend/supabase_client.py:375
+  store_share: backend/supabase_client.py:215
+  mem_fallback: backend/supabase_client.py:195
+  cache_budget: backend/supabase_client.py:266
+  evict: backend/supabase_client.py:355
+  delete_account: backend/supabase_client.py:377
   creds_client_write: frontend/src/App.js:584
 links:
   - backend
@@ -44,7 +44,7 @@ invariants:
   - "MUST: retention_days is clamped to 1-30 before a save is written."
   - "NEVER: the browser reads saved_analyses, shared_results or report_cache directly; they have RLS on and no policies."
   - "NEVER: a report_cache failure breaks an analysis; every cache call is best-effort."
-content_hash: sha256:b4e99145e83cd7604e3c284ecbe0ca0ceccbbfa922918b5ec65a4f936dca6f02
+content_hash: sha256:c5d69fd7320d9fa1214f539a922767f75454a4d43f7dea7007bbe0d401b4b617
 ---
 # Data Model
 
@@ -100,8 +100,8 @@ Columns as defined by the migrations, or, for tables created outside this repo, 
 | `created_at`, `expires_at` {share} | timestamps; index on `expires_at` | `expires_at` = now + 72h (`SHARE_TTL_HOURS`, `backend/supabase_client.py:34`) |
 | `report_cache` {cache} | `002_report_cache.sql:12` | No policies; backend only |
 | `key` {cache} | text PK, `v2:<namespace>:<repr(key)>` | Built in `backend/cache.py:61` |
-| `payload`, `size_bytes` {cache} | `br64:` text of tagged JSON; int | Rows over 4 MB are skipped (`backend/supabase_client.py:265`) |
-| `created_at`, `last_used_at` {cache} | timestamps; index on `last_used_at` | `last_used_at` bumped on every hit (`backend/supabase_client.py:325`) |
+| `payload`, `size_bytes` {cache} | `br64:` text of tagged JSON; int | Rows over 4 MB are skipped (`backend/supabase_client.py:267`) |
+| `created_at`, `last_used_at` {cache} | timestamps; index on `last_used_at` | `last_used_at` bumped on every hit (`backend/supabase_client.py:327`) |
 | `api_credentials` {creds} | created outside the repo; RLS + 4 policies at `001_shares_and_rls.sql:36` | Read and written by the browser |
 | `id`, `user_id` {creds} | ids | Policies require `auth.uid() = user_id` |
 | `client_id`, `client_secret`, `last_used` {creds} | text; timestamp | Written by `frontend/src/App.js:587` and `frontend/src/Settings.js:81` |
@@ -113,21 +113,21 @@ Each table has its own write path and its own way of getting rid of old rows.
 ```steps
 - title: Saving an analysis | short: Save | sub: 5 per user, 1-30 days
   body: save_analysis (backend/supabase_client.py:89) clamps retention_days to 1-30, deletes this user's expired rows, refuses a sixth save with code "limit", packs {data, config} after strip_secrets, refuses blobs over 3 MB with code "too_large", then inserts with expires_at = now + retention_days.
-  gotcha: Expired saves are only purged when that same user saves or lists (backend/supabase_client.py:85). load_analysis does not filter on expires_at (backend/supabase_client.py:140), so an expired row is still loadable by id until the next purge.
+  gotcha: Expired saves are purged only when that same user saves, lists or loads (backend/supabase_client.py:85); load_analysis purges first (backend/supabase_client.py:141), so an expired row is never returned, but it stays in the table until that user comes back.
 - title: Loading a save | short: Load | sub: owner only, old rows too
-  body: load_analysis filters on id and user_id together, unpacks the payload and strips secrets again on the way out. Rows written by older versions held the bare analysis; those are wrapped as {data, config None} (backend/supabase_client.py:147).
+  body: load_analysis filters on id and user_id together, unpacks the payload and strips secrets again on the way out. Rows written by older versions held the bare analysis; those are wrapped as {data, config None} (backend/supabase_client.py:149).
 - title: Creating a share | short: Share | sub: 72h, memory fallback
-  body: store_share (backend/supabase_client.py:213) packs and size-checks the payload, deletes every expired share in the table, and inserts the new row. If the insert fails, for example because migration 001 was never run, the blob goes into an in-process dict instead and the response carries ephemeral true (backend/supabase_client.py:232).
+  body: store_share (backend/supabase_client.py:215) packs and size-checks the payload, deletes every expired share in the table, and inserts the new row. If the insert fails, for example because migration 001 was never run, the blob goes into an in-process dict instead and the response carries ephemeral true (backend/supabase_client.py:234).
   gotcha: Memory shares live only in the process that created them. They vanish on restart and are not visible to a second gunicorn worker.
 - title: Reading a share | short: Read share | sub: memory first, then table
-  body: get_share checks the in-memory dict first, then the table with expires_at greater than now (backend/supabase_client.py:241). Expired rows are never served even before they are purged.
+  body: get_share checks the in-memory dict first, then the table with expires_at greater than now (backend/supabase_client.py:243). Expired rows are never served even before they are purged.
 - title: Report cache write | short: Cache put | sub: background, best-effort
-  body: SharedReportCache.set writes memory and submits cache_put to a 2-thread background pool (backend/cache.py:79). cache_put encodes dict keys, tuples and sets with __d, __t, __s tags (backend/supabase_client.py:272), packs, upserts, and every 20th write runs evict_report_cache.
-  gotcha: Any read or write error disables the shared cache for 5 minutes (backend/supabase_client.py:308), so a missing table costs nothing but a log line.
+  body: SharedReportCache.set writes memory and submits cache_put to a 2-thread background pool (backend/cache.py:79). cache_put encodes dict keys, tuples and sets with __d, __t, __s tags (backend/supabase_client.py:274), packs, upserts, and every 20th write runs evict_report_cache.
+  gotcha: Any read or write error disables the shared cache for 5 minutes (backend/supabase_client.py:310), so a missing table costs nothing but a log line.
 - title: Report cache eviction | short: Evict | sub: LRU under 200 MB
-  body: evict_report_cache (backend/supabase_client.py:353) reads every key and size ordered by last_used_at newest first, keeps a running total, and deletes in batches of 100 every row past the 200 MB budget.
+  body: evict_report_cache (backend/supabase_client.py:355) reads every key and size ordered by last_used_at newest first, keeps a running total, and deletes in batches of 100 every row past the 200 MB budget.
 - title: Account deletion | short: Delete account | sub: rows, then auth user
-  body: delete_user_account (backend/supabase_client.py:375) deletes the user's saved_analyses and api_credentials, then their shares by created_by, then the auth user through the admin API. It refuses to run without the service-role key.
+  body: delete_user_account (backend/supabase_client.py:377) deletes the user's saved_analyses and api_credentials, then their shares by created_by, then the auth user through the admin API. It refuses to run without the service-role key.
 ```
 
 ## Invariants
@@ -136,13 +136,13 @@ Each table has its own write path and its own way of getting rid of old rows.
 - **MUST** configs pass through `strip_secrets` before they are stored and again when they are returned (`backend/supabase_client.py:101`, `:154`, `:214`, `:250`); a stored WarcraftLogs secret would leak through every share.
 - **MUST** `retention_days` be clamped to 1-30 before a save is written (`backend/supabase_client.py:93`).
 - **NEVER** the browser reads `saved_analyses`, `shared_results` or `report_cache` directly: RLS is on and no anon or authenticated policies exist (`backend/migrations/001_shares_and_rls.sql:27`, `backend/migrations/002_report_cache.sql:21`).
-- **NEVER** a `report_cache` failure breaks an analysis; every cache call catches and treats errors as a miss (`backend/supabase_client.py:321`, `:343`).
+- **NEVER** a `report_cache` failure breaks an analysis; every cache call catches and treats errors as a miss (`backend/supabase_client.py:323`, `:343`).
 
 ## Gotchas
 
 - **Two tables have no CREATE in the repo**: `saved_analyses` and `api_credentials` only appear in `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` (`backend/migrations/001_shares_and_rls.sql:24`). Their full schema lives only in the Supabase project; the columns above are what the code uses.
 - **Service-role fallback to the anon key**: if `SUPABASE_SERVICE_ROLE_KEY` is unset the client is built with `SUPABASE_KEY` (`backend/supabase_client.py:38`). RLS then blocks saves and shares, which surface as generic errors or the memory share fallback rather than a clear "not configured".
-- **Eviction reads all rows in one select**: `evict_report_cache` does not page its `select` (`backend/supabase_client.py:357`). If the PostgREST row cap is lower than the table's row count, the oldest rows never enter the running total and are never evicted.
+- **Eviction reads all rows in one select**: `evict_report_cache` does not page its `select` (`backend/supabase_client.py:359`). If the PostgREST row cap is lower than the table's row count, the oldest rows never enter the running total and are never evicted.
 - **Plain JSON rows still load**: `unpack` accepts text without the `br64:` prefix (`backend/supabase_client.py:78`), so rows from older versions keep working.
 - **Bumping CACHE_VERSION orphans rows**: keys start with `CACHE_VERSION` (`backend/cache.py:85`), so a bump leaves old rows unread until LRU eviction removes them.
 - **Credentials are stored as entered**: `api_credentials.client_secret` holds the WarcraftLogs secret as text, protected by RLS only (`frontend/src/App.js:591`).

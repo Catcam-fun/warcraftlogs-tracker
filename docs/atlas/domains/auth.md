@@ -23,7 +23,7 @@ anchors:
   cache_ttl: backend/auth.py:23
   require_user: backend/auth.py:79
   delete_route: backend/app.py:721
-  delete_impl: backend/supabase_client.py:375
+  delete_impl: backend/supabase_client.py:377
   delete_client: frontend/src/Settings.js:187
 links:
   - frontend
@@ -41,7 +41,7 @@ invariants:
   - "MUST: verify_token return None on any non-200 or network failure, so the route answers 401."
   - "NEVER: store raw tokens in the verification cache; keys are SHA-256 hashes."
   - "NEVER: honor enableCheatDeath without a verified session."
-content_hash: sha256:cc75bb56590c41418b7bdb7fa81f2f835f8a6a6997b5be817b7cbc1c0e7f690e
+content_hash: sha256:4772b8e59305825fdd8482da445e79cd5f154d1fe93ecba5604012cee1d172c1
 ---
 # Accounts & Auth
 
@@ -90,7 +90,7 @@ edge req -> apifetch color=never "401"
 - title: Guard the route | short: require_user | sub: 401 or g.user_id
   body: require_user lets OPTIONS through with 204, otherwise returns 401 "Please sign in again." or sets g.user_id and calls the handler (backend/auth.py:84).
 - title: Delete the account | short: Delete account | sub: DELETE /api/account
-  body: Settings asks the user to type DELETE, then calls DELETE /api/account with the session (frontend/src/Settings.js:199). The backend deletes saved_analyses, api_credentials and shares for g.user_id, then the auth user via the admin API (backend/supabase_client.py:383, :394), drops the token from the cache (backend/app.py:727), and the browser signs out locally and goes home (frontend/src/Settings.js:204).
+  body: Settings asks the user to type DELETE, then calls DELETE /api/account with the session (frontend/src/Settings.js:199). The backend deletes saved_analyses, api_credentials and shares for g.user_id, then the auth user via the admin API (backend/supabase_client.py:385, :394), drops the token from the cache (backend/app.py:727), and the browser signs out locally and goes home (frontend/src/Settings.js:204).
   gotcha: Only the token used for the delete is forgotten. Another tab's token for the same user stays cached for up to 60 seconds and would still pass require_user.
 ```
 
@@ -124,8 +124,8 @@ The browser also reads and writes its own `api_credentials` row directly with th
 
 - **Missing env disables all sign-in checks**: `verify_token` returns `None` when `SUPABASE_URL` or `SUPABASE_KEY` is unset (`backend/auth.py:38`), so every protected route returns 401.
 - **auth.py does not load .env itself**: it reads `os.environ` at import (`backend/auth.py:20`); it works because `backend/app.py:20` calls `load_dotenv()` before importing it.
-- **Account deletion needs the service-role key**: without `SUPABASE_SERVICE_ROLE_KEY` the backend refuses with "Account deletion isn't configured on the server." (`backend/supabase_client.py:379`).
-- **Partial deletion reports an error**: if any table or the auth delete fails, the response is an error asking to retry (`backend/supabase_client.py:398`); share cleanup failures are only logged.
+- **Account deletion needs the service-role key**: without `SUPABASE_SERVICE_ROLE_KEY` the backend refuses with "Account deletion isn't configured on the server." (`backend/supabase_client.py:381`).
+- **Partial deletion reports an error**: if any table or the auth delete fails, the response is an error asking to retry (`backend/supabase_client.py:400`); share cleanup failures are only logged.
 - **Password reset lands back on the site**: the reset link redirects to `window.location.origin` (`frontend/src/Auth.js:95`), and the `PASSWORD_RECOVERY` event opens Settings (`frontend/src/App.js:279`).
 
 ## Glossary
