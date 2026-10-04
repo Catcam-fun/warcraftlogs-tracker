@@ -159,7 +159,7 @@ export const qualityArt = (rank) => {
   if (!rank?.rank || !rank.ranks) return null;
   const i = rank.ranks.findIndex((r) => r.rank === rank.rank);
   const art = QUALITY_ART[rank.ranks.length]?.[i];
-  return art ? `/art/quality/${art}.png` : null;
+  return art ? `${process.env.PUBLIC_URL}/art/quality/${art}.png` : null;
 };
 
 /* Where a consumable's heal comes from, in one line. */
