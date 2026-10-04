@@ -1,30 +1,21 @@
-# Background / game art — self-hosted
+# Site art (self-hosted)
 
-Downloaded once and committed (no third-party runtime dependency, no
-hotlink fragility, faster, survives the source going away).
+Everything here is committed and served by the site itself; nothing is hotlinked.
 
-## Landing background
+- `backgrounds/` — landing-page backgrounds, `<slug>.jpg`, 2200px wide, JPEG
+  quality 72, progressive. One is picked per page load: from
+  `CURRENT_TIER_BACKGROUNDS` half the time (`CURRENT_TIER_CHANCE`), otherwise
+  from `BACKGROUNDS` (both in `src/LandingPage.js`). To add one, drop the file
+  here and add its slug to the right list; when a new tier ships, move the
+  previous tier's slugs down into `BACKGROUNDS`.
+- `landing-keyart.svg` — fallback shown only if the chosen background fails to load.
+- `bosses/` — boss tiles for the landing strip and the Analyze page; see
+  `bosses/README.md`.
+- `quality/` — item-quality icons used in death rows on the Results page (`src/DeathRow.js`).
+- `<boss>-loader.webm` + `.jpg` — the looping model video on the analysis
+  loading screen and its first-frame still (`src/App.js`).
 
-`backgrounds/` — the official WoW: Midnight press kit (key art +
-cinematic stills), each downscaled to ~2200px / q72 JPG for web.
-**One is chosen at random per page load** (see `BACKGROUNDS` in
-`src/LandingPage.js`). Heavily scrimmed by CSS so detail is muted.
+The footer carries the Blizzard non-affiliation, trademark and key-art notice.
+If the site ever becomes commercial, revisit the use of this art.
 
-`landing-keyart.svg` — procedural void stand-in; only renders if a
-chosen background fails to load (graceful fallback).
-
-### Adding/replacing backgrounds
-Drop a web-sized JPG in `backgrounds/`, add its slug to the
-`BACKGROUNDS` array in `LandingPage.js`, `npm run build`. Done.
-
-## Boss strip
-
-`bosses/` — per-boss tile art, drop-in by exact filename. See
-`bosses/README.md` for the required names and where to source them.
-
-## Attribution / usage
-
-Floor Pov is a non-commercial fan tool. Blizzard fan-content & press
-assets are used under Blizzard's fan content guidelines. The site footer
-carries the required non-affiliation + trademark + key-art notices. If
-usage ever becomes commercial, revisit this.
+Full detail: `docs/atlas`, page "Landing Page and Art" (frontend).
