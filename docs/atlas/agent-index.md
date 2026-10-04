@@ -361,10 +361,9 @@
 - source: domains/doc-remediation.md
 - summary:
   - Per-file verdict on the existing docs now that the Atlas documents the same ground — code-grounded and self-syncing.
-  - 2 safe to remove, 1 to consolidate (save unique bits first), 1 to keep.
+  - 0 safe to remove, 0 to consolidate (save unique bits first), 0 to keep, 4 resolved.
   - Removing a file is destructive — atlas-remediate is interview-first and never deletes without your confirmation.
 - invariants:
-  - MUST fold frontend/public/art/README.md's unique content into the Atlas before removing it (DOC-003).
   - NEVER remove a doc file without explicit human confirmation, even when marked remove.
 - links: frontend, deployment, testing, frontend-pages-and-routing, frontend-landing-and-art, overview
 
@@ -865,15 +864,8 @@
 - source: domains/reconciliation.md
 - summary:
   - Pass 3 of the source policy: every hand-written doc diffed against the CURRENT code — the code wins.
-  - 6 conflicts (doc is wrong), 6 stale (code moved on), 7 gaps, 17 verified-aligned.
+  - 0 conflicts (doc is wrong), 0 stale (code moved on), 0 gaps, 17 verified-aligned, 19 resolved.
   - Filter the table by verdict; start with conflict — those are the misleads. Fixed findings move to the resolved filter.
-- invariants:
-  - MUST update frontend/.project-snapshot.md: Self line count (RC-001).
-  - MUST update frontend/.project-snapshot.md: Removed file SharedResults.js (RC-002).
-  - MUST update frontend/.project-snapshot.md: Backend URL in embedded code (RC-003).
-  - MUST update frontend/public/art/README.md: Background selection (RC-004).
-  - MUST update frontend/public/art/README.md: Adding backgrounds (RC-005).
-  - MUST update frontend/public/art/bosses/README.md: Results log filename (RC-006).
 
 ## Security & Trust Boundaries
 - id: security
