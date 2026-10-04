@@ -16,6 +16,7 @@ import { API_URL, apiFetch, stripSecrets, loadLocalCredentials, saveLocalCredent
 import SavedReports from './SavedReports';
 import SaveReportDialog from './SaveReportDialog';
 import { countedDeaths, isCounted } from './deathCounting';
+import { analyzedAt } from './analyzedAt';
 import { DefensiveSummaryChip, DefensiveTopUnused, summarizeDefensives } from './DefensivePanel';
 import { DeathRow } from './DeathRow';
 
@@ -1640,10 +1641,10 @@ export default function WarcraftLogsApp() {
                         <p>{RAID_ZONES[config.selectedRaid]?.name} · {
                           config.difficulty === '3' ? 'Normal' :
                           config.difficulty === '4' ? 'Heroic' : 'Mythic'
-                        } · Analyzed {new Date().toLocaleDateString('en-US', {
+                        }{analyzedAt(data?.meta) && ` · Analyzed ${analyzedAt(data.meta).toLocaleDateString('en-US', {
                           month: 'short', day: 'numeric', year: 'numeric',
                           hour: 'numeric', minute: '2-digit'
-                        })}</p>
+                        })}`}</p>
                       </div>
                     </div>
 
