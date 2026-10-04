@@ -44,8 +44,8 @@ invariants:
   - "MUST: retention_days is clamped to 1-30 before a save is written."
   - "NEVER: the browser reads saved_analyses, shared_results or report_cache directly; they have RLS on and no policies."
   - "NEVER: a report_cache failure breaks an analysis; every cache call is best-effort."
+content_hash: sha256:b4e99145e83cd7604e3c284ecbe0ca0ceccbbfa922918b5ec65a4f936dca6f02
 ---
-
 # Data Model
 
 ## Summary

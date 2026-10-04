@@ -46,8 +46,8 @@ links:
   - feat-results
   - game-data
   - testing
+content_hash: sha256:9c1d7d1f494b303502f0e889290bde034dff8f02dd3e6a3d2f75da46fdb2a47e
 ---
-
 ## Summary
 
 This page covers the art layer of the frontend: what the landing page shows, how boss tiles are named and found, where raid entries live, and the loading video. All of it is static data in a few JavaScript arrays plus files under `frontend/public/art/`.

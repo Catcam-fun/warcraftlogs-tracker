@@ -35,8 +35,8 @@ links:
   - game-data
   - warcraftlogs
   - operations
+content_hash: sha256:9ba3d477a19aeee9166cf0ef86efbb220f8197c9cdcca4608f8cdc4880e3485d
 ---
-
 ## Summary
 
 - **Unit tests** run offline. The backend ones mock WarcraftLogs and Supabase, so they need no keys and no network; the frontend ones mock `fetch` and the Supabase client.

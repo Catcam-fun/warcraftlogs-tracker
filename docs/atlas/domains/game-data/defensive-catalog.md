@@ -46,8 +46,8 @@ invariants:
   - "NEVER: hand-edit defensive_catalog.py; the curated lists live in the build script."
 flows:
   - data-build-path
+content_hash: sha256:8a38a989cc77608acdf2e046b1de797f8c6195a33f27846dd8ac1180846c76f0
 ---
-
 ## Summary
 
 - `backend/scripts/build_defensive_catalog.py` is the largest build script. It writes `backend/defensive_catalog.py`, which `backend/defensives.py` reads to know every defensive's cooldown, charges, effect and the talents that change them (`backend/defensives.py:28`).

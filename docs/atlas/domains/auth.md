@@ -41,8 +41,8 @@ invariants:
   - "MUST: verify_token return None on any non-200 or network failure, so the route answers 401."
   - "NEVER: store raw tokens in the verification cache; keys are SHA-256 hashes."
   - "NEVER: honor enableCheatDeath without a verified session."
+content_hash: sha256:cc75bb56590c41418b7bdb7fa81f2f835f8a6a6997b5be817b7cbc1c0e7f690e
 ---
-
 # Accounts & Auth
 
 ## Summary

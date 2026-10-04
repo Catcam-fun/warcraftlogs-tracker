@@ -11,8 +11,8 @@ invariants:
   - "MUST fold frontend/public/art/README.md's unique content into the Atlas before removing it (DOC-003)."
   - "NEVER remove a doc file without explicit human confirmation, even when marked remove."
 links: [frontend, deployment, testing, frontend-pages-and-routing, frontend-landing-and-art, overview]
+content_hash: sha256:0cea54fc087ae6af07101d44b1fc88ad400d21f833afca2201846a1c48052ca7
 ---
-
 ## Summary
 
 Pass 3 also judges each existing doc as a **whole file**: now that the Atlas documents the same material (code-grounded, `file:line`, self-syncing), is the file still earning its place? Each row is a verdict — **remove** (the Atlas supersedes it; safe to delete), **consolidate** (mostly superseded, but holds unique content to fold into the Atlas first), or **keep** (serves a purpose the Atlas does not). Filter by verdict; start with **remove**.

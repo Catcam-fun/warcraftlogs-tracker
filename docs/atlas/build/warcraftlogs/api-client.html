@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WCL API Client — Floor Pov</title>
+<meta name="generator" content="project-atlas">
+<meta name="atlas-content-hash" content="sha256:d7ab93cb13cfc49e0399a828d393a50d9219136c174603607fec382cb705c047">
+<meta name="atlas-html-integrity" content="sha256:7e8aa1b3c1c1d4e2fdc1664b100a7f988eb731d5744501e771f9d4d7c45a545f">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* a[href="#"] must never scroll-jump (dead/placeholder links) */
+  a[href="#"]{cursor:not-allowed}
+
+  /* ============================================================================
+     FROZEN SEMANTIC TOKENS — never overridable by brand config.
+     green = safe · amber = caution · red = never · blue = process · teal = structural.
+     An agent's colour reasoning must be stable across every project, so these
+     are baked into the template and are NOT exposed in atlas.config.json.
+     ============================================================================ */
+  :root{
+    --paper:#f4f0e6;          /* warm drafting paper            */
+    --paper-2:#efe9dc;        /* recessed panel                 */
+    --paper-3:#e7e0cf;        /* deeper panel                   */
+    --ink:#1b2430;            /* primary text (deep navy ink)   */
+    --ink-soft:#4d5867;       /* secondary text                 */
+    --ink-faint:#7d8794;      /* tertiary / captions            */
+    --line:rgba(27,36,48,.14);/* hairlines                      */
+    --line-strong:rgba(27,36,48,.30);
+
+    --blue:#1f4e79;           /* PROCESS / in-progress          */
+    --blue-soft:#e4ebf2;
+    --teal:#1d6b6b;           /* STRUCTURAL / accent            */
+    --teal-soft:#dcebe9;
+    --green:#2c6647;          /* SAFE / healthy                 */
+    --green-soft:#e2ece4;
+    --amber:#8f5e16;          /* CAUTION / needs-update         */
+    --amber-soft:#f0e6d2;
+    --red:#9c3528;            /* NEVER / failure                */
+    --red-soft:#f1e0db;
+
+    --radius:5px;
+    --shadow:0 1px 0 rgba(27,36,48,.04),0 16px 38px -24px rgba(27,36,48,.46);
+    --maxw:1080px;
+
+    /* font fallbacks frozen; brand may override the primary families below */
+    --font-display:'Fraunces',Georgia,'Times New Roman',serif;
+    --font-body:'IBM Plex Sans',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    --font-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',Menlo,Consolas,monospace;
+
+    /* brand accent defaults to teal; the brand CSS block below may override it */
+    --accent:var(--teal);
+    --accent-soft:var(--teal-soft);
+  }
+
+  /* brand tokens injected from atlas.config.json (accent + fonts only) */
+  :root{--accent:#7d6cff;}
+
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+
+  body{
+    margin:0;
+    font-family:var(--font-body);
+    color:var(--ink);
+    background-color:var(--paper);
+    background-image:
+      linear-gradient(rgba(31,78,121,.045) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(31,78,121,.045) 1px,transparent 1px),
+      radial-gradient(120% 80% at 50% -8%,rgba(255,255,255,.6),transparent 60%);
+    background-size:28px 28px,28px 28px,100% 100%;
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+
+  /* ───────────────────────────── layout ───────────────────────────── */
+  .shell{display:grid;grid-template-columns:268px minmax(0,1fr);gap:0;max-width:1360px;margin:0 auto}
+  .side{
+    position:sticky;top:0;align-self:start;height:100vh;
+    padding:32px 22px 22px;border-right:1px solid var(--line);
+    display:flex;flex-direction:column;gap:18px;overflow-y:auto;
+  }
+  .brand{display:flex;flex-direction:column;gap:7px}
+  .brand .ksmall{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--accent);font-weight:600}
+  .brand h1{font-family:var(--font-display);font-weight:600;font-size:22px;line-height:1.06;margin:0;letter-spacing:-.01em}
+  .brand .ribbon{display:inline-flex;align-items:center;gap:6px;align-self:flex-start;margin-top:3px;font-family:var(--font-mono);font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--amber);background:var(--amber-soft);border:1px solid rgba(143,94,22,.3);border-radius:3px;padding:2px 7px;font-weight:600}
+  .brand p{margin:2px 0 0;font-size:12px;color:var(--ink-soft);line-height:1.45}
+  .uplink{display:inline-flex;align-items:center;gap:7px;align-self:flex-start;margin-top:4px;font-family:var(--font-mono);font-size:11px;font-weight:600;color:var(--accent);text-decoration:none;border:1px solid var(--line);border-radius:4px;padding:5px 9px;background:var(--paper);transition:background .18s,border-color .18s}
+  .uplink:hover{background:var(--accent-soft);border-color:var(--line-strong)}
+  .uplink:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  nav.toc{display:flex;flex-direction:column;gap:1px;margin-top:2px}
+  nav.toc a{
+    display:flex;gap:10px;align-items:baseline;text-decoration:none;color:var(--ink-soft);
+    font-size:13px;padding:6px 9px;border-radius:var(--radius);border-left:2px solid transparent;
+    transition:background .18s,color .18s,border-color .18s;
+  }
+  nav.toc a .n{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-faint);min-width:18px}
+  nav.toc a.sub-d{padding-left:20px;font-size:12px}
+  nav.toc a:hover{background:var(--paper-2);color:var(--ink)}
+  nav.toc a.active{background:var(--paper-2);color:var(--accent);border-left-color:var(--accent);font-weight:600}
+  nav.toc a.active .n{color:var(--accent)}
+
+  /* ── persistent atlas-map nav (two-axis: By Layer / By Feature) ── */
+  /* desktop: always expanded (author display beats the UA <details> hiding); the
+     <details>/<summary> only becomes a hamburger toggle at <=880px (see mobile). */
+  .amap-wrap{margin:2px 0 8px}
+  .amap-toggle{list-style:none;cursor:pointer}
+  .amap-toggle::-webkit-details-marker{display:none}
+  .amap-wrap>summary{display:none}
+  .amap-deskhead{display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);margin:0 0 6px;padding:0 9px}
+  nav.atlas{display:flex;flex-direction:column;gap:1px;padding-bottom:14px;margin-bottom:14px;border-bottom:1px solid var(--line)}
+  nav.atlas .amap-group{font-family:var(--font-mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);margin:12px 0 3px;padding:0 9px}
+  nav.atlas a.amap-link{display:flex;gap:9px;align-items:center;text-decoration:none;color:var(--ink-soft);font-size:12.5px;padding:5px 9px;border-radius:var(--radius);border-left:2px solid transparent;transition:background .18s,color .18s,border-color .18s}
+  nav.atlas a.amap-link:hover{background:var(--paper-2);color:var(--ink)}
+  nav.atlas a.amap-link.active{background:var(--paper-2);color:var(--accent);border-left-color:var(--accent);font-weight:600}
+  nav.atlas a.amap-hub{color:var(--ink);font-weight:600}
+  nav.atlas a.amap-link.amap-hold{color:var(--ink-faint)}
+  nav.atlas a.amap-link.amap-hold .ad{opacity:.5}
+  .amap-link .ad{width:8px;height:8px;border-radius:2px;flex:none;border:1px solid rgba(0,0,0,.10);background:var(--ink-faint)}
+  .ad.ad-blue{background:var(--blue)} .ad.ad-green{background:var(--green)} .ad.ad-teal{background:var(--teal)} .ad.ad-amber{background:var(--amber)} .ad.ad-red{background:var(--red)}
+
+  /* hub domain grid: labeled axis groups (only rendered when >1 axis present) */
+  .axis-block{margin:0 0 32px}
+  .axis-block:last-child{margin-bottom:0}
+  .axis-h{font-family:var(--font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);margin:0 0 13px;padding-bottom:7px;border-bottom:1px solid var(--line)}
+
+  .legend{margin-top:auto;border-top:1px solid var(--line);padding-top:14px;display:flex;flex-direction:column;gap:7px}
+  .legend .lt{font-family:var(--font-mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint)}
+  .legend .row{display:flex;align-items:center;gap:9px;font-size:11.5px;color:var(--ink-soft)}
+  .swatch{width:11px;height:11px;border-radius:2px;flex:none;border:1px solid rgba(0,0,0,.08)}
+
+  /* main */
+  main{padding:0 0 110px;min-width:0}
+  .wrap{max-width:var(--maxw);padding:0 44px}
+  section{padding:50px 0 6px;scroll-margin-top:24px}
+
+  /* ───────────────────────────── breadcrumb ───────────────────────── */
+  .crumbs{max-width:var(--maxw);padding:26px 44px 0;display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-family:var(--font-mono);font-size:11px;letter-spacing:.05em}
+  .crumbs a{color:var(--accent);text-decoration:none;border-bottom:1px solid var(--line-strong);padding-bottom:1px;transition:color .18s,border-color .18s}
+  .crumbs a:hover{color:var(--ink);border-color:var(--ink)}
+  .crumbs a:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:2px}
+  .crumbs .sep{color:var(--ink-faint)}
+  .crumbs .here{color:var(--ink);font-weight:600}
+  .crumbs .lvl{margin-left:4px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.16em;font-size:9.5px;border:1px solid var(--line);border-radius:3px;padding:2px 6px}
+
+  /* ───────────────────────────── hero ─────────────────────────────── */
+  .hero{padding:48px 44px 30px;border-bottom:1px solid var(--line);max-width:var(--maxw)}
+  .hero.tophero{padding-top:60px}
+  .hero .eyebrow{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--accent);font-weight:600;margin-bottom:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  .hero h2{font-family:var(--font-display);font-weight:500;font-size:clamp(32px,4.6vw,50px);line-height:1.03;letter-spacing:-.02em;margin:0 0 18px}
+  .hero h2 em{font-style:italic;color:var(--accent)}
+  .hero .lede{font-size:17.5px;color:var(--ink-soft);max-width:66ch;margin:0}
+  .hero .lede b{color:var(--ink);font-weight:600}
+  .readline{display:flex;gap:14px;align-items:flex-start;margin-top:22px;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:var(--radius);background:var(--accent-soft);padding:13px 16px;max-width:72ch}
+  .readline .lab{font-family:var(--font-mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);font-weight:600;flex:none;margin-top:3px}
+  .readline p{margin:0;font-size:14px;color:var(--ink)}
+  .hero .meta{display:flex;flex-wrap:wrap;gap:8px 10px;margin-top:20px}
+  .chiplet{font-family:var(--font-mono);font-size:11px;color:var(--ink-soft);background:var(--paper);border:1px solid var(--line);border-radius:3px;padding:4px 9px}
+  .chiplet b{color:var(--ink);font-weight:600}
+
+  /* ───────────────────────────── section heads ────────────────────── */
+  .sec-head{display:flex;align-items:baseline;gap:13px;margin-bottom:9px}
+  .sec-head .num{font-family:var(--font-mono);font-size:12.5px;color:var(--accent);font-weight:600;letter-spacing:.04em}
+  h3{font-family:var(--font-display);font-weight:600;font-size:27px;line-height:1.1;letter-spacing:-.015em;margin:0}
+  h4{font-family:var(--font-body);font-weight:700;font-size:16px;margin:24px 0 8px;letter-spacing:-.005em;color:var(--ink)}
+  h5{font-family:var(--font-mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;margin:0 0 6px;font-weight:600;color:var(--ink-faint)}
+  .sub{font-size:15.5px;color:var(--ink-soft);max-width:72ch;margin:6px 0 0}
+  .sub b{color:var(--ink);font-weight:600}
+  p{margin:13px 0;color:var(--ink-soft);font-size:15px}
+  p b,li b{color:var(--ink);font-weight:600}
+  em{font-style:italic}
+  a.inline{color:var(--accent);text-decoration:underline;text-decoration-color:var(--line-strong);text-underline-offset:2px}
+  a.inline:hover{color:var(--ink)}
+  code{font-family:var(--font-mono);font-size:.86em;background:var(--paper-2);border:1px solid var(--line);border-radius:3px;padding:.06em .36em;color:var(--ink)}
+  blockquote{margin:18px 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:var(--radius);background:var(--accent-soft);padding:14px 18px;color:var(--ink)}
+  blockquote p{margin:6px 0;color:var(--ink)}
+
+  ul.clean,ol.clean{list-style:none;padding:0;margin:14px 0;counter-reset:li}
+  ul.clean li{position:relative;padding-left:22px;margin:9px 0;font-size:15px;color:var(--ink-soft)}
+  ul.clean li::before{content:"";position:absolute;left:2px;top:.62em;width:7px;height:7px;border:1.5px solid var(--accent);border-radius:1px;transform:rotate(45deg)}
+  ol.clean li{position:relative;padding-left:30px;margin:9px 0;font-size:15px;color:var(--ink-soft);counter-increment:li}
+  ol.clean li::before{content:counter(li);position:absolute;left:0;top:0;font-family:var(--font-mono);font-size:12px;font-weight:600;color:var(--accent);width:20px;text-align:right}
+
+  /* generic data table */
+  .matrix{width:100%;border-collapse:collapse;margin:18px 0;font-size:14px}
+  .matrix th,.matrix td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  .matrix th{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);font-weight:600;border-bottom:1px solid var(--line-strong)}
+  .matrix td:first-child{font-weight:600;color:var(--ink)}
+  .matrix tr:hover td{background:var(--paper-2)}
+
+  /* fenced code block */
+  pre.code{font-family:var(--font-mono);font-size:13px;background:var(--paper-2);border:1px solid var(--line);border-left:3px solid var(--ink-faint);border-radius:var(--radius);padding:14px 16px;overflow-x:auto;margin:16px 0;color:var(--ink);line-height:1.55}
+
+  /* ───────────────────────────── diagram / map ────────────────────── */
+  .map{margin:26px 0 4px;border:1px solid var(--line);border-radius:var(--radius);background:var(--paper);box-shadow:var(--shadow);overflow:hidden}
+  .map .map-h{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;justify-content:space-between;padding:13px 18px;border-bottom:1px solid var(--line);background:var(--paper-2)}
+  .map .map-h .mt{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);font-weight:600}
+  .map .map-h .keys{display:flex;flex-wrap:wrap;gap:6px}
+  .mkey{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-soft);border:1px solid var(--line);border-radius:3px;padding:2px 7px;background:var(--paper)}
+  .mkey i{width:18px;height:0;border-top-width:2px;border-top-style:solid;display:inline-block;flex:none}
+  .mkey.process i{border-color:var(--blue)}
+  .mkey.safe i{border-color:var(--green)}
+  .mkey.never i{border-top-style:dashed;border-color:var(--red)}
+  .mkey.caution i{border-top-style:dashed;border-color:var(--amber)}
+  .mkey.structural i{border-color:var(--teal)}
+  .map .svgwrap{padding:8px 6px 4px;overflow-x:auto}
+  .map svg{display:block;width:100%;height:auto}
+  .map .mapnote{padding:10px 18px 14px;border-top:1px solid var(--line);font-size:12.5px;color:var(--ink-faint)}
+  .map .mapnote b{color:var(--ink-soft);font-weight:600}
+  .map .mapnote code{font-family:var(--font-mono);background:var(--paper-2);border:1px solid var(--line);border-radius:3px;padding:.04em .34em;color:var(--ink);font-size:.9em}
+
+  /* svg node styles via classes */
+  .nbox{fill:var(--paper);stroke:var(--line-strong);stroke-width:1.4}
+  .nbox.dash{stroke-dasharray:5 4;fill:var(--paper-2)}
+  .nbox.process{stroke:var(--blue);stroke-width:1.5}
+  .nbox.safe{stroke:var(--green);stroke-width:1.5}
+  .nbox.caution{stroke:var(--amber);stroke-width:1.5}
+  .nbox.never{stroke:var(--red);stroke-width:1.5}
+  .nbox.structural{stroke:var(--teal);stroke-width:1.6}
+  .ntitle{font-family:var(--font-body);font-weight:600;font-size:12.5px;fill:var(--ink)}
+  .nsub{font-family:var(--font-mono);font-size:9px;fill:var(--ink-faint);letter-spacing:.04em;text-transform:uppercase}
+  .stepnum{font-family:var(--font-mono);font-size:9px;font-weight:600;fill:var(--accent)}
+  .lanecap{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;font-weight:600;fill:var(--ink-soft)}
+  .band{fill:none;stroke-width:1.2;stroke-dasharray:2 5}
+  .bandlab{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;font-weight:600}
+  .edge{fill:none;stroke-width:1.8;stroke:var(--ink-soft)}
+  .edge.process{stroke:var(--blue)}
+  .edge.safe{stroke:var(--green)}
+  .edge.never{stroke:var(--red);stroke-dasharray:5 4}
+  .edge.caution{stroke:var(--amber);stroke-dasharray:5 4}
+  .edge.structural{stroke:var(--teal)}
+  .elabel{font-family:var(--font-mono);font-size:8.5px;fill:var(--ink-soft);letter-spacing:.03em}
+
+  /* ───────────────────────────── context map ──────────────────────── */
+  .ctx{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin:22px 0 4px}
+  @media(max-width:820px){.ctx{grid-template-columns:1fr}}
+  .ctxcol{border:1px solid var(--line);border-radius:var(--radius);background:var(--paper);padding:15px 16px}
+  .ctxcol.dep{border-top:3px solid var(--blue)}
+  .ctxcol.prov{border-top:3px solid var(--green)}
+  .ctxcol.rely{border-top:3px solid var(--teal)}
+  .ctxcol .cl{font-family:var(--font-mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;font-weight:600;margin-bottom:9px;display:block}
+  .ctxcol.dep .cl{color:var(--blue)} .ctxcol.prov .cl{color:var(--green)} .ctxcol.rely .cl{color:var(--teal)}
+  .ctxcol ul{list-style:none;padding:0;margin:0}
+  .ctxcol li{font-size:13px;color:var(--ink-soft);padding:4px 0 4px 15px;position:relative;line-height:1.4}
+  .ctxcol li::before{content:"";position:absolute;left:0;top:.7em;width:6px;height:6px;border:1.4px solid currentColor;border-radius:1px;transform:rotate(45deg);opacity:.5}
+  .ctxcol.dep li{color:var(--ink-soft)}
+  .ctxhere{grid-column:1/-1;text-align:center;font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin:2px 0}
+  .ctxhere b{color:var(--ink);font-weight:600}
+
+  /* ───────────────────────────── domain / sub-page grid ───────────── */
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:26px 0 4px}
+  @media(max-width:1100px){.grid{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:680px){.grid{grid-template-columns:1fr}}
+  .dcard{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:var(--radius);background:var(--paper);overflow:hidden;text-decoration:none;color:inherit;transition:transform .18s,border-color .18s,box-shadow .18s;position:relative}
+  .dcard:hover{transform:translateY(-3px);border-color:var(--line-strong);box-shadow:var(--shadow)}
+  .dcard:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .dcard .top{height:4px;background:var(--accent)}
+  .dcard.c-blue .top{background:var(--blue)}
+  .dcard.c-green .top{background:var(--green)}
+  .dcard.c-teal .top{background:var(--teal)}
+  .dcard.c-amber .top{background:var(--amber)}
+  .dcard.c-red .top{background:var(--red)}
+  .dcard.hold,.dcard.draft{background:var(--paper-2);border-style:dashed;border-color:var(--line-strong)}
+  .dcard.hold .top,.dcard.draft .top{background:var(--ink-faint)}
+  .dcard.hold:hover{transform:none;box-shadow:none}
+  .dcard .body{padding:17px 18px 18px;display:flex;flex-direction:column;flex:1}
+  .dcard .crow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px}
+  .dcard .k{font-family:var(--font-mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;font-weight:600;color:var(--accent)}
+  .dcard.c-blue .k{color:var(--blue)} .dcard.c-green .k{color:var(--green)} .dcard.c-amber .k{color:var(--amber)} .dcard.c-red .k{color:var(--red)}
+  .dcard.hold .k,.dcard.draft .k{color:var(--ink-faint)}
+  .dcard h4{font-family:var(--font-display);font-weight:600;font-size:19px;margin:0 0 5px;letter-spacing:-.01em;color:var(--ink)}
+  .dcard.hold h4,.dcard.draft h4{color:var(--ink-soft)}
+  .dcard p.purpose{font-size:13.5px;color:var(--ink-soft);margin:0 0 13px;line-height:1.5}
+  .dcard .find-lab{font-family:var(--font-mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin:0 0 6px}
+  .dcard ul{list-style:none;padding:0;margin:0 0 16px}
+  .dcard li{position:relative;padding-left:17px;font-size:12.5px;color:var(--ink-soft);margin:5px 0;line-height:1.4}
+  .dcard li::before{content:"";position:absolute;left:2px;top:.5em;width:6px;height:6px;border:1.4px solid currentColor;border-radius:1px;transform:rotate(45deg);opacity:.55}
+  .dcard .open{margin-top:auto;font-family:var(--font-mono);font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:7px;color:var(--accent)}
+  .dcard.c-blue .open{color:var(--blue)} .dcard.c-green .open{color:var(--green)} .dcard.c-amber .open{color:var(--amber)} .dcard.c-red .open{color:var(--red)}
+  .dcard.hold .open,.dcard.draft .open{color:var(--ink-faint)}
+
+  /* status chips */
+  .chip{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:9.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:3px 7px;border-radius:3px;border:1px solid;white-space:nowrap}
+  .chip.documented{color:var(--green);background:var(--green-soft);border-color:rgba(44,102,71,.3)}
+  .chip.draft{color:var(--ink-faint);background:var(--paper-3);border-color:var(--line-strong)}
+  .chip.needs-update{color:var(--amber);background:var(--amber-soft);border-color:rgba(143,94,22,.3)}
+  .chip.on-hold{color:var(--ink-faint);background:var(--paper-3);border-color:var(--line-strong)}
+  .chip .dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+
+  .wired-note{margin:18px 0 0;font-size:12.5px;color:var(--ink-faint)}
+  .wired-note code{font-family:var(--font-mono);font-size:.9em;background:var(--paper-2);border:1px solid var(--line);border-radius:3px;padding:.06em .36em;color:var(--ink)}
+
+  /* ───────────────────────────── invariants panel ─────────────────── */
+  .invariants{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:24px 0 4px}
+  @media(max-width:860px){.invariants{grid-template-columns:1fr}}
+  .inv{border:1px solid var(--line);border-left:3px solid var(--green);border-radius:var(--radius);background:var(--paper);padding:15px 16px}
+  .inv.never{border-left-color:var(--red)}
+  .inv.must{border-left-color:var(--green)}
+  .inv .tag{font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--green);margin-bottom:7px;display:inline-flex;align-items:center;gap:6px}
+  .inv.never .tag{color:var(--red)}
+  .inv .tag .dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+  .inv p{margin:0;font-size:13.5px;color:var(--ink);line-height:1.5}
+  .inv code{font-family:var(--font-mono);font-size:.86em;background:var(--paper-2);border:1px solid var(--line);border-radius:3px;padding:.04em .34em}
+
+  /* ───────────────────────────── stepper ──────────────────────────── */
+  .stepper{display:grid;grid-template-columns:repeat(var(--step-cols,7),1fr);gap:6px;margin:24px 0 0}
+  .step{
+    appearance:none;text-align:left;cursor:pointer;background:var(--paper);border:1px solid var(--line);
+    border-radius:var(--radius);padding:12px 10px 13px;position:relative;transition:border-color .18s,background .18s,transform .18s;
+    font-family:var(--font-body);
+  }
+  .step:hover{border-color:var(--line-strong);transform:translateY(-2px)}
+  .step[aria-selected="true"]{border-color:var(--blue);background:#fff;box-shadow:var(--shadow)}
+  .step .sn{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-faint)}
+  .step[aria-selected="true"] .sn{color:var(--blue)}
+  .step .st{display:block;font-weight:600;font-size:13px;margin-top:5px;color:var(--ink);line-height:1.2}
+  .step .sd{display:block;font-size:11px;color:var(--ink-faint);margin-top:3px;line-height:1.25}
+  @media(max-width:760px){.stepper{grid-template-columns:repeat(3,1fr)}}
+  @media(max-width:460px){.stepper{grid-template-columns:repeat(2,1fr)}}
+  .panel{border:1px solid var(--line);border-top:3px solid var(--blue);border-radius:0 0 var(--radius) var(--radius);background:#fff;padding:22px 24px;margin-top:10px;box-shadow:var(--shadow)}
+  .panel h4{margin-top:0}
+  .panel .pbody{font-size:14.5px;color:var(--ink-soft)}
+  .panel .gotcha{display:flex;gap:12px;align-items:flex-start;background:var(--amber-soft);border:1px solid rgba(143,94,22,.25);border-left:3px solid var(--amber);border-radius:var(--radius);padding:11px 14px;margin-top:16px}
+  .panel .gotcha .gl{font-family:var(--font-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--amber);font-weight:600;flex:none;margin-top:2px}
+  .panel .gotcha p{margin:0;font-size:13.5px;color:var(--ink)}
+
+  /* ───────────────────────────── filterable inventory ─────────────── */
+  .filterbar{display:flex;flex-wrap:wrap;gap:7px;align-items:center;margin:18px 0 12px}
+  .filterbar .fl{font-family:var(--font-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin-right:4px}
+  .fchip{appearance:none;cursor:pointer;font-family:var(--font-mono);font-size:11px;font-weight:600;letter-spacing:.03em;color:var(--ink-soft);background:var(--paper);border:1px solid var(--line-strong);border-radius:20px;padding:5px 13px;transition:all .15s}
+  .fchip:hover{border-color:var(--accent);color:var(--accent)}
+  .fchip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--paper)}
+  .inv-count{font-family:var(--font-mono);font-size:11px;color:var(--ink-faint);margin-left:auto}
+  table.inv{width:100%;border-collapse:collapse;margin:6px 0 4px;font-size:13px}
+  table.inv th,table.inv td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  table.inv th{font-family:var(--font-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);font-weight:600;border-bottom:1px solid var(--line-strong)}
+  table.inv td:first-child{font-family:var(--font-mono);font-size:12.5px;font-weight:600;color:var(--ink)}
+  table.inv tr:hover td{background:var(--paper-2)}
+  table.inv tr[hidden]{display:none}
+
+  /* ───────────────────────────── standing-it-up table ─────────────── */
+  .standup{width:100%;border-collapse:collapse;margin:18px 0;font-size:14px}
+  .standup th,.standup td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  .standup th{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);font-weight:600;border-bottom:1px solid var(--line-strong)}
+  .standup td:first-child{font-weight:600;color:var(--ink);white-space:nowrap}
+  .standup tr:hover td{background:var(--paper-2)}
+
+  /* ───────────────────────────── accordion (gotchas / glossary) ───── */
+  .acc{border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;margin:20px 0;background:var(--paper)}
+  .acc details{border-top:1px solid var(--line)}
+  .acc details:first-child{border-top:0}
+  .acc summary{cursor:pointer;list-style:none;padding:14px 16px;display:flex;align-items:center;gap:12px;font-weight:600;font-size:14px;color:var(--ink);transition:background .15s}
+  .acc summary:hover{background:var(--paper-2)}
+  .acc summary::-webkit-details-marker{display:none}
+  .acc summary .chev{margin-left:auto;font-family:var(--font-mono);color:var(--ink-faint);transition:transform .2s;font-size:12px}
+  .acc details[open] summary .chev{transform:rotate(90deg);color:var(--accent)}
+  .acc .body{padding:2px 16px 18px 44px}
+  .acc .body p{margin:6px 0;font-size:14px;color:var(--ink-soft)}
+  .acc .gtag{flex:none;width:22px;height:22px;border-radius:3px;display:grid;place-items:center;font-size:12px;font-family:var(--font-mono);font-weight:700}
+  .gtag.warn{background:var(--amber-soft);color:var(--amber)}
+  .gtag.info{background:var(--blue-soft);color:var(--blue)}
+
+  /* dotted glossary term + floating tooltip */
+  .term{border-bottom:1.5px dotted var(--blue);cursor:help;color:var(--ink);font-weight:500}
+  #tip{position:fixed;z-index:50;max-width:300px;background:var(--ink);color:#f4f0e6;font-size:12.5px;line-height:1.5;padding:9px 12px;border-radius:5px;box-shadow:0 10px 30px -8px rgba(0,0,0,.5);pointer-events:none;opacity:0;transform:translateY(4px);transition:opacity .15s,transform .15s}
+  #tip.show{opacity:1;transform:none}
+  #tip b{color:#9fc6e6}
+  #tip code{background:rgba(255,255,255,.12);border:0;color:#e6c07b;padding:.04em .3em}
+
+  /* environments table */
+  .envtable{width:100%;border-collapse:collapse;margin:18px 0;font-size:14px}
+  .envtable th,.envtable td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  .envtable th{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);font-weight:600;border-bottom:1px solid var(--line-strong)}
+  .envtable td:first-child{font-weight:600;color:var(--ink)}
+  .envtable tr:hover td{background:var(--paper-2)}
+
+  /* related link graph */
+  .related{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0}
+  .relcard{display:inline-flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:var(--radius);background:var(--paper);padding:10px 14px;text-decoration:none;color:var(--ink);font-size:13.5px;transition:border-color .18s,transform .18s,box-shadow .18s}
+  .relcard:hover{border-color:var(--line-strong);transform:translateY(-2px);box-shadow:var(--shadow)}
+  .relcard .arr{font-family:var(--font-mono);color:var(--accent);font-size:12px}
+  .relcard .rt{font-weight:600}
+  .relcard .rd{color:var(--ink-faint);font-size:12px}
+
+  /* footer */
+  footer{border-top:1px solid var(--line);margin-top:54px;padding:26px 44px;max-width:var(--maxw)}
+  footer .lvlnote{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);border:1px solid var(--line);border-radius:3px;padding:4px 9px;margin-bottom:12px}
+  footer p{font-size:12px;color:var(--ink-faint);margin:5px 0;font-family:var(--font-mono)}
+  footer code{font-family:var(--font-mono);font-size:.92em;color:var(--ink-soft)}
+
+  /* reveal */
+  .reveal{opacity:0;transform:translateY(14px);transition:opacity .6s ease,transform .6s ease}
+  .reveal.in{opacity:1;transform:none}
+  @media (prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}}
+
+  /* ───────────────────────────── search ───────────────────────────── */
+  .atlas-search{position:relative;margin:2px 0 6px}
+  .atlas-search .as-input{width:100%;font-family:var(--font-body);font-size:13px;color:var(--ink);
+    background:var(--paper);border:1px solid var(--line-strong);border-radius:var(--radius);
+    padding:8px 30px 8px 11px;outline:none;transition:border-color .15s,box-shadow .15s}
+  .atlas-search .as-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+  .atlas-search .as-kbd{position:absolute;right:8px;top:7px;font-family:var(--font-mono);font-size:10px;
+    color:var(--ink-faint);border:1px solid var(--line);border-radius:3px;padding:1px 5px;background:var(--paper-2);pointer-events:none}
+  .atlas-search .as-results{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:60;max-height:60vh;overflow-y:auto;
+    background:var(--paper);border:1px solid var(--line-strong);border-radius:var(--radius);box-shadow:var(--shadow);padding:4px}
+  .atlas-search .as-results[hidden]{display:none}
+  .as-res{display:block;text-decoration:none;color:var(--ink-soft);padding:7px 9px;border-radius:var(--radius);border-left:2px solid transparent}
+  .as-res:hover,.as-res.as-active{background:var(--paper-2);color:var(--ink);border-left-color:var(--accent)}
+  .as-res .as-crumb{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);display:block;margin-bottom:2px}
+  .as-res .as-h{font-size:13px;font-weight:600;color:var(--ink)}
+  .as-res mark{background:var(--accent-soft);color:var(--ink);border-radius:2px;padding:0 1px}
+  .as-empty{padding:10px 9px;font-size:12.5px;color:var(--ink-faint)}
+
+  /* mobile */
+  @media(max-width:880px){
+    .shell{grid-template-columns:1fr}
+    .side{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}
+    nav.toc{flex-direction:row;flex-wrap:wrap;gap:4px}
+    nav.toc a{font-size:12px;padding:5px 9px}
+    nav.toc a .n{display:none}
+    nav.toc a.sub-d{padding-left:9px}
+    .amap-wrap>summary{display:flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);font-weight:600;padding:9px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--paper)}
+    .amap-deskhead{display:none}
+    .amap-wrap:not([open]) nav.atlas{display:none}
+    nav.atlas{margin-top:8px;padding-bottom:10px;margin-bottom:10px}
+    .legend{margin-top:14px}
+    .wrap,.hero,.crumbs,footer{padding-left:22px;padding-right:22px}
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <aside class="side">
+    <div class="brand">
+      <span class="ksmall">Floor Pov</span>
+      <h1>WCL API Client</h1>
+      <span class="ribbon">Sub-page</span>
+      <p>The request functions in warcraftlogs.py and the event fetchers built on them.</p>
+      <a class="uplink" href="../index.html">← Atlas Hub</a>
+    </div>
+    <div class="atlas-search" data-atlas-base="../"><input type="search" class="as-input" placeholder="Search the atlas…" aria-label="Search the atlas" autocomplete="off" spellcheck="false"><kbd class="as-kbd" aria-hidden="true">⌘K</kbd><div class="as-results" role="listbox" hidden></div></div><script src="../search-index.js" defer></script>
+    <details class="amap-wrap" open><summary class="amap-toggle"><span class="amap-burger" aria-hidden="true">☰</span> Atlas map</summary><div class="amap-deskhead" aria-hidden="true">Atlas map</div><nav class="atlas" aria-label="Atlas map"><a class="amap-link amap-hub" href="../index.html"><span class="ad ad-teal"></span><span>Hub</span></a><div class="amap-group">By Layer</div><a class="amap-link" href="../overview.html"><span class="ad ad-teal"></span><span>Overview</span></a><a class="amap-link" href="../frontend/index.html"><span class="ad ad-blue"></span><span>Frontend</span></a><a class="amap-link" href="../backend/index.html"><span class="ad ad-green"></span><span>Backend API</span></a><a class="amap-link active" href="../warcraftlogs/index.html"><span class="ad ad-teal"></span><span>WarcraftLogs Integration</span></a><a class="amap-link" href="../data-model.html"><span class="ad ad-teal"></span><span>Data Model</span></a><a class="amap-link" href="../auth.html"><span class="ad ad-blue"></span><span>Accounts &amp; Auth</span></a><a class="amap-link" href="../game-data/index.html"><span class="ad ad-green"></span><span>Game Data Catalogs</span></a><a class="amap-link" href="../deployment.html"><span class="ad ad-blue"></span><span>Deployment &amp; Environments</span></a><a class="amap-link" href="../security.html"><span class="ad ad-red"></span><span>Security &amp; Trust Boundaries</span></a><a class="amap-link" href="../testing.html"><span class="ad ad-green"></span><span>Testing &amp; Checks</span></a><a class="amap-link" href="../operations.html"><span class="ad ad-amber"></span><span>Operations &amp; New Tier</span></a><a class="amap-link" href="../reconciliation.html"><span class="ad ad-amber"></span><span>Docs ⇄ Code Reconciliation</span></a><a class="amap-link" href="../doc-remediation.html"><span class="ad ad-amber"></span><span>Documentation Remediation</span></a><div class="amap-group">By Feature</div><a class="amap-link" href="../feat-analyze.html"><span class="ad ad-blue"></span><span>Analyze a Guild</span></a><a class="amap-link" href="../feat-results.html"><span class="ad ad-green"></span><span>Results &amp; Death Breakdown</span></a><a class="amap-link" href="../feat-saved.html"><span class="ad ad-teal"></span><span>Saved Reports</span></a><a class="amap-link" href="../feat-share.html"><span class="ad ad-teal"></span><span>Share Links</span></a><a class="amap-link" href="../feat-account.html"><span class="ad ad-amber"></span><span>Account &amp; Settings</span></a></nav></details>
+    <nav class="toc" aria-label="Sections"><a href="#summary"><span class="n">01</span><span>Summary</span></a><a href="#how-it-works"><span class="n">02</span><span>How it works</span></a><a href="#context-map"><span class="n">03</span><span>Context map</span></a><a href="#invariants"><span class="n">04</span><span>Invariants</span></a><a href="#gotchas"><span class="n">05</span><span>Gotchas</span></a><a href="#glossary"><span class="n">06</span><span>Glossary</span></a><a href="#related"><span class="n">07</span><span>Related</span></a></nav>
+    <div class="legend">
+  <span class="lt">Semantic colour key</span>
+  <div class="row"><span class="swatch" style="background:var(--green)"></span> Safe / healthy</div>
+  <div class="row"><span class="swatch" style="background:var(--amber)"></span> Caution / needs update</div>
+  <div class="row"><span class="swatch" style="background:var(--red)"></span> Never / failure</div>
+  <div class="row"><span class="swatch" style="background:var(--blue)"></span> Process / in-progress</div>
+  <div class="row"><span class="swatch" style="background:var(--teal)"></span> Structural / accent</div>
+</div>
+  </aside>
+
+  <main>
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../index.html">Atlas</a><span class="sep" aria-hidden="true">›</span><a href="index.html">WarcraftLogs Integration</a><span class="sep" aria-hidden="true">›</span><span class="here">WCL API Client</span><span class="lvl">Level 3 of 3</span></nav>
+    <header class="hero"><div class="eyebrow"><span>Sub-page</span></div><h2>WCL API Client</h2><p class="lede">make_request_with_retry is the single HTTP path: client errors fail at once, 429 and 5xx back off exponentially and honor Retry-After.</p></header><section id="summary"><div class="wrap reveal"><div class="sec-head"><span class="num">01</span><h3>Summary</h3></div><ul class="clean"><li>All WCL traffic goes through two helpers in <code>backend/warcraftlogs.py</code>: <code>make_request_with_retry</code> (HTTP with backoff) and <code>graphql_query</code> (POST a query with a bearer token).</li><li>Five query functions sit on top: <code>get_access_token</code>, <code>get_guild_reports</code>, <code>get_guild_roster</code>, <code>get_fights</code> in <code>warcraftlogs.py</code>, and <code>get_report_deaths_bulk</code> in <code>backend/analysis.py</code>. The defensive event fetchers in <code>backend/defensives.py</code> reuse <code>graphql_query</code>.</li><li>Paging is handled in three places with the same rule: keep asking from <code>nextPageTimestamp</code> until WCL stops returning one, at most 50 times.</li></ul>
+</div></section>
+<section id="how-it-works"><div class="wrap reveal"><div class="sec-head"><span class="num">02</span><h3>How it works</h3></div><h5>Retries: <code>make_request_with_retry</code></h5>
+<p><code>make_request_with_retry(method, url, max_retries=3, timeout=120)</code> (<code>backend/warcraftlogs.py:30</code>) makes up to <code>max_retries + 1</code> attempts.</p>
+<ul class="clean"><li>On an HTTP error with a status from 400 to 499, other than 429, it <b>stops at once</b> (<code>backend/warcraftlogs.py:48-49</code>). Bad credentials, a bad query or an unknown guild will not succeed on a second try.</li><li>On 429 or 5xx it sleeps, using the <code>Retry-After</code> header when present (capped at 30 seconds, <code>RETRY_BACKOFF_MAX * 3</code>), otherwise <code>1 * 2^attempt</code> seconds capped at 10 (<code>backend/warcraftlogs.py:50-56</code>).</li><li>On a network error (timeout, connection reset) it backs off the same way and logs <code>[Retry]</code> (<code>backend/warcraftlogs.py:57-62</code>).</li><li>When it gives up it raises <code>Request failed after N attempt(s)</code> with the last error (<code>backend/warcraftlogs.py:63</code>).</li></ul>
+<h5>Token: <code>get_access_token</code></h5>
+<p><code>get_access_token(client_id, client_secret)</code> (<code>backend/warcraftlogs.py:91</code>):</p>
+<ol class="clean"><li>Hashes <code>client_id:client_secret</code> with SHA-256 and returns the cached token for that key if it hasn't expired (<code>backend/warcraftlogs.py:93-97</code>).</li><li>Otherwise posts <code>grant_type=client_credentials</code> to <code>OAUTH_TOKEN_URL</code>, with the pair as a Basic auth header, a 60 second timeout and 2 retries (<code>backend/warcraftlogs.py:101-121</code>).</li><li>Drops expired entries and stores the new token to expire 60 seconds before <code>expires_in</code> (default 3600) (<code>backend/warcraftlogs.py:126-134</code>).</li></ol>
+<p>The cache is a module-level dict guarded by a lock (<code>backend/warcraftlogs.py:26-27</code>). <code>backend/test_api.py:173-178</code> checks that two credential pairs get two tokens and that a repeat call is served from cache.</p>
+<h5>Queries: <code>graphql_query</code></h5>
+<p><code>graphql_query(token, query, variables=None, timeout=120, max_retries=3)</code> (<code>backend/warcraftlogs.py:140</code>) posts <code>{&quot;query&quot;, &quot;variables&quot;}</code> with a bearer token. If the response has an <code>errors</code> key it raises (<code>backend/warcraftlogs.py:169-170</code>); otherwise it returns <code>data</code>. Callers that must not stall pass a tighter budget: the roster uses <code>timeout=40, max_retries=1</code> (<code>backend/warcraftlogs.py:289-290</code>).</p>
+<h5>Name normalization: <code>normalize_character_name</code></h5>
+<p><code>normalize_character_name</code> (<code>backend/warcraftlogs.py:65</code>) decomposes to NFD and drops combining marks, so &quot;Fîshy&quot; becomes &quot;Fishy&quot; (<code>backend/warcraftlogs.py:80-88</code>). It is used for roster names, actor names, spec names and death targets. The raw spelling survives as <code><span class="term" data-tip="a player&#39;s name exactly as written in the log, accents included; used only in WCL filter expressions.">logName</span></code> on each friendly (<code>backend/warcraftlogs.py:403</code>) because WCL filters need it (<code>backend/defensives.py:791-792</code>).</p>
+<h5>The query functions</h5>
+<h5>Pagination</h5>
+<p>WCL returns at most <code>limit: 10000</code> events and a <code><span class="term" data-tip="the timestamp WCL returns when an events query hit its limit; the next request starts there.">nextPageTimestamp</span></code> when more remain. Three helpers follow it:</p>
+<table class="matrix"><thead><tr><th>Helper {paging}</th><th>Used by</th><th>Shape</th></tr></thead><tbody><tr><td><code>_fetch_remaining_events</code> {paging}</td><td>death, debuff and save-heal blocks</td><td>one event type, startTime/endTime, optional filter, max 50 pages (<code>backend/analysis.py:289-314</code>)</td></tr><tr><td><code>_paged</code> {paging}</td><td><code>fetch_defensive_raw</code></td><td>builds the query from optional <code>fightIDs</code>, <code>startTime</code>, <code>endTime</code>, filter and <code>includeResources</code>, max 50 pages (<code>backend/defensives.py:180-204</code>)</td></tr><tr><td><code>_fetch_blocks</code> {paging}</td><td><code>fetch_death_windows</code>, <code>fetch_instakills</code>, <code>build_raid_wide.py</code></td><td>many aliased blocks per request, 20 per request; only blocks with a next page are asked again, max 50 rounds (<code>backend/defensives.py:742-765</code>)</td></tr></tbody></table>
+<div class="stepper-wrap"><div class="stepper" role="tablist" style="--step-cols:4"><button class="step" role="tab" aria-selected="true" data-step="0"><span class="sn">STEP 1</span><span class="st">Reports</span><span class="sd">100 per page, max 50</span></button><button class="step" role="tab" aria-selected="false" data-step="1"><span class="sn">STEP 2</span><span class="st">Roster</span><span class="sd">parallel pages</span></button><button class="step" role="tab" aria-selected="false" data-step="2"><span class="sn">STEP 3</span><span class="st">Fights</span><span class="sd">one round trip</span></button><button class="step" role="tab" aria-selected="false" data-step="3"><span class="sn">STEP 4</span><span class="st">Deaths</span><span class="sd">one query per report</span></button></div><div class="panel" role="tabpanel"></div><script type="application/json">[{"title":"get_guild_reports","body":"Converts the YYYY-MM-DD window to epoch ms (the end date is inclusive to 23:59:59.999), slugifies the server (lowercase, spaces to hyphens, apostrophes removed) and uppercases the region (backend/warcraftlogs.py:192-226). Pages until a page returns fewer than 100 rows. Returns [{id, start, end, owner}].","gotcha":"A report with exactly 100 rows on its last page costs one extra empty page; harmless."},{"title":"get_guild_roster","body":"Fetches pages 1-3 at once, reads last_page, then fetches pages 4 to min(last_page, 12) at once (backend/warcraftlogs.py:277-323). Failed pages are logged and skipped. Returns a set of lowercase, accent-stripped names, or an empty set.","gotcha":"If last_page can't be read from any of the first pages, it fetches up to MAX_PAGES (12)."},{"title":"get_fights","body":"One query for fights (id, times, name, encounterID, difficulty, kill, gameZone, friendlyPlayers), Player actors, abilities (name, school bitmask, icon) and playerDetails (backend/warcraftlogs.py:341-377). Returns report_start, fights, friendlies, player_details, abilities, ability_schools and ability_icons.","gotcha":"Any error returns the same shape with empty values (backend/warcraftlogs.py:445-447), so an unreadable report just contributes no fights."},{"title":"get_report_deaths_bulk","body":"Queries Deaths events over the span of the kept pulls; with cheat-death detection it adds Debuffs and Healing blocks filtered by ability.id in the same query via aliases (backend/analysis.py:355-430). Deaths are grouped by fight, named from the actor map and the ability map (backend/analysis.py:595-631).","gotcha":"On failure it re-raises (backend/analysis.py:675) so the caller records the report as failed and does not cache an empty result."}]</script></div></div></section>
+<section id="context-map"><div class="wrap reveal"><div class="sec-head"><span class="num">03</span><h3>Context map</h3></div><div class="ctx"><div class="ctxcol dep"><span class="cl">Depends on</span><ul><li>the WCL Cloudflare Worker proxy (GraphQL and OAuth URLs)</li><li>requests, for HTTP</li></ul></div><div class="ctxcol prov"><span class="cl">Provides</span><ul><li>get_access_token, graphql_query, get_guild_reports, get_guild_roster, get_fights</li><li>get_report_deaths_bulk and the paged event helpers</li></ul></div><div class="ctxcol rely"><span class="cl">Relied on by</span><ul><li><a class="inline" href="../backend/index.html">backend</a> — the Analyze stream calls each function in turn</li><li><a class="inline" href="../backend/defensive-analysis.html">backend-defensive-analysis</a> — defensives.py builds its event queries on graphql_query</li><li>the build and check scripts in backend/scripts</li></ul></div><div class="ctxhere">You are here · <b>WCL API Client</b></div></div></div></section>
+<section id="invariants"><div class="wrap reveal"><div class="sec-head"><span class="num">04</span><h3>Invariants</h3></div><div class="invariants"><div class="inv must"><span class="tag"><span class="dot"></span>Must</span><p>fail 4xx responses other than 429 without retrying (<code>backend/warcraftlogs.py:48</code>); retrying cannot fix bad credentials or a bad query, and would only burn time.</p></div><div class="inv must"><span class="tag"><span class="dot"></span>Must</span><p>raise when the GraphQL response carries <code>errors</code> (<code>backend/warcraftlogs.py:169</code>), so partial data is never treated as complete.</p></div><div class="inv must"><span class="tag"><span class="dot"></span>Must</span><p>follow <code>nextPageTimestamp</code> on every event fetch, so long reports don't silently lose events past the first page (<code>backend/analysis.py:433-444</code>).</p></div><div class="inv never"><span class="tag"><span class="dot"></span>Never</span><p>put an accent-stripped name into a WCL filter: filters use the raw <code>logName</code> (<code>backend/defensives.py:791-792</code>).</p></div></div></div></section>
+<section id="gotchas"><div class="wrap reveal"><div class="sec-head"><span class="num">05</span><h3>Gotchas</h3></div><div class="acc"><details><summary><span class="gtag warn">!</span>Two retry layers can stack<span class="chev">›</span></summary><div class="body"><p><code>graphql_query</code> itself does not retry, but <code>make_request_with_retry</code> does, up to 4 attempts with backoff. A caller that loops (the roster's parallel pages) multiplies the wait unless it passes a small <code>max_retries</code>.</p></div></details><details><summary><span class="gtag warn">!</span><code>get_fights</code> swallows errors<span class="chev">›</span></summary><div class="body"><p>an unreadable report returns empty lists and is skipped (<code>backend/warcraftlogs.py:445-447</code>), while <code>get_report_deaths_bulk</code> raises. A report can therefore be silently absent at the fights step but loudly failed at the deaths step.</p></div></details><details><summary><span class="gtag warn">!</span>Events are matched by ID after the fact<span class="chev">›</span></summary><div class="body"><p>casts and buffs come back for every player, then <code>filter_defensive_raw</code> keeps only the dead players' events (<code>backend/defensives.py:242-252</code>), because WCL returns nothing for <code>source.id in (...)</code> filters on those types (comment at <code>backend/defensives.py:215-217</code>).</p></div></details></div></div></section>
+<section id="glossary"><div class="wrap reveal"><div class="sec-head"><span class="num">06</span><h3>Glossary</h3></div><div class="acc"><details><summary><span class="gtag info">i</span>nextPageTimestamp<span class="chev">›</span></summary><div class="body"><p>the timestamp WCL returns when an events query hit its limit; the next request starts there.</p></div></details><details><summary><span class="gtag info">i</span>Alias<span class="chev">›</span></summary><div class="body"><p>a GraphQL name like <code>deaths:</code> or <code>p12:</code> that lets one request ask for several <code>events</code> blocks at once.</p></div></details><details><summary><span class="gtag info">i</span>logName<span class="chev">›</span></summary><div class="body"><p>a player's name exactly as written in the log, accents included; used only in WCL filter expressions.</p></div></details></div></div></section>
+<section id="related"><div class="wrap reveal"><div class="sec-head"><span class="num">07</span><h3>Related</h3></div><ul class="clean"><li><a class="inline" href="../warcraftlogs/index.html">warcraftlogs</a> — the order these calls happen in during one analysis</li><li><a class="inline" href="../warcraftlogs/point-budget.html">warcraftlogs-point-budget</a> — why the queries are shaped the way they are</li><li><a class="inline" href="../backend/index.html">backend</a> — the Analyze stream that calls them</li><li><a class="inline" href="../backend/defensive-analysis.html">backend-defensive-analysis</a> — the defensive and death-window fetchers built on graphql_query</li><li><a class="inline" href="../testing.html">testing</a> — <code>test_api.py</code> covers the per-credential token cache</li></ul>
+<div class="related"><a class="relcard" href="../warcraftlogs/index.html"><span class="arr">→</span><span class="rt">WarcraftLogs Integration</span><span class="rd">documented</span></a><a class="relcard" href="../warcraftlogs/point-budget.html"><span class="arr">→</span><span class="rt">WCL Point Budget</span><span class="rd">documented</span></a><a class="relcard" href="../backend/index.html"><span class="arr">→</span><span class="rt">Backend API</span><span class="rd">documented</span></a><a class="relcard" href="../backend/defensive-analysis.html"><span class="arr">→</span><span class="rt">Defensive Analysis</span><span class="rd">documented</span></a><a class="relcard" href="../testing.html"><span class="arr">→</span><span class="rt">Testing &amp; Checks</span><span class="rd">documented</span></a></div></div></section>
+
+    <footer><span class="lvlnote">Level 3 of 3</span><p>Floor Pov — WCL API Client · generated by project-atlas</p><p>Content hash <code>sha256:d7ab93cb13cfc49e0399a828d393a50d9219136c174603607fec382cb705c047</code></p></footer>
+  </main>
+</div>
+
+<div id="tip" role="tooltip"></div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ── dead/placeholder links (href="#") never scroll-jump ── */
+  document.addEventListener('click', function(e){
+    var a = e.target.closest && e.target.closest('a[href="#"]');
+    if(a){ e.preventDefault(); }
+  });
+
+  /* ── atlas-map: collapse to a hamburger on mobile (keeps the <details> a11y
+     open-state aligned with what's visible; desktop stays open) ── */
+  var amap = document.querySelector('.amap-wrap');
+  if(amap && window.matchMedia && window.matchMedia('(max-width:880px)').matches){ amap.removeAttribute('open'); }
+
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+  var hasIO = 'IntersectionObserver' in window;
+
+  /* ── scroll-spy nav ── */
+  var links = Array.prototype.slice.call(document.querySelectorAll('nav.toc a'));
+  var byId = {};
+  links.forEach(function(a){
+    var href = a.getAttribute('href');
+    if(href && href.charAt(0) === '#'){ byId[href.slice(1)] = a; }
+  });
+  if(hasIO){
+    var observed = document.querySelectorAll('section[id], .dcard[id]');
+    var spy = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if(e.isIntersecting){
+          var a = byId[e.target.id];
+          if(a){
+            links.forEach(function(x){x.classList.remove('active');});
+            a.classList.add('active');
+          }
+        }
+      });
+    },{rootMargin:'-14% 0px -72% 0px',threshold:0});
+    observed.forEach(function(s){spy.observe(s);});
+  }
+
+  /* ── reveal on scroll ── */
+  if(reduce || !hasIO){
+    document.querySelectorAll('.reveal').forEach(function(el){el.classList.add('in');});
+  } else {
+    var rev = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('in'); rev.unobserve(e.target); } });
+    },{rootMargin:'0px 0px -8% 0px',threshold:0});
+    document.querySelectorAll('.reveal').forEach(function(el){rev.observe(el);});
+  }
+
+  /* ── interactive steppers (data-driven from embedded JSON) ── */
+  document.querySelectorAll('.stepper-wrap').forEach(function(wrap){
+    var dataEl = wrap.querySelector('script[type="application/json"]');
+    if(!dataEl) return;
+    var steps;
+    try { steps = JSON.parse(dataEl.textContent); } catch(err){ return; }
+    var panel = wrap.querySelector('.panel');
+    var tabs = Array.prototype.slice.call(wrap.querySelectorAll('.step'));
+    function render(i){
+      var s = steps[i]; if(!s) return;
+      var html = '<h4>'+s.title+'</h4><div class="pbody">'+s.body+'</div>';
+      if(s.gotcha){
+        html += '<div class="gotcha"><span class="gl">Gotcha</span><p>'+s.gotcha+'</p></div>';
+      }
+      panel.innerHTML = html;
+    }
+    tabs.forEach(function(t,idx){
+      t.addEventListener('click',function(){
+        tabs.forEach(function(x){x.setAttribute('aria-selected','false');});
+        t.setAttribute('aria-selected','true');
+        render(idx);
+      });
+      t.addEventListener('keydown',function(e){
+        var dir = e.key==='ArrowRight'?1:e.key==='ArrowLeft'?-1:0;
+        if(!dir) return;
+        e.preventDefault();
+        var next = (idx+dir+tabs.length)%tabs.length;
+        tabs[next].focus(); tabs[next].click();
+      });
+    });
+    render(0);
+  });
+
+  /* ── filterable inventory chips ── */
+  document.querySelectorAll('.inventory').forEach(function(invRoot){
+    var chips = Array.prototype.slice.call(invRoot.querySelectorAll('.fchip'));
+    var rows = Array.prototype.slice.call(invRoot.querySelectorAll('tbody tr'));
+    var countEl = invRoot.querySelector('.inv-count');
+    var total = rows.length;
+    function apply(f){
+      var shown = 0;
+      rows.forEach(function(r){
+        var match = (f === 'all') || (r.getAttribute('data-domain') === f);
+        r.hidden = !match;
+        if(match) shown++;
+      });
+      if(countEl) countEl.textContent = shown + ' / ' + total;
+    }
+    chips.forEach(function(c){
+      c.addEventListener('click',function(){
+        chips.forEach(function(x){x.setAttribute('aria-pressed','false');});
+        c.setAttribute('aria-pressed','true');
+        apply(c.getAttribute('data-filter'));
+      });
+    });
+  });
+
+  /* ── hover / focus glossary tooltips ── */
+  var tip = document.getElementById('tip');
+  function showTip(el){
+    tip.innerHTML = el.getAttribute('data-tip');
+    var r = el.getBoundingClientRect();
+    tip.classList.add('show');
+    var top = r.bottom + 8, left = Math.min(r.left, window.innerWidth - tip.offsetWidth - 14);
+    if(top + tip.offsetHeight > window.innerHeight - 8) top = r.top - tip.offsetHeight - 8;
+    tip.style.top = Math.max(8,top)+'px'; tip.style.left = Math.max(8,left)+'px';
+  }
+  function hideTip(){ tip.classList.remove('show'); }
+  document.querySelectorAll('.term').forEach(function(el){
+    el.addEventListener('mouseenter',function(){showTip(el);});
+    el.addEventListener('mouseleave',hideTip);
+    el.setAttribute('tabindex','0');
+    el.addEventListener('focus',function(){showTip(el);});
+    el.addEventListener('blur',hideTip);
+  });
+
+  /* ── atlas search ── */
+  function asNorm(s){ return String(s == null ? '' : s).toLowerCase(); }
+  function asTerms(q){ return asNorm(q).split(/\s+/).filter(Boolean); }
+  function searchIndex(entries, query){
+    var terms = asTerms(query);
+    if(!terms.length || !entries) return [];
+    var scored = [];
+    for(var i=0;i<entries.length;i++){
+      var e = entries[i], hi = asNorm(e.hi), body = asNorm(e.body), ok = true, score = 0;
+      for(var t=0;t<terms.length;t++){
+        var term = terms[t];
+        if(hi.indexOf(term) !== -1){ score += 10; if(hi.indexOf(term)===0) score += 4; }
+        else if(body.indexOf(term) !== -1){ score += 2; }
+        else { ok = false; break; }
+      }
+      if(ok){ score += (asNorm(e.title).indexOf(asNorm(query))===0 ? 3 : 0); scored.push({ e:e, s:score }); }
+    }
+    scored.sort(function(a,b){ return b.s - a.s; });
+    return scored.slice(0,20).map(function(x){ return x.e; });
+  }
+  // exposed for tests + runtime
+  window.ATLAS_SEARCH = { search: searchIndex };
+
+  function escHtml(s){ return String(s).replace(/[&<>"]/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]; }); }
+  function highlight(text, terms){
+    var out = escHtml(text);
+    for(var i=0;i<terms.length;i++){
+      var re = new RegExp('(' + terms[i].replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + ')', 'ig');
+      out = out.replace(re, '<mark>$1</mark>');
+    }
+    return out;
+  }
+  function getIndex(){ return (window.ATLAS_SEARCH_INDEX && window.ATLAS_SEARCH_INDEX.entries) || null; }
+
+  var box = document.querySelector('.atlas-search');
+  if(box){
+    var input = box.querySelector('.as-input');
+    var results = box.querySelector('.as-results');
+    var base = box.getAttribute('data-atlas-base') || '';
+    var active = -1, current = [];
+    function hrefFor(e){ return base + e.page + (e.anchor ? '#' + e.anchor : ''); }
+    function close(){ results.hidden = true; results.innerHTML = ''; active = -1; current = []; }
+    function render(){
+      var q = input.value.trim();
+      if(!q){ close(); return; }
+      var idx = getIndex();
+      if(!idx){ results.hidden = false; results.innerHTML = '<div class="as-empty">Search index unavailable — view this Atlas via a local server.</div>'; return; }
+      current = searchIndex(idx, q);
+      active = -1;
+      if(!current.length){ results.hidden = false; results.innerHTML = '<div class="as-empty">No matches.</div>'; return; }
+      var terms = asTerms(q);
+      results.innerHTML = current.map(function(e){
+        var crumb = escHtml(e.domain || '') + (e.heading ? ' › ' + escHtml(e.heading) : '');
+        return '<a class="as-res" href="' + escHtml(hrefFor(e)) + '">' +
+          '<span class="as-crumb">' + crumb + '</span>' +
+          '<span class="as-h">' + highlight(e.title, terms) + '</span></a>';
+      }).join('');
+      results.hidden = false;
+    }
+    function setActive(n){
+      var items = results.querySelectorAll('.as-res');
+      if(!items.length) return;
+      active = (n + items.length) % items.length;
+      for(var i=0;i<items.length;i++){ items[i].classList.toggle('as-active', i===active); }
+      items[active].scrollIntoView({ block:'nearest' });
+    }
+    input.addEventListener('input', render);
+    input.addEventListener('keydown', function(e){
+      if(e.key === 'ArrowDown'){ e.preventDefault(); setActive(active + 1); }
+      else if(e.key === 'ArrowUp'){ e.preventDefault(); setActive(active - 1); }
+      else if(e.key === 'Enter'){
+        var items = results.querySelectorAll('.as-res');
+        var pick = active >= 0 ? items[active] : items[0];
+        if(pick){ e.preventDefault(); window.location.href = pick.getAttribute('href'); }
+      } else if(e.key === 'Escape'){ input.value = ''; close(); input.blur(); }
+    });
+    document.addEventListener('keydown', function(e){
+      if((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')){ e.preventDefault(); input.focus(); input.select(); }
+    });
+    document.addEventListener('click', function(e){ if(!box.contains(e.target)) close(); });
+  }
+})();
+</script>
+</body>
+</html>

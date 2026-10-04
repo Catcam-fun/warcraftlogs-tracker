@@ -37,8 +37,8 @@ invariants:
   - "MUST: run under a threaded worker (gthread); a sync worker lets one analysis stream block every other request."
   - "MUST: keep WEB_CONCURRENCY at 1 unless shared state moves out of process; caches and rate limits live in process memory."
   - "NEVER: hard-code a WarcraftLogs API key on the server; each analysis brings the caller's own clientId and clientSecret."
+content_hash: sha256:362ddb75656aff792e8f204f7c8308b30016d8526e8fc16934e0662f09ed1edc
 ---
-
 ## Summary
 
 - The **backend** is one Flask application, `backend/app.py:57`. Its main job is `POST /api/analyze` (`backend/app.py:82`): it signs in to WarcraftLogs with the caller's own API client, reads the guild's reports for one raid tier, counts each pull's early deaths, attaches defensive analysis, and streams progress plus the final result as Server-Sent Events.

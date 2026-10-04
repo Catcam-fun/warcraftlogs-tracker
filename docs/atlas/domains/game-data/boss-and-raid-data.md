@@ -42,8 +42,8 @@ invariants:
   - "NEVER: store boss damage amounts in boss spell text; the game scales them at run time, so the tooltip shows the real hit from the log."
 flows:
   - data-build-path
+content_hash: sha256:5be44faa39f6507fd00bc5df5d1a0cce9fa1b25b3ad0b3ccfd82f449ac8eb774
 ---
-
 ## Summary
 
 - These five scripts produce the boss-side facts the analysis looks up, plus the icons and descriptions of the defensives. Each overwrites one module in `backend/` (see the inventory on [[game-data]]).

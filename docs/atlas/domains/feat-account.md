@@ -50,8 +50,8 @@ invariants:
   - "NEVER: delete an account without the service-role key; the call refuses instead (backend/supabase_client.py:379)."
   - "MUST: a signed-in user read and write only their own api_credentials row (backend/migrations/001_shares_and_rls.sql:36)."
   - "MUST: cheat-death detection run only for a request with a valid session (backend/app.py:116)."
+content_hash: sha256:5a516c1daf58ff9c5cc125ba6b435f73773c9b4c20318b5ceeef30a00212671e
 ---
-
 ## Summary
 
 - **What it is.** Optional email-and-password accounts on Supabase Auth (`frontend/src/Auth.js:135`, `frontend/src/Auth.js:139`). The header shows Sign In or Settings and Logout depending on `user` (`frontend/src/App.js:1624`).

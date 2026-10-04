@@ -50,8 +50,8 @@ invariants:
   - "MUST: every saved_analyses read and delete filter on both id and user_id (backend/supabase_client.py:141, backend/supabase_client.py:167)."
   - "NEVER: store or return WarcraftLogs credentials in a save; the config is stripped in the browser and again on write and read (frontend/src/SaveReportDialog.js:27, backend/supabase_client.py:101, backend/supabase_client.py:154)."
   - "MUST: keep at most MAX_SAVED_PER_USER (5) saves per user and clamp retention to 1-30 days (backend/supabase_client.py:93, backend/supabase_client.py:97)."
+content_hash: sha256:db5d7405e919011b73efdb0f85b5d86d9c426e31c38b49a156476892b16598c8
 ---
-
 ## Summary
 
 - **What it is.** A per-account shelf of up to 5 analyses (`MAX_SAVED_PER_USER`, `backend/supabase_client.py:31`). Saving happens from the Results page; reopening happens on `/saved` (`frontend/src/App.js:2205`).

@@ -15,6 +15,7 @@ invariants:
   - "MUST update frontend/public/art/README.md: Adding backgrounds (RC-005)."
   - "MUST update frontend/public/art/bosses/README.md: Results log filename (RC-006)."
 links: []
+content_hash: sha256:be5add4ea57e1c752883ac6d34db5e87382084217d89210b3851c4ead6fbd74e
 ---
 ## Summary
 

@@ -40,8 +40,8 @@ invariants:
   - "NEVER: a guild-reports query filters by zoneID; mixed raid and dungeon reports would be dropped."
 flows:
   - request-path
+content_hash: sha256:8d7c21cdfefa02757b3fb341b61fd20f6f7a2eea0c9b7a1a435cd1870d38374c
 ---
-
 ## Summary
 
 - The backend is a **client of WarcraftLogs' v2 GraphQL API**. It owns no game logs; everything is read from WCL at analysis time, or from the cache of an earlier read.

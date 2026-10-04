@@ -39,8 +39,8 @@ invariants:
   - "MUST: a player who dies, is battle-rezzed and dies again takes two slots."
   - "NEVER: let a cheat death take a slot from a real death, or count toward a wipe."
   - "NEVER: count anything inside a wipe, real or cheat."
+content_hash: sha256:35e07723ff6362ca063fa09f7c0fac71ea790d9113eb677b4cd471bbafef4793
 ---
-
 ## Summary
 
 - The site's headline number is "first X deaths per pull": who tends to die early. The backend does not apply X itself for the stored events. It tags every death with `slot` and `inWipe` (`backend/app.py:506`), and the frontend's `isCounted` keeps a death when `slot <= X` and it is not in a wipe (`frontend/src/deathCounting.js:22`). See [[frontend-results-view]].

@@ -51,8 +51,8 @@ invariants:
   - "NEVER: run cheat-death detection for a caller without a valid Supabase session, whatever the request body says (backend/app.py:116)."
   - "MUST: fights be kept only when their encounter ID is in the selected raid's RAID_ENCOUNTERS set (backend/analysis.py:275)."
   - "NEVER: store the Client ID or Secret in the browser's analysis history; stripSecrets removes them before IndexedDB writes (frontend/src/App.js:536)."
+content_hash: sha256:a99d9bb8eab6c29a7455719fbf78aa02e28c2ce272ee39cf1c356535b2e6ec2f
 ---
-
 ## Summary
 
 - **What it is.** The `/analyze` route renders `AnalyzeConfig` (`frontend/src/App.js:1548`, `frontend/src/AnalyzeConfig.js:28`). You pick a raid card, fill in your WarcraftLogs API client and guild, and press **Analyze Reports**.

@@ -51,8 +51,8 @@ invariants:
   - "MUST: share and save bodies pass _looks_like_analysis before anything is stored."
   - "NEVER: the browser reads saved_analyses, shared_results or report_cache; RLS is on and no policies grant it."
   - "NEVER: a WarcraftLogs secret is used as a cache key in plain form; the token cache keys on a SHA-256 of id and secret."
+content_hash: sha256:cd321f24c39ad51e3f30739f8dc57f8358bcab4df9ee818990b93afb438afe34
 ---
-
 # Security & Trust Boundaries
 
 ## Summary

@@ -36,8 +36,8 @@ invariants:
   - "MUST: a new raid is added to RAID_ENCOUNTERS before the boss-side scripts run, since all four read it."
 flows:
   - data-build-path
+content_hash: sha256:b2d632d1911c6d7b4c7d64952e14c60032b102c9b9356e90d7cfab573d087582
 ---
-
 ## Summary
 
 - The analysis needs game facts WarcraftLogs does not give it: a defensive's cooldown and damage reduction, which boss spells pierce immunities, how much armor reduces a boss's swings, which boss abilities hit the whole raid. These are **built ahead of time** into Python modules that ship with the backend.

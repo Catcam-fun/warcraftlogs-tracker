@@ -41,8 +41,8 @@ links:
   - feat-analyze
   - feat-share
   - feat-saved
+content_hash: sha256:0bab172d085405d7cb19c7b08fe465b708cfcd793fa5455eddc2fe626c15b960
 ---
-
 ## Summary
 
 - Routing is React Router 7 inside `BrowserRouter` (`frontend/src/index.js:10`). `App.js` declares an outer `<Routes>` for the legal pages and a catch-all `/*` that holds a second `<Routes>` for the app surfaces (`frontend/src/App.js:1385`, `frontend/src/App.js:1536`).

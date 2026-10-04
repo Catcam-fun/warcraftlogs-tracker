@@ -47,8 +47,8 @@ invariants:
   - "MUST: migrations 001 and 002 be run in the Supabase SQL editor before the features that use them are expected to persist."
   - "NEVER: commit backend/.env; it is gitignored and holds the backend's secrets."
   - "NEVER: rely on in-process state (rate limits, memory shares, caches) across workers or restarts."
+content_hash: sha256:d9b935b41a07c9fd161f54792cf10b8ea66b3d768839005c9aaf4bd528d437d6
 ---
-
 # Deployment & Environments
 
 ## Summary

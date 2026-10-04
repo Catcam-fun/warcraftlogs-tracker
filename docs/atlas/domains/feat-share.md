@@ -47,8 +47,8 @@ invariants:
   - "MUST: serve a share only before its expires_at; Supabase rows are filtered on expires_at and memory entries on their own deadline (backend/supabase_client.py:241, backend/supabase_client.py:208)."
   - "MUST: reject share ids outside [A-Za-z0-9_-]{6,32} before any lookup (backend/app.py:651)."
   - "MUST: try each ?share= id once per page; a failed load must not loop (frontend/src/App.js:335)."
+content_hash: sha256:94c75486811107fc32bdddabfb172357694e82047582d5d411a96755808ed5cd
 ---
-
 ## Summary
 
 - **What it is.** A short, unguessable link to one analysis result. The id is `secrets.token_urlsafe(9)`, 12 URL-safe characters (`backend/app.py:642`), and the link is `<origin>/results?share=<id>` (`frontend/src/App.js:623`).

@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WCL Point Budget — Floor Pov</title>
+<meta name="generator" content="project-atlas">
+<meta name="atlas-content-hash" content="sha256:0ee4cf2059b93dca31bbc651242fc4fcdc014b7614de8579f1cfcb11dc602b81">
+<meta name="atlas-html-integrity" content="sha256:b8607f2db94ee26c27d21df4219c46bd9eac2b53e3a900d7403f03e6d98c272c">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* a[href="#"] must never scroll-jump (dead/placeholder links) */
+  a[href="#"]{cursor:not-allowed}
+
+  /* ============================================================================
+     FROZEN SEMANTIC TOKENS — never overridable by brand config.
+     green = safe · amber = caution · red = never · blue = process · teal = structural.
+     An agent's colour reasoning must be stable across every project, so these
+     are baked into the template and are NOT exposed in atlas.config.json.
+     ============================================================================ */
+  :root{
+    --paper:#f4f0e6;          /* warm drafting paper            */
+    --paper-2:#efe9dc;        /* recessed panel                 */
+    --paper-3:#e7e0cf;        /* deeper panel                   */
+    --ink:#1b2430;            /* primary text (deep navy ink)   */
+    --ink-soft:#4d5867;       /* secondary text                 */
+    --ink-faint:#7d8794;      /* tertiary / captions            */
+    --line:rgba(27,36,48,.14);/* hairlines                      */
+    --line-strong:rgba(27,36,48,.30);
+
+    --blue:#1f4e79;           /* PROCESS / in-progress          */
+    --blue-soft:#e4ebf2;
+    --teal:#1d6b6b;           /* STRUCTURAL / accent            */
+    --teal-soft:#dcebe9;
+    --green:#2c6647;          /* SAFE / healthy                 */
+    --green-soft:#e2ece4;
+    --amber:#8f5e16;          /* CAUTION / needs-update         */
+    --amber-soft:#f0e6d2;
+    --red:#9c3528;            /* NEVER / failure                */
+    --red-soft:#f1e0db;
+
+    --radius:5px;
+    --shadow:0 1px 0 rgba(27,36,48,.04),0 16px 38px -24px rgba(27,36,48,.46);
+    --maxw:1080px;
+
+    /* font fallbacks frozen; brand may override the primary families below */
+    --font-display:'Fraunces',Georgia,'Times New Roman',serif;
+    --font-body:'IBM Plex Sans',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    --font-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',Menlo,Consolas,monospace;
+
+    /* brand accent defaults to teal; the brand CSS block below may override it */
+    --accent:var(--teal);
+    --accent-soft:var(--teal-soft);
+  }
+
+  /* brand tokens injected from atlas.config.json (accent + fonts only) */
+  :root{--accent:#7d6cff;}
+
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+
+  body{
+    margin:0;
+    font-family:var(--font-body);
+    color:var(--ink);
+    background-color:var(--paper);
+    background-image:
+      linear-gradient(rgba(31,78,121,.045) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(31,78,121,.045) 1px,transparent 1px),
+      radial-gradient(120% 80% at 50% -8%,rgba(255,255,255,.6),transparent 60%);
+    background-size:28px 28px,28px 28px,100% 100%;
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+
+  /* ───────────────────────────── layout ───────────────────────────── */
+  .shell{display:grid;grid-template-columns:268px minmax(0,1fr);gap:0;max-width:1360px;margin:0 auto}
+  .side{
+    position:sticky;top:0;align-self:start;height:100vh;
+    padding:32px 22px 22px;border-right:1px solid var(--line);
+    display:flex;flex-direction:column;gap:18px;overflow-y:auto;
+  }
+  .brand{display:flex;flex-direction:column;gap:7px}
+  .brand .ksmall{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--accent);font-weight:600}
+  .brand h1{font-family:var(--font-display);font-weight:600;font-size:22px;line-height:1.06;margin:0;letter-spacing:-.01em}
+  .brand .ribbon{display:inline-flex;align-items:center;gap:6px;align-self:flex-start;margin-top:3px;font-family:var(--font-mono);font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--amber);background:var(--amber-soft);border:1px solid rgba(143,94,22,.3);border-radius:3px;padding:2px 7px;font-weight:600}
+  .brand p{margin:2px 0 0;font-size:12px;color:var(--ink-soft);line-height:1.45}
+  .uplink{display:inline-flex;align-items:center;gap:7px;align-self:flex-start;margin-top:4px;font-family:var(--font-mono);font-size:11px;font-weight:600;color:var(--accent);text-decoration:none;border:1px solid var(--line);border-radius:4px;padding:5px 9px;background:var(--paper);transition:background .18s,border-color .18s}
+  .uplink:hover{background:var(--accent-soft);border-color:var(--line-strong)}
+  .uplink:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  nav.toc{display:flex;flex-direction:column;gap:1px;margin-top:2px}
+  nav.toc a{
+    display:flex;gap:10px;align-items:baseline;text-decoration:none;color:var(--ink-soft);
+    font-size:13px;padding:6px 9px;border-radius:var(--radius);border-left:2px solid transparent;
+    transition:background .18s,color .18s,border-color .18s;
+  }
+  nav.toc a .n{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-faint);min-width:18px}
+  nav.toc a.sub-d{padding-left:20px;font-size:12px}
+  nav.toc a:hover{background:var(--paper-2);color:var(--ink)}
+  nav.toc a.active{background:var(--paper-2);color:var(--accent);border-left-color:var(--accent);font-weight:600}
+  nav.toc a.active .n{color:var(--accent)}
+
+  /* ── persistent atlas-map nav (two-axis: By Layer / By Feature) ── */
+  /* desktop: always expanded (author display beats the UA <details> hiding); the
+     <details>/<summary> only becomes a hamburger toggle at <=880px (see mobile). */
+  .amap-wrap{margin:2px 0 8px}
+  .amap-toggle{list-style:none;cursor:pointer}
+  .amap-toggle::-webkit-details-marker{display:none}
+  .amap-wrap>summary{display:none}
+  .amap-deskhead{display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);margin:0 0 6px;padding:0 9px}
+  nav.atlas{display:flex;flex-direction:column;gap:1px;padding-bottom:14px;margin-bottom:14px;border-bottom:1px solid var(--line)}
+  nav.atlas .amap-group{font-family:var(--font-mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);margin:12px 0 3px;padding:0 9px}
+  nav.atlas a.amap-link{display:flex;gap:9px;align-items:center;text-decoration:none;color:var(--ink-soft);font-size:12.5px;padding:5px 9px;border-radius:var(--radius);border-left:2px solid transparent;transition:background .18s,color .18s,border-color .18s}
+  nav.atlas a.amap-link:hover{background:var(--paper-2);color:var(--ink)}
+  nav.atlas a.amap-link.active{background:var(--paper-2);color:var(--accent);border-left-color:var(--accent);font-weight:600}
+  nav.atlas a.amap-hub{color:var(--ink);font-weight:600}
+  nav.atlas a.amap-link.amap-hold{color:var(--ink-faint)}
+  nav.atlas a.amap-link.amap-hold .ad{opacity:.5}
+  .amap-link .ad{width:8px;height:8px;border-radius:2px;flex:none;border:1px solid rgba(0,0,0,.10);background:var(--ink-faint)}
+  .ad.ad-blue{background:var(--blue)} .ad.ad-green{background:var(--green)} .ad.ad-teal{background:var(--teal)} .ad.ad-amber{background:var(--amber)} .ad.ad-red{background:var(--red)}
+
+  /* hub domain grid: labeled axis groups (only rendered when >1 axis present) */
+  .axis-block{margin:0 0 32px}
+  .axis-block:last-child{margin-bottom:0}
+  .axis-h{font-family:var(--font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);margin:0 0 13px;padding-bottom:7px;border-bottom:1px solid var(--line)}
+
+  .legend{margin-top:auto;border-top:1px solid var(--line);padding-top:14px;display:flex;flex-direction:column;gap:7px}
+  .legend .lt{font-family:var(--font-mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint)}
+  .legend .row{display:flex;align-items:center;gap:9px;font-size:11.5px;color:var(--ink-soft)}
+  .swatch{width:11px;height:11px;border-radius:2px;flex:none;border:1px solid rgba(0,0,0,.08)}
+
+  /* main */
+  main{padding:0 0 110px;min-width:0}
+  .wrap{max-width:var(--maxw);padding:0 44px}
+  section{padding:50px 0 6px;scroll-margin-top:24px}
+
+  /* ───────────────────────────── breadcrumb ───────────────────────── */
+  .crumbs{max-width:var(--maxw);padding:26px 44px 0;display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-family:var(--font-mono);font-size:11px;letter-spacing:.05em}
+  .crumbs a{color:var(--accent);text-decoration:none;border-bottom:1px solid var(--line-strong);padding-bottom:1px;transition:color .18s,border-color .18s}
+  .crumbs a:hover{color:var(--ink);border-color:var(--ink)}
+  .crumbs a:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:2px}
+  .crumbs .sep{color:var(--ink-faint)}
+  .crumbs .here{color:var(--ink);font-weight:600}
+  .crumbs .lvl{margin-left:4px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.16em;font-size:9.5px;border:1px solid var(--line);border-radius:3px;padding:2px 6px}
+
+  /* ───────────────────────────── hero ─────────────────────────────── */
+  .hero{padding:48px 44px 30px;border-bottom:1px solid var(--line);max-width:var(--maxw)}
+  .hero.tophero{padding-top:60px}
+  .hero .eyebrow{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--accent);font-weight:600;margin-bottom:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  .hero h2{font-family:var(--font-display);font-weight:500;font-size:clamp(32px,4.6vw,50px);line-height:1.03;letter-spacing:-.02em;margin:0 0 18px}
+  .hero h2 em{font-style:italic;color:var(--accent)}
+  .hero .lede{font-size:17.5px;color:var(--ink-soft);max-width:66ch;margin:0}
+  .hero .lede b{color:var(--ink);font-weight:600}
+  .readline{display:flex;gap:14px;align-items:flex-start;margin-top:22px;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:var(--radius);background:var(--accent-soft);padding:13px 16px;max-width:72ch}
+  .readline .lab{font-family:var(--font-mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);font-weight:600;flex:none;margin-top:3px}
+  .readline p{margin:0;font-size:14px;color:var(--ink)}
+  .hero .meta{display:flex;flex-wrap:wrap;gap:8px 10px;margin-top:20px}
+  .chiplet{font-family:var(--font-mono);font-size:11px;color:var(--ink-soft);background:var(--paper);border:1px solid var(--line);border-radius:3px;padding:4px 9px}
+  .chiplet b{color:var(--ink);font-weight:600}
+
+  /* ───────────────────────────── section heads ────────────────────── */
+  .sec-head{display:flex;align-items:baseline;gap:13px;margin-bottom:9px}
+  .sec-head .num{font-family:var(--font-mono);font-size:12.5px;color:var(--accent);font-weight:600;letter-spacing:.04em}
+  h3{font-family:var(--font-display);font-weight:600;font-size:27px;line-height:1.1;letter-spacing:-.015em;margin:0}
+  h4{font-family:var(--font-body);font-weight:700;font-size:16px;margin:24px 0 8px;letter-spacing:-.005em;color:var(--ink)}
+  h5{font-family:var(--font-mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;margin:0 0 6px;font-weight:600;color:var(--ink-faint)}
+  .sub{font-size:15.5px;color:var(--ink-soft);max-width:72ch;margin:6px 0 0}
+  .sub b{color:var(--ink);font-weight:600}
+  p{margin:13px 0;color:var(--ink-soft);font-size:15px}
+  p b,li b{color:var(--ink);font-weight:600}
+  em{font-style:italic}
+  a.inline{color:var(--accent);text-decoration:underline;text-decoration-color:var(--line-strong);text-underline-offset:2px}
+  a.inline:hover{color:var(--ink)}
+  code{font-family:var(--font-mono);font-size:.86em;background:var(--paper-2);border:1px solid var(--line);border-radius:3px;padding:.06em .36em;color:var(--ink)}
+  blockquote{margin:18px 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:var(--radius);background:var(--accent-soft);padding:14px 18px;color:var(--ink)}
+  blockquote p{margin:6px 0;color:var(--ink)}
+
+  ul.clean,ol.clean{list-style:none;padding:0;margin:14px 0;counter-reset:li}
+  ul.clean li{position:relative;padding-left:22px;margin:9px 0;font-size:15px;color:var(--ink-soft)}
+  ul.clean li::before{content:"";position:absolute;left:2px;top:.62em;width:7px;height:7px;border:1.5px solid var(--accent);border-radius:1px;transform:rotate(45deg)}
+  ol.clean li{position:relative;padding-left:30px;margin:9px 0;font-size:15px;color:var(--ink-soft);counter-increment:li}
+  ol.clean li::before{content:counter(li);position:absolute;left:0;top:0;font-family:var(--font-mono);font-size:12px;font-weight:600;color:var(--accent);width:20px;text-align:right}
+
+  /* generic data table */
+  .matrix{width:100%;border-collapse:collapse;margin:18px 0;font-size:14px}
+  .matrix th,.matrix td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  .matrix th{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);font-weight:600;border-bottom:1px solid var(--line-strong)}
+  .matrix td:first-child{font-weight:600;color:var(--ink)}
+  .matrix tr:hover td{background:var(--paper-2)}
+
+  /* fenced code block */
+  pre.code{font-family:var(--font-mono);font-size:13px;background:var(--paper-2);border:1px solid var(--line);border-left:3px solid var(--ink-faint);border-radius:var(--radius);padding:14px 16px;overflow-x:auto;margin:16px 0;color:var(--ink);line-height:1.55}
+
+  /* ───────────────────────────── diagram / map ────────────────────── */
+  .map{margin:26px 0 4px;border:1px solid var(--line);border-radius:var(--radius);background:var(--paper);box-shadow:var(--shadow);overflow:hidden}
+  .map .map-h{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;justify-content:space-between;padding:13px 18px;border-bottom:1px solid var(--line);background:var(--paper-2)}
+  .map .map-h .mt{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);font-weight:600}
+  .map .map-h .keys{display:flex;flex-wrap:wrap;gap:6px}
+  .mkey{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-soft);border:1px solid var(--line);border-radius:3px;padding:2px 7px;background:var(--paper)}
+  .mkey i{width:18px;height:0;border-top-width:2px;border-top-style:solid;display:inline-block;flex:none}
+  .mkey.process i{border-color:var(--blue)}
+  .mkey.safe i{border-color:var(--green)}
+  .mkey.never i{border-top-style:dashed;border-color:var(--red)}
+  .mkey.caution i{border-top-style:dashed;border-color:var(--amber)}
+  .mkey.structural i{border-color:var(--teal)}
+  .map .svgwrap{padding:8px 6px 4px;overflow-x:auto}
+  .map svg{display:block;width:100%;height:auto}
+  .map .mapnote{padding:10px 18px 14px;border-top:1px solid var(--line);font-size:12.5px;color:var(--ink-faint)}
+  .map .mapnote b{color:var(--ink-soft);font-weight:600}
+  .map .mapnote code{font-family:var(--font-mono);background:var(--paper-2);border:1px solid var(--line);border-radius:3px;padding:.04em .34em;color:var(--ink);font-size:.9em}
+
+  /* svg node styles via classes */
+  .nbox{fill:var(--paper);stroke:var(--line-strong);stroke-width:1.4}
+  .nbox.dash{stroke-dasharray:5 4;fill:var(--paper-2)}
+  .nbox.process{stroke:var(--blue);stroke-width:1.5}
+  .nbox.safe{stroke:var(--green);stroke-width:1.5}
+  .nbox.caution{stroke:var(--amber);stroke-width:1.5}
+  .nbox.never{stroke:var(--red);stroke-width:1.5}
+  .nbox.structural{stroke:var(--teal);stroke-width:1.6}
+  .ntitle{font-family:var(--font-body);font-weight:600;font-size:12.5px;fill:var(--ink)}
+  .nsub{font-family:var(--font-mono);font-size:9px;fill:var(--ink-faint);letter-spacing:.04em;text-transform:uppercase}
+  .stepnum{font-family:var(--font-mono);font-size:9px;font-weight:600;fill:var(--accent)}
+  .lanecap{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;font-weight:600;fill:var(--ink-soft)}
+  .band{fill:none;stroke-width:1.2;stroke-dasharray:2 5}
+  .bandlab{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;font-weight:600}
+  .edge{fill:none;stroke-width:1.8;stroke:var(--ink-soft)}
+  .edge.process{stroke:var(--blue)}
+  .edge.safe{stroke:var(--green)}
+  .edge.never{stroke:var(--red);stroke-dasharray:5 4}
+  .edge.caution{stroke:var(--amber);stroke-dasharray:5 4}
+  .edge.structural{stroke:var(--teal)}
+  .elabel{font-family:var(--font-mono);font-size:8.5px;fill:var(--ink-soft);letter-spacing:.03em}
+
+  /* ───────────────────────────── context map ──────────────────────── */
+  .ctx{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin:22px 0 4px}
+  @media(max-width:820px){.ctx{grid-template-columns:1fr}}
+  .ctxcol{border:1px solid var(--line);border-radius:var(--radius);background:var(--paper);padding:15px 16px}
+  .ctxcol.dep{border-top:3px solid var(--blue)}
+  .ctxcol.prov{border-top:3px solid var(--green)}
+  .ctxcol.rely{border-top:3px solid var(--teal)}
+  .ctxcol .cl{font-family:var(--font-mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;font-weight:600;margin-bottom:9px;display:block}
+  .ctxcol.dep .cl{color:var(--blue)} .ctxcol.prov .cl{color:var(--green)} .ctxcol.rely .cl{color:var(--teal)}
+  .ctxcol ul{list-style:none;padding:0;margin:0}
+  .ctxcol li{font-size:13px;color:var(--ink-soft);padding:4px 0 4px 15px;position:relative;line-height:1.4}
+  .ctxcol li::before{content:"";position:absolute;left:0;top:.7em;width:6px;height:6px;border:1.4px solid currentColor;border-radius:1px;transform:rotate(45deg);opacity:.5}
+  .ctxcol.dep li{color:var(--ink-soft)}
+  .ctxhere{grid-column:1/-1;text-align:center;font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin:2px 0}
+  .ctxhere b{color:var(--ink);font-weight:600}
+
+  /* ───────────────────────────── domain / sub-page grid ───────────── */
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:26px 0 4px}
+  @media(max-width:1100px){.grid{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:680px){.grid{grid-template-columns:1fr}}
+  .dcard{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:var(--radius);background:var(--paper);overflow:hidden;text-decoration:none;color:inherit;transition:transform .18s,border-color .18s,box-shadow .18s;position:relative}
+  .dcard:hover{transform:translateY(-3px);border-color:var(--line-strong);box-shadow:var(--shadow)}
+  .dcard:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .dcard .top{height:4px;background:var(--accent)}
+  .dcard.c-blue .top{background:var(--blue)}
+  .dcard.c-green .top{background:var(--green)}
+  .dcard.c-teal .top{background:var(--teal)}
+  .dcard.c-amber .top{background:var(--amber)}
+  .dcard.c-red .top{background:var(--red)}
+  .dcard.hold,.dcard.draft{background:var(--paper-2);border-style:dashed;border-color:var(--line-strong)}
+  .dcard.hold .top,.dcard.draft .top{background:var(--ink-faint)}
+  .dcard.hold:hover{transform:none;box-shadow:none}
+  .dcard .body{padding:17px 18px 18px;display:flex;flex-direction:column;flex:1}
+  .dcard .crow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px}
+  .dcard .k{font-family:var(--font-mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;font-weight:600;color:var(--accent)}
+  .dcard.c-blue .k{color:var(--blue)} .dcard.c-green .k{color:var(--green)} .dcard.c-amber .k{color:var(--amber)} .dcard.c-red .k{color:var(--red)}
+  .dcard.hold .k,.dcard.draft .k{color:var(--ink-faint)}
+  .dcard h4{font-family:var(--font-display);font-weight:600;font-size:19px;margin:0 0 5px;letter-spacing:-.01em;color:var(--ink)}
+  .dcard.hold h4,.dcard.draft h4{color:var(--ink-soft)}
+  .dcard p.purpose{font-size:13.5px;color:var(--ink-soft);margin:0 0 13px;line-height:1.5}
+  .dcard .find-lab{font-family:var(--font-mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin:0 0 6px}
+  .dcard ul{list-style:none;padding:0;margin:0 0 16px}
+  .dcard li{position:relative;padding-left:17px;font-size:12.5px;color:var(--ink-soft);margin:5px 0;line-height:1.4}
+  .dcard li::before{content:"";position:absolute;left:2px;top:.5em;width:6px;height:6px;border:1.4px solid currentColor;border-radius:1px;transform:rotate(45deg);opacity:.55}
+  .dcard .open{margin-top:auto;font-family:var(--font-mono);font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:7px;color:var(--accent)}
+  .dcard.c-blue .open{color:var(--blue)} .dcard.c-green .open{color:var(--green)} .dcard.c-amber .open{color:var(--amber)} .dcard.c-red .open{color:var(--red)}
+  .dcard.hold .open,.dcard.draft .open{color:var(--ink-faint)}
+
+  /* status chips */
+  .chip{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:9.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:3px 7px;border-radius:3px;border:1px solid;white-space:nowrap}
+  .chip.documented{color:var(--green);background:var(--green-soft);border-color:rgba(44,102,71,.3)}
+  .chip.draft{color:var(--ink-faint);background:var(--paper-3);border-color:var(--line-strong)}
+  .chip.needs-update{color:var(--amber);background:var(--amber-soft);border-color:rgba(143,94,22,.3)}
+  .chip.on-hold{color:var(--ink-faint);background:var(--paper-3);border-color:var(--line-strong)}
+  .chip .dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+
+  .wired-note{margin:18px 0 0;font-size:12.5px;color:var(--ink-faint)}
+  .wired-note code{font-family:var(--font-mono);font-size:.9em;background:var(--paper-2);border:1px solid var(--line);border-radius:3px;padding:.06em .36em;color:var(--ink)}
+
+  /* ───────────────────────────── invariants panel ─────────────────── */
+  .invariants{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:24px 0 4px}
+  @media(max-width:860px){.invariants{grid-template-columns:1fr}}
+  .inv{border:1px solid var(--line);border-left:3px solid var(--green);border-radius:var(--radius);background:var(--paper);padding:15px 16px}
+  .inv.never{border-left-color:var(--red)}
+  .inv.must{border-left-color:var(--green)}
+  .inv .tag{font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--green);margin-bottom:7px;display:inline-flex;align-items:center;gap:6px}
+  .inv.never .tag{color:var(--red)}
+  .inv .tag .dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+  .inv p{margin:0;font-size:13.5px;color:var(--ink);line-height:1.5}
+  .inv code{font-family:var(--font-mono);font-size:.86em;background:var(--paper-2);border:1px solid var(--line);border-radius:3px;padding:.04em .34em}
+
+  /* ───────────────────────────── stepper ──────────────────────────── */
+  .stepper{display:grid;grid-template-columns:repeat(var(--step-cols,7),1fr);gap:6px;margin:24px 0 0}
+  .step{
+    appearance:none;text-align:left;cursor:pointer;background:var(--paper);border:1px solid var(--line);
+    border-radius:var(--radius);padding:12px 10px 13px;position:relative;transition:border-color .18s,background .18s,transform .18s;
+    font-family:var(--font-body);
+  }
+  .step:hover{border-color:var(--line-strong);transform:translateY(-2px)}
+  .step[aria-selected="true"]{border-color:var(--blue);background:#fff;box-shadow:var(--shadow)}
+  .step .sn{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-faint)}
+  .step[aria-selected="true"] .sn{color:var(--blue)}
+  .step .st{display:block;font-weight:600;font-size:13px;margin-top:5px;color:var(--ink);line-height:1.2}
+  .step .sd{display:block;font-size:11px;color:var(--ink-faint);margin-top:3px;line-height:1.25}
+  @media(max-width:760px){.stepper{grid-template-columns:repeat(3,1fr)}}
+  @media(max-width:460px){.stepper{grid-template-columns:repeat(2,1fr)}}
+  .panel{border:1px solid var(--line);border-top:3px solid var(--blue);border-radius:0 0 var(--radius) var(--radius);background:#fff;padding:22px 24px;margin-top:10px;box-shadow:var(--shadow)}
+  .panel h4{margin-top:0}
+  .panel .pbody{font-size:14.5px;color:var(--ink-soft)}
+  .panel .gotcha{display:flex;gap:12px;align-items:flex-start;background:var(--amber-soft);border:1px solid rgba(143,94,22,.25);border-left:3px solid var(--amber);border-radius:var(--radius);padding:11px 14px;margin-top:16px}
+  .panel .gotcha .gl{font-family:var(--font-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--amber);font-weight:600;flex:none;margin-top:2px}
+  .panel .gotcha p{margin:0;font-size:13.5px;color:var(--ink)}
+
+  /* ───────────────────────────── filterable inventory ─────────────── */
+  .filterbar{display:flex;flex-wrap:wrap;gap:7px;align-items:center;margin:18px 0 12px}
+  .filterbar .fl{font-family:var(--font-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin-right:4px}
+  .fchip{appearance:none;cursor:pointer;font-family:var(--font-mono);font-size:11px;font-weight:600;letter-spacing:.03em;color:var(--ink-soft);background:var(--paper);border:1px solid var(--line-strong);border-radius:20px;padding:5px 13px;transition:all .15s}
+  .fchip:hover{border-color:var(--accent);color:var(--accent)}
+  .fchip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--paper)}
+  .inv-count{font-family:var(--font-mono);font-size:11px;color:var(--ink-faint);margin-left:auto}
+  table.inv{width:100%;border-collapse:collapse;margin:6px 0 4px;font-size:13px}
+  table.inv th,table.inv td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  table.inv th{font-family:var(--font-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);font-weight:600;border-bottom:1px solid var(--line-strong)}
+  table.inv td:first-child{font-family:var(--font-mono);font-size:12.5px;font-weight:600;color:var(--ink)}
+  table.inv tr:hover td{background:var(--paper-2)}
+  table.inv tr[hidden]{display:none}
+
+  /* ───────────────────────────── standing-it-up table ─────────────── */
+  .standup{width:100%;border-collapse:collapse;margin:18px 0;font-size:14px}
+  .standup th,.standup td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  .standup th{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);font-weight:600;border-bottom:1px solid var(--line-strong)}
+  .standup td:first-child{font-weight:600;color:var(--ink);white-space:nowrap}
+  .standup tr:hover td{background:var(--paper-2)}
+
+  /* ───────────────────────────── accordion (gotchas / glossary) ───── */
+  .acc{border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;margin:20px 0;background:var(--paper)}
+  .acc details{border-top:1px solid var(--line)}
+  .acc details:first-child{border-top:0}
+  .acc summary{cursor:pointer;list-style:none;padding:14px 16px;display:flex;align-items:center;gap:12px;font-weight:600;font-size:14px;color:var(--ink);transition:background .15s}
+  .acc summary:hover{background:var(--paper-2)}
+  .acc summary::-webkit-details-marker{display:none}
+  .acc summary .chev{margin-left:auto;font-family:var(--font-mono);color:var(--ink-faint);transition:transform .2s;font-size:12px}
+  .acc details[open] summary .chev{transform:rotate(90deg);color:var(--accent)}
+  .acc .body{padding:2px 16px 18px 44px}
+  .acc .body p{margin:6px 0;font-size:14px;color:var(--ink-soft)}
+  .acc .gtag{flex:none;width:22px;height:22px;border-radius:3px;display:grid;place-items:center;font-size:12px;font-family:var(--font-mono);font-weight:700}
+  .gtag.warn{background:var(--amber-soft);color:var(--amber)}
+  .gtag.info{background:var(--blue-soft);color:var(--blue)}
+
+  /* dotted glossary term + floating tooltip */
+  .term{border-bottom:1.5px dotted var(--blue);cursor:help;color:var(--ink);font-weight:500}
+  #tip{position:fixed;z-index:50;max-width:300px;background:var(--ink);color:#f4f0e6;font-size:12.5px;line-height:1.5;padding:9px 12px;border-radius:5px;box-shadow:0 10px 30px -8px rgba(0,0,0,.5);pointer-events:none;opacity:0;transform:translateY(4px);transition:opacity .15s,transform .15s}
+  #tip.show{opacity:1;transform:none}
+  #tip b{color:#9fc6e6}
+  #tip code{background:rgba(255,255,255,.12);border:0;color:#e6c07b;padding:.04em .3em}
+
+  /* environments table */
+  .envtable{width:100%;border-collapse:collapse;margin:18px 0;font-size:14px}
+  .envtable th,.envtable td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  .envtable th{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);font-weight:600;border-bottom:1px solid var(--line-strong)}
+  .envtable td:first-child{font-weight:600;color:var(--ink)}
+  .envtable tr:hover td{background:var(--paper-2)}
+
+  /* related link graph */
+  .related{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0}
+  .relcard{display:inline-flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:var(--radius);background:var(--paper);padding:10px 14px;text-decoration:none;color:var(--ink);font-size:13.5px;transition:border-color .18s,transform .18s,box-shadow .18s}
+  .relcard:hover{border-color:var(--line-strong);transform:translateY(-2px);box-shadow:var(--shadow)}
+  .relcard .arr{font-family:var(--font-mono);color:var(--accent);font-size:12px}
+  .relcard .rt{font-weight:600}
+  .relcard .rd{color:var(--ink-faint);font-size:12px}
+
+  /* footer */
+  footer{border-top:1px solid var(--line);margin-top:54px;padding:26px 44px;max-width:var(--maxw)}
+  footer .lvlnote{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);border:1px solid var(--line);border-radius:3px;padding:4px 9px;margin-bottom:12px}
+  footer p{font-size:12px;color:var(--ink-faint);margin:5px 0;font-family:var(--font-mono)}
+  footer code{font-family:var(--font-mono);font-size:.92em;color:var(--ink-soft)}
+
+  /* reveal */
+  .reveal{opacity:0;transform:translateY(14px);transition:opacity .6s ease,transform .6s ease}
+  .reveal.in{opacity:1;transform:none}
+  @media (prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}}
+
+  /* ───────────────────────────── search ───────────────────────────── */
+  .atlas-search{position:relative;margin:2px 0 6px}
+  .atlas-search .as-input{width:100%;font-family:var(--font-body);font-size:13px;color:var(--ink);
+    background:var(--paper);border:1px solid var(--line-strong);border-radius:var(--radius);
+    padding:8px 30px 8px 11px;outline:none;transition:border-color .15s,box-shadow .15s}
+  .atlas-search .as-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+  .atlas-search .as-kbd{position:absolute;right:8px;top:7px;font-family:var(--font-mono);font-size:10px;
+    color:var(--ink-faint);border:1px solid var(--line);border-radius:3px;padding:1px 5px;background:var(--paper-2);pointer-events:none}
+  .atlas-search .as-results{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:60;max-height:60vh;overflow-y:auto;
+    background:var(--paper);border:1px solid var(--line-strong);border-radius:var(--radius);box-shadow:var(--shadow);padding:4px}
+  .atlas-search .as-results[hidden]{display:none}
+  .as-res{display:block;text-decoration:none;color:var(--ink-soft);padding:7px 9px;border-radius:var(--radius);border-left:2px solid transparent}
+  .as-res:hover,.as-res.as-active{background:var(--paper-2);color:var(--ink);border-left-color:var(--accent)}
+  .as-res .as-crumb{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);display:block;margin-bottom:2px}
+  .as-res .as-h{font-size:13px;font-weight:600;color:var(--ink)}
+  .as-res mark{background:var(--accent-soft);color:var(--ink);border-radius:2px;padding:0 1px}
+  .as-empty{padding:10px 9px;font-size:12.5px;color:var(--ink-faint)}
+
+  /* mobile */
+  @media(max-width:880px){
+    .shell{grid-template-columns:1fr}
+    .side{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}
+    nav.toc{flex-direction:row;flex-wrap:wrap;gap:4px}
+    nav.toc a{font-size:12px;padding:5px 9px}
+    nav.toc a .n{display:none}
+    nav.toc a.sub-d{padding-left:9px}
+    .amap-wrap>summary{display:flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);font-weight:600;padding:9px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--paper)}
+    .amap-deskhead{display:none}
+    .amap-wrap:not([open]) nav.atlas{display:none}
+    nav.atlas{margin-top:8px;padding-bottom:10px;margin-bottom:10px}
+    .legend{margin-top:14px}
+    .wrap,.hero,.crumbs,footer{padding-left:22px;padding-right:22px}
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <aside class="side">
+    <div class="brand">
+      <span class="ksmall">Floor Pov</span>
+      <h1>WCL Point Budget</h1>
+      <span class="ribbon">Sub-page</span>
+      <p>How the backend keeps the cost of one analysis on the officer's WCL key down.</p>
+      <a class="uplink" href="../index.html">← Atlas Hub</a>
+    </div>
+    <div class="atlas-search" data-atlas-base="../"><input type="search" class="as-input" placeholder="Search the atlas…" aria-label="Search the atlas" autocomplete="off" spellcheck="false"><kbd class="as-kbd" aria-hidden="true">⌘K</kbd><div class="as-results" role="listbox" hidden></div></div><script src="../search-index.js" defer></script>
+    <details class="amap-wrap" open><summary class="amap-toggle"><span class="amap-burger" aria-hidden="true">☰</span> Atlas map</summary><div class="amap-deskhead" aria-hidden="true">Atlas map</div><nav class="atlas" aria-label="Atlas map"><a class="amap-link amap-hub" href="../index.html"><span class="ad ad-teal"></span><span>Hub</span></a><div class="amap-group">By Layer</div><a class="amap-link" href="../overview.html"><span class="ad ad-teal"></span><span>Overview</span></a><a class="amap-link" href="../frontend/index.html"><span class="ad ad-blue"></span><span>Frontend</span></a><a class="amap-link" href="../backend/index.html"><span class="ad ad-green"></span><span>Backend API</span></a><a class="amap-link active" href="../warcraftlogs/index.html"><span class="ad ad-teal"></span><span>WarcraftLogs Integration</span></a><a class="amap-link" href="../data-model.html"><span class="ad ad-teal"></span><span>Data Model</span></a><a class="amap-link" href="../auth.html"><span class="ad ad-blue"></span><span>Accounts &amp; Auth</span></a><a class="amap-link" href="../game-data/index.html"><span class="ad ad-green"></span><span>Game Data Catalogs</span></a><a class="amap-link" href="../deployment.html"><span class="ad ad-blue"></span><span>Deployment &amp; Environments</span></a><a class="amap-link" href="../security.html"><span class="ad ad-red"></span><span>Security &amp; Trust Boundaries</span></a><a class="amap-link" href="../testing.html"><span class="ad ad-green"></span><span>Testing &amp; Checks</span></a><a class="amap-link" href="../operations.html"><span class="ad ad-amber"></span><span>Operations &amp; New Tier</span></a><a class="amap-link" href="../reconciliation.html"><span class="ad ad-amber"></span><span>Docs ⇄ Code Reconciliation</span></a><a class="amap-link" href="../doc-remediation.html"><span class="ad ad-amber"></span><span>Documentation Remediation</span></a><div class="amap-group">By Feature</div><a class="amap-link" href="../feat-analyze.html"><span class="ad ad-blue"></span><span>Analyze a Guild</span></a><a class="amap-link" href="../feat-results.html"><span class="ad ad-green"></span><span>Results &amp; Death Breakdown</span></a><a class="amap-link" href="../feat-saved.html"><span class="ad ad-teal"></span><span>Saved Reports</span></a><a class="amap-link" href="../feat-share.html"><span class="ad ad-teal"></span><span>Share Links</span></a><a class="amap-link" href="../feat-account.html"><span class="ad ad-amber"></span><span>Account &amp; Settings</span></a></nav></details>
+    <nav class="toc" aria-label="Sections"><a href="#summary"><span class="n">01</span><span>Summary</span></a><a href="#how-it-works"><span class="n">02</span><span>How it works</span></a><a href="#diagram"><span class="n">03</span><span>Diagram</span></a><a href="#reference"><span class="n">04</span><span>Reference</span></a><a href="#invariants"><span class="n">05</span><span>Invariants</span></a><a href="#gotchas"><span class="n">06</span><span>Gotchas</span></a><a href="#context-map"><span class="n">07</span><span>Context map</span></a><a href="#related"><span class="n">08</span><span>Related</span></a></nav>
+    <div class="legend">
+  <span class="lt">Semantic colour key</span>
+  <div class="row"><span class="swatch" style="background:var(--green)"></span> Safe / healthy</div>
+  <div class="row"><span class="swatch" style="background:var(--amber)"></span> Caution / needs update</div>
+  <div class="row"><span class="swatch" style="background:var(--red)"></span> Never / failure</div>
+  <div class="row"><span class="swatch" style="background:var(--blue)"></span> Process / in-progress</div>
+  <div class="row"><span class="swatch" style="background:var(--teal)"></span> Structural / accent</div>
+</div>
+  </aside>
+
+  <main>
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../index.html">Atlas</a><span class="sep" aria-hidden="true">›</span><a href="index.html">WarcraftLogs Integration</a><span class="sep" aria-hidden="true">›</span><span class="here">WCL Point Budget</span><span class="lvl">Level 3 of 3</span></nav>
+    <header class="hero"><div class="eyebrow"><span>Sub-page</span></div><h2>WCL Point Budget</h2><p class="lede">WarcraftLogs meters each API key in points, charged per page of events and at least once per event block, so the backend asks for as few pages and blocks as it can.</p></header><section id="summary"><div class="wrap reveal"><div class="sec-head"><span class="num">01</span><h3>Summary</h3></div><ul class="clean"><li>WarcraftLogs (WCL) charges each API key <b>points</b>. The code's own comment states the rule it is built around: about one point per page of events, and at least one per event block (<code>backend/defensives.py:771-772</code>). Fewer pages and fewer blocks mean a cheaper analysis.</li><li>Every Analyze run spends the <b>officer's own key</b> (see <a class="inline" href="../warcraftlogs/index.html">warcraftlogs</a>), so cost is a user-facing concern, not only a server one.</li><li>The backend keeps cost down four ways: <b>batching per report</b>, <b>narrow filters</b>, <b>tight time and pull scopes</b>, and a <b>cache of finished reports</b>.</li><li>There is no runtime cost meter. <code>rateLimitData</code> is not queried anywhere in <code>backend/</code> or <code>frontend/src/</code>; cost is controlled by how queries are shaped.</li></ul>
+</div></section>
+<section id="how-it-works"><div class="wrap reveal"><div class="sec-head"><span class="num">02</span><h3>How it works</h3></div><p>One analysis reads guild-level data once, then a fixed set of queries per report. Each step below names how it limits cost.</p>
+<h5>Paging</h5>
+<p>Every event query asks for <code>limit: 10000</code> events per page (<code>backend/defensives.py:197</code>, <code>backend/defensives.py:738</code>, <code>backend/analysis.py:296</code>) and follows <code>nextPageTimestamp</code> only while WCL returns one, at most 50 times (<code>backend/defensives.py:184</code>, <code>backend/defensives.py:752</code>). <code>_fetch_blocks</code> follows up only the blocks that overflowed, not the whole request (<code>backend/defensives.py:762-764</code>).</p>
+<h5>The endTime rule</h5>
+<p><code>_fetch_blocks</code> always sends an <code>endTime</code>, because WCL returns an empty second page for a block scoped by <code>fightIDs</code> without one (docstring, <code>backend/defensives.py:745-746</code>). <code>_paged</code> passes <code>end_time + 1</code> on all four defensive queries (<code>backend/defensives.py:236-237</code>), and <code>fetch_instakills</code> passes <code>end_time + 1</code> too (<code>backend/defensives.py:815</code>).</p>
+<h5>Caching finished reports</h5>
+<p>A report counts as finished when its <code>end</code> is more than <code>REPORT_CACHE_MIN_AGE_MS</code> (2 hours) in the past (<code>backend/app.py:43</code>, <code>backend/app.py:180-182</code>). Only finished reports are read from or written to the four caches in <code>backend/cache.py:91-97</code>:</p>
+<table class="matrix"><thead><tr><th>Cache {cache}</th><th>Holds</th><th>Key includes</th></tr></thead><tbody><tr><td><code>report_meta_cache</code> {cache}</td><td><code>get_fights</code> result</td><td>report code (<code>backend/app.py:187</code>)</td></tr><tr><td><code>report_deaths_cache</code> {cache}</td><td>deaths and cheat deaths</td><td>report, pulls, cheat-death flag and its ability IDs (<code>backend/app.py:310-311</code>)</td></tr><tr><td><code>report_defensive_cache</code> {cache}</td><td>casts, buffs, talents, consumable heals of the dead</td><td>report, pulls, players, patch, <code>CATALOG_FINGERPRINT</code> (<code>backend/app.py:316-318</code>)</td></tr><tr><td><code>report_recap_cache</code> {cache}</td><td>instant kills and death windows</td><td>report, pulls, counted deaths, <code>LETHAL_WINDOW_MS</code> (<code>backend/app.py:313</code>, <code>backend/app.py:359-360</code>)</td></tr></tbody></table>
+<p>Each is a <code>SharedReportCache</code>: an in-memory LRU in front of the Supabase <code>report_cache</code> table, written in the background (<code>backend/cache.py:42-79</code>). Keys are prefixed with <code>CACHE_VERSION</code> (<code>backend/cache.py:61</code>, <code>backend/cache.py:85</code>), and <code>CATALOG_FINGERPRINT</code> changes whenever what is fetched for defensives changes (<code>backend/defensives.py:163-168</code>), so stale rows are never served to new code.</p>
+<div class="stepper-wrap"><div class="stepper" role="tablist" style="--step-cols:6"><button class="step" role="tab" aria-selected="true" data-step="0"><span class="sn">STEP 1</span><span class="st">Guild</span><span class="sd">roster and report list</span></button><button class="step" role="tab" aria-selected="false" data-step="1"><span class="sn">STEP 2</span><span class="st">Fights</span><span class="sd">1 query, cached</span></button><button class="step" role="tab" aria-selected="false" data-step="2"><span class="sn">STEP 3</span><span class="st">Deaths</span><span class="sd">one aliased query</span></button><button class="step" role="tab" aria-selected="false" data-step="3"><span class="sn">STEP 4</span><span class="st">Defensives</span><span class="sd">four filtered queries</span></button><button class="step" role="tab" aria-selected="false" data-step="4"><span class="sn">STEP 5</span><span class="st">Instakills</span><span class="sd">All stream, filtered</span></button><button class="step" role="tab" aria-selected="false" data-step="5"><span class="sn">STEP 6</span><span class="st">Death windows</span><span class="sd">counted deaths only</span></button></div><div class="panel" role="tabpanel"></div><script type="application/json">[{"title":"Guild-level reads","body":"The roster is skipped entirely when the roster toggle is off (backend/app.py:138). The report list pushes the tier's date window into the WCL query itself (startTime and endTime, backend/warcraftlogs.py:204-206), so out-of-tier reports are never listed; the window comes from resolve_report_window (backend/app.py:162).","gotcha":""},{"title":"Fights per report","body":"get_fights reads fights, actors, abilities and specs for a report in one GraphQL round trip (backend/warcraftlogs.py:333). fetch_report_meta answers finished reports from report_meta_cache and only stores a result that has fights (backend/app.py:184-193). Reports are read REPORT_FETCH_WORKERS = 6 at a time (backend/app.py:47, 195).","gotcha":"The comment on REPORT_FETCH_WORKERS says WCL's rate limit is per API key, so concurrency stays modest (backend/app.py:45-46)."},{"title":"Deaths","body":"get_report_deaths_bulk asks for the whole report's Deaths, plus cheat-death Debuffs and Healing when that option is on, as three aliases of a single query over the span from the first kept pull's start to the last one's end (backend/analysis.py:344-430). The debuff and heal aliases carry an ability.id filter so they stay small (backend/analysis.py:348-351). Extra pages are only fetched for an alias that returned nextPageTimestamp (backend/analysis.py:435-444).","gotcha":""},{"title":"Defensive data","body":"fetch_defensive_raw runs Casts, Buffs, Healing and CombatantInfo side by side (backend/defensives.py:229-239). Casts are filtered to the catalog's cast IDs, Buffs to the catalog's buff names, Healing to consumable ability IDs (backend/defensives.py:226-228). Healing and talent loadouts are scoped to the boss pulls by fightIDs, which costs least (docstring, backend/defensives.py:218-222).","gotcha":"Casts and Buffs are not filtered by player in the query. WCL returns nothing for source.id in (...) on those data types, and the unfiltered query costs fewer points anyway; players are filtered afterwards in filter_defensive_raw (backend/defensives.py:212-217, 242)."},{"title":"Instant kills","body":"Instant kills deal no damage, so they are only in the All stream. fetch_instakills reads it with the filter type = 'instakill', scoped to the kept pulls with an endTime: about 1 point per report (backend/defensives.py:811-816, 699).","gotcha":""},{"title":"Hits before deaths","body":"counted_by_fight keeps only deaths within the deaths tracked, not in a wipe, of guild members (backend/app.py:280-291). fetch_death_windows groups pulls whose windows fall within WINDOW_BLOCK_SPAN_MS (15 minutes) into one block, filters each block by target.name, and sends up to WINDOW_BLOCKS_PER_REQUEST = 20 blocks in one request (backend/defensives.py:721-723, 781-796, 755). Its docstring records the measured effect, 19 to 8 and 11 to 5 points for a night's reports (backend/defensives.py:776-777).","gotcha":""}]</script></div></div></section>
+<section id="diagram"><div class="wrap reveal"><div class="sec-head"><span class="num">03</span><h3>Diagram</h3></div><p>Where the cost goes for one report, and what short-circuits it.</p>
+<div class="map"><div class="map-h"><span class="mt">Diagram</span><span class="keys"><span class="mkey process"><i></i>Process</span><span class="mkey safe"><i></i>Safe</span><span class="mkey caution"><i></i>Caution</span></span></div><div class="svgwrap"><div style="min-width:1096px"><svg viewBox="0 0 1096 449" role="img" preserveAspectRatio="xMinYMin meet" aria-label="Structured diagram"><defs><marker id="arr-process" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto"><path d="M0,0 L7,3.2 L0,6.4 Z" fill="var(--blue)"/></marker><marker id="arr-safe" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto"><path d="M0,0 L7,3.2 L0,6.4 Z" fill="var(--green)"/></marker><marker id="arr-caution" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto"><path d="M0,0 L7,3.2 L0,6.4 Z" fill="var(--amber)"/></marker><marker id="arr-never" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto"><path d="M0,0 L7,3.2 L0,6.4 Z" fill="var(--red)"/></marker><marker id="arr-structural" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto"><path d="M0,0 L7,3.2 L0,6.4 Z" fill="var(--teal)"/></marker></defs><rect x="6" y="18" width="1084" height="425" rx="9" fill="none" stroke="var(--teal)" stroke-width="1.2" stroke-dasharray="2 6" opacity="0.5"/><text class="bandlab" x="1080" y="34" text-anchor="end" fill="var(--teal)">Officer's WCL key</text><text class="lanecap" x="24" y="30">Backend</text><text class="lanecap" x="24" y="167">Cache</text><text class="lanecap" x="24" y="304">WCL (points)</text><path class="edge process" d="M192,63.5 H244" marker-end="url(#arr-process)"/><path class="edge safe" d="M328,89 V132 H108 V175" marker-end="url(#arr-safe)"/><rect x="206.1" y="117.0" width="23.9" height="13" rx="3" fill="var(--paper)" opacity="0.9"/><text class="elabel" x="218.0" y="127.0" text-anchor="middle">yes</text><path class="edge process" d="M328,89 V200.5 H108 V312" marker-end="url(#arr-process)"/><rect x="190.2" y="185.5" width="55.7" height="13" rx="3" fill="var(--paper)" opacity="0.9"/><text class="elabel" x="218.0" y="195.5" text-anchor="middle">no / miss</text><path class="edge process" d="M192,337.5 H244" marker-end="url(#arr-process)"/><rect x="203.4" y="320.5" width="29.2" height="13" rx="3" fill="var(--paper)" opacity="0.9"/><text class="elabel" x="218.0" y="330.5" text-anchor="middle">then</text><path class="edge process" d="M412,337.5 H464" marker-end="url(#arr-process)"/><rect x="404.9" y="320.5" width="66.3" height="13" rx="3" fill="var(--paper)" opacity="0.9"/><text class="elabel" x="438.0" y="330.5" text-anchor="middle">in parallel</text><path class="edge process" d="M412,337.5 H684" marker-end="url(#arr-process)"/><rect x="514.9" y="320.5" width="66.3" height="13" rx="3" fill="var(--paper)" opacity="0.9"/><text class="elabel" x="548.0" y="330.5" text-anchor="middle">in parallel</text><path class="edge caution" d="M412,337.5 H904" marker-end="url(#arr-caution)"/><rect x="622.2" y="320.5" width="71.6" height="13" rx="3" fill="var(--paper)" opacity="0.9"/><text class="elabel" x="658.0" y="330.5" text-anchor="middle">counted only</text><g><rect class="nbox process" x="24" y="38" width="168" height="51" rx="6"/><text class="ntitle" x="108" y="60.0" text-anchor="middle">Report</text><text class="nsub" x="108" y="75.0" text-anchor="middle">fetch_report_deaths</text></g><g><rect class="nbox process" x="244" y="38" width="168" height="51" rx="6"/><text class="ntitle" x="328" y="60.0" text-anchor="middle">Finished?</text><text class="nsub" x="328" y="75.0" text-anchor="middle">ended &gt; 2h ago</text></g><g><rect class="nbox safe" x="24" y="175" width="168" height="51" rx="6"/><text class="ntitle" x="108" y="197.0" text-anchor="middle">Cache hit</text><text class="nsub" x="108" y="212.0" text-anchor="middle">memory, then Supabase</text></g><g><rect class="nbox process" x="24" y="312" width="168" height="51" rx="6"/><text class="ntitle" x="108" y="334.0" text-anchor="middle">Fights</text><text class="nsub" x="108" y="349.0" text-anchor="middle">1 query</text></g><g><rect class="nbox process" x="244" y="312" width="168" height="51" rx="6"/><text class="ntitle" x="328" y="334.0" text-anchor="middle">Deaths</text><text class="nsub" x="328" y="349.0" text-anchor="middle">1 aliased query</text></g><g><rect class="nbox process" x="464" y="312" width="168" height="51" rx="6"/><text class="ntitle" x="548" y="334.0" text-anchor="middle">Defensives</text><text class="nsub" x="548" y="349.0" text-anchor="middle">4 filtered queries</text></g><g><rect class="nbox process" x="684" y="312" width="168" height="51" rx="6"/><text class="ntitle" x="768" y="334.0" text-anchor="middle">Instakills</text><text class="nsub" x="768" y="349.0" text-anchor="middle">~1 point</text></g><g><rect class="nbox process" x="904" y="312" width="168" height="51" rx="6"/><text class="ntitle" x="988" y="334.0" text-anchor="middle">Death windows</text><text class="nsub" x="988" y="349.0" text-anchor="middle">15 min blocks</text></g></svg></div></div></div></div></section>
+<section id="reference"><div class="wrap reveal"><div class="sec-head"><span class="num">04</span><h3>Reference</h3></div><div class="inventory"><div class="filterbar" role="group" aria-label="Filter inventory"><span class="fl">Filter</span><button class="fchip" data-filter="all" aria-pressed="true">All</button><button class="fchip" data-filter="scope" aria-pressed="false">scope</button><button class="fchip" data-filter="batch" aria-pressed="false">batch</button><button class="fchip" data-filter="filter" aria-pressed="false">filter</button><button class="fchip" data-filter="cache" aria-pressed="false">cache</button><button class="fchip" data-filter="concurrency" aria-pressed="false">concurrency</button><span class="inv-count">11 / 11</span></div><table class="inv"><thead><tr><th>Lever {lever}</th><th>Where</th><th>Effect</th></tr></thead><tbody><tr data-domain="scope"><td>Date window in the query</td><td><code>backend/warcraftlogs.py:204-206</code></td><td>out-of-tier reports are never listed</td></tr><tr data-domain="scope"><td>Roster skipped when off</td><td><code>backend/app.py:138</code></td><td>no roster pages at all</td></tr><tr data-domain="batch"><td>One aliased deaths query</td><td><code>backend/analysis.py:355-428</code></td><td>deaths and cheat-death events in one call</td></tr><tr data-domain="filter"><td>Ability filters on defensive queries</td><td><code>backend/defensives.py:226-228</code></td><td>only catalog abilities come back</td></tr><tr data-domain="scope"><td><code>fightIDs</code> on Healing and CombatantInfo</td><td><code>backend/defensives.py:232-233</code></td><td>boss pulls only</td></tr><tr data-domain="filter"><td><code>target.name</code> filter on death windows</td><td><code>backend/defensives.py:791-793</code></td><td>only the players who died</td></tr><tr data-domain="batch"><td><code>WINDOW_BLOCK_SPAN_MS</code> = 900,000</td><td><code>backend/defensives.py:721</code></td><td>pulls 15 minutes apart share a block</td></tr><tr data-domain="batch"><td><code>WINDOW_BLOCKS_PER_REQUEST</code> = 20</td><td><code>backend/defensives.py:723</code></td><td>many blocks in one request</td></tr><tr data-domain="cache"><td><code>REPORT_CACHE_MIN_AGE_MS</code> = 2 h</td><td><code>backend/app.py:43</code></td><td>finished reports read once</td></tr><tr data-domain="concurrency"><td><code>REPORT_FETCH_WORKERS</code> = 6</td><td><code>backend/app.py:47</code></td><td>fights phase concurrency</td></tr><tr data-domain="concurrency"><td>Deaths phase pool = 8</td><td><code>backend/app.py:387</code></td><td>per-report event phase concurrency</td></tr></tbody></table></div></div></section>
+<section id="invariants"><div class="wrap reveal"><div class="sec-head"><span class="num">05</span><h3>Invariants</h3></div><div class="invariants"><div class="inv must"><span class="tag"><span class="dot"></span>Must</span><p>send an <code>endTime</code> with any event query scoped by <code>fightIDs</code>; WCL returns an empty second page without one (<code>backend/defensives.py:745-746</code>).</p></div><div class="inv must"><span class="tag"><span class="dot"></span>Must</span><p>fetch hits before deaths only for deaths that can count, as one request per report (<code>backend/app.py:280-291</code>, <code>backend/app.py:364</code>).</p></div><div class="inv must"><span class="tag"><span class="dot"></span>Must</span><p>cache only reports whose last event is more than two hours old; a report still being logged is always refetched (<code>backend/app.py:41-43</code>).</p></div><div class="inv never"><span class="tag"><span class="dot"></span>Never</span><p>filter a WCL event query by <code>target.id</code> or by timestamp; filter by <code>target.name</code> with the raw log spelling (<code>backend/defensives.py:774-775</code>, <code>backend/defensives.py:791-792</code>).</p></div><div class="inv never"><span class="tag"><span class="dot"></span>Never</span><p>serve a cached defensive entry built with a different catalog; the key carries <code>CATALOG_FINGERPRINT</code> (<code>backend/app.py:316-318</code>).</p></div></div></div></section>
+<section id="gotchas"><div class="wrap reveal"><div class="sec-head"><span class="num">06</span><h3>Gotchas</h3></div><div class="acc"><details><summary><span class="gtag warn">!</span>Two different concurrency limits<span class="chev">›</span></summary><div class="body"><p>the fights phase uses <code>REPORT_FETCH_WORKERS = 6</code> (<code>backend/app.py:195</code>), but the deaths phase hard-codes <code>max_workers=8</code> (<code>backend/app.py:387</code>). Each of those report jobs opens a pool of 3 (<code>backend/app.py:325</code>), and the defensive job opens 4 more (<code>backend/defensives.py:235</code>), so many requests can be in flight on one key at once.</p></div></details><details><summary><span class="gtag warn">!</span>Casts and Buffs cover more than the pulls<span class="chev">›</span></summary><div class="body"><p>they start 3 minutes (<code>ENCOUNTER_RESET_MS</code>) before the first pull and run to the last pull's end, trash included (<code>backend/defensives.py:34</code>, <code>backend/defensives.py:225</code>). This costs more pages than a pull-scoped query but catches a defensive pressed just before a pull.</p></div></details><details><summary><span class="gtag warn">!</span>Deaths are scoped by time, not by pull<span class="chev">›</span></summary><div class="body"><p><code>get_report_deaths_bulk</code> sends <code>startTime</code> and <code>endTime</code> but no <code>fightIDs</code> (<code>backend/analysis.py:355-428</code>), so trash deaths between kept pulls come back too and are dropped in code.</p></div></details><details><summary><span class="gtag warn">!</span>A build script skips the endTime rule<span class="chev">›</span></summary><div class="body"><p><code>_events</code> in <code>backend/scripts/build_armor_constants.py:46-57</code> queries DamageTaken with <code>fightIDs</code> and a <code>startTime</code> but no <code>endTime</code>, the shape <code>backend/defensives.py:745-746</code> says WCL answers with an empty second page.</p></div></details><details><summary><span class="gtag warn">!</span>No live cost reading<span class="chev">›</span></summary><div class="body"><p>nothing reads <code>rateLimitData</code>, so the site cannot tell an officer how many points an analysis used or how many are left.</p></div></details></div></div></section>
+<section id="context-map"><div class="wrap reveal"><div class="sec-head"><span class="num">07</span><h3>Context map</h3></div><div class="ctx"><div class="ctxcol dep"><span class="cl">Depends on</span><ul><li><a class="inline" href="../warcraftlogs/api-client.html">warcraftlogs-api-client</a> — graphql_query and the paging helpers every query goes through</li><li><a class="inline" href="../data-model.html">data-model</a> — the Supabase report_cache table behind the shared caches</li></ul></div><div class="ctxcol prov"><span class="cl">Provides</span><ul><li>a bounded number of WCL queries per report</li><li>cached fights, deaths, defensive data and hits for finished reports</li></ul></div><div class="ctxcol rely"><span class="cl">Relied on by</span><ul><li><a class="inline" href="../backend/index.html">backend</a> — the Analyze stream issues these queries</li><li><a class="inline" href="../backend/defensive-analysis.html">backend-defensive-analysis</a> — reads the defensive events and death windows</li><li><a class="inline" href="../backend/death-descriptions.html">backend-death-descriptions</a> — reads the hits before each death</li></ul></div><div class="ctxhere">You are here · <b>WCL Point Budget</b></div></div></div></section>
+<section id="related"><div class="wrap reveal"><div class="sec-head"><span class="num">08</span><h3>Related</h3></div><ul class="clean"><li><a class="inline" href="../warcraftlogs/index.html">warcraftlogs</a> — the overall read path these limits apply to</li><li><a class="inline" href="../warcraftlogs/api-client.html">warcraftlogs-api-client</a> — retries, paging and the request functions</li><li><a class="inline" href="../backend/index.html">backend</a> — the Analyze stream and its report workers</li><li><a class="inline" href="../backend/defensive-analysis.html">backend-defensive-analysis</a> — why the defensive queries fetch what they fetch</li><li><a class="inline" href="../backend/death-descriptions.html">backend-death-descriptions</a> — uses the death windows fetched here</li><li><a class="inline" href="../data-model.html">data-model</a> — the <code>report_cache</code> table</li><li><a class="inline" href="../game-data/index.html">game-data</a> — the build scripts that also spend WCL points</li><li><a class="inline" href="../operations.html">operations</a> — running those scripts with <code>WCL_CLIENT_ID</code> and <code>WCL_CLIENT_SECRET</code></li></ul>
+<div class="related"><a class="relcard" href="../warcraftlogs/index.html"><span class="arr">→</span><span class="rt">WarcraftLogs Integration</span><span class="rd">documented</span></a><a class="relcard" href="../warcraftlogs/api-client.html"><span class="arr">→</span><span class="rt">WCL API Client</span><span class="rd">documented</span></a><a class="relcard" href="../backend/index.html"><span class="arr">→</span><span class="rt">Backend API</span><span class="rd">documented</span></a><a class="relcard" href="../backend/defensive-analysis.html"><span class="arr">→</span><span class="rt">Defensive Analysis</span><span class="rd">documented</span></a><a class="relcard" href="../backend/death-descriptions.html"><span class="arr">→</span><span class="rt">Death Descriptions</span><span class="rd">documented</span></a><a class="relcard" href="../data-model.html"><span class="arr">→</span><span class="rt">Data Model</span><span class="rd">documented</span></a><a class="relcard" href="../game-data/index.html"><span class="arr">→</span><span class="rt">Game Data Catalogs</span><span class="rd">documented</span></a><a class="relcard" href="../operations.html"><span class="arr">→</span><span class="rt">Operations &amp; New Tier</span><span class="rd">documented</span></a></div></div></section>
+
+    <footer><span class="lvlnote">Level 3 of 3</span><p>Floor Pov — WCL Point Budget · generated by project-atlas</p><p>Content hash <code>sha256:0ee4cf2059b93dca31bbc651242fc4fcdc014b7614de8579f1cfcb11dc602b81</code></p></footer>
+  </main>
+</div>
+
+<div id="tip" role="tooltip"></div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ── dead/placeholder links (href="#") never scroll-jump ── */
+  document.addEventListener('click', function(e){
+    var a = e.target.closest && e.target.closest('a[href="#"]');
+    if(a){ e.preventDefault(); }
+  });
+
+  /* ── atlas-map: collapse to a hamburger on mobile (keeps the <details> a11y
+     open-state aligned with what's visible; desktop stays open) ── */
+  var amap = document.querySelector('.amap-wrap');
+  if(amap && window.matchMedia && window.matchMedia('(max-width:880px)').matches){ amap.removeAttribute('open'); }
+
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+  var hasIO = 'IntersectionObserver' in window;
+
+  /* ── scroll-spy nav ── */
+  var links = Array.prototype.slice.call(document.querySelectorAll('nav.toc a'));
+  var byId = {};
+  links.forEach(function(a){
+    var href = a.getAttribute('href');
+    if(href && href.charAt(0) === '#'){ byId[href.slice(1)] = a; }
+  });
+  if(hasIO){
+    var observed = document.querySelectorAll('section[id], .dcard[id]');
+    var spy = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if(e.isIntersecting){
+          var a = byId[e.target.id];
+          if(a){
+            links.forEach(function(x){x.classList.remove('active');});
+            a.classList.add('active');
+          }
+        }
+      });
+    },{rootMargin:'-14% 0px -72% 0px',threshold:0});
+    observed.forEach(function(s){spy.observe(s);});
+  }
+
+  /* ── reveal on scroll ── */
+  if(reduce || !hasIO){
+    document.querySelectorAll('.reveal').forEach(function(el){el.classList.add('in');});
+  } else {
+    var rev = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('in'); rev.unobserve(e.target); } });
+    },{rootMargin:'0px 0px -8% 0px',threshold:0});
+    document.querySelectorAll('.reveal').forEach(function(el){rev.observe(el);});
+  }
+
+  /* ── interactive steppers (data-driven from embedded JSON) ── */
+  document.querySelectorAll('.stepper-wrap').forEach(function(wrap){
+    var dataEl = wrap.querySelector('script[type="application/json"]');
+    if(!dataEl) return;
+    var steps;
+    try { steps = JSON.parse(dataEl.textContent); } catch(err){ return; }
+    var panel = wrap.querySelector('.panel');
+    var tabs = Array.prototype.slice.call(wrap.querySelectorAll('.step'));
+    function render(i){
+      var s = steps[i]; if(!s) return;
+      var html = '<h4>'+s.title+'</h4><div class="pbody">'+s.body+'</div>';
+      if(s.gotcha){
+        html += '<div class="gotcha"><span class="gl">Gotcha</span><p>'+s.gotcha+'</p></div>';
+      }
+      panel.innerHTML = html;
+    }
+    tabs.forEach(function(t,idx){
+      t.addEventListener('click',function(){
+        tabs.forEach(function(x){x.setAttribute('aria-selected','false');});
+        t.setAttribute('aria-selected','true');
+        render(idx);
+      });
+      t.addEventListener('keydown',function(e){
+        var dir = e.key==='ArrowRight'?1:e.key==='ArrowLeft'?-1:0;
+        if(!dir) return;
+        e.preventDefault();
+        var next = (idx+dir+tabs.length)%tabs.length;
+        tabs[next].focus(); tabs[next].click();
+      });
+    });
+    render(0);
+  });
+
+  /* ── filterable inventory chips ── */
+  document.querySelectorAll('.inventory').forEach(function(invRoot){
+    var chips = Array.prototype.slice.call(invRoot.querySelectorAll('.fchip'));
+    var rows = Array.prototype.slice.call(invRoot.querySelectorAll('tbody tr'));
+    var countEl = invRoot.querySelector('.inv-count');
+    var total = rows.length;
+    function apply(f){
+      var shown = 0;
+      rows.forEach(function(r){
+        var match = (f === 'all') || (r.getAttribute('data-domain') === f);
+        r.hidden = !match;
+        if(match) shown++;
+      });
+      if(countEl) countEl.textContent = shown + ' / ' + total;
+    }
+    chips.forEach(function(c){
+      c.addEventListener('click',function(){
+        chips.forEach(function(x){x.setAttribute('aria-pressed','false');});
+        c.setAttribute('aria-pressed','true');
+        apply(c.getAttribute('data-filter'));
+      });
+    });
+  });
+
+  /* ── hover / focus glossary tooltips ── */
+  var tip = document.getElementById('tip');
+  function showTip(el){
+    tip.innerHTML = el.getAttribute('data-tip');
+    var r = el.getBoundingClientRect();
+    tip.classList.add('show');
+    var top = r.bottom + 8, left = Math.min(r.left, window.innerWidth - tip.offsetWidth - 14);
+    if(top + tip.offsetHeight > window.innerHeight - 8) top = r.top - tip.offsetHeight - 8;
+    tip.style.top = Math.max(8,top)+'px'; tip.style.left = Math.max(8,left)+'px';
+  }
+  function hideTip(){ tip.classList.remove('show'); }
+  document.querySelectorAll('.term').forEach(function(el){
+    el.addEventListener('mouseenter',function(){showTip(el);});
+    el.addEventListener('mouseleave',hideTip);
+    el.setAttribute('tabindex','0');
+    el.addEventListener('focus',function(){showTip(el);});
+    el.addEventListener('blur',hideTip);
+  });
+
+  /* ── atlas search ── */
+  function asNorm(s){ return String(s == null ? '' : s).toLowerCase(); }
+  function asTerms(q){ return asNorm(q).split(/\s+/).filter(Boolean); }
+  function searchIndex(entries, query){
+    var terms = asTerms(query);
+    if(!terms.length || !entries) return [];
+    var scored = [];
+    for(var i=0;i<entries.length;i++){
+      var e = entries[i], hi = asNorm(e.hi), body = asNorm(e.body), ok = true, score = 0;
+      for(var t=0;t<terms.length;t++){
+        var term = terms[t];
+        if(hi.indexOf(term) !== -1){ score += 10; if(hi.indexOf(term)===0) score += 4; }
+        else if(body.indexOf(term) !== -1){ score += 2; }
+        else { ok = false; break; }
+      }
+      if(ok){ score += (asNorm(e.title).indexOf(asNorm(query))===0 ? 3 : 0); scored.push({ e:e, s:score }); }
+    }
+    scored.sort(function(a,b){ return b.s - a.s; });
+    return scored.slice(0,20).map(function(x){ return x.e; });
+  }
+  // exposed for tests + runtime
+  window.ATLAS_SEARCH = { search: searchIndex };
+
+  function escHtml(s){ return String(s).replace(/[&<>"]/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]; }); }
+  function highlight(text, terms){
+    var out = escHtml(text);
+    for(var i=0;i<terms.length;i++){
+      var re = new RegExp('(' + terms[i].replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + ')', 'ig');
+      out = out.replace(re, '<mark>$1</mark>');
+    }
+    return out;
+  }
+  function getIndex(){ return (window.ATLAS_SEARCH_INDEX && window.ATLAS_SEARCH_INDEX.entries) || null; }
+
+  var box = document.querySelector('.atlas-search');
+  if(box){
+    var input = box.querySelector('.as-input');
+    var results = box.querySelector('.as-results');
+    var base = box.getAttribute('data-atlas-base') || '';
+    var active = -1, current = [];
+    function hrefFor(e){ return base + e.page + (e.anchor ? '#' + e.anchor : ''); }
+    function close(){ results.hidden = true; results.innerHTML = ''; active = -1; current = []; }
+    function render(){
+      var q = input.value.trim();
+      if(!q){ close(); return; }
+      var idx = getIndex();
+      if(!idx){ results.hidden = false; results.innerHTML = '<div class="as-empty">Search index unavailable — view this Atlas via a local server.</div>'; return; }
+      current = searchIndex(idx, q);
+      active = -1;
+      if(!current.length){ results.hidden = false; results.innerHTML = '<div class="as-empty">No matches.</div>'; return; }
+      var terms = asTerms(q);
+      results.innerHTML = current.map(function(e){
+        var crumb = escHtml(e.domain || '') + (e.heading ? ' › ' + escHtml(e.heading) : '');
+        return '<a class="as-res" href="' + escHtml(hrefFor(e)) + '">' +
+          '<span class="as-crumb">' + crumb + '</span>' +
+          '<span class="as-h">' + highlight(e.title, terms) + '</span></a>';
+      }).join('');
+      results.hidden = false;
+    }
+    function setActive(n){
+      var items = results.querySelectorAll('.as-res');
+      if(!items.length) return;
+      active = (n + items.length) % items.length;
+      for(var i=0;i<items.length;i++){ items[i].classList.toggle('as-active', i===active); }
+      items[active].scrollIntoView({ block:'nearest' });
+    }
+    input.addEventListener('input', render);
+    input.addEventListener('keydown', function(e){
+      if(e.key === 'ArrowDown'){ e.preventDefault(); setActive(active + 1); }
+      else if(e.key === 'ArrowUp'){ e.preventDefault(); setActive(active - 1); }
+      else if(e.key === 'Enter'){
+        var items = results.querySelectorAll('.as-res');
+        var pick = active >= 0 ? items[active] : items[0];
+        if(pick){ e.preventDefault(); window.location.href = pick.getAttribute('href'); }
+      } else if(e.key === 'Escape'){ input.value = ''; close(); input.blur(); }
+    });
+    document.addEventListener('keydown', function(e){
+      if((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')){ e.preventDefault(); input.focus(); input.select(); }
+    });
+    document.addEventListener('click', function(e){ if(!box.contains(e.target)) close(); });
+  }
+})();
+</script>
+</body>
+</html>

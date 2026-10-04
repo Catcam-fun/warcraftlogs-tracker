@@ -45,8 +45,8 @@ invariants:
   - "MUST: user dates may only narrow RAID_DATE_WINDOWS, never widen it."
   - "MUST: drop duplicate pulls before fetching deaths, so a pull logged by three raiders is counted once."
   - "NEVER: cache the deaths of a report that failed to load; get_report_deaths_bulk re-raises so the caller records the failure instead."
+content_hash: sha256:7c2cf45f3df4e96f56abfa3cb0efadc7e8f56bf7e6ef16f9c4cf598d8d77e886
 ---
-
 ## Summary
 
 - `POST /api/analyze` (`backend/app.py:82`) reads its JSON body, checks the bearer token, then returns a streaming response driven by the inner `generate()` function (`backend/app.py:95`). Everything on this page happens inside that generator. The stream format is on [[backend-api-endpoints]].

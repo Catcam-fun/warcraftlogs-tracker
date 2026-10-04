@@ -46,8 +46,8 @@ invariants:
   - "NEVER: let a cheat death take a real death's slot; it is counted separately as +N cheat (frontend/src/deathCounting.js:31)."
   - "MUST: defensive analysis exist only for deaths that could count (slot <= maxCutoff, not in a wipe, not a cheat death) (backend/app.py:514)."
   - "NEVER: call the server when a filter changes; every table is recomputed from the loaded result (frontend/src/App.js:1240)."
+content_hash: sha256:7ffefd57a48e52e49165830719cc1d778112c53586b28de22480691ab2109e14
 ---
-
 ## Summary
 
 - **What it is.** The `/results` route (`frontend/src/App.js:1566`) shows the analysis held in app state: a filter bar, a collapsible death-rate matrix, and a player list whose rows expand into a per-boss death log.

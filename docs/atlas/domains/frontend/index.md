@@ -43,8 +43,8 @@ links:
   - feat-saved
   - feat-share
   - feat-account
+content_hash: sha256:10988e95c357a04ecd46fcf6d3dffcc8da30d3023532039c40e130bb67734dba
 ---
-
 ## Summary
 
 The **frontend** is the React (Create React App) site at the top of Floor Pov. It renders the landing page, the Analyze form, the Results breakdown and the Saved list, and it consumes the backend's streamed analysis directly in the browser.

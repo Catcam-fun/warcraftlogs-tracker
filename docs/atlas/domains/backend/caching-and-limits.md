@@ -44,8 +44,8 @@ invariants:
   - "MUST: treat every shared-cache failure as a miss; an analysis never fails because Supabase is down."
   - "NEVER: make an analysis wait on a Supabase cache write; writes run on a background pool."
   - "NEVER: give the anon or authenticated roles access to report_cache; only the service role reads and writes it."
+content_hash: sha256:9fd95536863471b9de34ad2884c8cf56a7f9e49c9ece40506a5421557323773a
 ---
-
 ## Summary
 
 - An analysis can touch dozens of reports. The caches make a second analysis of the same guild, or another officer's analysis, cost few or no WarcraftLogs API points. The module docstring states the idea: a finished report never changes (`backend/cache.py:4`).

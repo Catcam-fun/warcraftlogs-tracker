@@ -44,8 +44,8 @@ links:
   - operations
   - feat-analyze
   - feat-results
+content_hash: sha256:b23ce83e289001d8805a5a6b87a28281370e4cc07d9e939f922163b3acd2802a
 ---
-
 ## Summary
 
 - **Floor Pov** is a death-analysis site for World of Warcraft raid guilds. The landing page puts it as: it "reads a WarcraftLogs report and rebuilds the raid night around death — who fell each pull, where the wipes cascaded, and which bosses kept ending you" (`frontend/src/LandingPage.js:186`).

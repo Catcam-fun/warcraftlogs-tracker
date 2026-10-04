@@ -40,8 +40,8 @@ links:
   - warcraftlogs
   - frontend-results-view
   - feat-results
+content_hash: sha256:791998cfd8c5ed73b2e3214146de6eb0966f7dcbdc2b7d79c72c0aa05c3aa9a2
 ---
-
 ## Summary
 
 - `backend/defensives.py` answers one question per death: **what could this player have pressed, and would it have kept them alive?**

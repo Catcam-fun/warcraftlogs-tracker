@@ -46,8 +46,8 @@ links:
   - feat-analyze
   - feat-share
   - feat-saved
+content_hash: sha256:23ba85d2dcb1ac73f28d0e621e5befd2161f1209f59a5d93a79a5b85057bd1f5
 ---
-
 ## Summary
 
 The **Results view** is what a raid officer reads after an analysis. It lives inside the `/results` route in `frontend/src/App.js:1566`, with two leaf components for the detail: `DeathRow.js` and `DefensivePanel.js`.

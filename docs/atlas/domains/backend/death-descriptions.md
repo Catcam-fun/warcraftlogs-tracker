@@ -36,8 +36,8 @@ links:
   - warcraftlogs
   - frontend-results-view
   - feat-results
+content_hash: sha256:6cf29cab020047cb0322f3f947f494e543e8059cb32ec62c3c08e076df373f81
 ---
-
 ## Summary
 
 - The description is computed at the end of `assess_survival` in `backend/defensives.py`, on the same replayed hits used for the "would it have saved them" verdict (`backend/defensives.py:1643`). See [[backend-defensive-analysis]] for that replay.

@@ -46,8 +46,8 @@ invariants:
   - "MUST: rebuild spell_icons.py after rebuilding defensive_catalog.py; the icon script reads every catalog ability."
   - "MUST: bump CACHE_VERSION in cache.py when what gets fetched or how it is indexed changes, so old shared-cache rows are never served to new code."
   - "NEVER: hand-edit the generated modules (defensive_catalog.py, boss_spell_flags.py, boss_spell_text.py, spell_icons.py, armor_constants.py, raid_wide_damage.py); edit the script and rerun it."
+content_hash: sha256:96c67bdd4682f9acb6d0515b0462e878806e536f26197a32d19a5943c5c824e0
 ---
-
 ## Summary
 
 - **Config is small.** The API reads seven environment variables; the build and check scripts read three more. No WarcraftLogs key lives on the server.
@@ -148,7 +148,7 @@ Failure modes visible in the code, and what the user sees:
 
 - **Errors after streaming starts are HTTP 200**: once `/api/analyze` begins, every failure is a `data: {"error": ...}` event. Uptime checks that only look at status codes will not see them.
 - **The memory share fallback is per process**: with Supabase missing, a share created on one gunicorn worker is invisible to another and vanishes on restart.
-- **Debug output is unconditional**: the `[DEBUG]` and `[DEDUP]` prints in `get_report_deaths_bulk` run on every report, so logs grow with every analysis.
+- **Debug output is unconditional**: the `[DEBUG]` prints in `get_report_deaths_bulk` (`backend/analysis.py:455`) run for every report that is not served from cache, and the `[DEDUP]` lines add more when cheat-death detection is on, so logs grow with every analysis.
 - **The current-tier windows have no end**: `None` in `RAID_DATE_WINDOWS` means "up to today". When a tier closes, set its end date, or its analyses keep listing every newer report.
 - **Unknown raid keys do not fail**: a key missing from `RAID_ENCOUNTERS` silently falls back to the zone filter (`backend/analysis.py:278`), so a typo in the frontend key returns plausible but wrong pulls.
 

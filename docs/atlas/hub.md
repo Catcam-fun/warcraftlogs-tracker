@@ -20,6 +20,7 @@ anchors:
   final_result: backend/app.py:606
 links: [overview, frontend, backend, warcraftlogs, data-model, auth, game-data, feat-analyze, feat-results]
 flows: [request-path, share-path, data-build-path]
+content_hash: sha256:097d0f235eb2cf531fac4774ef5ada5b45039fe93ca340b340fbf8d492584ab9
 ---
 ## Summary
 

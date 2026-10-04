@@ -48,8 +48,8 @@ invariants:
   - "NEVER: serve a cached defensive entry built with a different catalog; the key carries the catalog fingerprint."
 flows:
   - request-path
+content_hash: sha256:0ee4cf2059b93dca31bbc651242fc4fcdc014b7614de8579f1cfcb11dc602b81
 ---
-
 ## Summary
 
 - WarcraftLogs (WCL) charges each API key **points**. The code's own comment states the rule it is built around: about one point per page of events, and at least one per event block (`backend/defensives.py:771-772`). Fewer pages and fewer blocks mean a cheaper analysis.

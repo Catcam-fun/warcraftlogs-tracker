@@ -40,8 +40,8 @@ invariants:
   - "MUST: an /api/analyze stream ends with exactly one result event or one error event; the client treats the first error as final."
   - "MUST: cheat-death detection runs only for a request with a valid bearer token, whatever enableCheatDeath says."
   - "NEVER: return stored credentials; shares and saves pass config through strip_secrets on the way in and out."
+content_hash: sha256:bf01951ce3cc314f94ec70a8f34ba05eacde86c3759f2472eb8973429651d0ce
 ---
-
 ## Summary
 
 - All routes live in `backend/app.py`. CORS covers `/api/*` with the origins from `ALLOWED_ORIGINS`, headers `Content-Type` and `Authorization`, and methods GET, POST, DELETE, OPTIONS (`backend/app.py:65`).

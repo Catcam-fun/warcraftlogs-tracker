@@ -37,8 +37,8 @@ invariants:
   - "MUST: a GraphQL response with an errors array raises, never returns partial data silently."
   - "MUST: every event fetch follows nextPageTimestamp so long reports don't lose events past the first page."
   - "NEVER: use an accent-stripped name in a WCL filter expression; it matches nobody."
+content_hash: sha256:d7ab93cb13cfc49e0399a828d393a50d9219136c174603607fec382cb705c047
 ---
-
 ## Summary
 
 - All WCL traffic goes through two helpers in `backend/warcraftlogs.py`: `make_request_with_retry` (HTTP with backoff) and `graphql_query` (POST a query with a bearer token).
