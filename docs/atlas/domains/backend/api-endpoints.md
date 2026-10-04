@@ -22,7 +22,7 @@ anchors:
   storage_response: backend/app.py:671
   require_user: backend/auth.py:79
   limit_decorator: backend/ratelimit.py:47
-  frontend_sse_reader: frontend/src/App.js:751
+  frontend_sse_reader: frontend/src/App.js:750
 links:
   - backend
   - backend-analysis-pipeline
@@ -40,7 +40,7 @@ invariants:
   - "MUST: an /api/analyze stream ends with exactly one result event or one error event; the client treats the first error as final."
   - "MUST: cheat-death detection runs only for a request with a valid bearer token, whatever enableCheatDeath says."
   - "NEVER: return stored credentials; shares and saves pass config through strip_secrets on the way in and out."
-content_hash: sha256:98f127f4286c5e5fe5f86777903370c44f4a6edaaa65ef46cf380a92a642a773
+content_hash: sha256:521d80553dbb5edc35e507cc72be770ad13fc5b982a3252debb16b03af94eef0
 ---
 ## Summary
 
@@ -86,7 +86,7 @@ Storage routes share one mapper, `_storage_response` (`backend/app.py:671`): a r
 
 #### The /api/analyze SSE protocol
 
-The route returns `Response(generate(), mimetype='text/event-stream')` with `Cache-Control: no-cache` and `X-Accel-Buffering: no` so proxies do not buffer the stream (`backend/app.py:618`). Each event is a single `data: <json>` line followed by a blank line. There are no `event:` names or ids; the JSON keys say what the event is. The frontend splits on blank lines and dispatches on `error`, then `message`, then `result` (`frontend/src/App.js:751`).
+The route returns `Response(generate(), mimetype='text/event-stream')` with `Cache-Control: no-cache` and `X-Accel-Buffering: no` so proxies do not buffer the stream (`backend/app.py:618`). Each event is a single `data: <json>` line followed by a blank line. There are no `event:` names or ids; the JSON keys say what the event is. The frontend splits on blank lines and dispatches on `error`, then `message`, then `result` (`frontend/src/App.js:750`).
 
 | Event {sse} | Shape | When |
 |---|---|---|
@@ -133,7 +133,7 @@ relied-on-by: [[feat-account]] — account deletion
 
 ## Invariants
 
-- **MUST** end an `/api/analyze` stream with exactly one `result` event or one `error` event; the client throws on the first `error` (`frontend/src/App.js:754`).
+- **MUST** end an `/api/analyze` stream with exactly one `result` event or one `error` event; the client throws on the first `error` (`frontend/src/App.js:753`).
 - **MUST** gate cheat-death detection on a valid bearer token, whatever `enableCheatDeath` says, since a shared config or a direct call can set the flag (`backend/app.py:91`).
 - **NEVER** return stored credentials: shares and saves pass `config` through `strip_secrets` when stored and when read (`backend/supabase_client.py:223`, `backend/supabase_client.py:259`).
 
@@ -141,7 +141,7 @@ relied-on-by: [[feat-account]] — account deletion
 
 - **A 200 does not mean success**: `/api/analyze` commits to 200 before any work. Read the stream for an `error` event.
 - **Share errors use the shared status mapper**: `share_results` answers a storage error through `_storage_response` (`backend/app.py:649`), so too large is 413 and anything else 500.
-- **Shares can live only in memory**: if the Supabase insert fails, the share is kept in process memory (`backend/supabase_client.py:241`) and the route passes `ephemeral: true` to the browser (`backend/app.py:653`), which warns that the link stops working when the server restarts (`frontend/src/App.js:1458`, `frontend/src/shareNote.js`).
+- **Shares can live only in memory**: if the Supabase insert fails, the share is kept in process memory (`backend/supabase_client.py:241`) and the route passes `ephemeral: true` to the browser (`backend/app.py:653`), which warns that the link stops working when the server restarts (`frontend/src/App.js:1457`, `frontend/src/shareNote.js`).
 - **Cutoff keys become strings**: `pullCutoffTimestamps` uses integer keys in Python, which JSON turns into strings.
 
 ## Related

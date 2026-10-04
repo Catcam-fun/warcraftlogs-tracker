@@ -18,7 +18,7 @@ anchors:
   spell_icons: backend/spell_icons.py:1
   imports_defensives: backend/defensives.py:25
   import_app: backend/app.py:33
-  raid_encounters: backend/analysis.py:196
+  raid_encounters: backend/analysis.py:188
   wago_table: backend/scripts/build_defensive_catalog.py:414
 links:
   - game-data-defensive-catalog
@@ -36,7 +36,7 @@ invariants:
   - "MUST: a new raid is added to RAID_ENCOUNTERS before the boss-side scripts run, since all four read it."
 flows:
   - data-build-path
-content_hash: sha256:35508de343cfe30ce9cd18bf8402efc83e47a27f1806a3046edd47d1dccfa9f2
+content_hash: sha256:6f0d07cd232febe7de6733d53f2fdba6abe6fd1e8253972f7a590c75adaf1b71
 ---
 ## Summary
 
@@ -113,7 +113,7 @@ band structural "Committed to the repo"
 
 - **MUST** change a generated module by rerunning its build script, never by hand; each header names the script (`backend/defensive_catalog.py:1-2`, `backend/armor_constants.py:1`).
 - **MUST** run `build_spell_icons.py` after `build_defensive_catalog.py`, because it imports the catalog it reads names from (`backend/scripts/build_spell_icons.py:25`, `backend/scripts/build_spell_icons.py:60-64`).
-- **MUST** add a new raid to `RAID_ENCOUNTERS` (`backend/analysis.py:196`) before the boss-side scripts run; all four import it (`backend/scripts/build_boss_spell_flags.py:22`, `backend/scripts/build_boss_spell_text.py:30`, `backend/scripts/build_armor_constants.py:32`, `backend/scripts/build_raid_wide.py:23`).
+- **MUST** add a new raid to `RAID_ENCOUNTERS` (`backend/analysis.py:188`) before the boss-side scripts run; all four import it (`backend/scripts/build_boss_spell_flags.py:22`, `backend/scripts/build_boss_spell_text.py:30`, `backend/scripts/build_armor_constants.py:32`, `backend/scripts/build_raid_wide.py:23`).
 
 ## Gotchas
 

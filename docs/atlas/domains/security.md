@@ -51,13 +51,13 @@ invariants:
   - "MUST: share and save bodies pass _looks_like_analysis before anything is stored."
   - "NEVER: the browser reads saved_analyses, shared_results or report_cache; RLS is on and no policies grant it."
   - "NEVER: a WarcraftLogs secret is used as a cache key in plain form; the token cache keys on a SHA-256 of id and secret."
-content_hash: sha256:318538816d171654238f7bd93bc0542776f51100bf604bd749fdff9907d9adfb
+content_hash: sha256:6a0924e6fc7f13fe48a41baee1bea5ee32b36d11a8f67f431729a1175c43af40
 ---
 # Security & Trust Boundaries
 
 ## Summary
 
-- There is no shared server-side WarcraftLogs key. Each officer brings their own WarcraftLogs API client ID and secret; the browser keeps them in `localStorage` under `fpx.wclCredentials` (`frontend/src/api.js:18`) and sends them in the body of every `POST /api/analyze` (`frontend/src/App.js:710`). Signed-in users can also store them in Supabase `api_credentials` (`frontend/src/App.js:603`).
+- There is no shared server-side WarcraftLogs key. Each officer brings their own WarcraftLogs API client ID and secret; the browser keeps them in `localStorage` under `fpx.wclCredentials` (`frontend/src/api.js:18`) and sends them in the body of every `POST /api/analyze` (`frontend/src/App.js:709`). Signed-in users can also store them in Supabase `api_credentials` (`frontend/src/App.js:602`).
 - The backend uses those credentials only for the length of one analysis. It exchanges them for a WarcraftLogs token through a Cloudflare Worker proxy (`backend/warcraftlogs.py:16`) and caches the token keyed by a SHA-256 of `id:secret` (`backend/warcraftlogs.py:93`).
 - Everything that persists an analysis (saves, shares, local recent runs) removes `clientId` and `clientSecret` first, in the browser (`frontend/src/api.js:40`) and again on the server (`backend/supabase_client.py:61`).
 - Supabase is the data and identity store. The browser holds only the public anon key; the backend holds the service-role key and the anon key. Row-level security keeps the anon key away from every table except the user's own credentials row (`backend/migrations/001_shares_and_rls.sql:23`, `:36`).
@@ -100,7 +100,7 @@ A request crosses the same gates in the same order. The steps follow one analysi
 
 ```steps
 - title: Credentials in the browser | short: Browser creds | sub: localStorage, signed in or not
-  body: The analyze form's client ID and secret are written to localStorage on every change (frontend/src/App.js:218 calling frontend/src/api.js:30) and read back on load (frontend/src/api.js:20). Every access is wrapped in try/catch so a blocked storage just starts the form empty. Signed-in users also get a copy in Supabase api_credentials, written only when the values changed (frontend/src/App.js:587).
+  body: The analyze form's client ID and secret are written to localStorage on every change (frontend/src/App.js:218 calling frontend/src/api.js:30) and read back on load (frontend/src/api.js:20). Every access is wrapped in try/catch so a blocked storage just starts the form empty. Signed-in users also get a copy in Supabase api_credentials, written only when the values changed (frontend/src/App.js:586).
   gotcha: The secret sits in plain text in localStorage and in the api_credentials.client_secret column. Any script running on the site's origin can read the localStorage copy; RLS is the only guard on the column.
 - title: CORS and body size | short: CORS | sub: before any route
   body: flask-cors allows the origins listed in ALLOWED_ORIGINS for /api/* paths, with only the Content-Type and Authorization headers and the GET, POST, DELETE and OPTIONS methods (backend/app.py:64). Flask rejects any body over 25 MB with 413 before a route runs (backend/app.py:59).
@@ -114,7 +114,7 @@ A request crosses the same gates in the same order. The steps follow one analysi
 - title: Use WCL credentials | short: WCL token | sub: through the proxy
   body: get_access_token sends the id and secret as HTTP Basic auth to the proxy's /oauth/token (backend/warcraftlogs.py:101) and caches the token per credential pair until 60 seconds before it expires (backend/warcraftlogs.py:130). The credentials are not written anywhere by the backend.
 - title: Store without secrets | short: Strip + store | sub: both sides, then RLS
-  body: The browser strips clientId and clientSecret before a share, a save and a recent-run write (frontend/src/App.js:633, frontend/src/SaveReportDialog.js:27, frontend/src/App.js:481). The server strips a wider key set (client ids, secrets, password, token, access tokens) before packing and again when returning (backend/supabase_client.py:57, :101, :214, :250). Rows go in with the service-role key into tables that have RLS on and no policies.
+  body: The browser strips clientId and clientSecret before a share, a save and a recent-run write (frontend/src/App.js:632, frontend/src/SaveReportDialog.js:27, frontend/src/App.js:480). The server strips a wider key set (client ids, secrets, password, token, access tokens) before packing and again when returning (backend/supabase_client.py:57, :101, :214, :250). Rows go in with the service-role key into tables that have RLS on and no policies.
 ```
 
 ## Reference

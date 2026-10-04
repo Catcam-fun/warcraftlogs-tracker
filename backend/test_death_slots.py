@@ -50,10 +50,6 @@ class DeathSlotTests(unittest.TestCase):
         self.assertEqual(counted(deaths, 2), ["Squidfear"])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class SaveThatDiedTests(unittest.TestCase):
     def test_a_save_only_counts_if_they_survived_it(self):
         # Purgatory not healed off: dead 3.5s after it triggered. Only the real death stays.
@@ -61,3 +57,6 @@ class SaveThatDiedTests(unittest.TestCase):
         kept = drop_saves_that_died(deaths)
         self.assertEqual([(d["targetID"], d["isCheatDeath"]) for d in kept], [("A", False), ("B", True), ("B", False)])
 
+
+if __name__ == "__main__":
+    unittest.main()

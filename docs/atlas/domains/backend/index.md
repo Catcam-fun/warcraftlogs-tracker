@@ -37,7 +37,7 @@ invariants:
   - "MUST: run under a threaded worker (gthread); a sync worker lets one analysis stream block every other request."
   - "MUST: keep WEB_CONCURRENCY at 1 unless shared state moves out of process; caches and rate limits live in process memory."
   - "NEVER: hard-code a WarcraftLogs API key on the server; each analysis brings the caller's own clientId and clientSecret."
-content_hash: sha256:37206cb74c5cca87de18904e36ceae90b14955e9d3d9e62596054c0bb9fee994
+content_hash: sha256:1de42a85729c65966c163044ece781902c82c518a46997abbe0899ca48599277
 ---
 ## Summary
 
@@ -149,7 +149,7 @@ The repository holds no `render.yaml` or `Procfile`; the Render start command an
 
 - **The analysis body is read before streaming starts**: `request.get_json` and the sign-in check run before the generator (`backend/app.py:88`, `backend/app.py:93`), because the generator runs after Flask's request context is gone.
 - **Errors after the stream starts are not HTTP errors**: once `/api/analyze` returns 200, a failure arrives as a `data: {"error": ...}` event. Only a bad JSON body (400) and the rate limit (429) are real HTTP errors.
-- **Free-tier sleep**: the frontend pings `/api/health` on load (`frontend/src/App.js:263`), which, per the comment at `frontend/src/App.js:258`, starts waking a Render instance that slept after idling, while the user is still filling in the form.
+- **Free-tier sleep**: the frontend pings `/api/health` on load (`frontend/src/App.js:262`), which, per the comment at `frontend/src/App.js:257`, starts waking a Render instance that slept after idling, while the user is still filling in the form.
 
 ## Related
 

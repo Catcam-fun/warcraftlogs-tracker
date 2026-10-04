@@ -26,7 +26,7 @@ anchors:
   cache_budget: backend/supabase_client.py:273
   evict: backend/supabase_client.py:362
   delete_account: backend/supabase_client.py:384
-  creds_client_write: frontend/src/App.js:600
+  creds_client_write: frontend/src/App.js:599
 links:
   - backend
   - auth
@@ -44,7 +44,7 @@ invariants:
   - "MUST: retention_days is clamped to 1-30 before a save is written."
   - "NEVER: the browser reads saved_analyses, shared_results or report_cache directly; they have RLS on and no policies."
   - "NEVER: a report_cache failure breaks an analysis; every cache call is best-effort."
-content_hash: sha256:5b3c1bd1e7d474e2ceb51beb424ae20c08029c9bb1ffea1f9958fce69563bf74
+content_hash: sha256:11fb14d7e19416c280240b10f31d28d85e4dd0d02ca5c17684685b361f69811b
 ---
 # Data Model
 
@@ -104,7 +104,7 @@ Columns as defined by the migrations, or, for tables created outside this repo, 
 | `created_at`, `last_used_at` {cache} | timestamps; index on `last_used_at` | `last_used_at` bumped on every hit (`backend/supabase_client.py:334`) |
 | `api_credentials` {creds} | created outside the repo; RLS + 4 policies at `001_shares_and_rls.sql:36` | Read and written by the browser |
 | `id`, `user_id` {creds} | ids | Policies require `auth.uid() = user_id` |
-| `client_id`, `client_secret`, `last_used` {creds} | text; timestamp | Written by `frontend/src/App.js:603` and `frontend/src/Settings.js:81` |
+| `client_id`, `client_secret`, `last_used` {creds} | text; timestamp | Written by `frontend/src/App.js:602` and `frontend/src/Settings.js:81` |
 
 ## How it works
 
@@ -145,7 +145,7 @@ Each table has its own write path and its own way of getting rid of old rows.
 - **Eviction reads all rows in one select**: `evict_report_cache` does not page its `select` (`backend/supabase_client.py:366`). If the PostgREST row cap is lower than the table's row count, the oldest rows never enter the running total and are never evicted.
 - **Plain JSON rows still load**: `unpack` accepts text without the `br64:` prefix (`backend/supabase_client.py:78`), so rows from older versions keep working.
 - **Bumping CACHE_VERSION orphans rows**: keys start with `CACHE_VERSION` (`backend/cache.py:85`), so a bump leaves old rows unread until LRU eviction removes them.
-- **Credentials are stored as entered**: `api_credentials.client_secret` holds the WarcraftLogs secret as text, protected by RLS only (`frontend/src/App.js:607`).
+- **Credentials are stored as entered**: `api_credentials.client_secret` holds the WarcraftLogs secret as text, protected by RLS only (`frontend/src/App.js:606`).
 
 ## Glossary
 

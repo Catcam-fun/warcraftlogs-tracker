@@ -26,8 +26,8 @@ anchors:
   season_two_raids: frontend/src/seasonTwoRaids.js:6
   raid_zones: frontend/src/App.js:30
   boss_order: frontend/src/App.js:73
-  loader_orb: frontend/src/App.js:1539
-  loader_preview: frontend/src/App.js:373
+  loader_orb: frontend/src/App.js:1538
+  loader_preview: frontend/src/App.js:372
   fetch_bosses: frontend/scripts/fetch-boss-renders.py:14
   enc_override: frontend/scripts/fetch-boss-renders.py:31
   display_override: frontend/scripts/fetch-boss-renders.py:35
@@ -46,7 +46,7 @@ links:
   - feat-results
   - game-data
   - testing
-content_hash: sha256:beed2c3a1cbe2dad762f0bb794f1ce9fe46b61b2b6f8ae0641f4ba79b8e2f5d2
+content_hash: sha256:10198fccd859506d163fda56e5578f979e83a04c74fe6d4c282dafa3b5a96c3f
 ---
 ## Summary
 
@@ -55,7 +55,7 @@ This page covers the art layer of the frontend: what the landing page shows, how
 - **Backgrounds** are JPEGs in `public/art/backgrounds/`, chosen once per page load (`frontend/src/LandingPage.js:111`).
 - **Boss tiles** are `.webp` files in `public/art/bosses/`, named by a slug of the boss name (`frontend/src/LandingPage.js:206`, `frontend/src/AnalyzeConfig.js:25`).
 - **Raid entries** for the Analyze page are the `RAIDS` array (`frontend/src/AnalyzeConfig.js:12`); the current tier's entry is imported from `seasonTwoRaids.js` (`frontend/src/seasonTwoRaids.js:6`).
-- **The loader** is a `<video>` inside `.fpx-load-orb`, shown while an analysis runs (`frontend/src/App.js:1539`).
+- **The loader** is a `<video>` inside `.fpx-load-orb`, shown while an analysis runs (`frontend/src/App.js:1538`).
 - What it deliberately does not do: none of these lists is generated or validated. The boss names, the council slugs and the raid lineups are hand-kept copies; a typo is a missing tile, not a build error.
 
 ## How it works
@@ -73,9 +73,9 @@ You can follow the art from the file on disk to the pixel on screen. Each step b
 - title: Fit councils | short: Council | sub: whole group in frame
   body: If the slug is in COUNCIL the tile gets the council class (LandingPage.js:209), which switches the art from auto 116% (crop to the model) to contain (show every member) (fp-design.css:203). AnalyzeConfig.js applies the same rule to the lineup tiles with its own COUNCIL copy (AnalyzeConfig.js:23, AnalyzeConfig.js:123).
 - title: Raid cards and lineup | short: Analyze art | sub: final and bosses
-  body: Each RAIDS entry has key, name, exp, final and bosses. The raid card's art is the tile of final (AnalyzeConfig.js:43); the lineup under the cards is one tile per name in the selected entry's bosses (AnalyzeConfig.js:122). Clicking a card sends its key to handleRaidChange in App.js, which copies reportZone and fightZone from RAID_ZONES (App.js:668).
+  body: Each RAIDS entry has key, name, exp, final and bosses. The raid card's art is the tile of final (AnalyzeConfig.js:43); the lineup under the cards is one tile per name in the selected entry's bosses (AnalyzeConfig.js:122). Clicking a card sends its key to handleRaidChange in App.js, which copies reportZone and fightZone from RAID_ZONES (App.js:667).
 - title: Play the loader | short: Loader | sub: while loading is true
-  body: When loading is true, App.js draws the .fpx-loadov overlay with a muted, looping, autoplaying video of art/ulatek-loader.webm and art/ulatek-loader.jpg as its poster (App.js:1526, App.js:1539-1544). The CSS sizes it to 212px inside a 190px pulsing orb (fp-design.css:815-821). On localhost, ?loader=1 forces the overlay on for a preview (App.js:373).
+  body: When loading is true, App.js draws the .fpx-loadov overlay with a muted, looping, autoplaying video of art/ulatek-loader.webm and art/ulatek-loader.jpg as its poster (App.js:1525, App.js:1538-1543). The CSS sizes it to 212px inside a 190px pulsing orb (fp-design.css:815-821). On localhost, ?loader=1 forces the overlay on for a preview (App.js:372).
   gotcha: The file names are literal in App.js. A new tier's loader means a new file and an edit to both src and poster on lines 1521-1522.
 ```
 
@@ -125,7 +125,7 @@ Every art-related constant and file. Filter by where it lives.
 | `SEASON_TWO_RAIDS` {shared} | The `midnight-s2-all` entry: `reportZone: null`, `fightZone: '0'`, `final: "Ula'tek"`, 9 bosses | `frontend/src/seasonTwoRaids.js:6` |
 | `RAID_ZONES` {shared} | Per raid key: display name, `reportZone`, `fightZone`; spreads in `SEASON_TWO_RAIDS` | `frontend/src/App.js:30` |
 | `BOSS_ORDER` {shared} | Per raid key: Adventure-Guide boss order used to sort results; spreads in `SEASON_TWO_RAIDS` | `frontend/src/App.js:73` |
-| Loader `<video>` {loader} | `art/ulatek-loader.webm`, poster `art/ulatek-loader.jpg`; `autoPlay loop muted playsInline` | `frontend/src/App.js:1540` |
+| Loader `<video>` {loader} | `art/ulatek-loader.webm`, poster `art/ulatek-loader.jpg`; `autoPlay loop muted playsInline` | `frontend/src/App.js:1539` |
 | `.fpx-load-orb` CSS {loader} | 190px orb, pulsing glow, video sized 212px with a blue drop shadow | `frontend/src/fp-design.css:815` |
 | `BOSSES` {script} | Names the script fetches; a command-line list narrows it to those names | `frontend/scripts/fetch-boss-renders.py:14` |
 | `ENC_OVERRIDE` {script} | Lowercased boss name to a fixed JournalEncounter ID (`l'ura` → `2740`) | `frontend/scripts/fetch-boss-renders.py:31` |
@@ -162,10 +162,10 @@ relied-on-by: [[frontend-results-view]] — BOSS_ORDER sorts boss chips and per-
 
 | Concern | This area | Source |
 |---|---|---|
-| Asset prefix | Background, boss tile and loader URLs are built from `process.env.PUBLIC_URL` (CRA built-in) | `frontend/src/LandingPage.js:127`, `frontend/src/AnalyzeConfig.js:26`, `frontend/src/App.js:1541` |
+| Asset prefix | Background, boss tile and loader URLs are built from `process.env.PUBLIC_URL` (CRA built-in) | `frontend/src/LandingPage.js:127`, `frontend/src/AnalyzeConfig.js:26`, `frontend/src/App.js:1540` |
 | Boss tile script | `python frontend/scripts/fetch-boss-renders.py ["Boss Name" ...]`; needs Pillow and outbound access to `wago.tools` and `render.worldofwarcraft.com` | `frontend/scripts/fetch-boss-renders.py:3`, `frontend/scripts/fetch-boss-renders.py:8` |
 | Tile format | Transparent WebP, 300px tall, width follows the model | `frontend/scripts/fetch-boss-renders.py:146-148` |
-| Loader file | `frontend/public/art/ulatek-loader.webm` is 512x512 VP9 with an alpha channel at 30 fps (read from the file's stream headers); its poster is `ulatek-loader.jpg` | `frontend/src/App.js:1541-1542` |
+| Loader file | `frontend/public/art/ulatek-loader.webm` is 512x512 VP9 with an alpha channel at 30 fps (read from the file's stream headers); its poster is `ulatek-loader.jpg` | `frontend/src/App.js:1540-1541` |
 | Background files | `frontend/public/art/backgrounds/<slug>.jpg`, 2200px wide, JPEG quality 72, progressive (read from the files themselves); the slug is what goes in `CURRENT_TIER_BACKGROUNDS` or `BACKGROUNDS` | `frontend/src/LandingPage.js:84-95`, `frontend/src/LandingPage.js:127` |
 | Hosting | All art is committed under `frontend/public/art/` and served from the site itself, never hotlinked, so a source page moving or disappearing can't break the landing page and no third party sees visitors' requests | `frontend/src/LandingPage.js:127` |
 | Fallback | `landing-keyart.svg` sits behind the chosen photo and shows only if that image fails to load | `frontend/src/LandingPage.js:128` |
@@ -176,17 +176,17 @@ relied-on-by: [[frontend-results-view]] — BOSS_ORDER sorts boss chips and per-
 
 - **MUST** every name in `BOSS_STRIP` and in a `RAIDS` entry's `final` and `bosses` have a matching `frontend/public/art/bosses/<slug>.webp`. Nothing checks it: the tile's `--img` points at a file that does not exist and the tile renders empty (`frontend/src/LandingPage.js:210`, `frontend/src/AnalyzeConfig.js:26`).
 - **MUST** add a multi-boss slug to all three `COUNCIL` copies (`frontend/src/LandingPage.js:64`, `frontend/src/AnalyzeConfig.js:23`, `frontend/scripts/fetch-boss-renders.py:36`). Missing from a Set, the tile crops members off; missing from the dict, the script fetches only one model.
-- **MUST** give a raid entry a `key` that exists in `RAID_ZONES`; `handleRaidChange` reads `reportZone` and `fightZone` from it with no fallback (`frontend/src/App.js:670-675`).
+- **MUST** give a raid entry a `key` that exists in `RAID_ZONES`; `handleRaidChange` reads `reportZone` and `fightZone` from it with no fallback (`frontend/src/App.js:669-674`).
 - **NEVER** let `BACKGROUNDS` be empty. The current-tier pool is guarded by its length, but the fallback pool is not, and an empty pool yields `undefined.jpg` (`frontend/src/LandingPage.js:113-116`).
 
 ## Gotchas
 
 - **Raid lineups exist twice**: `RAIDS[].bosses` in `AnalyzeConfig.js` and `BOSS_ORDER` in `App.js` are separate copies for the four older entries; only `SEASON_TWO_RAIDS` feeds both (`frontend/src/AnalyzeConfig.js:12`, `frontend/src/App.js:73`). The comment at `frontend/src/AnalyzeConfig.js:10` says RAIDS mirrors them; nothing enforces it.
-- **Season 1 is one combined card**: `voidspire`, `dreamrift` and `queldanas` are in `RAID_ZONES` and `BOSS_ORDER` (`frontend/src/App.js:34-48`) but have no card of their own in `RAIDS`. The Analyze page offers them together as `midnight-all`, whose encounter set is the union of all three (`backend/analysis.py:208`). The per-raid keys remain valid backend selections. The test pins five cards (`frontend/src/AnalyzeConfig.test.js:28`).
+- **Season 1 is one combined card**: `voidspire`, `dreamrift` and `queldanas` are in `RAID_ZONES` and `BOSS_ORDER` (`frontend/src/App.js:34-48`) but have no card of their own in `RAIDS`. The Analyze page offers them together as `midnight-all`, whose encounter set is the union of all three (`backend/analysis.py:200`). The per-raid keys remain valid backend selections. The test pins five cards (`frontend/src/AnalyzeConfig.test.js:28`).
 - **The script's council dict is a count, not a flag**: `COUNCIL` in the script maps slug to a number of models (`frontend/scripts/fetch-boss-renders.py:36`). A council whose journal lists the same display ID twice still gets fewer distinct models than asked.
 - **DISPLAY_OVERRIDE replaces, it does not merge**: when a slug is in `DISPLAY_OVERRIDE`, the council count is ignored and exactly the listed IDs are used (`frontend/scripts/fetch-boss-renders.py:116`). The Lost Explorers tile is one model for that reason.
 - **Journal search is fuzzy**: the encounter match accepts substring matches either way for names longer than five letters (`frontend/scripts/fetch-boss-renders.py:98-101`), then takes the highest ID. A short or common name can pick the wrong encounter; `ENC_OVERRIDE` exists for that (`l'ura`).
-- **The loader respects reduced motion**: the reduced-motion CSS stops the orb's glow pulse (`frontend/src/fp-design.css:888`), and the video only autoplays when the visitor hasn't asked for reduced motion; otherwise its still poster shows (`frontend/src/App.js:1543`, `frontend/src/reducedMotion.js`).
+- **The loader respects reduced motion**: the reduced-motion CSS stops the orb's glow pulse (`frontend/src/fp-design.css:888`), and the video only autoplays when the visitor hasn't asked for reduced motion; otherwise its still poster shows (`frontend/src/App.js:1542`, `frontend/src/reducedMotion.js`).
 - **UPDATES dates have no year**: the third field is a display label like `'OCT 1'`; ordering is just array order (`frontend/src/LandingPage.js:97-103`).
 
 ## Glossary

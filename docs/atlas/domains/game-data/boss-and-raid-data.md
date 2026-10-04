@@ -42,7 +42,7 @@ invariants:
   - "NEVER: store boss damage amounts in boss spell text; the game scales them at run time, so the tooltip shows the real hit from the log."
 flows:
   - data-build-path
-content_hash: sha256:a64ced382edc9b83d4e8edec292c9c7aa11a96416788f3a5e10030092494ca10
+content_hash: sha256:5da587e6d0cb60849a459ff83fd602bdaf0f33d8111cf4b6a974583e544f986f
 ---
 ## Summary
 
@@ -124,7 +124,7 @@ Run as `python backend/scripts/build_spell_icons.py` after rebuilding the catalo
 
 ## Gotchas
 
-- **The flags script reads live tables, the others a pinned build**: `build_boss_spell_flags.py` calls `table(name)` with no build (`backend/scripts/build_boss_spell_flags.py:33`, `backend/scripts/build_boss_spell_flags.py:55`), while the text and icon scripts pass `patches()[-1][2]` (`backend/scripts/build_boss_spell_text.py:120`, `backend/scripts/build_spell_icons.py:65`). With `WAGO_CACHE` set, the live tables are cached as `{name}_live` and reused on every later run (`backend/scripts/build_defensive_catalog.py:415-418`).
+- **The flags script reads live tables, the others a pinned build**: `build_boss_spell_flags.py` calls `table(name)` with no build (`backend/scripts/build_boss_spell_flags.py:33`, `backend/scripts/build_boss_spell_flags.py:55`), while the text and icon scripts pass `patches()[-1][2]` (`backend/scripts/build_boss_spell_text.py:120`, `backend/scripts/build_spell_icons.py:65`). Live tables are never cached, so the flags script always reads current data (`backend/scripts/build_defensive_catalog.py:414-418`).
 - **Armor events need the fight's endTime**: WCL answers a `fightIDs`-scoped events query without an `endTime` with an empty second page (`backend/defensives.py:745-746`). `_events` therefore looks up the fight's `endTime` first and sends it with every page (`backend/scripts/build_armor_constants.py:47-55`); before that fix, a pull with more than 10,000 DamageTaken events was measured from its first page only. `backend/test_armor_build.py` checks that every page is read. `build_raid_wide.py` goes through `_fetch_blocks`, which also sends one.
 - **Measured tables depend on public kills**: both WCL scripts read whatever `fightRankings` returns today. A boss with too few samples falls back to its raid's pooled K, or gets no entry at all (`backend/scripts/build_armor_constants.py:133-137`).
 - **The boss text is tested on a real spell**: `backend/test_boss_spell_text.py:34-36` checks that Sever's text mentions a frontal cone, so a regenerated file that loses it fails the suite.

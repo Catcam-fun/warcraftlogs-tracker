@@ -10,8 +10,8 @@ summary:
   - "A new raid tier touches the backend raid tables, a frontend raid entry, the landing art, then the game-data build scripts in dependency order, then the real-log checks."
 tagline: Running the site from the code's point of view, and the steps to add a raid tier.
 anchors:
-  raid_encounters: backend/analysis.py:196
-  raid_date_windows: backend/analysis.py:224
+  raid_encounters: backend/analysis.py:188
+  raid_date_windows: backend/analysis.py:216
   season_two_entry: frontend/src/seasonTwoRaids.js:6
   raid_cards_spread: frontend/src/AnalyzeConfig.js:21
   raid_zones_spread: frontend/src/App.js:31
@@ -29,7 +29,7 @@ anchors:
   wcl_endpoints: backend/warcraftlogs.py:15
   report_failure: backend/app.py:375
   analyze_error_event: backend/app.py:612
-  catalog_build: backend/scripts/build_defensive_catalog.py:1025
+  catalog_build: backend/scripts/build_defensive_catalog.py:1027
   wago_cache: backend/scripts/build_defensive_catalog.py:406
 links:
   - testing
@@ -46,12 +46,12 @@ invariants:
   - "MUST: rebuild spell_icons.py after rebuilding defensive_catalog.py; the icon script reads every catalog ability."
   - "MUST: bump CACHE_VERSION in cache.py when what gets fetched or how it is indexed changes, so old shared-cache rows are never served to new code."
   - "NEVER: hand-edit the generated modules (defensive_catalog.py, boss_spell_flags.py, boss_spell_text.py, spell_icons.py, armor_constants.py, raid_wide_damage.py); edit the script and rerun it."
-content_hash: sha256:13dd45916d8a490a01b449beed739ad80fc250acb4886819f17fa3033be47f5b
+content_hash: sha256:315b3143df7e95ac6f19cbe8a8f4328d1fd4a70745ff4e953f3bec80fd395990
 ---
 ## Summary
 
 - **Config is small.** The API reads seven environment variables; the build and check scripts read three more. No WarcraftLogs key lives on the server.
-- **Health** is `GET /api/health`, which returns `{"status": "healthy", "supabase": <bool>}` (`backend/app.py:742`). The site calls it as soon as it opens to wake a sleeping instance (`frontend/src/App.js:263`).
+- **Health** is `GET /api/health`, which returns `{"status": "healthy", "supabase": <bool>}` (`backend/app.py:742`). The site calls it as soon as it opens to wake a sleeping instance (`frontend/src/App.js:262`).
 - **Logging** is `print` to standard output with bracketed prefixes; there is no `logging` setup and no log levels.
 - **Caches evict themselves**: in-process LRUs drop the oldest entry, and the shared Supabase cache keeps itself under 200 MB.
 - **A new raid tier** is mostly data: encounter IDs and a date window in the backend, one raid entry in the frontend, art, then a fixed order of build scripts. The steps are below; `git show --stat 0e825bb` is the Season 2 example (backend raid tables, a raid-selection test, `seasonTwoRaids.js`, `AnalyzeConfig.js` and its test, `App.js`, `fp-design.css`).
@@ -62,18 +62,18 @@ Adding a raid tier, in the order the code's dependencies require. Click each ste
 
 ```steps
 - title: Add the raid to the backend tables | short: Backend tables | sub: RAID_ENCOUNTERS, RAID_DATE_WINDOWS
-  body: Add a raid key with its encounter IDs to RAID_ENCOUNTERS (backend/analysis.py:196). analyze_fights keeps only fights whose encounter ID is in the set and whose difficulty matches (backend/analysis.py:275), which is also what keeps dungeon bosses out. Add the same key to RAID_DATE_WINDOWS (backend/analysis.py:224) as (start, end); the comment above it sets start at release minus 5 days and end at the next tier's opening plus 5 days, with None for a tier still open. Close the previous tier's window at the same time.
-  gotcha: The source comment for Season 2's encounter IDs is BigWigs' raid folders (backend/analysis.py:198). When the new tier opens, give the previous tier's windows an end date (new raid's opening plus 5 days); test_only_the_newest_tier_is_open_ended fails otherwise (backend/test_raid_selection.py).
+  body: Add a raid key with its encounter IDs to RAID_ENCOUNTERS (backend/analysis.py:188). analyze_fights keeps only fights whose encounter ID is in the set and whose difficulty matches (backend/analysis.py:267), which is also what keeps dungeon bosses out. Add the same key to RAID_DATE_WINDOWS (backend/analysis.py:216) as (start, end); the comment above it sets start at release minus 5 days and end at the next tier's opening plus 5 days, with None for a tier still open. Close the previous tier's window at the same time.
+  gotcha: The source comment for Season 2's encounter IDs is BigWigs' raid folders (backend/analysis.py:190). When the new tier opens, give the previous tier's windows an end date (new raid's opening plus 5 days); test_only_the_newest_tier_is_open_ended fails otherwise (backend/test_raid_selection.py).
 - title: Test the selection | short: Raid test | sub: test_raid_selection.py
   body: Extend backend/test_raid_selection.py the way Season 2 did. It checks the new key keeps exactly its encounters at each difficulty, that every other key excludes the new fights, and that the date window clamps user dates (backend/test_raid_selection.py:6, backend/test_raid_selection.py:32, backend/test_raid_selection.py:51).
 - title: Add a frontend raid entry | short: Raid entry | sub: seasonTwoRaids.js pattern
   body: SEASON_TWO_RAIDS (frontend/src/seasonTwoRaids.js:6) holds key, name, exp, reportZone, fightZone, final (the raid card art) and bosses (the lineup and the Results page boss order). One array feeds three places by spreading it in: RAIDS on the Analyze page (frontend/src/AnalyzeConfig.js:21), RAID_ZONES (frontend/src/App.js:31) and BOSS_ORDER (frontend/src/App.js:74). The key must equal the backend raid key. Add multi-boss encounters to COUNCIL (frontend/src/AnalyzeConfig.js:23).
   gotcha: frontend/src/AnalyzeConfig.test.js expects an exact number of raid cards; update it with the new entry.
 - title: Landing page and art | short: Landing + art | sub: strip, backgrounds, loader
-  body: Add the bosses to BOSS_STRIP with their zone label (frontend/src/LandingPage.js:11) and multi-boss slugs to its COUNCIL (frontend/src/LandingPage.js:64). Boss tiles are fetched by frontend/scripts/fetch-boss-renders.py into frontend/public/art/bosses; add the names to its BOSSES list (frontend/scripts/fetch-boss-renders.py:14), and its COUNCIL and DISPLAY_OVERRIDE if needed. Put the new tier's backgrounds in CURRENT_TIER_BACKGROUNDS and move the previous ones into BACKGROUNDS (frontend/src/LandingPage.js:84). The analysis loader video is referenced by path in App.js (frontend/src/App.js:1541). Add a line to UPDATES (frontend/src/LandingPage.js:97). See [[frontend-landing-and-art]].
+  body: Add the bosses to BOSS_STRIP with their zone label (frontend/src/LandingPage.js:11) and multi-boss slugs to its COUNCIL (frontend/src/LandingPage.js:64). Boss tiles are fetched by frontend/scripts/fetch-boss-renders.py into frontend/public/art/bosses; add the names to its BOSSES list (frontend/scripts/fetch-boss-renders.py:14), and its COUNCIL and DISPLAY_OVERRIDE if needed. Put the new tier's backgrounds in CURRENT_TIER_BACKGROUNDS and move the previous ones into BACKGROUNDS (frontend/src/LandingPage.js:84). The analysis loader video is referenced by path in App.js (frontend/src/App.js:1540). Add a line to UPDATES (frontend/src/LandingPage.js:97). See [[frontend-landing-and-art]].
 - title: Rebuild the defensive catalog | short: Catalog | sub: wago.tools, every patch
-  body: python backend/scripts/build_defensive_catalog.py builds one catalog per retail patch from 11.0.2 on, each from that patch's last build (backend/scripts/build_defensive_catalog.py:401). Set WAGO_CACHE to a folder to keep downloaded tables between runs (backend/scripts/build_defensive_catalog.py:406). Patch names as arguments do a dry run that writes nothing (backend/scripts/build_defensive_catalog.py:1046). New potions need a typical heal in POTION_TYPICAL (backend/scripts/build_defensive_catalog.py:343); the per-tier STANDARD_POTION and DEMONIC_HEALTHSTONE_MEASURED tables in backend/defensives.py:53 and backend/defensives.py:58 are maintained by hand from real logs.
-  gotcha: If the newest patch's spell data no longer matches the curated list, the script stops with "spell data changed; update CURATED / EFFECTS" (backend/scripts/build_defensive_catalog.py:1037). Older patches only print a note.
+  body: python backend/scripts/build_defensive_catalog.py builds one catalog per retail patch from 11.0.2 on, each from that patch's last build (backend/scripts/build_defensive_catalog.py:401). Set WAGO_CACHE to a folder to keep downloaded tables between runs (backend/scripts/build_defensive_catalog.py:406). Patch names as arguments do a dry run that writes nothing (backend/scripts/build_defensive_catalog.py:1048). New potions need a typical heal in POTION_TYPICAL (backend/scripts/build_defensive_catalog.py:343); the per-tier STANDARD_POTION and DEMONIC_HEALTHSTONE_MEASURED tables in backend/defensives.py:53 and backend/defensives.py:58 are maintained by hand from real logs.
+  gotcha: If the newest patch's spell data no longer matches the curated list, the script stops with "spell data changed; update CURATED / EFFECTS" (backend/scripts/build_defensive_catalog.py:1039). Older patches only print a note.
 - title: Rebuild the icons | short: Icons | sub: after the catalog
   body: python backend/scripts/build_spell_icons.py writes backend/spell_icons.py, the icon and description of every catalog ability. Its docstring says to rerun it after rebuilding the catalog (backend/scripts/build_spell_icons.py:10); it imports the catalog it just rebuilt.
 - title: Boss spell flags and text | short: Boss spells | sub: reads RAID_ENCOUNTERS
@@ -128,7 +128,7 @@ Failure modes visible in the code, and what the user sees:
 |---|---|---|
 | Health | `GET /api/health` returns status and whether Supabase is configured (`backend/app.py:742`) | code |
 | Startup log | `[Startup] Supabase storage configured: <bool> (service role: <bool>)` (`backend/supabase_client.py:40`) | stdout |
-| Log prefixes | `[Retry]`, `[WARN]`, `[ERROR]`, `[ReportCache]`, `[Share]`, `[Saved]`, `[Auth]`, `[Delete Account]`; `analysis.py` also prints per-report `[DEBUG]` lines (`backend/analysis.py:457`) | stdout via `print` |
+| Log prefixes | `[Retry]`, `[WARN]`, `[ERROR]`, `[ReportCache]`, `[Share]`, `[Saved]`, `[Auth]`, `[Delete Account]` | stdout via `print` |
 | Finished reports | a report whose last event is over 2 hours old is treated as finished and cached (`backend/app.py:43`) | code |
 | In-memory caches | LRU per process: 200 report metas, 400 death sets, 200 defensive sets, 400 hit windows (`backend/cache.py:91`) | code |
 | Shared cache | Supabase `report_cache`: rows over 4 MB are not stored; every 20th write deletes least-recently-used rows past 200 MB (`backend/supabase_client.py:273`, `backend/supabase_client.py:362`) | code |
@@ -148,9 +148,8 @@ Failure modes visible in the code, and what the user sees:
 
 - **Errors after streaming starts are HTTP 200**: once `/api/analyze` begins, every failure is a `data: {"error": ...}` event. Uptime checks that only look at status codes will not see them.
 - **The memory share fallback is per process**: with Supabase missing, a share created on one gunicorn worker is invisible to another and vanishes on restart.
-- **Debug output is unconditional**: the `[DEBUG]` prints in `get_report_deaths_bulk` (`backend/analysis.py:457`) run for every report that is not served from cache, and the `[DEDUP]` lines add more when cheat-death detection is on, so logs grow with every analysis.
 - **The current-tier windows have no end**: `None` in `RAID_DATE_WINDOWS` means "up to today". When a tier closes, set its end date, or its analyses keep listing every newer report.
-- **Unknown raid keys do not fail**: a key missing from `RAID_ENCOUNTERS` silently falls back to the zone filter (`backend/analysis.py:280`), so a typo in the frontend key returns plausible but wrong pulls.
+- **Unknown raid keys do not fail**: a key missing from `RAID_ENCOUNTERS` silently falls back to the zone filter (`backend/analysis.py:272`), so a typo in the frontend key returns plausible but wrong pulls.
 
 ## Related
 

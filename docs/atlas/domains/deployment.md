@@ -47,7 +47,7 @@ invariants:
   - "MUST: migrations 001 and 002 be run in the Supabase SQL editor before the features that use them are expected to persist."
   - "NEVER: commit backend/.env; it is gitignored and holds the backend's secrets."
   - "NEVER: rely on in-process state (rate limits, memory shares, caches) across workers or restarts."
-content_hash: sha256:34c58a12f339d987a89364f808585f52961dfbdd02e0807b392f10f13733c7fe
+content_hash: sha256:0955da9f1ebb45c397cec3183b1c895dcd85d682430b192b22eb5e68cdc2793c
 ---
 # Deployment & Environments
 
@@ -94,7 +94,7 @@ edge static -> supa color=process "anon key"
 - title: Build the frontend | short: Static build | sub: react-scripts build
   body: npm run build runs react-scripts build (frontend/package.json:21). REACT_APP_API_URL, if set, is baked into the bundle at this point (frontend/src/api.js:7). Everything in frontend/public, including art and _redirects.txt, is copied into build/. The Supabase URL and anon key are constants in the source (frontend/src/supabaseClient.js:3), not build variables.
 - title: Route every path to the app | short: SPA rewrite | sub: /* to /index.html 200
-  body: The app uses BrowserRouter (frontend/src/index.js:11) with paths like /analyze, /results and /saved (frontend/src/App.js:1568, :1566, :2205). frontend/public/_redirects.txt holds one rule, /* /index.html 200, so a direct visit or refresh on those paths serves the app instead of a 404.
+  body: The app uses BrowserRouter (frontend/src/index.js:11) with paths like /analyze, /results and /saved (frontend/src/App.js:1567, :1566, :2205). frontend/public/_redirects.txt holds one rule, /* /index.html 200, so a direct visit or refresh on those paths serves the app instead of a 404.
 - title: Point the site at the API | short: API base URL | sub: by hostname
   body: API_URL is the only place the backend address appears (frontend/src/api.js:3). The backend in turn must allow the site's origin in ALLOWED_ORIGINS, or leave it unset to allow any origin (backend/app.py:64).
 ```
