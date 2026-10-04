@@ -113,6 +113,17 @@ class StorageTests(unittest.TestCase):
         loaded = supabase_client.load_analysis('old', 'u1')
         self.assertEqual(loaded['data']['meta']['guild_name'], 'G')
 
+    def test_expired_saves_do_not_load(self):
+        saved = supabase_client.save_analysis('u1', 'mine', 'G', ANALYSIS, retention_days=7)
+        row = self.db.tables['saved_analyses'][0]
+        row['expires_at'] = '2000-01-01T00:00:00+00:00'
+        self.assertEqual(supabase_client.load_analysis(saved['id'], 'u1').get('code'), 'not_found')
+        self.assertEqual(self.db.tables['saved_analyses'], [])
+
+    def test_unexpired_saves_still_load(self):
+        saved = supabase_client.save_analysis('u1', 'mine', 'G', ANALYSIS, retention_days=7)
+        self.assertTrue(supabase_client.load_analysis(saved['id'], 'u1').get('success'))
+
     def test_shares_strip_secrets_and_round_trip(self):
         supabase_client.store_share('abc123', ANALYSIS, SECRET_CONFIG)
         share = supabase_client.get_share('abc123')
