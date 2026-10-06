@@ -44,7 +44,7 @@ links:
   - operations
   - feat-analyze
   - feat-results
-content_hash: sha256:2428502d2084b1c953d5d79f3259effd30a4700b45adfb29fe7cc5bd913eaea0
+content_hash: sha256:f094d3bc72839fb0fd473643e56271d48c726c7348f671f11ff22bfbd60c9015
 ---
 ## Summary
 
@@ -76,7 +76,7 @@ edge analysis -> defs color=safe "counted deaths"
 edge defs -> gen color=structural "spell data"
 edge flask -> supa color=structural "cache, storage"
 edge site -> supa color=caution "sign in"
-band structural "Substrate · static site + Render + Supabase"
+band structural "Substrate · AWS (CloudFront, S3, Lambda) + Supabase"
 ```
 
 ## Reference
@@ -106,7 +106,7 @@ The parts of the system, and where each is documented:
 | Supabase tables {layer} | saves, shares, credentials, report cache | [[data-model]] |
 | Sign-in {layer} | Supabase Auth bearer tokens | [[auth]] |
 | Generated game data {layer} | defensive catalog, boss spells, armor, raid-wide damage | [[game-data]] |
-| Hosting {layer} | static site, Render, Supabase | [[deployment]] |
+| Hosting {layer} | AWS (CloudFront, S3, Lambda), Supabase | [[deployment]] |
 | Trust boundaries {layer} | secrets, RLS, rate limits | [[security]] |
 | Tests and real-log checks {layer} | unittest, jest, `check_*.py` | [[testing]] |
 | Running it, new raid tiers {layer} | env vars, health, failure modes | [[operations]] |

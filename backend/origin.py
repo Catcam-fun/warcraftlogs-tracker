@@ -3,8 +3,8 @@ origin.py - Is this request from our CloudFront distribution?
 
 On AWS the Lambda function URL is public, so CloudFront adds a secret header
 (X-Origin-Verify) to every request it forwards, and the function only serves
-requests that carry it. ORIGIN_VERIFY_SECRET unset (Render, local dev) means
-no such lock.
+requests that carry it. ORIGIN_VERIFY_SECRET unset (local dev) means no
+such lock.
 """
 
 import hmac

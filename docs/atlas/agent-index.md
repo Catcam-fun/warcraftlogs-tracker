@@ -16,7 +16,7 @@
 - anchors:
   - analyze_route: backend/app.py:109
   - analyze_stream_client: frontend/src/App.js:723
-  - api_base_url: frontend/src/api.js:8
+  - api_base_url: frontend/src/api.js:9
   - wcl_token: backend/app.py:158
   - shared_report_cache: backend/cache.py:42
   - deaths_fetch: backend/app.py:376
@@ -44,7 +44,7 @@
   - session_only: frontend/src/supabaseClient.js:15
   - sign_in: frontend/src/Auth.js:139
   - captcha: frontend/src/Auth.js:72
-  - api_fetch: frontend/src/api.js:54
+  - api_fetch: frontend/src/api.js:55
   - analyze_header: frontend/src/App.js:720
   - session_restore: frontend/src/App.js:277
   - bearer: backend/auth.py:29
@@ -124,7 +124,7 @@
   - saved_id_re: backend/app.py:684
   - storage_response: backend/app.py:726
   - require_user: backend/auth.py:79
-  - limit_decorator: backend/ratelimit.py:56
+  - limit_decorator: backend/ratelimit.py:54
   - frontend_sse_reader: frontend/src/App.js:754
 - links: backend, backend-analysis-pipeline, backend-death-counting, backend-caching-and-limits, backend-defensive-analysis, auth, data-model, frontend, feat-analyze, feat-share, feat-saved, feat-account
 
@@ -161,8 +161,8 @@
   - evict: backend/supabase_client.py:395
   - report_cache_table: backend/migrations/002_report_cache.sql:12
   - client_ip: backend/ratelimit.py:18
-  - rate_limiter: backend/ratelimit.py:34
-  - limit: backend/ratelimit.py:56
+  - rate_limiter: backend/ratelimit.py:32
+  - limit: backend/ratelimit.py:54
 - links: backend, backend-analysis-pipeline, backend-api-endpoints, backend-defensive-analysis, warcraftlogs, data-model, frontend-results-view, feat-analyze
 
 ## Death Counting
@@ -288,7 +288,7 @@
   - supabase_env: backend/supabase_client.py:27
   - auth_env: backend/auth.py:20
   - dev_server: backend/app.py:807
-  - frontend_api_url: frontend/src/api.js:8
+  - frontend_api_url: frontend/src/api.js:9
 - links: backend-api-endpoints, backend-analysis-pipeline, backend-death-counting, backend-caching-and-limits, backend-defensive-analysis, backend-death-descriptions, warcraftlogs, data-model, auth, frontend, feat-analyze
 
 ## Data Model
@@ -331,11 +331,11 @@
 - status: documented
 - source: domains/deployment.md
 - summary:
-  - The backend runs on Render as gunicorn with gthread workers, configured by PORT, WEB_CONCURRENCY and GUNICORN_THREADS.
+  - The backend runs on AWS Lambda as gunicorn with gthread workers (through the Lambda Web Adapter), configured by PORT, WEB_CONCURRENCY and GUNICORN_THREADS.
   - The frontend is a static Create React App build; a _redirects.txt file sends every path to index.html for client-side routing.
-  - The browser picks the API by hostname: localhost talks to localhost:5000, everything else to deathwarcraftlogs-api.onrender.com, unless REACT_APP_API_URL is set at build time.
+  - The browser picks the API by hostname: localhost talks to localhost:5000, everything else to /api on the page's own host, unless REACT_APP_API_URL is set at build time.
   - Supabase migrations are SQL files run by hand in the Supabase dashboard; nothing applies them automatically.
-  - An AWS deployment (S3 + CloudFront for the site, Lambda behind the same CloudFront for the API) is defined in infra/ and deployed from GitHub Actions on every push to main (or by hand); Render stays the live host until the domain moves.
+  - floorpov.gg is served from AWS: S3 + CloudFront for the site, Lambda behind the same CloudFront for the API, deployed from GitHub Actions on every push to main (or by hand). Render is no longer used.
 - invariants:
   - MUST: SUPABASE_SERVICE_ROLE_KEY be set on the production backend, or saves and shares are blocked by RLS.
   - MUST: migrations 001 and 002 be run in the Supabase SQL editor before the features that use them are expected to persist.
@@ -352,8 +352,8 @@
   - allowed_origins: backend/app.py:67
   - health: backend/app.py:797
   - supabase_env: backend/supabase_client.py:27
-  - api_url: frontend/src/api.js:8
-  - wake_message: frontend/src/api.js:104
+  - api_url: frontend/src/api.js:9
+  - wake_message: frontend/src/api.js:105
   - build_script: frontend/package.json:21
   - spa_rewrite: frontend/public/_redirects.txt:1
   - migration_001: backend/migrations/001_shares_and_rls.sql:2
@@ -404,7 +404,7 @@
   - session_only: frontend/src/supabaseClient.js:15
   - session_restore: frontend/src/App.js:269
   - auth_listener: frontend/src/App.js:292
-  - local_credentials: frontend/src/api.js:20
+  - local_credentials: frontend/src/api.js:21
   - remember_local: frontend/src/App.js:217
   - load_db_credentials: frontend/src/App.js:561
   - save_db_credentials: frontend/src/App.js:587
@@ -447,7 +447,7 @@
   - stream_reader: frontend/src/App.js:736
   - loader: frontend/src/App.js:1535
   - cancel: frontend/src/App.js:657
-  - local_credentials: frontend/src/api.js:20
+  - local_credentials: frontend/src/api.js:21
   - analyze_endpoint: backend/app.py:109
   - max_cutoff_clamp: backend/app.py:134
   - cheat_death_gate: backend/app.py:143
@@ -570,7 +570,7 @@
 - summary:
   - A Create React App site: one large shell component (App.js) owns all state, routing and the analysis stream; smaller files render each surface.
   - The browser talks to two back ends: the Flask API (analysis, shares, saved reports, account delete) and Supabase directly (auth and stored WarcraftLogs credentials).
-  - The API base URL is chosen at runtime: REACT_APP_API_URL if set at build time, else localhost:5000 on a local host, else the Render production API.
+  - The API base URL is chosen at runtime: REACT_APP_API_URL if set at build time, else localhost:5000 on a local host, else /api on the page's own host.
   - WarcraftLogs credentials never leave the browser except in the /api/analyze call; stripSecrets removes them from shares, saves and local history.
   - The latest analysis and the last 5 runs persist in IndexedDB, so a refresh or a closed tab does not lose results.
 - invariants:
@@ -581,10 +581,10 @@
 - anchors:
   - entry: frontend/src/index.js:9
   - app_shell: frontend/src/App.js:187
-  - api_url: frontend/src/api.js:7
-  - api_fetch: frontend/src/api.js:54
-  - strip_secrets: frontend/src/api.js:42
-  - local_creds: frontend/src/api.js:20
+  - api_url: frontend/src/api.js:8
+  - api_fetch: frontend/src/api.js:55
+  - strip_secrets: frontend/src/api.js:43
+  - local_creds: frontend/src/api.js:21
   - supabase_client: frontend/src/supabaseClient.js:6
   - session_only: frontend/src/supabaseClient.js:12
   - warmup: frontend/src/App.js:262
@@ -906,8 +906,8 @@
   - share_id_re: backend/app.py:683
   - cheat_death_gate: backend/app.py:143
   - client_ip: backend/ratelimit.py:18
-  - rate_limiter: backend/ratelimit.py:34
-  - limit_decorator: backend/ratelimit.py:56
+  - rate_limiter: backend/ratelimit.py:32
+  - limit_decorator: backend/ratelimit.py:54
   - verify_token: backend/auth.py:36
   - require_user: backend/auth.py:79
   - strip_secrets_py: backend/supabase_client.py:61
@@ -915,8 +915,8 @@
   - rls: backend/migrations/001_shares_and_rls.sql:23
   - creds_policies: backend/migrations/001_shares_and_rls.sql:36
   - report_cache_rls: backend/migrations/002_report_cache.sql:23
-  - strip_secrets_js: frontend/src/api.js:42
-  - local_creds: frontend/src/api.js:20
+  - strip_secrets_js: frontend/src/api.js:43
+  - local_creds: frontend/src/api.js:21
   - wcl_token_cache: backend/warcraftlogs.py:93
   - wcl_proxy: backend/warcraftlogs.py:16
 - links: auth, data-model, backend, frontend, deployment, feat-share, feat-saved, operations

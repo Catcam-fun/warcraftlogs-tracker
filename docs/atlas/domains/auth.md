@@ -15,7 +15,7 @@ anchors:
   session_only: frontend/src/supabaseClient.js:15
   sign_in: frontend/src/Auth.js:139
   captcha: frontend/src/Auth.js:72
-  api_fetch: frontend/src/api.js:54
+  api_fetch: frontend/src/api.js:55
   analyze_header: frontend/src/App.js:720
   session_restore: frontend/src/App.js:277
   bearer: backend/auth.py:29
@@ -41,14 +41,14 @@ invariants:
   - "MUST: verify_token return None on any non-200 or network failure, so the route answers 401."
   - "NEVER: store raw tokens in the verification cache; keys are SHA-256 hashes."
   - "NEVER: honor enableCheatDeath without a verified session."
-content_hash: sha256:a3f3ab549b42fd5253cea7d8ada6eff3f23d6970d47f45043901064e9bfe26c0
+content_hash: sha256:4965a8c49fe84978a9fadd07b5cf46e82eaa5c2e40943cce3b027b818bcd320d
 ---
 # Accounts & Auth
 
 ## Summary
 
 - Sign-up, sign-in, password reset, email change and password change all run in the browser against Supabase Auth with the public anon key (`frontend/src/Auth.js:135`, `:139`, `:94`; `frontend/src/Settings.js:136`, `:168`).
-- When the browser calls the backend it attaches `Authorization: Bearer <access token>` (`frontend/src/api.js:91`). The backend turns that into a user id by asking Supabase (`backend/auth.py:49`), never by reading an id from the URL or body.
+- When the browser calls the backend it attaches `Authorization: Bearer <access token>` (`frontend/src/api.js:92`). The backend turns that into a user id by asking Supabase (`backend/auth.py:49`), never by reading an id from the URL or body.
 - The `@require_user` decorator (`backend/auth.py:79`) guards every saved-analysis route and account deletion. Analyze and share check the token without requiring it.
 
 ## Diagram
@@ -83,7 +83,7 @@ edge req -> apifetch color=never "401"
 - title: Stay logged in | short: Session length | sub: localStorage flag + cookie
   body: Supabase always persists the session. Unchecking "Stay logged in" sets a localStorage flag and a session cookie (frontend/src/supabaseClient.js:15). On the next load, flag set and cookie gone means the browser was closed, and App.js signs out locally (frontend/src/App.js:277).
 - title: Call the backend | short: Send token | sub: apiFetch
-  body: apiFetch with auth true reads the current session and adds the Bearer header; with no session it returns a local 401 without a network call. auth 'optional' attaches a token only if there is one (frontend/src/api.js:54). The analyze stream uses fetch directly and adds the same header when signed in (frontend/src/App.js:720).
+  body: apiFetch with auth true reads the current session and adds the Bearer header; with no session it returns a local 401 without a network call. auth 'optional' attaches a token only if there is one (frontend/src/api.js:55). The analyze stream uses fetch directly and adds the same header when signed in (frontend/src/App.js:720).
 - title: Verify the token | short: Verify | sub: GET /auth/v1/user
   body: verify_token (backend/auth.py:36) hashes the token, returns a cached user id if it is under 60 seconds old, otherwise calls SUPABASE_URL/auth/v1/user with the anon key as apikey and a 10 second timeout. Only a 200 with an id counts.
   gotcha: The cache holds up to 1000 entries; when full it drops expired ones, or half the cache if none have expired (backend/auth.py:65).

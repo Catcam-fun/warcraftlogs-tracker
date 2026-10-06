@@ -20,7 +20,7 @@ anchors:
   supabase_env: backend/supabase_client.py:27
   auth_env: backend/auth.py:20
   dev_server: backend/app.py:807
-  frontend_api_url: frontend/src/api.js:8
+  frontend_api_url: frontend/src/api.js:9
 links:
   - backend-api-endpoints
   - backend-analysis-pipeline
@@ -37,7 +37,7 @@ invariants:
   - "MUST: run under a threaded worker (gthread); a sync worker lets one analysis stream block every other request."
   - "MUST: keep WEB_CONCURRENCY at 1 unless shared state moves out of process; caches and rate limits live in process memory."
   - "NEVER: hard-code a WarcraftLogs API key on the server; each analysis brings the caller's own clientId and clientSecret."
-content_hash: sha256:e3b07351ea0812b3f0f08790457c68b1db5ea25a144ced593cbfcc01e95d6361
+content_hash: sha256:72cf361263cd2761a9408655d4c8fc601bb75bcd25befd6cfbb3b10e44de4aa7
 ---
 ## Summary
 
@@ -127,15 +127,15 @@ The module map, for finding code:
 | Request size | bodies over 25 MB are rejected (`backend/app.py:62`) | code |
 | Dependencies | Flask 3.0, flask-cors, requests, gunicorn 21.2, brotli, supabase, python-dotenv | `backend/requirements.txt` |
 
-The repository holds no `render.yaml` or `Procfile`; the Render start command and env values are set in Render's dashboard.
+In production the API runs on AWS Lambda: `backend/run.sh` starts gunicorn, and the env values are set on the Lambda function (see [[deployment]]).
 
 ## Environments
 
 | Aspect | Local | Production |
 |---|---|---|
-| Server | `python app.py`: Flask's threaded dev server on `PORT` or 5000 (`backend/app.py:807`) | gunicorn with `backend/gunicorn.conf.py` on Render |
-| URL the frontend uses | `http://localhost:5000` when the site runs on localhost (`frontend/src/api.js:9`) | `https://deathwarcraftlogs-api.onrender.com` (`frontend/src/api.js:9`), unless `REACT_APP_API_URL` overrides it at build time (`frontend/src/api.js:8`) |
-| Env source | `backend/.env` loaded by `load_dotenv()` | Render environment settings |
+| Server | `python app.py`: Flask's threaded dev server on `PORT` or 5000 (`backend/app.py:807`) | gunicorn with `backend/gunicorn.conf.py` on AWS Lambda, started by `backend/run.sh` |
+| URL the frontend uses | `http://localhost:5000` when the site runs on localhost (`frontend/src/api.js:10`) | `/api` on the site's own host (CloudFront sends it to Lambda) (`frontend/src/api.js:10`), unless `REACT_APP_API_URL` overrides it at build time (`frontend/src/api.js:9`) |
+| Env source | `backend/.env` loaded by `load_dotenv()` | Lambda environment variables |
 | Supabase | optional: without it, saves fail, shares fall back to process memory, the shared report cache is skipped | configured; service-role key preferred (`backend/supabase_client.py:38`) |
 | CORS | `ALLOWED_ORIGINS` unset means any origin | same mechanism; set to the site origins if restricted |
 
@@ -149,7 +149,7 @@ The repository holds no `render.yaml` or `Procfile`; the Render start command an
 
 - **The analysis body is read before streaming starts**: `request.get_json` and the sign-in check run before the generator (`backend/app.py:115`, `backend/app.py:120`), because the generator runs after Flask's request context is gone.
 - **Errors after the stream starts are not HTTP errors**: once `/api/analyze` returns 200, a failure arrives as a `data: {"error": ...}` event. Only a bad JSON body (400) and the rate limit (429) are real HTTP errors.
-- **Free-tier sleep**: the frontend pings `/api/health` on load (`frontend/src/App.js:263`), which, per the comment at `frontend/src/App.js:259`, starts waking a Render instance that slept after idling, while the user is still filling in the form.
+- **Cold starts**: a schedule keeps one Lambda copy warm, but AWS can recycle it. The frontend pings `/api/health` on load (`frontend/src/App.js:263`), which, per the comment at `frontend/src/App.js:259`, starts a cold copy while the user is still filling in the form.
 
 ## Related
 

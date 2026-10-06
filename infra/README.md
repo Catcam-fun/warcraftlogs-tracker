@@ -19,8 +19,8 @@ The whole site runs on AWS in `us-east-1`:
   ready. AWS can still recycle it, so an occasional first request is slower.
 - **Unchanged:** Supabase, and the WarcraftLogs proxy.
 
-It has its own CloudFront address, so floorpov.gg doesn't change until the
-domain is pointed at AWS.
+floorpov.gg and www.floorpov.gg point at this CloudFront distribution, so this
+is the live site. (The old Render host is no longer used.)
 
 ## Deploying (GitHub Actions)
 
@@ -47,24 +47,22 @@ One-time setup, so GitHub can deploy without a stored AWS key:
 `template.yaml` describes the same setup as a SAM stack; it is a reference
 for rebuilding it, not what is live.
 
-## Later: the domain
+## The domain
 
-At switch time: a Route 53 hosted zone for `floorpov.gg`, a certificate,
-and the domain on the production CloudFront distribution. Then, at Porkbun,
-the domain's nameservers change to the four Route 53 gives. The domain stays
-registered at Porkbun.
+`floorpov.gg` and `www.floorpov.gg` are alternate domain names on the
+CloudFront distribution below. The domain stays registered at Porkbun.
 
 ## What's live now (built by hand in the console, Oct 2026)
 
-The staging site was built by hand rather than from `template.yaml`; these
-are the real resources (account 315553918291, us-east-1):
+The site was built by hand rather than from `template.yaml` (first as
+staging, hence the `staging` in some names); these are the real resources (account 315553918291, us-east-1):
 
 | Piece | Name / ID | Settings |
 |---|---|---|
 | API | Lambda `floorpov-staging-api` | Python 3.12, x86_64, handler `run.sh`, layer `LambdaAdapterLayerX86:30`, 3008 MB, 15 min; env vars as in `template.yaml` plus the Supabase keys and `ORIGIN_VERIFY_SECRET` |
 | API URL | `https://6cvez5x3ydvytctrjuaf4u2bai0vipjw.lambda-url.us-east-1.on.aws/` | auth NONE, RESPONSE_STREAM |
 | Site files | S3 bucket `floorpov-site` | private, read by CloudFront only |
-| CDN | CloudFront `E1C4ZVT58GS469`, `d1tjynbsufz31j.cloudfront.net` | origins: the bucket, and `floorpov-api` (the Lambda URL, custom header `X-Origin-Verify`, response and keep-alive timeouts 60 s); behaviors: `/api/*` (CachingDisabled, AllViewerExceptHostHeader, no compression, viewer-request function `floorpov-viewer-ip`) and Default (`floorpov-spa-rewrite`) |
+| CDN | CloudFront `E1C4ZVT58GS469`, `d1tjynbsufz31j.cloudfront.net`, aliases `floorpov.gg` and `www.floorpov.gg` | origins: the bucket, and `floorpov-api` (the Lambda URL, custom header `X-Origin-Verify`, response and keep-alive timeouts 60 s); behaviors: `/api/*` (CachingDisabled, AllViewerExceptHostHeader, no compression, viewer-request function `floorpov-viewer-ip`) and Default (`floorpov-spa-rewrite`) |
 | Warm-up | EventBridge schedule `floorpov-warm` | every 5 min, payload `{"source": "floorpov.warm"}` |
 | Budget | `floorpov-monthly` | $10/month, email alerts at 50/80/100% |
 

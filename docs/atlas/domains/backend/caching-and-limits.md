@@ -27,8 +27,8 @@ anchors:
   evict: "backend/supabase_client.py:395"
   report_cache_table: "backend/migrations/002_report_cache.sql:12"
   client_ip: "backend/ratelimit.py:18"
-  rate_limiter: "backend/ratelimit.py:34"
-  limit: "backend/ratelimit.py:56"
+  rate_limiter: "backend/ratelimit.py:32"
+  limit: "backend/ratelimit.py:54"
 links:
   - backend
   - backend-analysis-pipeline
@@ -44,14 +44,14 @@ invariants:
   - "MUST: treat every shared-cache failure as a miss; an analysis never fails because Supabase is down."
   - "NEVER: make an analysis wait on a Supabase cache write; writes run on a background pool."
   - "NEVER: give the anon or authenticated roles access to report_cache; only the service role reads and writes it."
-content_hash: sha256:c5682e767147c8a5327dbe5407233890a58f9ac3b11a4c804cfc3f338e7bac86
+content_hash: sha256:95858acfe3dcb4ef48b436b29359b72724315602aa0404d3c6a9ebb955240498
 ---
 ## Summary
 
 - An analysis can touch dozens of reports. The caches make a second analysis of the same guild, or another officer's analysis, cost few or no WarcraftLogs API points. The module docstring states the idea: a finished report never changes (`backend/cache.py:4`).
 - There are five caches, one per kind of report data (`backend/cache.py:111`). Each is a **SharedReportCache**: memory first, then the shared Supabase table `report_cache` ([[data-model]]).
 - "Finished" means the report's end time is more than two hours old (`REPORT_CACHE_MIN_AGE_MS`, `backend/app.py:46`, `backend/app.py:210`). Anything newer may still be live-logging, so it is always fetched.
-- Rate limits are separate: `RateLimiter` windows in process memory, keyed by client IP (`backend/ratelimit.py:34`), applied by the `limit` decorator (`backend/ratelimit.py:56`).
+- Rate limits are separate: `RateLimiter` windows in process memory, keyed by client IP (`backend/ratelimit.py:32`), applied by the `limit` decorator (`backend/ratelimit.py:54`).
 
 ## How it works
 
@@ -95,9 +95,9 @@ Report-cache calls go through `_cache_db`, which gives each thread its own Supab
 
 #### Rate limits
 
-`RateLimiter.allow(key)` keeps a deque of hit times per key (`backend/ratelimit.py:41`). It drops hits older than the window, refuses when the window already holds `max_calls` hits, and otherwise records the hit. When more than 10,000 keys are tracked, keys with no hits left are deleted so memory stays bounded (`backend/ratelimit.py:50`).
+`RateLimiter.allow(key)` keeps a deque of hit times per key (`backend/ratelimit.py:39`). It drops hits older than the window, refuses when the window already holds `max_calls` hits, and otherwise records the hit. When more than 10,000 keys are tracked, keys with no hits left are deleted so memory stays bounded (`backend/ratelimit.py:48`).
 
-`limit(limiter, message)` wraps a route: a non-OPTIONS request over the limit gets 429 `{"success": false, "error": message}` before the route runs (`backend/ratelimit.py:56`, `backend/ratelimit.py:60`). The key is `client_ip()` (`backend/ratelimit.py:18`): on AWS, the `X-Viewer-Ip` header a CloudFront Function writes, trusted only on requests that carry the origin secret (`backend/ratelimit.py:26`); else `CF-Connecting-IP`, which Cloudflare sets in front of Render; else the socket address; else `unknown` (`backend/ratelimit.py:30`).
+`limit(limiter, message)` wraps a route: a non-OPTIONS request over the limit gets 429 `{"success": false, "error": message}` before the route runs (`backend/ratelimit.py:54`, `backend/ratelimit.py:58`). The key is `client_ip()` (`backend/ratelimit.py:18`): on AWS, the `X-Viewer-Ip` header a CloudFront Function writes, trusted only on requests that carry the origin secret (`backend/ratelimit.py:25`); else the socket address; else `unknown` (`backend/ratelimit.py:29`).
 
 ## Diagram
 
@@ -136,7 +136,7 @@ edge pipe -> wcl color=caution "both miss"
 | `analyze_limiter` {limit} | 60 per hour per IP | `backend/app.py:53` |
 | `share_limiter` {limit} | 20 per hour per IP | `backend/app.py:52` |
 | `save_limiter` {limit} | 30 per hour per IP | `backend/app.py:54` |
-| Tracked-key cleanup {limit} | above 10,000 keys | `backend/ratelimit.py:50` |
+| Tracked-key cleanup {limit} | above 10,000 keys | `backend/ratelimit.py:48` |
 
 The `report_cache` table (`backend/migrations/002_report_cache.sql:12`): `key` text primary key, `payload` text, `size_bytes` integer, `created_at` and `last_used_at` timestamps, an index on `last_used_at`, and row-level security on with no policies, so only the service role can use it (`backend/migrations/002_report_cache.sql:21`).
 
@@ -168,12 +168,12 @@ relied-on-by: [[feat-analyze]] — repeat analyses come back faster and cheaper
 | Shared cache | used only if `SUPABASE_URL` and a key are set (`backend/supabase_client.py:39`); otherwise memory only | on, through the service-role key |
 | Table missing | first error pauses the shared cache for 5 minutes, repeatedly | same; run `backend/migrations/002_report_cache.sql` once |
 | Rate limits | same numbers, per process | same; per gunicorn process |
-| `client_ip` | the socket address, usually `127.0.0.1` | `X-Viewer-Ip` from CloudFront on AWS; `CF-Connecting-IP` from Cloudflare on Render |
+| `client_ip` | the socket address, usually `127.0.0.1` | `X-Viewer-Ip` from CloudFront on AWS |
 
 ## Gotchas
 
 - **Memory caches and limits are per process**: with more than one gunicorn worker, each has its own LRU and its own rate-limit windows, so the effective limit multiplies (see [[backend]]).
-- **The key is never `X-Forwarded-For`**: Render appends to a client-supplied `X-Forwarded-For`, so its first entry can be forged. CloudFront and Cloudflare each overwrite their own header, so those are used instead (`backend/ratelimit.py:19-31`). Without either in front, every client would share the proxy's address and one limit.
+- **The key is never a header the client can set**: `X-Forwarded-For` and `CF-Connecting-IP` can be forged, so they are ignored. CloudFront overwrites `X-Viewer-Ip` and is the only one that sends the origin secret, so only that header is trusted (`backend/ratelimit.py:19-29`). Without it, every client would share the proxy's address and one limit.
 - **The defensive cache waits for the deaths**: its key needs the set of dead players, so it is looked up after the deaths are known, from the deaths cache (`backend/app.py:365`) or right after the deaths query (`backend/app.py:380`).
 - **A report with no death that can count writes no defensive or hit cache**: it returns after its deaths (`backend/app.py:383`), so only its fight lists, full fights and deaths are cached.
 - **The 2-hour rule uses the report's end time**: a report still being logged tonight is fetched in full on every analysis until two hours after its last event (`backend/app.py:209`).
