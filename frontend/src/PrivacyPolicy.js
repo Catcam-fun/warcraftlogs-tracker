@@ -158,7 +158,7 @@ export default function PrivacyPolicy({ user, onShowAuthModal, onShowSettings, o
               <li>Supabase (authentication and database)</li>
               <li>WarcraftLogs (API requests using your credentials)</li>
               <li>Cloudflare (CDN and API proxying)</li>
-              <li>Render.com (application hosting)</li>
+              <li>Amazon Web Services (application hosting)</li>
             </ul>
 
             <h3>5.2 Public Analysis Results</h3>

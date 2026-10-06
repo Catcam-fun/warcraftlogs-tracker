@@ -19,16 +19,14 @@ def client_ip():
     # On AWS, a CloudFront Function writes the viewer's IP into
     # X-Viewer-Ip on every /api request, replacing any value the client sent
     # (infra/template.yaml); it is trusted only on requests carrying the
-    # origin secret, which only CloudFront sends. On Render, Cloudflare sets CF-Connecting-IP and
-    # overwrites any value the client sent. X-Forwarded-For is not usable:
-    # Render appends to whatever the client put there, so its first entry can
-    # be forged. Otherwise (local dev), use the socket.
+    # origin secret, which only CloudFront sends. Headers a client can set
+    # (X-Forwarded-For, CF-Connecting-IP) are never used, so the key can't be
+    # forged. Otherwise (local dev), use the socket.
     if from_cloudfront():
         viewer = request.headers.get('X-Viewer-Ip', '').strip()
         if viewer:
             return viewer
-    return (request.headers.get('CF-Connecting-IP', '').strip()
-            or request.remote_addr or 'unknown')
+    return request.remote_addr or 'unknown'
 
 
 class RateLimiter:
