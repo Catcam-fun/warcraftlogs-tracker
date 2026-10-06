@@ -113,6 +113,13 @@ def save_analysis(user_id, analysis_name, guild_name, analysis_data, config=None
             'size_bytes': len(blob),
             'expires_at': (_now() + timedelta(days=retention_days)).isoformat(),
         }).execute()
+        # Two saves at once can both pass the count above; recount, and the
+        # one that went over takes its row back out.
+        after = db.table('saved_analyses').select('id', count='exact').eq('user_id', user_id).execute()
+        if (after.count or 0) > MAX_SAVED_PER_USER:
+            db.table('saved_analyses').delete().eq('id', analysis_id).execute()
+            return {"error": f"You can keep {MAX_SAVED_PER_USER} saved reports. Delete one to save another.",
+                    "code": "limit"}
         return {"success": True, "id": analysis_id, "size_bytes": len(blob)}
     except Exception as e:
         print(f"[Saved] save failed: {e}")
@@ -137,6 +144,8 @@ def load_analysis(analysis_id, user_id):
     if not db:
         return {"error": "Database not configured"}
     try:
+        # An expired save is gone, even when opened directly by its id.
+        _purge_expired_saves(user_id)
         result = db.table('saved_analyses').select('*') \
             .eq('id', analysis_id).eq('user_id', user_id).limit(1).execute()
         if not result.data:
@@ -309,12 +318,22 @@ def _cache_failed(what, e):
     print(f"[ReportCache] {what} failed, skipping the shared cache for 5 min: {e}")
 
 
+def _twice(call):
+    """Run a Supabase call, once more if it fails: after Lambda thaws a frozen
+    function its pooled connection is often dead ("Connection reset by peer"),
+    and the retry opens a fresh one."""
+    try:
+        return call()
+    except Exception:
+        return call()
+
+
 def cache_get(key):
     """The cached value for `key`, or None."""
     if not _cache_available():
         return None
     try:
-        result = db.table('report_cache').select('payload').eq('key', key).limit(1).execute()
+        result = _twice(lambda: db.table('report_cache').select('payload').eq('key', key).limit(1).execute())
         if not result.data:
             return None
         value = _dec(unpack(result.data[0]['payload']))
@@ -338,8 +357,8 @@ def cache_put(key, value):
         if len(blob) > REPORT_CACHE_MAX_ROW_BYTES:
             return
         now = _now().isoformat()
-        db.table('report_cache').upsert({'key': key, 'payload': blob, 'size_bytes': len(blob),
-                                         'created_at': now, 'last_used_at': now}).execute()
+        _twice(lambda: db.table('report_cache').upsert({'key': key, 'payload': blob, 'size_bytes': len(blob),
+                                                         'created_at': now, 'last_used_at': now}).execute())
     except Exception as e:
         _cache_failed("write", e)
         return

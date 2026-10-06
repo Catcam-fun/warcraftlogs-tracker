@@ -72,14 +72,6 @@ def is_duplicate_pull(seen_by_boss, boss_id, abs_start, abs_end, is_kill=None):
 # MASS DEATH DETECTION
 # =============================================================================
 
-def filter_mass_deaths(deaths):
-    """Mark deaths during mass death events (wipes)."""
-    for i, death in enumerate(deaths):
-        in_mass, _ = is_in_mass_death(i, deaths)
-        death["isInMassDeath"] = in_mass
-    return deaths
-
-
 def is_in_mass_death(death_index, deaths_list):
     """
     Check if a death at the given index is part of a mass death event.
@@ -90,10 +82,10 @@ def is_in_mass_death(death_index, deaths_list):
     if len(deaths_list) < MASS_DEATH_THRESHOLD:
         return False, None
     
-    # Count deaths within 10 seconds of this death (both before and after)
     death_ts = deaths_list[death_index]["timestamp"]
-    
-    # Look for a window that contains this death and has 7+ deaths total
+
+    # Look for a MASS_DEATH_WINDOW-long window, starting at a death, that
+    # contains this death and holds MASS_DEATH_THRESHOLD or more deaths
     # We need to find if there's ANY window containing this death that qualifies as mass death
     for i in range(len(deaths_list)):
         window_start_ts = deaths_list[i]["timestamp"]
@@ -214,9 +206,11 @@ RAID_ENCOUNTERS = {
 # minus 5 days; end = the day the *next* tier's first raid opened (which
 # already covers the prepatch tail) plus 5 days. The +/-5d margin absorbs
 # the NA/EU regional release split. A None end means "current tier, still
-# open". Midnight's three raids opened on different days (Voidspire/Dreamrift
-# 2026-03-17, March on Quel'Danas 2026-03-31); per spec the whole Midnight
-# window uses the earliest (2026-03-17) and has no end yet.
+# open". Midnight Season 1's three raids opened on different days
+# (Voidspire/Dreamrift 2026-03-17, March on Quel'Danas 2026-03-31); per spec
+# its window uses the earliest (2026-03-17). It ends 2026-08-23: Season 2's
+# raids opened 2026-08-18 (patch 12.1 had ended the season on 2026-08-11,
+# but there was no new raid until the 18th).
 # These bounds are authoritative: user-supplied dates may narrow the window
 # but never widen it past the tier.
 RAID_DATE_WINDOWS = {
@@ -226,10 +220,10 @@ RAID_DATE_WINDOWS = {
     'nerubar':      ('2024-09-05', '2025-03-09'),  # Nerub-ar Palace, TWW S1
     'undermine':    ('2025-02-27', '2025-08-17'),  # Liberation of Undermine, S2
     'manaforge':    ('2025-08-07', '2026-03-22'),  # Manaforge Omega, S3
-    'voidspire':    ('2026-03-12', None),          # Midnight S1 (current)
-    'dreamrift':    ('2026-03-12', None),
-    'queldanas':    ('2026-03-12', None),
-    'midnight-all': ('2026-03-12', None),
+    'voidspire':    ('2026-03-12', '2026-08-23'),  # Midnight S1
+    'dreamrift':    ('2026-03-12', '2026-08-23'),
+    'queldanas':    ('2026-03-12', '2026-08-23'),
+    'midnight-all': ('2026-03-12', '2026-08-23'),
 }
 
 
@@ -449,15 +443,6 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
         # Build a map of fightId -> list of deaths
         deaths_by_fight = {f['id']: [] for f in fights}
         
-        # DEBUG: Log death event info
-        expected_fight_ids = set(deaths_by_fight.keys())
-        actual_death_fight_ids = set(e.get("fight") for e in events_data if e.get("type") == "death")
-        print(f"  [DEBUG] Raw death events: {len(events_data)}")
-        print(f"  [DEBUG] Expected fight IDs (from fights param): {sorted(expected_fight_ids)[:5]}...")
-        print(f"  [DEBUG] Actual fight IDs in death events: {sorted(actual_death_fight_ids)[:5]}...")
-        matching_fight_ids = expected_fight_ids & actual_death_fight_ids
-        print(f"  [DEBUG] Matching fight IDs: {len(matching_fight_ids)} of {len(expected_fight_ids)}")
-        
         # Extract debuff events (if cheat death enabled)
         cheat_death_events = []
         if enable_cheat_death:
@@ -508,10 +493,12 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
             
             print(f"  Found {len(cheat_death_events)} cheat death events to add")
             
-            # STEP 3.5: Deduplicate cheat death events
-            # Issue 1: Same fight logged by multiple people → duplicate cheat deaths across reports
-            # Issue 2: WarcraftLogs bug → same player shows multiple cheat deaths in one fight
-            # Solution: Deduplicate by (player, fight) first, then by (player, timestamp) across reports
+            # STEP 3.5: Deduplicate cheat death events (all from this one report;
+            # the same pull logged in several reports is dropped earlier, by
+            # is_duplicate_pull). WarcraftLogs can show the same player's cheat
+            # death more than once in a fight: keep the first per player per
+            # fight, then drop near-identical events (same player and ability
+            # within 100ms).
             
             print(f"  [DEDUP] Deduplicating cheat deaths...")
             print(f"  [DEDUP] Before deduplication: {len(cheat_death_events)} cheat death events")
@@ -541,9 +528,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
             per_fight_removed = len(cheat_death_events)
             print(f"  [DEDUP] After per-fight per-player filtering: {len(cheat_death_events)} events")
             
-            # PHASE 2: Cross-report deduplication (same fight logged by multiple people)
-            # When 3 people log the same fight, each report has the same cheat death
-            # Deduplicate based on: same player + similar timestamp (within 100ms) + same ability
+            # PHASE 2: same player + same ability within 100ms is one event
             
             # Sort by player name and timestamp for efficient deduplication
             cheat_death_events.sort(key=lambda x: (normalize_character_name(x['targetName']), x['timestamp']))
@@ -662,9 +647,8 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
             print(f"    - Real deaths: {real_deaths}")
             print(f"    - Cheat deaths: {cheat_deaths}")
         
-        # DO NOT filter mass deaths here - the new cutoff timestamp approach handles wipes correctly
-        # The old filter_mass_deaths logic was removing ALL deaths from wipes, causing missing data
-        # Now we detect mass deaths and adjust the cutoff timestamp instead
+        # Wipes are not filtered here: every death is returned, and
+        # rank_pull_deaths marks the ones inside a wipe (inWipe).
         
         return deaths_by_fight
     
