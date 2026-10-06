@@ -50,7 +50,7 @@ invariants:
   - "MUST: drop duplicate pulls before fetching deaths, so a pull logged by three raiders is counted once."
   - "MUST: sort pulls by start time, then report code, then fight id, so the copy of a pull that is kept never depends on which report was read first."
   - "NEVER: cache the deaths of a report that failed to load; get_report_deaths_bulk re-raises so the caller records the failure instead."
-content_hash: sha256:cd5f233fc834abe6a2aea2f980d2b345b1f4a77321e5e9022c40d1c332b44611
+content_hash: sha256:ed9950d4b710afcd693830adda39232b968679cfa1bbe78a7e78ebc904c4cdaa
 ---
 ## Summary
 
@@ -103,7 +103,7 @@ When several raiders log the same night, each report contains the same pulls. `i
 
 `fetch_report_deaths` (`backend/app.py:339`) sends one query at a time, in an order picked for WarcraftLogs' point cost:
 
-1. **Talent loadouts** (`defensives.fetch_combatants`, `backend/app.py:377`). On a report WarcraftLogs has not read in the last hour, the first event query pays a higher "cold" price. Loadouts are the cheapest way to pay it (about 2 points); Deaths or Casts sent first cost 4-17.
+1. **Talent loadouts** (`defensives.fetch_combatants`, `backend/app.py:377`). The first event query on a report pays a higher "cold" price. Loadouts are the cheapest way to pay it (about 2 points); Deaths or Casts sent first cost 4-17. The report then stays warm for only 10-30 seconds, so the queries that follow are sent right after.
 2. **Deaths** (`get_report_deaths_bulk`, `backend/app.py:380`).
 3. **Skip check**: `counted_by_fight` finds the deaths that can count (`backend/app.py:326`). With none, the report returns empty defensive data and no hits (`backend/app.py:389`); nothing would read them.
 4. **Defensive events**: casts, buffs and healing, with the loadouts from step 1 passed in so they are not read twice (`backend/app.py:399`).

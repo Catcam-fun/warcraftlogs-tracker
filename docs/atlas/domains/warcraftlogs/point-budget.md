@@ -60,7 +60,7 @@ invariants:
   - "NEVER: serve a cached defensive entry built with a different catalog; the key carries the catalog fingerprint."
 flows:
   - request-path
-content_hash: sha256:5d797c65ebf0ee1257dee1181ce0c42ae8c544f9363c2dc1d3f7130fe5b9f271
+content_hash: sha256:d095be3c245cd0cc3416110a1aab88aee91809d6e963ef36dc44e1ff8df15dd9
 ---
 ## Summary
 
@@ -82,7 +82,7 @@ One analysis reads guild-level data once, then each report's fight list, then a 
 - title: Dedup, then the full read | short: Full read | sub: kept reports only
   body: Pulls are sorted by start time, then report code, then fight ID, so the copy kept never depends on which report was read first (backend/app.py:260). Duplicates are dropped with is_duplicate_pull, and only the reports that kept a pull are read in full with get_fights (3 points), cached in report_meta_cache (backend/app.py:224-232, 265-279). A report whose full read comes back empty is marked unreadable and dedup runs again, so its pulls go to another log's copy (backend/app.py:276-279).
 - title: Loadouts first | short: Loadouts | sub: the warm-up query
-  body: When a report's deaths are not cached, fetch_report_deaths reads CombatantInfo first and alone with fetch_combatants (backend/app.py:372-379). A report WCL hasn't read in the last hour pays a "cold" price on its first event query. CombatantInfo over the kept pulls is the cheapest warm-up, about 2 points; Deaths or Casts sent first cost 4-17 (backend/defensives.py:218-226). _loadout trims each event to who, which pull, spec and talent picks as each page arrives (backend/defensives.py:209-215).
+  body: When a report's deaths are not cached, fetch_report_deaths reads CombatantInfo first and alone with fetch_combatants (backend/app.py:372-379). A report's first event query pays a "cold" price, and the report stays warm for only 10-30 seconds after a query. CombatantInfo over the kept pulls is the cheapest warm-up, about 2 points; Deaths or Casts sent first cost 4-17 (backend/defensives.py:218-226). _loadout trims each event to who, which pull, spec and talent picks as each page arrives (backend/defensives.py:209-215).
 - title: Deaths | short: Deaths | sub: one aliased query
   body: get_report_deaths_bulk asks for the whole report's Deaths, plus cheat-death Debuffs and Healing when that option is on, as three aliases of a single query over the span from the first kept pull's start to the last one's end (backend/analysis.py:338-424). The debuff and heal aliases carry an ability.id filter so they stay small (backend/analysis.py:342-345). Extra pages are only fetched for an alias that returned nextPageTimestamp (backend/analysis.py:429-438).
 - title: Stop if nothing counts | short: Short-circuit | sub: no counted death, no more queries
@@ -103,7 +103,7 @@ These were measured on fresh Mythic logs. The code does not read them at run tim
 | Fact {measured} | Where the code relies on it |
 |---|---|
 | A light fight list costs 1 point; a full `get_fights` costs 3 | read every report light, only kept reports in full (`backend/app.py:203-206`, `backend/warcraftlogs.py:334-336`) |
-| A report's first event query pays a "cold" price (Deaths 2-17 points, about 4 per hour of report span). A report read in the last 45-60 minutes is warm, and each query then costs about 1 | loadouts go first (`backend/app.py:373-375`) |
+| A report's first event query pays a "cold" price (Deaths 2-17 points, about 4 per hour of report span). For 10-30 seconds after a query the report is warm, and a query then costs about 1; after 2 minutes the price is back up. Separately, WCL answers an identical repeat query from its own cache for 45-60 minutes, for about 1 point | loadouts go first (`backend/app.py:373-375`) |
 | CombatantInfo over the kept pulls is the cheapest warm-up, 1.4-3 points; a one-pull query does not warm the report | `fetch_combatants` spans every kept pull (`backend/defensives.py:218-226`) |
 | After the warm-up, queries sent one at a time cost about a quarter less than sent together (3.5 vs 4.8 points per hour of raid) | `backend/app.py:394-395`, `backend/defensives.py:257-258` |
 | A death-window block costs exactly 1 point (+1 per extra page) whatever its size. Neither `includeResources` nor a type filter changes it. Per-pull or exact-window blocks cost 2-4x more; one block per report costs 1.3-2x more | 15-minute blocks (`backend/defensives.py:749`, `backend/defensives.py:816-829`) |
@@ -200,7 +200,7 @@ band structural "Officer's WCL key"
 ## Gotchas
 
 - **Concurrency is across reports, not within one**: the fight-list and full-read phases use `REPORT_FETCH_WORKERS = 6` (`backend/app.py:234`, `backend/app.py:274`), and the event phase reads 8 reports at once (`backend/app.py:444`). Inside one report the queries run one after another, so at most about 8 event requests are in flight on one key.
-- **A report's first query is the expensive one**: the same query costs several times more on a report WCL hasn't read in the last hour. Moving a different query ahead of `fetch_combatants` raises the cost of every cold report (`backend/app.py:373-375`).
+- **A report's first query is the expensive one**: the same query costs several times more on a report WCL hasn't read in the last 10-30 seconds, so a report's queries are sent back to back. Moving a different query ahead of `fetch_combatants` raises the cost of every cold report (`backend/app.py:373-375`).
 - **A failed loadout read skips defensives**: if `fetch_combatants` raises, the error is kept and the defensive query is not sent; deaths still count (`backend/app.py:376-379`, `backend/app.py:396`).
 - **Casts and Buffs cover more than the pulls**: they start 3 minutes (`ENCOUNTER_RESET_MS`) before the first pull and run to the last pull's end, trash included (`backend/defensives.py:34`, `backend/defensives.py:248`). This costs more pages than a pull-scoped query but catches a defensive pressed just before a pull.
 - **Deaths are scoped by time, not by pull**: `get_report_deaths_bulk` sends `startTime` and `endTime` but no `fightIDs` (`backend/analysis.py:349-422`), so trash deaths between kept pulls come back too and are dropped in code.

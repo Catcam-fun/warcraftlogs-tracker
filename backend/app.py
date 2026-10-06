@@ -370,9 +370,9 @@ def analyze():
                     def_error = hits_error = None
                     combatants = None
                     if deaths is None:
-                        # Talent loadouts first, alone: the cheapest first query on a report WCL
-                        # hasn't read in the last hour (about 2 points), after which each query
-                        # costs about 1-3. Deaths or Casts sent first cost 4-17.
+                        # Talent loadouts first, alone: the cheapest first query on a cold report (~2
+                        # points; Deaths or Casts first cost 4-17). The report then stays warm 10-30 s,
+                        # so the queries sent right after it cost about 1-3.
                         try:
                             combatants = defensives.fetch_combatants(token, rid, fight_ids, first_start, last_end)
                         except Exception as e:
