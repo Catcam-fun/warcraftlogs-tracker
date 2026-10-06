@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LogIn, LogOut, Settings as SettingsIcon } from 'lucide-react';
+import FpMark from './FpMark';
 
 export default function AppHeader({ user, onShowAuthModal, onShowSettings, onLogout }) {
   const navigate = useNavigate();
@@ -9,7 +10,7 @@ export default function AppHeader({ user, onShowAuthModal, onShowSettings, onLog
     <header className="fpx-apphead">
       <div className="fpx-apphead-in">
         <div className="fpx-brand" onClick={() => navigate('/')}>
-          <div className="mk">FP</div>
+          <FpMark />
           <div className="wm">FLOOR&nbsp;POV<small>DEATH ANALYSIS</small></div>
         </div>
 
