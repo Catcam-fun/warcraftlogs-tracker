@@ -1,0 +1,105 @@
+# Deploy Floor Pov to the hand-built AWS setup (infra/README.md, "What's live
+# now"): the Flask API to the Lambda function, the React site to the S3
+# bucket, then a CloudFront refresh. Runs on every push to main (a merged pull
+# request), and by hand: Actions > "Deploy to AWS" > Run workflow.
+#
+# Only the code changes. The function's settings and secrets (Supabase keys,
+# ORIGIN_VERIFY_SECRET) stay as set in the AWS console.
+#
+# Setup, once (infra/README.md): the deploy role from
+# infra/github-deploy-role.yaml, and its RoleArn in the repository secret
+# AWS_DEPLOY_ROLE_ARN.
+name: Deploy to AWS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # GitHub's OIDC token, exchanged for the AWS deploy role
+  contents: read
+
+concurrency:
+  group: deploy-aws
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  FUNCTION: floorpov-staging-api
+  BUCKET: floorpov-site
+  DISTRIBUTION: E1C4ZVT58GS469
+  SITE_URL: https://d1tjynbsufz31j.cloudfront.net
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Backend tests
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt
+          python -m unittest discover -p "test_*.py"
+
+      - name: Frontend tests
+        working-directory: frontend
+        run: |
+          npm ci
+          CI=true npx react-scripts test --watchAll=false
+
+      - name: Build the API zip and the site
+        run: |
+          infra/build-api-zip.sh api.zip
+          cd frontend && REACT_APP_API_URL=same-origin npm run build
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy the API
+        run: |
+          aws lambda update-function-code --function-name "$FUNCTION" \
+            --zip-file fileb://api.zip --query CodeSha256 --output text
+          aws lambda wait function-updated-v2 --function-name "$FUNCTION"
+
+      - name: Deploy the site
+        working-directory: frontend
+        run: |
+          # Hashed bundles never change: cache them for a year. Old ones stay
+          # (no --delete) so a page loaded before the deploy keeps working.
+          aws s3 sync build/static "s3://$BUCKET/static" \
+            --cache-control "public,max-age=31536000,immutable"
+          # Everything else (index.html, art, manifest): always revalidate.
+          aws s3 sync build "s3://$BUCKET" \
+            --exclude "static/*" --exclude "_redirects.txt" \
+            --cache-control "public,max-age=0,must-revalidate" --delete
+          aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION" \
+            --paths "/*" --query Invalidation.Id --output text
+
+      - name: Smoke test
+        run: |
+          for i in 1 2 3 4 5 6; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$SITE_URL/api/health") && [ "$code" = 200 ] && break
+            sleep 10
+          done
+          curl -fsS "$SITE_URL/api/health"; echo
+          curl -fsS -o /dev/null "$SITE_URL/" && echo "site OK"
+          curl -fsS -o /dev/null "$SITE_URL/results" && echo "deep link OK"
+          # The Lambda URL itself must refuse requests that skip CloudFront.
+          fn_url=$(aws lambda get-function-url-config --function-name "$FUNCTION" --query FunctionUrl --output text)
+          code=$(curl -s -o /dev/null -w '%{http_code}' "${fn_url}api/shared/abcdefghijkl")
+          [ "$code" = 403 ] && echo "origin lock OK" || { echo "origin lock returned $code"; exit 1; }
+          echo "### Deployed $(git rev-parse --short HEAD) to $SITE_URL" >> "$GITHUB_STEP_SUMMARY"

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
-import { apiFetch } from './api';
+import { apiFetch, saveLocalCredentials } from './api';
 import { X, Save, Eye, EyeOff, Key, Mail, Trash2 } from 'lucide-react';
 
 export default function Settings({ user, onClose, onCredentialsUpdate, onShowPrivacy }) {
@@ -202,6 +202,8 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
       }
 
       await supabase.auth.signOut({ scope: 'local' });
+      // The WarcraftLogs key this browser remembers goes with the account.
+      saveLocalCredentials('', '');
       setDeleteMessage('Account deleted successfully');
       setTimeout(() => {
         onClose();
@@ -234,11 +236,12 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
             <p>Save your WarcraftLogs API credentials here — they auto-fill when you analyze reports.</p>
 
             <p className="fpx-mnote">
-              <strong style={{ color: 'var(--fpx-ink)' }}>Your credentials are secure.</strong>{' '}
-              Encrypted and stored in accordance with our{' '}
+              <strong style={{ color: 'var(--fpx-ink)' }}>How they're stored.</strong>{' '}
+              Saved to your account in our database, which is encrypted at rest; no other account can read them.
+              We only use them to fetch raid data on your behalf. See our{' '}
               <button type="button" className="fpx-link" onClick={() => { if (onShowPrivacy) onShowPrivacy(); }}>
                 Privacy Policy
-              </button>. We only use them to fetch raid data on your behalf.
+              </button>.
             </p>
 
             <div className="fpx-mform">

@@ -1,0 +1,329 @@
+{
+  "discrepancies": [
+    {
+      "doc": "frontend/README.md",
+      "topic": "npm start",
+      "verdict": "ok",
+      "docClaim": "`npm start` runs the dev server on localhost:3000.",
+      "docSource": "frontend/README.md:9",
+      "codeTruth": "package.json maps start to `react-scripts start` (frontend/package.json:20).",
+      "id": "RC-020"
+    },
+    {
+      "doc": "frontend/README.md",
+      "topic": "npm test",
+      "verdict": "ok",
+      "docClaim": "`npm test` launches the test runner in watch mode.",
+      "docSource": "frontend/README.md:17",
+      "codeTruth": "`test` is `react-scripts test` (frontend/package.json:22); real tests exist in frontend/src/AnalyzeConfig.test.js and frontend/src/api.test.js.",
+      "id": "RC-021"
+    },
+    {
+      "doc": "frontend/README.md",
+      "topic": "npm run build",
+      "verdict": "ok",
+      "docClaim": "`npm run build` bundles to the `build` folder.",
+      "docSource": "frontend/README.md:22",
+      "codeTruth": "`build` is `react-scripts build` (frontend/package.json:21).",
+      "id": "RC-022"
+    },
+    {
+      "doc": "frontend/README.md",
+      "topic": "npm run eject",
+      "verdict": "ok",
+      "docClaim": "`npm run eject` is available.",
+      "docSource": "frontend/README.md:32",
+      "codeTruth": "`eject` is `react-scripts eject` (frontend/package.json:23); project has not ejected (no config/ dir, react-scripts 5.0.1 at frontend/package.json:15).",
+      "id": "RC-023"
+    },
+    {
+      "doc": "frontend/README.md",
+      "topic": "Project identity",
+      "verdict": "gap",
+      "docClaim": "README is the stock Create React App boilerplate; says nothing about Floor Pov.",
+      "docSource": "frontend/README.md:1",
+      "codeTruth": "The app is the Floor Pov site with landing/analyze/results/saved routes (frontend/src/App.js:1537, frontend/src/App.js:1548, frontend/src/App.js:1566, frontend/src/App.js:2205).",
+      "id": "RC-013"
+    },
+    {
+      "doc": "frontend/README.md",
+      "topic": "Backend URL / env config",
+      "verdict": "gap",
+      "docClaim": "No mention of how the frontend finds the backend.",
+      "docSource": "frontend/README.md:1",
+      "codeTruth": "API_URL comes from REACT_APP_API_URL, else http://localhost:5000 locally, else https://deathwarcraftlogs-api.onrender.com (frontend/src/api.js:7-8).",
+      "id": "RC-014"
+    },
+    {
+      "doc": "frontend/README.md",
+      "topic": "Local dev with backend",
+      "verdict": "gap",
+      "docClaim": "Doc implies the frontend runs standalone.",
+      "docSource": "frontend/README.md:11",
+      "codeTruth": "On localhost the app calls a local backend at http://localhost:5000 (frontend/src/api.js:6-8), so a running Flask backend is needed for analysis.",
+      "id": "RC-015"
+    },
+    {
+      "doc": "frontend/.project-snapshot.md",
+      "topic": "Generation date / encoding",
+      "verdict": "stale",
+      "docClaim": "Generated 2026-05-16 by scoutProjectFull(); headers contain mojibake (e.g. 'Ã¢â‚¬â€').",
+      "docSource": "frontend/.project-snapshot.md:1",
+      "codeTruth": "Snapshot predates the 2026-05-17 redesign and later work; current src/ tree differs substantially (see rows below). Mojibake is visible at frontend/.project-snapshot.md:1 and frontend/.project-snapshot.md:9.",
+      "id": "RC-007"
+    },
+    {
+      "doc": "frontend/.project-snapshot.md",
+      "topic": "Self line count",
+      "verdict": "conflict",
+      "docClaim": "Lists `.project-snapshot.md (1674 lines)`.",
+      "docSource": "frontend/.project-snapshot.md:9",
+      "codeTruth": "The file is 1265 lines (wc -l frontend/.project-snapshot.md).",
+      "id": "RC-001"
+    },
+    {
+      "doc": "frontend/.project-snapshot.md",
+      "topic": "Removed file SharedResults.js",
+      "verdict": "conflict",
+      "docClaim": "Lists `src/SharedResults.js (475 lines)`.",
+      "docSource": "frontend/.project-snapshot.md:23",
+      "codeTruth": "No SharedResults.js in frontend/src; shared results now load inside App.js via loadSharedResults calling /api/shared/<id> (frontend/src/App.js:296-302) on a ?share= param (frontend/src/App.js:330-337).",
+      "id": "RC-002"
+    },
+    {
+      "doc": "frontend/.project-snapshot.md",
+      "topic": "Files missing from snapshot",
+      "verdict": "gap",
+      "docClaim": "File tree lists 19 files only.",
+      "docSource": "frontend/.project-snapshot.md:8",
+      "codeTruth": "Current src adds AnalyzeConfig.js, DeathRow.js, DefensivePanel.js, FpxRail.js, InfoModal.js, api.js, deathCounting.js, mockResults.js, seasonTwoRaids.js, fp-design.css and tests (AnalyzeConfig.test.js, api.test.js); plus frontend/scripts/fetch-boss-renders.py and public/art/ (e.g. frontend/src/AnalyzeConfig.js:8 imports seasonTwoRaids).",
+      "id": "RC-016"
+    },
+    {
+      "doc": "frontend/.project-snapshot.md",
+      "topic": "Line counts of major files",
+      "verdict": "stale",
+      "docClaim": "App.js 3960, LandingPage.js 102, Auth.js 422, Settings.js 854, PrivacyPolicy.js 441, TermsOfService.js 351, SaveReportDialog.js 211, SavedReports.js 291, AppHeader.js 42, supabaseClient.js 6, index.css 536.",
+      "docSource": "frontend/.project-snapshot.md:15",
+      "codeTruth": "Now App.js 2508, LandingPage.js 283, Auth.js 311, Settings.js 426, PrivacyPolicy.js 261, TermsOfService.js 182, SaveReportDialog.js 75, SavedReports.js 103, AppHeader.js 36, supabaseClient.js 33, index.css 467 (wc -l frontend/src/*).",
+      "id": "RC-008"
+    },
+    {
+      "doc": "frontend/.project-snapshot.md",
+      "topic": "Unchanged-size files",
+      "verdict": "ok",
+      "docClaim": "package.json 43 lines, App.css 3 lines, index.js 14 lines.",
+      "docSource": "frontend/.project-snapshot.md:11",
+      "codeTruth": "Still 43 (frontend/package.json), 3 (frontend/src/App.css), 14 (frontend/src/index.js).",
+      "id": "RC-024"
+    },
+    {
+      "doc": "frontend/.project-snapshot.md",
+      "topic": "public/ files",
+      "verdict": "stale",
+      "docClaim": "public/index.html 18 lines, public/manifest.json 25 lines.",
+      "docSource": "frontend/.project-snapshot.md:12",
+      "codeTruth": "Now 21 and 24 lines; public/ also holds art/ (backgrounds, bosses, quality, loader video) not in the snapshot (frontend/src/App.js:1521-1522).",
+      "id": "RC-009"
+    },
+    {
+      "doc": "frontend/.project-snapshot.md",
+      "topic": "Backend URL in embedded code",
+      "verdict": "conflict",
+      "docClaim": "Embedded SaveReportDialog/SavedReports define API_BASE = 'https://floorpov-backend.onrender.com' and call fetch directly.",
+      "docSource": "frontend/.project-snapshot.md:384",
+      "codeTruth": "Single API_URL in frontend/src/api.js:7-8 points to https://deathwarcraftlogs-api.onrender.com; components use apiFetch (frontend/src/SaveReportDialog.js:3, frontend/src/SavedReports.js:3).",
+      "id": "RC-003"
+    },
+    {
+      "doc": "frontend/.project-snapshot.md",
+      "topic": "Embedded LandingPage.js",
+      "verdict": "stale",
+      "docClaim": "Landing page has a mock timeline and three updates (latest 'Midnight Raid Support', Mar 17).",
+      "docSource": "frontend/.project-snapshot.md:263",
+      "codeTruth": "Current landing has BOSS_STRIP, backgrounds and five UPDATES entries led by 'Defensives judged on the whole burst' (OCT 1) and 'Midnight Season 2 support' (frontend/src/LandingPage.js:11, frontend/src/LandingPage.js:97-103).",
+      "id": "RC-010"
+    },
+    {
+      "doc": "frontend/public/art/README.md",
+      "topic": "Self-hosted art",
+      "verdict": "ok",
+      "docClaim": "Art is downloaded once and committed; no runtime third-party dependency.",
+      "docSource": "frontend/public/art/README.md:3",
+      "codeTruth": "Backgrounds and boss tiles load from PUBLIC_URL/art/... (frontend/src/LandingPage.js:127, frontend/src/LandingPage.js:210).",
+      "id": "RC-025"
+    },
+    {
+      "doc": "frontend/public/art/README.md",
+      "topic": "Background source",
+      "verdict": "stale",
+      "docClaim": "backgrounds/ is the official WoW: Midnight press kit (key art + cinematic stills).",
+      "docSource": "frontend/public/art/README.md:8",
+      "codeTruth": "Set now also includes Patch 12.1 key art 'curse-of-ulatek' and Patch 12.2 Eclipse concept art (the-mantle-vault, the-worldcore, the-worldcore-entrance) (frontend/src/LandingPage.js:84-95).",
+      "id": "RC-011"
+    },
+    {
+      "doc": "frontend/public/art/README.md",
+      "topic": "Background selection",
+      "verdict": "conflict",
+      "docClaim": "One background is chosen at random per page load from `BACKGROUNDS`.",
+      "docSource": "frontend/public/art/README.md:10",
+      "codeTruth": "Weighted: CURRENT_TIER_BACKGROUNDS is used with probability CURRENT_TIER_CHANCE = 0.5, otherwise a uniform pick from BACKGROUNDS (frontend/src/LandingPage.js:84-88, frontend/src/LandingPage.js:111-117).",
+      "id": "RC-004"
+    },
+    {
+      "doc": "frontend/public/art/README.md",
+      "topic": "landing-keyart.svg fallback",
+      "verdict": "ok",
+      "docClaim": "landing-keyart.svg only shows if the chosen background fails to load.",
+      "docSource": "frontend/public/art/README.md:13",
+      "codeTruth": "It is the second layer under the chosen JPG in the same background-image (frontend/src/LandingPage.js:126-128).",
+      "id": "RC-026"
+    },
+    {
+      "doc": "frontend/public/art/README.md",
+      "topic": "Adding backgrounds",
+      "verdict": "conflict",
+      "docClaim": "Drop a JPG in backgrounds/, add its slug to `BACKGROUNDS`, build. Done.",
+      "docSource": "frontend/public/art/README.md:17",
+      "codeTruth": "A new tier's art goes in CURRENT_TIER_BACKGROUNDS and the previous tier's art moves down into BACKGROUNDS (frontend/src/LandingPage.js:80-83).",
+      "id": "RC-005"
+    },
+    {
+      "doc": "frontend/public/art/README.md",
+      "topic": "Image processing spec",
+      "verdict": "ok",
+      "docClaim": "~2200px wide, q72 JPG.",
+      "docSource": "frontend/public/art/README.md:9",
+      "codeTruth": "Not enforced in code; 17 JPGs in frontend/public/art/backgrounds/ match the slugs in frontend/src/LandingPage.js:84-95.",
+      "note": "Processing spec cannot be checked against code; file/slug correspondence verified.",
+      "id": "RC-027"
+    },
+    {
+      "doc": "frontend/public/art/README.md",
+      "topic": "Boss strip pointer",
+      "verdict": "ok",
+      "docClaim": "bosses/ holds per-boss tiles by exact filename; see bosses/README.md.",
+      "docSource": "frontend/public/art/README.md:22",
+      "codeTruth": "Tiles resolve /art/bosses/<slug>.webp (frontend/src/LandingPage.js:206-210).",
+      "id": "RC-028"
+    },
+    {
+      "doc": "frontend/public/art/README.md",
+      "topic": "Other art not documented",
+      "verdict": "gap",
+      "docClaim": "Doc covers only backgrounds/, landing-keyart.svg and bosses/.",
+      "docSource": "frontend/public/art/README.md:6",
+      "codeTruth": "public/art also holds the analysis loader video ulatek-loader.webm/.jpg (frontend/src/App.js:1521-1522) and quality/*.png icons used by DeathRow (frontend/src/DeathRow.js:162).",
+      "id": "RC-017"
+    },
+    {
+      "doc": "frontend/public/art/README.md",
+      "topic": "Footer attribution",
+      "verdict": "ok",
+      "docClaim": "Footer carries non-affiliation, trademark and key-art notices.",
+      "docSource": "frontend/public/art/README.md:28",
+      "codeTruth": "Footer text at frontend/src/LandingPage.js:274-276.",
+      "id": "RC-029"
+    },
+    {
+      "doc": "frontend/public/art/bosses/README.md",
+      "topic": "Tile count",
+      "verdict": "ok",
+      "docClaim": "All 42 boss tiles are filled with official Blizzard renders.",
+      "docSource": "frontend/public/art/bosses/README.md:3",
+      "codeTruth": "42 .webp files in frontend/public/art/bosses/; BOSS_STRIP has 42 entries (frontend/src/LandingPage.js:11-60); BOSSES in the script has 42 names (frontend/scripts/fetch-boss-renders.py:14-27).",
+      "id": "RC-030"
+    },
+    {
+      "doc": "frontend/public/art/bosses/README.md",
+      "topic": "wago.tools lookups",
+      "verdict": "ok",
+      "docClaim": "Queries JournalEncounter/csv then JournalEncounterCreature/csv on wago.tools.",
+      "docSource": "frontend/public/art/bosses/README.md:10",
+      "codeTruth": "frontend/scripts/fetch-boss-renders.py:97 and frontend/scripts/fetch-boss-renders.py:105.",
+      "id": "RC-031"
+    },
+    {
+      "doc": "frontend/public/art/bosses/README.md",
+      "topic": "Render CDN URL",
+      "verdict": "ok",
+      "docClaim": "Downloads render.worldofwarcraft.com/us/npcs/zoom/creature-display-<id>.jpg.",
+      "docSource": "frontend/public/art/bosses/README.md:14",
+      "codeTruth": "frontend/scripts/fetch-boss-renders.py:123.",
+      "id": "RC-032"
+    },
+    {
+      "doc": "frontend/public/art/bosses/README.md",
+      "topic": "Output format",
+      "verdict": "ok",
+      "docClaim": "Cut out, composite councils, save 300px tall to public/art/bosses/<slug>.webp.",
+      "docSource": "frontend/public/art/bosses/README.md:15",
+      "codeTruth": "TILE_H = 300 and WEBP save (frontend/scripts/fetch-boss-renders.py:146-148).",
+      "id": "RC-033"
+    },
+    {
+      "doc": "frontend/public/art/bosses/README.md",
+      "topic": "Slug rule",
+      "verdict": "ok",
+      "docClaim": "Slug = lowercase, non-alphanumerics to '-', same as LandingPage.js.",
+      "docSource": "frontend/public/art/bosses/README.md:18",
+      "codeTruth": "Script slug() (frontend/scripts/fetch-boss-renders.py:42) matches LandingPage (frontend/src/LandingPage.js:206) and AnalyzeConfig (frontend/src/AnalyzeConfig.js:25).",
+      "id": "RC-034"
+    },
+    {
+      "doc": "frontend/public/art/bosses/README.md",
+      "topic": "Where boss names are registered",
+      "verdict": "gap",
+      "docClaim": "Add names to BOSSES in the script and BOSS_STRIP in LandingPage.js; COUNCIL in both files.",
+      "docSource": "frontend/public/art/bosses/README.md:23",
+      "codeTruth": "Boss art is also used by the Analyze page raid card (final) and lineup (bosses) (frontend/src/AnalyzeConfig.js:26, frontend/src/AnalyzeConfig.js:43, frontend/src/AnalyzeConfig.js:123), and COUNCIL exists in a third place (frontend/src/AnalyzeConfig.js:23-24). New raid entries live in frontend/src/seasonTwoRaids.js:13-14.",
+      "id": "RC-018"
+    },
+    {
+      "doc": "frontend/public/art/bosses/README.md",
+      "topic": "Fetch command",
+      "verdict": "ok",
+      "docClaim": "`python frontend/scripts/fetch-boss-renders.py \"Boss One\" ...` writes .webp into this folder; needs Pillow.",
+      "docSource": "frontend/public/art/bosses/README.md:27",
+      "codeTruth": "argv filters BOSSES (frontend/scripts/fetch-boss-renders.py:29-30); imports PIL (frontend/scripts/fetch-boss-renders.py:8); OUT is public/art/bosses (frontend/scripts/fetch-boss-renders.py:11).",
+      "id": "RC-035"
+    },
+    {
+      "doc": "frontend/public/art/bosses/README.md",
+      "topic": "DISPLAY_OVERRIDE",
+      "verdict": "ok",
+      "docClaim": "Pin a display ID in DISPLAY_OVERRIDE when a render is bad.",
+      "docSource": "frontend/public/art/bosses/README.md:29",
+      "codeTruth": "DISPLAY_OVERRIDE = {\"the-lost-explorers\": [\"143082\"]} applied at frontend/scripts/fetch-boss-renders.py:35 and :116.",
+      "id": "RC-036"
+    },
+    {
+      "doc": "frontend/public/art/bosses/README.md",
+      "topic": "Resolution stat",
+      "verdict": "stale",
+      "docClaim": "It resolved 33/33 including unreleased Midnight bosses.",
+      "docSource": "frontend/public/art/bosses/README.md:32",
+      "codeTruth": "BOSSES now has 42 entries including Midnight Season 2 (frontend/scripts/fetch-boss-renders.py:24-27), and The Lost Explorers needed a manual override (frontend/scripts/fetch-boss-renders.py:32-35).",
+      "id": "RC-012"
+    },
+    {
+      "doc": "frontend/public/art/bosses/README.md",
+      "topic": "Results log filename",
+      "verdict": "conflict",
+      "docClaim": "Misses are logged to `_results.json`.",
+      "docSource": "frontend/public/art/bosses/README.md:33",
+      "codeTruth": "Script writes scripts/_boss_results.json (frontend/scripts/fetch-boss-renders.py:155), which is gitignored (frontend/.gitignore:24).",
+      "id": "RC-006"
+    },
+    {
+      "doc": "frontend/public/art/bosses/README.md",
+      "topic": "ENC_OVERRIDE",
+      "verdict": "gap",
+      "docClaim": "Doc mentions only DISPLAY_OVERRIDE.",
+      "docSource": "frontend/public/art/bosses/README.md:29",
+      "codeTruth": "ENC_OVERRIDE = {\"l'ura\": \"2740\"} pins a journal encounter ID when name lookup fails (frontend/scripts/fetch-boss-renders.py:31).",
+      "id": "RC-019"
+    }
+  ]
+}

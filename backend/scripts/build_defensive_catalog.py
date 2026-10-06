@@ -412,7 +412,9 @@ def _get(url):
 
 
 def table(name, build=None):
-    path = CACHE_DIR and os.path.join(CACHE_DIR, f"{name}_{build or 'live'}.csv.gz")
+    # Only a pinned build is cached: the live table changes with every game
+    # build, so a cached copy of it would silently go stale.
+    path = CACHE_DIR and build and os.path.join(CACHE_DIR, f"{name}_{build}.csv.gz")
     if path and os.path.exists(path):
         with gzip.open(path, "rt", encoding="utf-8") as f:
             return list(csv.DictReader(f))

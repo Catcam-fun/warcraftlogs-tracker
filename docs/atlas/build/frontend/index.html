@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Frontend — Domain — Floor Pov</title>
+<meta name="generator" content="project-atlas">
+<meta name="atlas-content-hash" content="sha256:f8b4136fcdf4f0900ea27223a28b034c8bba9bf9e8ccd06515156eba6a1c97bf">
+<meta name="atlas-html-integrity" content="sha256:7c6662b4e024572142932bdbeb30e6f0edaa2280e54793c0ba0f0178d87c9137">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* a[href="#"] must never scroll-jump (dead/placeholder links) */
+  a[href="#"]{cursor:not-allowed}
+
+  /* ============================================================================
+     FROZEN SEMANTIC TOKENS — never overridable by brand config.
+     green = safe · amber = caution · red = never · blue = process · teal = structural.
+     An agent's colour reasoning must be stable across every project, so these
+     are baked into the template and are NOT exposed in atlas.config.json.
+     ============================================================================ */
+  :root{
+    --paper:#f4f0e6;          /* warm drafting paper            */
+    --paper-2:#efe9dc;        /* recessed panel                 */
+    --paper-3:#e7e0cf;        /* deeper panel                   */
+    --ink:#1b2430;            /* primary text (deep navy ink)   */
+    --ink-soft:#4d5867;       /* secondary text                 */
+    --ink-faint:#7d8794;      /* tertiary / captions            */
+    --line:rgba(27,36,48,.14);/* hairlines                      */
+    --line-strong:rgba(27,36,48,.30);
+
+    --blue:#1f4e79;           /* PROCESS / in-progress          */
+    --blue-soft:#e4ebf2;
+    --teal:#1d6b6b;           /* STRUCTURAL / accent            */
+    --teal-soft:#dcebe9;
+    --green:#2c6647;          /* SAFE / healthy                 */
+    --green-soft:#e2ece4;
+    --amber:#8f5e16;          /* CAUTION / needs-update         */
+    --amber-soft:#f0e6d2;
+    --red:#9c3528;            /* NEVER / failure                */
+    --red-soft:#f1e0db;
+
+    --radius:5px;
+    --shadow:0 1px 0 rgba(27,36,48,.04),0 16px 38px -24px rgba(27,36,48,.46);
+    --maxw:1080px;
+
+    /* font fallbacks frozen; brand may override the primary families below */
+    --font-display:'Fraunces',Georgia,'Times New Roman',serif;
+    --font-body:'IBM Plex Sans',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    --font-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',Menlo,Consolas,monospace;
+
+    /* brand accent defaults to teal; the brand CSS block below may override it */
+    --accent:var(--teal);
+    --accent-soft:var(--teal-soft);
+  }
+
+  /* brand tokens injected from atlas.config.json (accent + fonts only) */
+  :root{--accent:#7d6cff;}
+
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+
+  body{
+    margin:0;
+    font-family:var(--font-body);
+    color:var(--ink);
+    background-color:var(--paper);
+    background-image:
+      linear-gradient(rgba(31,78,121,.045) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(31,78,121,.045) 1px,transparent 1px),
+      radial-gradient(120% 80% at 50% -8%,rgba(255,255,255,.6),transparent 60%);
+    background-size:28px 28px,28px 28px,100% 100%;
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+
+  /* ───────────────────────────── layout ───────────────────────────── */
+  .shell{display:grid;grid-template-columns:268px minmax(0,1fr);gap:0;max-width:1360px;margin:0 auto}
+  .side{
+    position:sticky;top:0;align-self:start;height:100vh;
+    padding:32px 22px 22px;border-right:1px solid var(--line);
+    display:flex;flex-direction:column;gap:18px;overflow-y:auto;
+  }
+  .brand{display:flex;flex-direction:column;gap:7px}
+  .brand .ksmall{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--accent);font-weight:600}
+  .brand h1{font-family:var(--font-display);font-weight:600;font-size:22px;line-height:1.06;margin:0;letter-spacing:-.01em}
+  .brand .ribbon{display:inline-flex;align-items:center;gap:6px;align-self:flex-start;margin-top:3px;font-family:var(--font-mono);font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--amber);background:var(--amber-soft);border:1px solid rgba(143,94,22,.3);border-radius:3px;padding:2px 7px;font-weight:600}
+  .brand p{margin:2px 0 0;font-size:12px;color:var(--ink-soft);line-height:1.45}
+  .uplink{display:inline-flex;align-items:center;gap:7px;align-self:flex-start;margin-top:4px;font-family:var(--font-mono);font-size:11px;font-weight:600;color:var(--accent);text-decoration:none;border:1px solid var(--line);border-radius:4px;padding:5px 9px;background:var(--paper);transition:background .18s,border-color .18s}
+  .uplink:hover{background:var(--accent-soft);border-color:var(--line-strong)}
+  .uplink:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  nav.toc{display:flex;flex-direction:column;gap:1px;margin-top:2px}
+  nav.toc a{
+    display:flex;gap:10px;align-items:baseline;text-decoration:none;color:var(--ink-soft);
+    font-size:13px;padding:6px 9px;border-radius:var(--radius);border-left:2px solid transparent;
+    transition:background .18s,color .18s,border-color .18s;
+  }
+  nav.toc a .n{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-faint);min-width:18px}
+  nav.toc a.sub-d{padding-left:20px;font-size:12px}
+  nav.toc a:hover{background:var(--paper-2);color:var(--ink)}
+  nav.toc a.active{background:var(--paper-2);color:var(--accent);border-left-color:var(--accent);font-weight:600}
+  nav.toc a.active .n{color:var(--accent)}
+
+  /* ── persistent atlas-map nav (two-axis: By Layer / By Feature) ── */
+  /* desktop: always expanded (author display beats the UA <details> hiding); the
+     <details>/<summary> only becomes a hamburger toggle at <=880px (see mobile). */
+  .amap-wrap{margin:2px 0 8px}
+  .amap-toggle{list-style:none;cursor:pointer}
+  .amap-toggle::-webkit-details-marker{display:none}
+  .amap-wrap>summary{display:none}
+  .amap-deskhead{display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);margin:0 0 6px;padding:0 9px}
+  nav.atlas{display:flex;flex-direction:column;gap:1px;padding-bottom:14px;margin-bottom:14px;border-bottom:1px solid var(--line)}
+  nav.atlas .amap-group{font-family:var(--font-mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);margin:12px 0 3px;padding:0 9px}
+  nav.atlas a.amap-link{display:flex;gap:9px;align-items:center;text-decoration:none;color:var(--ink-soft);font-size:12.5px;padding:5px 9px;border-radius:var(--radius);border-left:2px solid transparent;transition:background .18s,color .18s,border-color .18s}
+  nav.atlas a.amap-link:hover{background:var(--paper-2);color:var(--ink)}
+  nav.atlas a.amap-link.active{background:var(--paper-2);color:var(--accent);border-left-color:var(--accent);font-weight:600}
+  nav.atlas a.amap-hub{color:var(--ink);font-weight:600}
+  nav.atlas a.amap-link.amap-hold{color:var(--ink-faint)}
+  nav.atlas a.amap-link.amap-hold .ad{opacity:.5}
+  .amap-link .ad{width:8px;height:8px;border-radius:2px;flex:none;border:1px solid rgba(0,0,0,.10);background:var(--ink-faint)}
+  .ad.ad-blue{background:var(--blue)} .ad.ad-green{background:var(--green)} .ad.ad-teal{background:var(--teal)} .ad.ad-amber{background:var(--amber)} .ad.ad-red{background:var(--red)}
+
+  /* hub domain grid: labeled axis groups (only rendered when >1 axis present) */
+  .axis-block{margin:0 0 32px}
+  .axis-block:last-child{margin-bottom:0}
+  .axis-h{font-family:var(--font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);margin:0 0 13px;padding-bottom:7px;border-bottom:1px solid var(--line)}
+
+  .legend{margin-top:auto;border-top:1px solid var(--line);padding-top:14px;display:flex;flex-direction:column;gap:7px}
+  .legend .lt{font-family:var(--font-mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint)}
+  .legend .row{display:flex;align-items:center;gap:9px;font-size:11.5px;color:var(--ink-soft)}
+  .swatch{width:11px;height:11px;border-radius:2px;flex:none;border:1px solid rgba(0,0,0,.08)}
+
+  /* main */
+  main{padding:0 0 110px;min-width:0}
+  .wrap{max-width:var(--maxw);padding:0 44px}
+  section{padding:50px 0 6px;scroll-margin-top:24px}
+
+  /* ───────────────────────────── breadcrumb ───────────────────────── */
+  .crumbs{max-width:var(--maxw);padding:26px 44px 0;display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-family:var(--font-mono);font-size:11px;letter-spacing:.05em}
+  .crumbs a{color:var(--accent);text-decoration:none;border-bottom:1px solid var(--line-strong);padding-bottom:1px;transition:color .18s,border-color .18s}
+  .crumbs a:hover{color:var(--ink);border-color:var(--ink)}
+  .crumbs a:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:2px}
+  .crumbs .sep{color:var(--ink-faint)}
+  .crumbs .here{color:var(--ink);font-weight:600}
+  .crumbs .lvl{margin-left:4px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.16em;font-size:9.5px;border:1px solid var(--line);border-radius:3px;padding:2px 6px}
+
+  /* ───────────────────────────── hero ─────────────────────────────── */
+  .hero{padding:48px 44px 30px;border-bottom:1px solid var(--line);max-width:var(--maxw)}
+  .hero.tophero{padding-top:60px}
+  .hero .eyebrow{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--accent);font-weight:600;margin-bottom:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  .hero h2{font-family:var(--font-display);font-weight:500;font-size:clamp(32px,4.6vw,50px);line-height:1.03;letter-spacing:-.02em;margin:0 0 18px}
+  .hero h2 em{font-style:italic;color:var(--accent)}
+  .hero .lede{font-size:17.5px;color:var(--ink-soft);max-width:66ch;margin:0}
+  .hero .lede b{color:var(--ink);font-weight:600}
+  .readline{display:flex;gap:14px;align-items:flex-start;margin-top:22px;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:var(--radius);background:var(--accent-soft);padding:13px 16px;max-width:72ch}
+  .readline .lab{font-family:var(--font-mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);font-weight:600;flex:none;margin-top:3px}
+  .readline p{margin:0;font-size:14px;color:var(--ink)}
+  .hero .meta{display:flex;flex-wrap:wrap;gap:8px 10px;margin-top:20px}
+  .chiplet{font-family:var(--font-mono);font-size:11px;color:var(--ink-soft);background:var(--paper);border:1px solid var(--line);border-radius:3px;padding:4px 9px}
+  .chiplet b{color:var(--ink);font-weight:600}
+
+  /* ───────────────────────────── section heads ────────────────────── */
+  .sec-head{display:flex;align-items:baseline;gap:13px;margin-bottom:9px}
+  .sec-head .num{font-family:var(--font-mono);font-size:12.5px;color:var(--accent);font-weight:600;letter-spacing:.04em}
+  h3{font-family:var(--font-display);font-weight:600;font-size:27px;line-height:1.1;letter-spacing:-.015em;margin:0}
+  h4{font-family:var(--font-body);font-weight:700;font-size:16px;margin:24px 0 8px;letter-spacing:-.005em;color:var(--ink)}
+  h5{font-family:var(--font-mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;margin:0 0 6px;font-weight:600;color:var(--ink-faint)}
+  .sub{font-size:15.5px;color:var(--ink-soft);max-width:72ch;margin:6px 0 0}
+  .sub b{color:var(--ink);font-weight:600}
+  p{margin:13px 0;color:var(--ink-soft);font-size:15px}
+  p b,li b{color:var(--ink);font-weight:600}
+  em{font-style:italic}
+  a.inline{color:var(--accent);text-decoration:underline;text-decoration-color:var(--line-strong);text-underline-offset:2px}
+  a.inline:hover{color:var(--ink)}
+  code{font-family:var(--font-mono);font-size:.86em;background:var(--paper-2);border:1px solid var(--line);border-radius:3px;padding:.06em .36em;color:var(--ink)}
+  blockquote{margin:18px 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:var(--radius);background:var(--accent-soft);padding:14px 18px;color:var(--ink)}
+  blockquote p{margin:6px 0;color:var(--ink)}
+
+  ul.clean,ol.clean{list-style:none;padding:0;margin:14px 0;counter-reset:li}
+  ul.clean li{position:relative;padding-left:22px;margin:9px 0;font-size:15px;color:var(--ink-soft)}
+  ul.clean li::before{content:"";position:absolute;left:2px;top:.62em;width:7px;height:7px;border:1.5px solid var(--accent);border-radius:1px;transform:rotate(45deg)}
+  ol.clean li{position:relative;padding-left:30px;margin:9px 0;font-size:15px;color:var(--ink-soft);counter-increment:li}
+  ol.clean li::before{content:counter(li);position:absolute;left:0;top:0;font-family:var(--font-mono);font-size:12px;font-weight:600;color:var(--accent);width:20px;text-align:right}
+
+  /* generic data table */
+  .matrix{width:100%;border-collapse:collapse;margin:18px 0;font-size:14px}
+  .matrix th,.matrix td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  .matrix th{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);font-weight:600;border-bottom:1px solid var(--line-strong)}
+  .matrix td:first-child{font-weight:600;color:var(--ink)}
+  .matrix tr:hover td{background:var(--paper-2)}
+
+  /* fenced code block */
+  pre.code{font-family:var(--font-mono);font-size:13px;background:var(--paper-2);border:1px solid var(--line);border-left:3px solid var(--ink-faint);border-radius:var(--radius);padding:14px 16px;overflow-x:auto;margin:16px 0;color:var(--ink);line-height:1.55}
+
+  /* ───────────────────────────── diagram / map ────────────────────── */
+  .map{margin:26px 0 4px;border:1px solid var(--line);border-radius:var(--radius);background:var(--paper);box-shadow:var(--shadow);overflow:hidden}
+  .map .map-h{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;justify-content:space-between;padding:13px 18px;border-bottom:1px solid var(--line);background:var(--paper-2)}
+  .map .map-h .mt{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);font-weight:600}
+  .map .map-h .keys{display:flex;flex-wrap:wrap;gap:6px}
+  .mkey{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-soft);border:1px solid var(--line);border-radius:3px;padding:2px 7px;background:var(--paper)}
+  .mkey i{width:18px;height:0;border-top-width:2px;border-top-style:solid;display:inline-block;flex:none}
+  .mkey.process i{border-color:var(--blue)}
+  .mkey.safe i{border-color:var(--green)}
+  .mkey.never i{border-top-style:dashed;border-color:var(--red)}
+  .mkey.caution i{border-top-style:dashed;border-color:var(--amber)}
+  .mkey.structural i{border-color:var(--teal)}
+  .map .svgwrap{padding:8px 6px 4px;overflow-x:auto}
+  .map svg{display:block;width:100%;height:auto}
+  .map .mapnote{padding:10px 18px 14px;border-top:1px solid var(--line);font-size:12.5px;color:var(--ink-faint)}
+  .map .mapnote b{color:var(--ink-soft);font-weight:600}
+  .map .mapnote code{font-family:var(--font-mono);background:var(--paper-2);border:1px solid var(--line);border-radius:3px;padding:.04em .34em;color:var(--ink);font-size:.9em}
+
+  /* svg node styles via classes */
+  .nbox{fill:var(--paper);stroke:var(--line-strong);stroke-width:1.4}
+  .nbox.dash{stroke-dasharray:5 4;fill:var(--paper-2)}
+  .nbox.process{stroke:var(--blue);stroke-width:1.5}
+  .nbox.safe{stroke:var(--green);stroke-width:1.5}
+  .nbox.caution{stroke:var(--amber);stroke-width:1.5}
+  .nbox.never{stroke:var(--red);stroke-width:1.5}
+  .nbox.structural{stroke:var(--teal);stroke-width:1.6}
+  .ntitle{font-family:var(--font-body);font-weight:600;font-size:12.5px;fill:var(--ink)}
+  .nsub{font-family:var(--font-mono);font-size:9px;fill:var(--ink-faint);letter-spacing:.04em;text-transform:uppercase}
+  .stepnum{font-family:var(--font-mono);font-size:9px;font-weight:600;fill:var(--accent)}
+  .lanecap{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;font-weight:600;fill:var(--ink-soft)}
+  .band{fill:none;stroke-width:1.2;stroke-dasharray:2 5}
+  .bandlab{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;font-weight:600}
+  .edge{fill:none;stroke-width:1.8;stroke:var(--ink-soft)}
+  .edge.process{stroke:var(--blue)}
+  .edge.safe{stroke:var(--green)}
+  .edge.never{stroke:var(--red);stroke-dasharray:5 4}
+  .edge.caution{stroke:var(--amber);stroke-dasharray:5 4}
+  .edge.structural{stroke:var(--teal)}
+  .elabel{font-family:var(--font-mono);font-size:8.5px;fill:var(--ink-soft);letter-spacing:.03em}
+
+  /* ───────────────────────────── context map ──────────────────────── */
+  .ctx{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin:22px 0 4px}
+  @media(max-width:820px){.ctx{grid-template-columns:1fr}}
+  .ctxcol{border:1px solid var(--line);border-radius:var(--radius);background:var(--paper);padding:15px 16px}
+  .ctxcol.dep{border-top:3px solid var(--blue)}
+  .ctxcol.prov{border-top:3px solid var(--green)}
+  .ctxcol.rely{border-top:3px solid var(--teal)}
+  .ctxcol .cl{font-family:var(--font-mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;font-weight:600;margin-bottom:9px;display:block}
+  .ctxcol.dep .cl{color:var(--blue)} .ctxcol.prov .cl{color:var(--green)} .ctxcol.rely .cl{color:var(--teal)}
+  .ctxcol ul{list-style:none;padding:0;margin:0}
+  .ctxcol li{font-size:13px;color:var(--ink-soft);padding:4px 0 4px 15px;position:relative;line-height:1.4}
+  .ctxcol li::before{content:"";position:absolute;left:0;top:.7em;width:6px;height:6px;border:1.4px solid currentColor;border-radius:1px;transform:rotate(45deg);opacity:.5}
+  .ctxcol.dep li{color:var(--ink-soft)}
+  .ctxhere{grid-column:1/-1;text-align:center;font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin:2px 0}
+  .ctxhere b{color:var(--ink);font-weight:600}
+
+  /* ───────────────────────────── domain / sub-page grid ───────────── */
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:26px 0 4px}
+  @media(max-width:1100px){.grid{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:680px){.grid{grid-template-columns:1fr}}
+  .dcard{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:var(--radius);background:var(--paper);overflow:hidden;text-decoration:none;color:inherit;transition:transform .18s,border-color .18s,box-shadow .18s;position:relative}
+  .dcard:hover{transform:translateY(-3px);border-color:var(--line-strong);box-shadow:var(--shadow)}
+  .dcard:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .dcard .top{height:4px;background:var(--accent)}
+  .dcard.c-blue .top{background:var(--blue)}
+  .dcard.c-green .top{background:var(--green)}
+  .dcard.c-teal .top{background:var(--teal)}
+  .dcard.c-amber .top{background:var(--amber)}
+  .dcard.c-red .top{background:var(--red)}
+  .dcard.hold,.dcard.draft{background:var(--paper-2);border-style:dashed;border-color:var(--line-strong)}
+  .dcard.hold .top,.dcard.draft .top{background:var(--ink-faint)}
+  .dcard.hold:hover{transform:none;box-shadow:none}
+  .dcard .body{padding:17px 18px 18px;display:flex;flex-direction:column;flex:1}
+  .dcard .crow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px}
+  .dcard .k{font-family:var(--font-mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;font-weight:600;color:var(--accent)}
+  .dcard.c-blue .k{color:var(--blue)} .dcard.c-green .k{color:var(--green)} .dcard.c-amber .k{color:var(--amber)} .dcard.c-red .k{color:var(--red)}
+  .dcard.hold .k,.dcard.draft .k{color:var(--ink-faint)}
+  .dcard h4{font-family:var(--font-display);font-weight:600;font-size:19px;margin:0 0 5px;letter-spacing:-.01em;color:var(--ink)}
+  .dcard.hold h4,.dcard.draft h4{color:var(--ink-soft)}
+  .dcard p.purpose{font-size:13.5px;color:var(--ink-soft);margin:0 0 13px;line-height:1.5}
+  .dcard .find-lab{font-family:var(--font-mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin:0 0 6px}
+  .dcard ul{list-style:none;padding:0;margin:0 0 16px}
+  .dcard li{position:relative;padding-left:17px;font-size:12.5px;color:var(--ink-soft);margin:5px 0;line-height:1.4}
+  .dcard li::before{content:"";position:absolute;left:2px;top:.5em;width:6px;height:6px;border:1.4px solid currentColor;border-radius:1px;transform:rotate(45deg);opacity:.55}
+  .dcard .open{margin-top:auto;font-family:var(--font-mono);font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:7px;color:var(--accent)}
+  .dcard.c-blue .open{color:var(--blue)} .dcard.c-green .open{color:var(--green)} .dcard.c-amber .open{color:var(--amber)} .dcard.c-red .open{color:var(--red)}
+  .dcard.hold .open,.dcard.draft .open{color:var(--ink-faint)}
+
+  /* status chips */
+  .chip{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:9.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:3px 7px;border-radius:3px;border:1px solid;white-space:nowrap}
+  .chip.documented{color:var(--green);background:var(--green-soft);border-color:rgba(44,102,71,.3)}
+  .chip.draft{color:var(--ink-faint);background:var(--paper-3);border-color:var(--line-strong)}
+  .chip.needs-update{color:var(--amber);background:var(--amber-soft);border-color:rgba(143,94,22,.3)}
+  .chip.on-hold{color:var(--ink-faint);background:var(--paper-3);border-color:var(--line-strong)}
+  .chip .dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+
+  .wired-note{margin:18px 0 0;font-size:12.5px;color:var(--ink-faint)}
+  .wired-note code{font-family:var(--font-mono);font-size:.9em;background:var(--paper-2);border:1px solid var(--line);border-radius:3px;padding:.06em .36em;color:var(--ink)}
+
+  /* ───────────────────────────── invariants panel ─────────────────── */
+  .invariants{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:24px 0 4px}
+  @media(max-width:860px){.invariants{grid-template-columns:1fr}}
+  .inv{border:1px solid var(--line);border-left:3px solid var(--green);border-radius:var(--radius);background:var(--paper);padding:15px 16px}
+  .inv.never{border-left-color:var(--red)}
+  .inv.must{border-left-color:var(--green)}
+  .inv .tag{font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--green);margin-bottom:7px;display:inline-flex;align-items:center;gap:6px}
+  .inv.never .tag{color:var(--red)}
+  .inv .tag .dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+  .inv p{margin:0;font-size:13.5px;color:var(--ink);line-height:1.5}
+  .inv code{font-family:var(--font-mono);font-size:.86em;background:var(--paper-2);border:1px solid var(--line);border-radius:3px;padding:.04em .34em}
+
+  /* ───────────────────────────── stepper ──────────────────────────── */
+  .stepper{display:grid;grid-template-columns:repeat(var(--step-cols,7),1fr);gap:6px;margin:24px 0 0}
+  .step{
+    appearance:none;text-align:left;cursor:pointer;background:var(--paper);border:1px solid var(--line);
+    border-radius:var(--radius);padding:12px 10px 13px;position:relative;transition:border-color .18s,background .18s,transform .18s;
+    font-family:var(--font-body);
+  }
+  .step:hover{border-color:var(--line-strong);transform:translateY(-2px)}
+  .step[aria-selected="true"]{border-color:var(--blue);background:#fff;box-shadow:var(--shadow)}
+  .step .sn{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-faint)}
+  .step[aria-selected="true"] .sn{color:var(--blue)}
+  .step .st{display:block;font-weight:600;font-size:13px;margin-top:5px;color:var(--ink);line-height:1.2}
+  .step .sd{display:block;font-size:11px;color:var(--ink-faint);margin-top:3px;line-height:1.25}
+  @media(max-width:760px){.stepper{grid-template-columns:repeat(3,1fr)}}
+  @media(max-width:460px){.stepper{grid-template-columns:repeat(2,1fr)}}
+  .panel{border:1px solid var(--line);border-top:3px solid var(--blue);border-radius:0 0 var(--radius) var(--radius);background:#fff;padding:22px 24px;margin-top:10px;box-shadow:var(--shadow)}
+  .panel h4{margin-top:0}
+  .panel .pbody{font-size:14.5px;color:var(--ink-soft)}
+  .panel .gotcha{display:flex;gap:12px;align-items:flex-start;background:var(--amber-soft);border:1px solid rgba(143,94,22,.25);border-left:3px solid var(--amber);border-radius:var(--radius);padding:11px 14px;margin-top:16px}
+  .panel .gotcha .gl{font-family:var(--font-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--amber);font-weight:600;flex:none;margin-top:2px}
+  .panel .gotcha p{margin:0;font-size:13.5px;color:var(--ink)}
+
+  /* ───────────────────────────── filterable inventory ─────────────── */
+  .filterbar{display:flex;flex-wrap:wrap;gap:7px;align-items:center;margin:18px 0 12px}
+  .filterbar .fl{font-family:var(--font-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin-right:4px}
+  .fchip{appearance:none;cursor:pointer;font-family:var(--font-mono);font-size:11px;font-weight:600;letter-spacing:.03em;color:var(--ink-soft);background:var(--paper);border:1px solid var(--line-strong);border-radius:20px;padding:5px 13px;transition:all .15s}
+  .fchip:hover{border-color:var(--accent);color:var(--accent)}
+  .fchip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--paper)}
+  .inv-count{font-family:var(--font-mono);font-size:11px;color:var(--ink-faint);margin-left:auto}
+  table.inv{width:100%;border-collapse:collapse;margin:6px 0 4px;font-size:13px}
+  table.inv th,table.inv td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  table.inv th{font-family:var(--font-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);font-weight:600;border-bottom:1px solid var(--line-strong)}
+  table.inv td:first-child{font-family:var(--font-mono);font-size:12.5px;font-weight:600;color:var(--ink)}
+  table.inv tr:hover td{background:var(--paper-2)}
+  table.inv tr[hidden]{display:none}
+
+  /* ───────────────────────────── standing-it-up table ─────────────── */
+  .standup{width:100%;border-collapse:collapse;margin:18px 0;font-size:14px}
+  .standup th,.standup td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  .standup th{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);font-weight:600;border-bottom:1px solid var(--line-strong)}
+  .standup td:first-child{font-weight:600;color:var(--ink);white-space:nowrap}
+  .standup tr:hover td{background:var(--paper-2)}
+
+  /* ───────────────────────────── accordion (gotchas / glossary) ───── */
+  .acc{border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;margin:20px 0;background:var(--paper)}
+  .acc details{border-top:1px solid var(--line)}
+  .acc details:first-child{border-top:0}
+  .acc summary{cursor:pointer;list-style:none;padding:14px 16px;display:flex;align-items:center;gap:12px;font-weight:600;font-size:14px;color:var(--ink);transition:background .15s}
+  .acc summary:hover{background:var(--paper-2)}
+  .acc summary::-webkit-details-marker{display:none}
+  .acc summary .chev{margin-left:auto;font-family:var(--font-mono);color:var(--ink-faint);transition:transform .2s;font-size:12px}
+  .acc details[open] summary .chev{transform:rotate(90deg);color:var(--accent)}
+  .acc .body{padding:2px 16px 18px 44px}
+  .acc .body p{margin:6px 0;font-size:14px;color:var(--ink-soft)}
+  .acc .gtag{flex:none;width:22px;height:22px;border-radius:3px;display:grid;place-items:center;font-size:12px;font-family:var(--font-mono);font-weight:700}
+  .gtag.warn{background:var(--amber-soft);color:var(--amber)}
+  .gtag.info{background:var(--blue-soft);color:var(--blue)}
+
+  /* dotted glossary term + floating tooltip */
+  .term{border-bottom:1.5px dotted var(--blue);cursor:help;color:var(--ink);font-weight:500}
+  #tip{position:fixed;z-index:50;max-width:300px;background:var(--ink);color:#f4f0e6;font-size:12.5px;line-height:1.5;padding:9px 12px;border-radius:5px;box-shadow:0 10px 30px -8px rgba(0,0,0,.5);pointer-events:none;opacity:0;transform:translateY(4px);transition:opacity .15s,transform .15s}
+  #tip.show{opacity:1;transform:none}
+  #tip b{color:#9fc6e6}
+  #tip code{background:rgba(255,255,255,.12);border:0;color:#e6c07b;padding:.04em .3em}
+
+  /* environments table */
+  .envtable{width:100%;border-collapse:collapse;margin:18px 0;font-size:14px}
+  .envtable th,.envtable td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  .envtable th{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);font-weight:600;border-bottom:1px solid var(--line-strong)}
+  .envtable td:first-child{font-weight:600;color:var(--ink)}
+  .envtable tr:hover td{background:var(--paper-2)}
+
+  /* related link graph */
+  .related{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0}
+  .relcard{display:inline-flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:var(--radius);background:var(--paper);padding:10px 14px;text-decoration:none;color:var(--ink);font-size:13.5px;transition:border-color .18s,transform .18s,box-shadow .18s}
+  .relcard:hover{border-color:var(--line-strong);transform:translateY(-2px);box-shadow:var(--shadow)}
+  .relcard .arr{font-family:var(--font-mono);color:var(--accent);font-size:12px}
+  .relcard .rt{font-weight:600}
+  .relcard .rd{color:var(--ink-faint);font-size:12px}
+
+  /* footer */
+  footer{border-top:1px solid var(--line);margin-top:54px;padding:26px 44px;max-width:var(--maxw)}
+  footer .lvlnote{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);border:1px solid var(--line);border-radius:3px;padding:4px 9px;margin-bottom:12px}
+  footer p{font-size:12px;color:var(--ink-faint);margin:5px 0;font-family:var(--font-mono)}
+  footer code{font-family:var(--font-mono);font-size:.92em;color:var(--ink-soft)}
+
+  /* reveal */
+  .reveal{opacity:0;transform:translateY(14px);transition:opacity .6s ease,transform .6s ease}
+  .reveal.in{opacity:1;transform:none}
+  @media (prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}}
+
+  /* ───────────────────────────── search ───────────────────────────── */
+  .atlas-search{position:relative;margin:2px 0 6px}
+  .atlas-search .as-input{width:100%;font-family:var(--font-body);font-size:13px;color:var(--ink);
+    background:var(--paper);border:1px solid var(--line-strong);border-radius:var(--radius);
+    padding:8px 30px 8px 11px;outline:none;transition:border-color .15s,box-shadow .15s}
+  .atlas-search .as-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+  .atlas-search .as-kbd{position:absolute;right:8px;top:7px;font-family:var(--font-mono);font-size:10px;
+    color:var(--ink-faint);border:1px solid var(--line);border-radius:3px;padding:1px 5px;background:var(--paper-2);pointer-events:none}
+  .atlas-search .as-results{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:60;max-height:60vh;overflow-y:auto;
+    background:var(--paper);border:1px solid var(--line-strong);border-radius:var(--radius);box-shadow:var(--shadow);padding:4px}
+  .atlas-search .as-results[hidden]{display:none}
+  .as-res{display:block;text-decoration:none;color:var(--ink-soft);padding:7px 9px;border-radius:var(--radius);border-left:2px solid transparent}
+  .as-res:hover,.as-res.as-active{background:var(--paper-2);color:var(--ink);border-left-color:var(--accent)}
+  .as-res .as-crumb{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);display:block;margin-bottom:2px}
+  .as-res .as-h{font-size:13px;font-weight:600;color:var(--ink)}
+  .as-res mark{background:var(--accent-soft);color:var(--ink);border-radius:2px;padding:0 1px}
+  .as-empty{padding:10px 9px;font-size:12.5px;color:var(--ink-faint)}
+
+  /* mobile */
+  @media(max-width:880px){
+    .shell{grid-template-columns:1fr}
+    .side{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}
+    nav.toc{flex-direction:row;flex-wrap:wrap;gap:4px}
+    nav.toc a{font-size:12px;padding:5px 9px}
+    nav.toc a .n{display:none}
+    nav.toc a.sub-d{padding-left:9px}
+    .amap-wrap>summary{display:flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);font-weight:600;padding:9px 11px;border:1px solid var(--line);border-radius:var(--radius);background:var(--paper)}
+    .amap-deskhead{display:none}
+    .amap-wrap:not([open]) nav.atlas{display:none}
+    nav.atlas{margin-top:8px;padding-bottom:10px;margin-bottom:10px}
+    .legend{margin-top:14px}
+    .wrap,.hero,.crumbs,footer{padding-left:22px;padding-right:22px}
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <aside class="side">
+    <div class="brand">
+      <span class="ksmall">Floor Pov</span>
+      <h1>Frontend</h1>
+      <span class="ribbon">Domain Landing</span>
+      <p>The React site raid officers use, from landing page to the per-death breakdown.</p>
+      <a class="uplink" href="../index.html">← Atlas Hub</a>
+    </div>
+    <div class="atlas-search" data-atlas-base="../"><input type="search" class="as-input" placeholder="Search the atlas…" aria-label="Search the atlas" autocomplete="off" spellcheck="false"><kbd class="as-kbd" aria-hidden="true">⌘K</kbd><div class="as-results" role="listbox" hidden></div></div><script src="../search-index.js" defer></script>
+    <details class="amap-wrap" open><summary class="amap-toggle"><span class="amap-burger" aria-hidden="true">☰</span> Atlas map</summary><div class="amap-deskhead" aria-hidden="true">Atlas map</div><nav class="atlas" aria-label="Atlas map"><a class="amap-link amap-hub" href="../index.html"><span class="ad ad-teal"></span><span>Hub</span></a><div class="amap-group">By Layer</div><a class="amap-link" href="../overview.html"><span class="ad ad-teal"></span><span>Overview</span></a><a class="amap-link active" href="../frontend/index.html"><span class="ad ad-blue"></span><span>Frontend</span></a><a class="amap-link" href="../backend/index.html"><span class="ad ad-green"></span><span>Backend API</span></a><a class="amap-link" href="../warcraftlogs/index.html"><span class="ad ad-teal"></span><span>WarcraftLogs Integration</span></a><a class="amap-link" href="../data-model.html"><span class="ad ad-teal"></span><span>Data Model</span></a><a class="amap-link" href="../auth.html"><span class="ad ad-blue"></span><span>Accounts &amp; Auth</span></a><a class="amap-link" href="../game-data/index.html"><span class="ad ad-green"></span><span>Game Data Catalogs</span></a><a class="amap-link" href="../deployment.html"><span class="ad ad-blue"></span><span>Deployment &amp; Environments</span></a><a class="amap-link" href="../security.html"><span class="ad ad-red"></span><span>Security &amp; Trust Boundaries</span></a><a class="amap-link" href="../testing.html"><span class="ad ad-green"></span><span>Testing &amp; Checks</span></a><a class="amap-link" href="../operations.html"><span class="ad ad-amber"></span><span>Operations &amp; New Tier</span></a><a class="amap-link" href="../reconciliation.html"><span class="ad ad-amber"></span><span>Docs ⇄ Code Reconciliation</span></a><a class="amap-link" href="../doc-remediation.html"><span class="ad ad-amber"></span><span>Documentation Remediation</span></a><div class="amap-group">By Feature</div><a class="amap-link" href="../feat-analyze.html"><span class="ad ad-blue"></span><span>Analyze a Guild</span></a><a class="amap-link" href="../feat-results.html"><span class="ad ad-green"></span><span>Results &amp; Death Breakdown</span></a><a class="amap-link" href="../feat-saved.html"><span class="ad ad-teal"></span><span>Saved Reports</span></a><a class="amap-link" href="../feat-share.html"><span class="ad ad-teal"></span><span>Share Links</span></a><a class="amap-link" href="../feat-account.html"><span class="ad ad-amber"></span><span>Account &amp; Settings</span></a></nav></details>
+    <nav class="toc" aria-label="Sections"><a href="#summary"><span class="n">01</span><span>Summary</span></a><a href="#how-it-works"><span class="n">02</span><span>How it works</span></a><a href="#diagram"><span class="n">03</span><span>Diagram</span></a><a href="#reference"><span class="n">04</span><span>Reference</span></a><a href="#standing-it-up"><span class="n">05</span><span>Standing it up</span></a><a href="#environments"><span class="n">06</span><span>Environments</span></a><a href="#invariants"><span class="n">07</span><span>Invariants</span></a><a href="#gotchas"><span class="n">08</span><span>Gotchas</span></a><a href="#glossary"><span class="n">09</span><span>Glossary</span></a><a href="#related"><span class="n">10</span><span>Related</span></a><a href="#subpages"><span class="n">11</span><span>Sub-pages</span></a></nav>
+    <div class="legend">
+  <span class="lt">Semantic colour key</span>
+  <div class="row"><span class="swatch" style="background:var(--green)"></span> Safe / healthy</div>
+  <div class="row"><span class="swatch" style="background:var(--amber)"></span> Caution / needs update</div>
+  <div class="row"><span class="swatch" style="background:var(--red)"></span> Never / failure</div>
+  <div class="row"><span class="swatch" style="background:var(--blue)"></span> Process / in-progress</div>
+  <div class="row"><span class="swatch" style="background:var(--teal)"></span> Structural / accent</div>
+</div>
+  </aside>
+
+  <main>
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../index.html">Atlas</a><span class="sep" aria-hidden="true">›</span><span class="here">Frontend</span><span class="lvl">Level 2 of 3</span></nav>
+    <header class="hero"><div class="eyebrow"><span>Domain landing</span></div><h2>Frontend</h2><p class="lede">A Create React App site: one large shell component (App.js) owns all state, routing and the analysis stream; smaller files render each surface.</p><div class="readline"><span class="lab">How to read</span><p>This is a mini-atlas for one domain: an overview and diagram, then the index of its sub-pages.</p></div></header><section id="summary"><div class="wrap reveal"><div class="sec-head"><span class="num">01</span><h3>Summary</h3></div><p>The <b>frontend</b> is the React (Create React App) site at the top of Floor Pov. It renders the landing page, the Analyze form, the Results breakdown and the Saved list, and it consumes the backend's streamed analysis directly in the browser.</p>
+<ul class="clean"><li>The app mounts in <code>frontend/src/index.js:9</code> inside a <code>BrowserRouter</code>, and loads two style sheets: the older <code>index.css</code> and the <code>fpx-</code> design system in <code>fp-design.css</code> (<code>frontend/src/index.js:4</code>).</li><li>Almost all state lives in one component, <code>WarcraftLogsApp</code> in <code>frontend/src/App.js:187</code>. Child surfaces receive props and callbacks; there is no global store.</li><li>Two network partners: the Flask API through <code>apiFetch</code> (<code>frontend/src/api.js:54</code>) and Supabase through the shared client (<code>frontend/src/supabaseClient.js:6</code>).</li><li>What it deliberately does not do: it never computes deaths, slots or defensive verdicts itself. Those arrive pre-computed from the backend; the browser only counts, filters and displays them.</li></ul>
+</div></section>
+<section id="how-it-works"><div class="wrap reveal"><div class="sec-head"><span class="num">02</span><h3>How it works</h3></div><p>You can think of <code>App.js</code> as the switchboard. It owns the analysis config, the loaded results, the signed-in user and every modal flag. Each page is a thin renderer that reads from it and calls back into it.</p>
+<div class="stepper-wrap"><div class="stepper" role="tablist" style="--step-cols:5"><button class="step" role="tab" aria-selected="true" data-step="0"><span class="sn">STEP 1</span><span class="st">Boot</span><span class="sd">wake Render, restore session</span></button><button class="step" role="tab" aria-selected="false" data-step="1"><span class="sn">STEP 2</span><span class="st">Restore</span><span class="sd">IndexedDB, unless a share link</span></button><button class="step" role="tab" aria-selected="false" data-step="2"><span class="sn">STEP 3</span><span class="st">Credentials</span><span class="sd">browser first, then account</span></button><button class="step" role="tab" aria-selected="false" data-step="3"><span class="sn">STEP 4</span><span class="st">Analyze</span><span class="sd">POST and read the stream</span></button><button class="step" role="tab" aria-selected="false" data-step="4"><span class="sn">STEP 5</span><span class="st">Results</span><span class="sd">count, filter, display</span></button></div><div class="panel" role="tabpanel"></div><script type="application/json">[{"title":"Boot and warm the API","body":"On mount the app fires a fire-and-forget GET /api/health so a sleeping Render instance starts waking while the user reads (App.js:262). In parallel it restores the Supabase session, or signs out locally if a &quot;stay logged in = off&quot; session outlived its browser (App.js:277).","gotcha":"The health ping swallows every error on purpose. A slow or down backend never blocks the page from rendering."},{"title":"Restore last results","body":"Unless the URL carries ?share=, the app reads the last analysis from IndexedDB (database FloorPovDB, store analysisData, key sharedAnalysisData) and puts it back on screen (App.js:531). The recent-runs list is loaded the same way and re-saved to scrub credentials older versions stored (App.js:515).","gotcha":""},{"title":"Fill credentials","body":"The config starts with credentials remembered in localStorage under fpx.wclCredentials (api.js:20, App.js:199). When a user signs in, their stored row in the Supabase api_credentials table overrides those (App.js:561).","gotcha":""},{"title":"Run the analysis","body":"handleSubmit POSTs the config to /api/analyze and reads the response body as a server-sent-event stream, updating the loader text on each message and storing the final result (App.js:681). See frontend-pages-and-routing for the stream format.","gotcha":""},{"title":"Render and persist","body":"The result is stored in state, saved to IndexedDB and to the recent-runs list, and the app navigates to /results (App.js:937). Every table on that page is derived from the stored result plus the current filters.","gotcha":""}]</script></div></div></section>
+<section id="diagram"><div class="wrap reveal"><div class="sec-head"><span class="num">03</span><h3>Diagram</h3></div><p>The component map. Blue edges are props and callbacks from the <span class="term" data-tip="`WarcraftLogsApp` in `App.js`, the one component that owns state and both route tables.">shell</span>; teal boxes are external services.</p>
+<div class="map"><div class="map-h"><span class="mt">Diagram</span><span class="keys"><span class="mkey process"><i></i>Process</span><span class="mkey structural"><i></i>Structural</span></span></div><div class="svgwrap"><div style="min-width:1096px"><svg viewBox="0 0 1096 586" role="img" preserveAspectRatio="xMinYMin meet" aria-label="Structured diagram"><defs><marker id="arr-process" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto"><path d="M0,0 L7,3.2 L0,6.4 Z" fill="var(--blue)"/></marker><marker id="arr-safe" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto"><path d="M0,0 L7,3.2 L0,6.4 Z" fill="var(--green)"/></marker><marker id="arr-caution" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto"><path d="M0,0 L7,3.2 L0,6.4 Z" fill="var(--amber)"/></marker><marker id="arr-never" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto"><path d="M0,0 L7,3.2 L0,6.4 Z" fill="var(--red)"/></marker><marker id="arr-structural" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto"><path d="M0,0 L7,3.2 L0,6.4 Z" fill="var(--teal)"/></marker></defs><text class="lanecap" x="24" y="30">App shell</text><text class="lanecap" x="24" y="167">Pages and modals</text><text class="lanecap" x="24" y="304">Results leaves</text><text class="lanecap" x="24" y="441">Services</text><path class="edge process" d="M192,63.5 H244" marker-end="url(#arr-process)"/><rect x="198.1" y="46.5" width="39.8" height="13" rx="3" fill="var(--paper)" opacity="0.9"/><text class="elabel" x="218.0" y="56.5" text-anchor="middle">mounts</text><path class="edge process" d="M412,63.5 H464" marker-end="url(#arr-process)"/><rect x="415.4" y="46.5" width="45.1" height="13" rx="3" fill="var(--paper)" opacity="0.9"/><text class="elabel" x="438.0" y="56.5" text-anchor="middle">renders</text><path class="edge process" d="M328,89 V132 H108 V175" marker-end="url(#arr-process)"/><rect x="200.8" y="117.0" width="34.5" height="13" rx="3" fill="var(--paper)" opacity="0.9"/><text class="elabel" x="218.0" y="127.0" text-anchor="middle">route</text><path class="edge process" d="M328,89 V132 H328 V175" marker-end="url(#arr-process)"/><rect x="310.8" y="117.0" width="34.5" height="13" rx="3" fill="var(--paper)" opacity="0.9"/><text class="elabel" x="328.0" y="127.0" text-anchor="middle">route</text><path class="edge process" d="M328,89 V132 H548 V175" marker-end="url(#arr-process)"/><rect x="420.8" y="117.0" width="34.5" height="13" rx="3" fill="var(--paper)" opacity="0.9"/><text class="elabel" x="438.0" y="127.0" text-anchor="middle">route</text><path class="edge process" d="M328,89 V132 H768 V175" marker-end="url(#arr-process)"/><rect x="530.8" y="117.0" width="34.5" height="13" rx="3" fill="var(--paper)" opacity="0.9"/><text class="elabel" x="548.0" y="127.0" text-anchor="middle">route</text><path class="edge process" d="M328,89 V132 H988 V175" marker-end="url(#arr-process)"/><rect x="640.8" y="117.0" width="34.5" height="13" rx="3" fill="var(--paper)" opacity="0.9"/><text class="elabel" x="658.0" y="127.0" text-anchor="middle">flags</text><path class="edge process" d="M548,226 V269 H108 V312" marker-end="url(#arr-process)"/><rect x="300.1" y="254.0" width="55.7" height="13" rx="3" fill="var(--paper)" opacity="0.9"/><text class="elabel" x="328.0" y="264.0" text-anchor="middle">per death</text><path class="edge process" d="M548,226 V269 H328 V312" marker-end="url(#arr-process)"/><rect x="407.5" y="254.0" width="61.0" height="13" rx="3" fill="var(--paper)" opacity="0.9"/><text class="elabel" x="438.0" y="264.0" text-anchor="middle">per player</text><path class="edge process" d="M548,226 V269 H548 V312" marker-end="url(#arr-process)"/><rect x="520.1" y="254.0" width="55.7" height="13" rx="3" fill="var(--paper)" opacity="0.9"/><text class="elabel" x="548.0" y="264.0" text-anchor="middle">isCounted</text><path class="edge process" d="M328,89 V269 H108 V449" marker-end="url(#arr-process)"/><rect x="200.8" y="254.0" width="34.5" height="13" rx="3" fill="var(--paper)" opacity="0.9"/><text class="elabel" x="218.0" y="264.0" text-anchor="middle">fetch</text><path class="edge process" d="M768,226 V337.5 H108 V449" marker-end="url(#arr-process)"/><rect x="412.8" y="322.5" width="50.4" height="13" rx="3" fill="var(--paper)" opacity="0.9"/><text class="elabel" x="438.0" y="332.5" text-anchor="middle">apiFetch</text><path class="edge process" d="M988,226 V337.5 H328 V449" marker-end="url(#arr-process)"/><rect x="624.9" y="322.5" width="66.3" height="13" rx="3" fill="var(--paper)" opacity="0.9"/><text class="elabel" x="658.0" y="332.5" text-anchor="middle">supabase-js</text><path class="edge structural" d="M328,89 V269 H548 V449" marker-end="url(#arr-structural)"/><rect x="415.4" y="254.0" width="45.1" height="13" rx="3" fill="var(--paper)" opacity="0.9"/><text class="elabel" x="438.0" y="264.0" text-anchor="middle">persist</text><g><rect class="nbox structural" x="24" y="38" width="168" height="51" rx="6"/><text class="ntitle" x="108" y="60.0" text-anchor="middle">index.js</text><text class="nsub" x="108" y="75.0" text-anchor="middle">BrowserRouter</text></g><g><rect class="nbox process" x="244" y="38" width="168" height="51" rx="6"/><text class="ntitle" x="328" y="60.0" text-anchor="middle">App.js</text><text class="nsub" x="328" y="75.0" text-anchor="middle">state + routes</text></g><g><rect class="nbox structural" x="464" y="38" width="168" height="51" rx="6"/><text class="ntitle" x="548" y="60.0" text-anchor="middle">FpxRail</text><text class="nsub" x="548" y="75.0" text-anchor="middle">left nav</text></g><g><rect class="nbox process" x="24" y="175" width="168" height="51" rx="6"/><text class="ntitle" x="108" y="197.0" text-anchor="middle">LandingPage</text><text class="nsub" x="108" y="212.0" text-anchor="middle">/</text></g><g><rect class="nbox process" x="244" y="175" width="168" height="51" rx="6"/><text class="ntitle" x="328" y="197.0" text-anchor="middle">AnalyzeConfig</text><text class="nsub" x="328" y="212.0" text-anchor="middle">/analyze</text></g><g><rect class="nbox process" x="464" y="175" width="168" height="51" rx="6"/><text class="ntitle" x="548" y="197.0" text-anchor="middle">Results view</text><text class="nsub" x="548" y="212.0" text-anchor="middle">/results (in App.js)</text></g><g><rect class="nbox process" x="684" y="175" width="168" height="51" rx="6"/><text class="ntitle" x="768" y="197.0" text-anchor="middle">SavedReports</text><text class="nsub" x="768" y="212.0" text-anchor="middle">/saved</text></g><g><rect class="nbox process" x="904" y="175" width="168" height="51" rx="6"/><text class="ntitle" x="988" y="197.0" text-anchor="middle">Auth / Settings</text><text class="nsub" x="988" y="212.0" text-anchor="middle">modals</text></g><g><rect class="nbox safe" x="24" y="312" width="168" height="51" rx="6"/><text class="ntitle" x="108" y="334.0" text-anchor="middle">DeathRow</text><text class="nsub" x="108" y="349.0" text-anchor="middle">one death</text></g><g><rect class="nbox safe" x="244" y="312" width="168" height="51" rx="6"/><text class="ntitle" x="328" y="334.0" text-anchor="middle">DefensivePanel</text><text class="nsub" x="328" y="349.0" text-anchor="middle">per-player chips</text></g><g><rect class="nbox safe" x="464" y="312" width="168" height="51" rx="6"/><text class="ntitle" x="548" y="334.0" text-anchor="middle">deathCounting</text><text class="nsub" x="548" y="349.0" text-anchor="middle">slot / inWipe</text></g><g><rect class="nbox structural" x="24" y="449" width="168" height="51" rx="6"/><text class="ntitle" x="108" y="471.0" text-anchor="middle">Flask API</text><text class="nsub" x="108" y="486.0" text-anchor="middle">api.js API_URL</text></g><g><rect class="nbox structural" x="244" y="449" width="168" height="51" rx="6"/><text class="ntitle" x="328" y="471.0" text-anchor="middle">Supabase</text><text class="nsub" x="328" y="486.0" text-anchor="middle">auth + credentials</text></g><g><rect class="nbox structural" x="464" y="449" width="168" height="51" rx="6"/><text class="ntitle" x="548" y="471.0" text-anchor="middle">IndexedDB</text><text class="nsub" x="548" y="486.0" text-anchor="middle">last run, recent 5</text></g></svg></div></div></div></div></section>
+<section id="reference"><div class="wrap reveal"><div class="sec-head"><span class="num">04</span><h3>Reference</h3></div><p>The main modules. Filter by role.</p>
+<div class="inventory"><div class="filterbar" role="group" aria-label="Filter inventory"><span class="fl">Filter</span><button class="fchip" data-filter="all" aria-pressed="true">All</button><button class="fchip" data-filter="shell" aria-pressed="false">shell</button><button class="fchip" data-filter="page" aria-pressed="false">page</button><button class="fchip" data-filter="results" aria-pressed="false">results</button><button class="fchip" data-filter="account" aria-pressed="false">account</button><button class="fchip" data-filter="plumbing" aria-pressed="false">plumbing</button><button class="fchip" data-filter="style" aria-pressed="false">style</button><span class="inv-count">21 / 21</span></div><table class="inv"><thead><tr><th>Module {shell}</th><th>What it does</th><th>Anchor</th></tr></thead><tbody><tr data-domain="shell"><td><code>App.js</code></td><td>The shell: config, results, user, modals, both route tables, the analysis stream reader, and the Results page markup</td><td><code>frontend/src/App.js:187</code></td></tr><tr data-domain="shell"><td><code>index.js</code></td><td>Mounts <code>&lt;App /&gt;</code> in <code>React.StrictMode</code> and <code>BrowserRouter</code>; imports both style sheets</td><td><code>frontend/src/index.js:9</code></td></tr><tr data-domain="shell"><td><code>FpxRail.js</code></td><td>The shared collapsible left nav (Home, Run Analysis, Results, Saved)</td><td><code>frontend/src/FpxRail.js:8</code></td></tr><tr data-domain="shell"><td><code>AppHeader.js</code></td><td>A small top header with brand and auth buttons</td><td><code>frontend/src/AppHeader.js:5</code></td></tr><tr data-domain="page"><td><code>LandingPage.js</code></td><td>Home: random background art, boss strip marquee, feature cards, recent updates</td><td><code>frontend/src/LandingPage.js:105</code></td></tr><tr data-domain="page"><td><code>AnalyzeConfig.js</code></td><td>The Analyze form: raid cards, boss lineup, credentials and scope fields</td><td><code>frontend/src/AnalyzeConfig.js:28</code></td></tr><tr data-domain="page"><td><code>seasonTwoRaids.js</code></td><td>The Midnight Season 2 raid entry, shared by <code>AnalyzeConfig.js</code> and <code>App.js</code></td><td><code>frontend/src/seasonTwoRaids.js:6</code></td></tr><tr data-domain="page"><td><code>SavedReports.js</code></td><td>Lists, opens and deletes the signed-in user's saved analyses</td><td><code>frontend/src/SavedReports.js:10</code></td></tr><tr data-domain="page"><td><code>TermsOfService.js</code> / <code>PrivacyPolicy.js</code></td><td>Static legal pages at <code>/terms</code> and <code>/privacy</code></td><td><code>frontend/src/TermsOfService.js:6</code></td></tr><tr data-domain="results"><td><code>DeathRow.js</code></td><td>One death: killing blow, health bar, defensive icon strip, tooltips</td><td><code>frontend/src/DeathRow.js:235</code></td></tr><tr data-domain="results"><td><code>DefensivePanel.js</code></td><td>Per-player defensive rollup chips</td><td><code>frontend/src/DefensivePanel.js:20</code></td></tr><tr data-domain="results"><td><code>deathCounting.js</code></td><td>Decides which deaths count toward &quot;first X deaths per pull&quot;</td><td><code>frontend/src/deathCounting.js:22</code></td></tr><tr data-domain="account"><td><code>Auth.js</code></td><td>Sign-in / sign-up / reset modal with a Cloudflare Turnstile CAPTCHA</td><td><code>frontend/src/Auth.js:8</code></td></tr><tr data-domain="account"><td><code>Settings.js</code></td><td>Edit stored WarcraftLogs credentials, email, password; delete the account</td><td><code>frontend/src/Settings.js:6</code></td></tr><tr data-domain="account"><td><code>SaveReportDialog.js</code></td><td>Names and saves the current analysis (7, 14 or 30 days)</td><td><code>frontend/src/SaveReportDialog.js:7</code></td></tr><tr data-domain="account"><td><code>InfoModal.js</code></td><td>The &quot;How it works&quot; modal on the Analyze page</td><td><code>frontend/src/InfoModal.js:66</code></td></tr><tr data-domain="plumbing"><td><code>api.js</code></td><td><code>API_URL</code>, <code>apiFetch</code>, <code>stripSecrets</code>, browser credential memory</td><td><code>frontend/src/api.js:8</code></td></tr><tr data-domain="plumbing"><td><code>supabaseClient.js</code></td><td>The Supabase client and the &quot;stay logged in&quot; session-only logic</td><td><code>frontend/src/supabaseClient.js:6</code></td></tr><tr data-domain="plumbing"><td><code>mockResults.js</code></td><td>A seeded fixture for <code>?mock=1</code> on localhost</td><td><code>frontend/src/mockResults.js:237</code></td></tr><tr data-domain="style"><td><code>fp-design.css</code></td><td>The <code>fpx-</code> design system: color tokens on <code>:root</code>, layout, loader, boss tiles</td><td><code>frontend/src/fp-design.css:6</code></td></tr><tr data-domain="style"><td><code>index.css</code></td><td>Older global styles, still used by the share modal and <code>.analysis-shell</code></td><td><code>frontend/src/index.css:112</code></td></tr></tbody></table></div></div></section>
+<section id="standing-it-up"><div class="wrap reveal"><div class="sec-head"><span class="num">05</span><h3>Standing it up</h3></div><table class="standup"><thead><tr><th>Concern</th><th>This domain</th><th>Source</th></tr></thead><tbody><tr><td>Runs on</td><td>Static CRA build (<code>react-scripts build</code>) served as a single-page app; React 19, React Router 7</td><td><code>frontend/package.json</code> scripts and dependencies</td></tr><tr><td>Local dev</td><td><code>npm start</code> (CRA dev server); talks to a local Flask API on port 5000</td><td><code>frontend/src/api.js:8</code></td></tr><tr><td>API base URL</td><td><code>REACT_APP_API_URL</code> if set at build time; else <code>http://localhost:5000</code> when the host is <code>localhost</code> or <code>127.0.0.1</code>; else <code>https://deathwarcraftlogs-api.onrender.com</code></td><td><code>frontend/src/api.js:7</code></td></tr><tr><td>Asset prefix</td><td><code>PUBLIC_URL</code> (CRA built-in) prefixes art paths: backgrounds, boss tiles, loader video</td><td><code>frontend/src/LandingPage.js:127</code>, <code>frontend/src/App.js:1550</code></td></tr><tr><td>Supabase</td><td>Project URL and the public anon key are constants in code, not env vars</td><td><code>frontend/src/supabaseClient.js:3</code></td></tr><tr><td>CAPTCHA</td><td>Turnstile site key is a constant; tokens are checked by an external Cloudflare Worker before calling Supabase auth</td><td><code>frontend/src/Auth.js:6</code>, <code>frontend/src/Auth.js:72</code></td></tr><tr><td>Secrets</td><td>None in the bundle. WarcraftLogs credentials are typed by the user and kept in their own browser or their Supabase row</td><td><code>frontend/src/api.js:20</code></td></tr><tr><td>SPA fallback</td><td><code>public/_redirects.txt</code> holds a <code>/* /index.html 200</code> rewrite</td><td><code>frontend/public/_redirects.txt:1</code></td></tr></tbody></table>
+</div></section>
+<section id="environments"><div class="wrap reveal"><div class="sec-head"><span class="num">06</span><h3>Environments</h3></div><table class="envtable"><thead><tr><th>Aspect</th><th>Local</th><th>Production</th></tr></thead><tbody><tr><td>API base</td><td><code>http://localhost:5000</code> (unless <code>REACT_APP_API_URL</code> is set)</td><td><code>https://deathwarcraftlogs-api.onrender.com</code> (unless <code>REACT_APP_API_URL</code> is set)</td></tr><tr><td>Supabase</td><td>Same hard-coded project as production</td><td>Same</td></tr><tr><td><code>?mock=1</code> fixture results</td><td>Works: seeds Results with <code>MOCK_RESULTS</code> (<code>frontend/src/App.js:362</code>)</td><td>Ignored: gated to localhost</td></tr><tr><td><code>?loader=1</code> loader preview</td><td>Works: shows the analysis loader overlay (<code>frontend/src/App.js:373</code>)</td><td>Ignored</td></tr><tr><td>Backend warm-up ping</td><td>Fires against the local API</td><td>Fires against Render on every page load (<code>frontend/src/App.js:262</code>)</td></tr></tbody></table>
+</div></section>
+<section id="invariants"><div class="wrap reveal"><div class="sec-head"><span class="num">07</span><h3>Invariants</h3></div><div class="invariants"><div class="inv must"><span class="tag"><span class="dot"></span>Must</span><p>every request to the Flask API resolve its base URL through <code>API_URL</code> in <code>frontend/src/api.js:8</code>; the analyze call, the health ping and <code>apiFetch</code> all use it.</p></div><div class="inv never"><span class="tag"><span class="dot"></span>Never</span><p>write <code>clientId</code> or <code>clientSecret</code> into a share, a saved report, the recent-runs list or the persisted last analysis. <code>stripSecrets</code> (<code>frontend/src/api.js:42</code>) runs on each path: <code>frontend/src/App.js:635</code>, <code>frontend/src/SaveReportDialog.js:31</code>, <code>frontend/src/App.js:481</code>, <code>frontend/src/App.js:552</code>.</p></div><div class="inv must"><span class="tag"><span class="dot"></span>Must</span><p>merge a config loaded from a share, a saved report or a recent run through <code>stripSecrets</code>, so it cannot overwrite the viewer's own credentials (<code>frontend/src/App.js:325</code>, <code>frontend/src/App.js:341</code>, <code>frontend/src/App.js:508</code>).</p></div><div class="inv must"><span class="tag"><span class="dot"></span>Must</span><p>wrap storage access in try/catch so blocked storage leaves an empty form instead of a crash (<code>frontend/src/api.js:23</code>, <code>frontend/src/supabaseClient.js:15</code>).</p></div></div></div></section>
+<section id="gotchas"><div class="wrap reveal"><div class="sec-head"><span class="num">08</span><h3>Gotchas</h3></div><div class="acc"><details><summary><span class="gtag warn">!</span>App.js is one 2,300-line component<span class="chev">›</span></summary><div class="body"><p>the Results page and the share modal are inline JSX in <code>frontend/src/App.js</code>. A change to results layout is a change to the shell.</p></div></details><details><summary><span class="gtag warn">!</span>Supabase settings are not env-driven<span class="chev">›</span></summary><div class="body"><p>switching Supabase projects means editing <code>frontend/src/supabaseClient.js:3</code>, not setting a variable. The anon key there is the public key Supabase expects in browsers.</p></div></details><details><summary><span class="gtag warn">!</span>The CAPTCHA check is client-side<span class="chev">›</span></summary><div class="body"><p><code>Auth.js</code> verifies the Turnstile token with an external Worker and then calls Supabase directly (<code>frontend/src/Auth.js:72</code>, <code>frontend/src/Auth.js:139</code>). Anything enforcing CAPTCHA server-side has to live in Supabase or the Worker, not this code.</p></div></details><details><summary><span class="gtag warn">!</span>Debug globals on window<span class="chev">›</span></summary><div class="body"><p>each completed analysis sets <code>window.deathTrackerData</code>, <code>window.exportDeathData</code> and <code>window.exportAndCopy</code> (<code>frontend/src/App.js:769</code>). <code>exportDeathData</code> hard-codes a cutoff of 2 (<code>frontend/src/App.js:773</code>), so its &quot;included&quot; flags can differ from what the page shows.</p></div></details><details><summary><span class="gtag warn">!</span>SPA rewrite file name<span class="chev">›</span></summary><div class="body"><p>the rewrite rule lives in <code>_redirects.txt</code>. Hosts that read Netlify-style rules look for a file named exactly <code>_redirects</code>; check the host's behavior before relying on it for deep links like <code>/results?share=</code>.</p></div></details></div></div></section>
+<section id="glossary"><div class="wrap reveal"><div class="sec-head"><span class="num">09</span><h3>Glossary</h3></div><div class="acc"><details><summary><span class="gtag info">i</span>Shell<span class="chev">›</span></summary><div class="body"><p><code>WarcraftLogsApp</code> in <code>App.js</code>, the one component that owns state and both route tables.</p></div></details><details><summary><span class="gtag info">i</span>fpx-<span class="chev">›</span></summary><div class="body"><p>the class-name prefix of the current design system in <code>fp-design.css</code>.</p></div></details><details><summary><span class="gtag info">i</span>Recent runs<span class="chev">›</span></summary><div class="body"><p>the last 5 completed analyses, kept per browser in IndexedDB with credentials stripped.</p></div></details><details><summary><span class="gtag info">i</span>Warm-up ping<span class="chev">›</span></summary><div class="body"><p>the unawaited <code>GET /api/health</code> on page load that wakes a sleeping Render instance.</p></div></details></div></div></section>
+<section id="related"><div class="wrap reveal"><div class="sec-head"><span class="num">10</span><h3>Related</h3></div><ul class="clean"><li><a class="inline" href="../frontend/pages-and-routing.html">frontend-pages-and-routing</a> — routes, state handoff between pages and the analysis stream reader</li><li><a class="inline" href="../frontend/landing-and-art.html">frontend-landing-and-art</a> — landing art, boss strip, raid entries and the loader video</li><li><a class="inline" href="../frontend/results-view.html">frontend-results-view</a> — death counting, the matrix, DeathRow and DefensivePanel</li><li><a class="inline" href="../backend/index.html">backend</a> — the Flask API every fetch goes to</li><li><a class="inline" href="../auth.html">auth</a> — Supabase sessions, the session-only cookie and CAPTCHA</li><li><a class="inline" href="../data-model.html">data-model</a> — the api_credentials table and saved/shared analysis storage</li><li><a class="inline" href="../deployment.html">deployment</a> — how the static build and the Render API are hosted</li><li><a class="inline" href="../security.html">security</a> — credential handling and the client-side CAPTCHA</li><li><a class="inline" href="../testing.html">testing</a> — <code>api.test.js</code> and <code>AnalyzeConfig.test.js</code></li><li><a class="inline" href="../feat-analyze.html">feat-analyze</a> — the end-to-end Analyze slice</li><li><a class="inline" href="../feat-results.html">feat-results</a> — the end-to-end Results slice</li><li><a class="inline" href="../feat-saved.html">feat-saved</a> — saved analyses</li><li><a class="inline" href="../feat-share.html">feat-share</a> — share links</li><li><a class="inline" href="../feat-account.html">feat-account</a> — account and settings</li></ul>
+<div class="related"><a class="relcard" href="../frontend/pages-and-routing.html"><span class="arr">→</span><span class="rt">Pages &amp; Routing</span><span class="rd">documented</span></a><a class="relcard" href="../frontend/landing-and-art.html"><span class="arr">→</span><span class="rt">Landing Page and Art</span><span class="rd">documented</span></a><a class="relcard" href="../frontend/results-view.html"><span class="arr">→</span><span class="rt">Results View</span><span class="rd">documented</span></a><a class="relcard" href="../backend/index.html"><span class="arr">→</span><span class="rt">Backend API</span><span class="rd">documented</span></a><a class="relcard" href="../auth.html"><span class="arr">→</span><span class="rt">Accounts &amp; Auth</span><span class="rd">documented</span></a><a class="relcard" href="../data-model.html"><span class="arr">→</span><span class="rt">Data Model</span><span class="rd">documented</span></a><a class="relcard" href="../deployment.html"><span class="arr">→</span><span class="rt">Deployment &amp; Environments</span><span class="rd">documented</span></a><a class="relcard" href="../security.html"><span class="arr">→</span><span class="rt">Security &amp; Trust Boundaries</span><span class="rd">documented</span></a><a class="relcard" href="../testing.html"><span class="arr">→</span><span class="rt">Testing &amp; Checks</span><span class="rd">documented</span></a><a class="relcard" href="../feat-analyze.html"><span class="arr">→</span><span class="rt">Analyze a Guild</span><span class="rd">documented</span></a><a class="relcard" href="../feat-results.html"><span class="arr">→</span><span class="rt">Results &amp; Death Breakdown</span><span class="rd">documented</span></a><a class="relcard" href="../feat-saved.html"><span class="arr">→</span><span class="rt">Saved Reports</span><span class="rd">documented</span></a><a class="relcard" href="../feat-share.html"><span class="arr">→</span><span class="rt">Share Links</span><span class="rd">documented</span></a><a class="relcard" href="../feat-account.html"><span class="arr">→</span><span class="rt">Account &amp; Settings</span><span class="rd">documented</span></a></div></div></section>
+<section id="subpages"><div class="wrap reveal"><div class="sec-head"><span class="num">11</span><h3>Sub-pages</h3></div><p class="sub">Deeper level-3 pages in this domain — each its own focused detail and graphics.</p><div class="grid"><a class="dcard c-blue" href="landing-and-art.html" aria-label="Landing Page and Art"><div class="top"></div><div class="body"><div class="crow"><span class="k">Sub-page</span><span class="chip documented"><span class="dot"></span>documented</span></div><h4>Landing Page and Art</h4><ul><li>The landing page picks one background per page load: the current tier's art half the time (CURRENT_TIER_CHANCE = 0.5), otherwise any entry of BACKGROUNDS, uniformly.</li><li>Boss art is one transparent .webp tile per boss in public/art/bosses, found by slugging the boss name; the landing strip (BOSS_STRIP) and the Analyze page (raid card final, lineup bosses) use the same slug rule.</li><li>COUNCIL lists multi-boss encounters three times: a Set in LandingPage.js and AnalyzeConfig.js (fit the whole group in the tile) and a dict in the fetch script (how many models to composite).</li><li>frontend/scripts/fetch-boss-renders.py builds the tiles from wago.tools journal data and render.worldofwarcraft.com creature renders; DISPLAY_OVERRIDE and ENC_OVERRIDE pin bad lookups.</li></ul><span class="open">Open ───▶</span></div></a><a class="dcard c-blue" href="pages-and-routing.html" aria-label="Pages &amp; Routing"><div class="top"></div><div class="body"><div class="crow"><span class="k">Sub-page</span><span class="chip documented"><span class="dot"></span>documented</span></div><h4>Pages &amp; Routing</h4><ul><li>Two nested route tables in App.js: /terms and /privacy at the top level, then /, /analyze, /results and /saved inside a catch-all.</li><li>Pages share state by living inside one component; navigating never refetches, it only changes which view of the same state renders.</li><li>A share link is /results?share=&lt;id&gt;; the app fetches it once per id and merges its config without the viewer's credentials.</li><li>The analysis arrives as a server-sent-event stream over a POST; the browser splits on blank lines and handles error, message and result payloads.</li></ul><span class="open">Open ───▶</span></div></a><a class="dcard c-blue" href="results-view.html" aria-label="Results View"><div class="top"></div><div class="body"><div class="crow"><span class="k">Sub-page</span><span class="chip documented"><span class="dot"></span>documented</span></div><h4>Results View</h4><ul><li>The /results page is inline JSX in App.js: a filter bar, a player-by-boss death-rate matrix, and an expandable player list whose rows are DeathRow components.</li><li>Which deaths count is one rule in deathCounting.js: a death counts when its slot is at most the chosen X and it is not inWipe; old saved results fall back to per-pull cutoff timestamps.</li><li>Every number is recomputed in the browser from the stored result plus the filters (deaths to count, boss chips, minimum pulls, search, hidden players, alt groups); the backend is not called again.</li><li>DeathRow shows one death: killing blow and how it happened, health before it, and a strip of defensives (active, ready, on cooldown) with tooltips carrying the backend's verdicts.</li></ul><span class="open">Open ───▶</span></div></a></div></div></section>
+    <footer><span class="lvlnote">Level 2 of 3 — domain landing</span><p>Floor Pov — Frontend · generated by project-atlas</p><p>Content hash <code>sha256:f8b4136fcdf4f0900ea27223a28b034c8bba9bf9e8ccd06515156eba6a1c97bf</code></p></footer>
+  </main>
+</div>
+
+<div id="tip" role="tooltip"></div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ── dead/placeholder links (href="#") never scroll-jump ── */
+  document.addEventListener('click', function(e){
+    var a = e.target.closest && e.target.closest('a[href="#"]');
+    if(a){ e.preventDefault(); }
+  });
+
+  /* ── atlas-map: collapse to a hamburger on mobile (keeps the <details> a11y
+     open-state aligned with what's visible; desktop stays open) ── */
+  var amap = document.querySelector('.amap-wrap');
+  if(amap && window.matchMedia && window.matchMedia('(max-width:880px)').matches){ amap.removeAttribute('open'); }
+
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+  var hasIO = 'IntersectionObserver' in window;
+
+  /* ── scroll-spy nav ── */
+  var links = Array.prototype.slice.call(document.querySelectorAll('nav.toc a'));
+  var byId = {};
+  links.forEach(function(a){
+    var href = a.getAttribute('href');
+    if(href && href.charAt(0) === '#'){ byId[href.slice(1)] = a; }
+  });
+  if(hasIO){
+    var observed = document.querySelectorAll('section[id], .dcard[id]');
+    var spy = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if(e.isIntersecting){
+          var a = byId[e.target.id];
+          if(a){
+            links.forEach(function(x){x.classList.remove('active');});
+            a.classList.add('active');
+          }
+        }
+      });
+    },{rootMargin:'-14% 0px -72% 0px',threshold:0});
+    observed.forEach(function(s){spy.observe(s);});
+  }
+
+  /* ── reveal on scroll ── */
+  if(reduce || !hasIO){
+    document.querySelectorAll('.reveal').forEach(function(el){el.classList.add('in');});
+  } else {
+    var rev = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('in'); rev.unobserve(e.target); } });
+    },{rootMargin:'0px 0px -8% 0px',threshold:0});
+    document.querySelectorAll('.reveal').forEach(function(el){rev.observe(el);});
+  }
+
+  /* ── interactive steppers (data-driven from embedded JSON) ── */
+  document.querySelectorAll('.stepper-wrap').forEach(function(wrap){
+    var dataEl = wrap.querySelector('script[type="application/json"]');
+    if(!dataEl) return;
+    var steps;
+    try { steps = JSON.parse(dataEl.textContent); } catch(err){ return; }
+    var panel = wrap.querySelector('.panel');
+    var tabs = Array.prototype.slice.call(wrap.querySelectorAll('.step'));
+    function render(i){
+      var s = steps[i]; if(!s) return;
+      var html = '<h4>'+s.title+'</h4><div class="pbody">'+s.body+'</div>';
+      if(s.gotcha){
+        html += '<div class="gotcha"><span class="gl">Gotcha</span><p>'+s.gotcha+'</p></div>';
+      }
+      panel.innerHTML = html;
+    }
+    tabs.forEach(function(t,idx){
+      t.addEventListener('click',function(){
+        tabs.forEach(function(x){x.setAttribute('aria-selected','false');});
+        t.setAttribute('aria-selected','true');
+        render(idx);
+      });
+      t.addEventListener('keydown',function(e){
+        var dir = e.key==='ArrowRight'?1:e.key==='ArrowLeft'?-1:0;
+        if(!dir) return;
+        e.preventDefault();
+        var next = (idx+dir+tabs.length)%tabs.length;
+        tabs[next].focus(); tabs[next].click();
+      });
+    });
+    render(0);
+  });
+
+  /* ── filterable inventory chips ── */
+  document.querySelectorAll('.inventory').forEach(function(invRoot){
+    var chips = Array.prototype.slice.call(invRoot.querySelectorAll('.fchip'));
+    var rows = Array.prototype.slice.call(invRoot.querySelectorAll('tbody tr'));
+    var countEl = invRoot.querySelector('.inv-count');
+    var total = rows.length;
+    function apply(f){
+      var shown = 0;
+      rows.forEach(function(r){
+        var match = (f === 'all') || (r.getAttribute('data-domain') === f);
+        r.hidden = !match;
+        if(match) shown++;
+      });
+      if(countEl) countEl.textContent = shown + ' / ' + total;
+    }
+    chips.forEach(function(c){
+      c.addEventListener('click',function(){
+        chips.forEach(function(x){x.setAttribute('aria-pressed','false');});
+        c.setAttribute('aria-pressed','true');
+        apply(c.getAttribute('data-filter'));
+      });
+    });
+  });
+
+  /* ── hover / focus glossary tooltips ── */
+  var tip = document.getElementById('tip');
+  function showTip(el){
+    tip.innerHTML = el.getAttribute('data-tip');
+    var r = el.getBoundingClientRect();
+    tip.classList.add('show');
+    var top = r.bottom + 8, left = Math.min(r.left, window.innerWidth - tip.offsetWidth - 14);
+    if(top + tip.offsetHeight > window.innerHeight - 8) top = r.top - tip.offsetHeight - 8;
+    tip.style.top = Math.max(8,top)+'px'; tip.style.left = Math.max(8,left)+'px';
+  }
+  function hideTip(){ tip.classList.remove('show'); }
+  document.querySelectorAll('.term').forEach(function(el){
+    el.addEventListener('mouseenter',function(){showTip(el);});
+    el.addEventListener('mouseleave',hideTip);
+    el.setAttribute('tabindex','0');
+    el.addEventListener('focus',function(){showTip(el);});
+    el.addEventListener('blur',hideTip);
+  });
+
+  /* ── atlas search ── */
+  function asNorm(s){ return String(s == null ? '' : s).toLowerCase(); }
+  function asTerms(q){ return asNorm(q).split(/\s+/).filter(Boolean); }
+  function searchIndex(entries, query){
+    var terms = asTerms(query);
+    if(!terms.length || !entries) return [];
+    var scored = [];
+    for(var i=0;i<entries.length;i++){
+      var e = entries[i], hi = asNorm(e.hi), body = asNorm(e.body), ok = true, score = 0;
+      for(var t=0;t<terms.length;t++){
+        var term = terms[t];
+        if(hi.indexOf(term) !== -1){ score += 10; if(hi.indexOf(term)===0) score += 4; }
+        else if(body.indexOf(term) !== -1){ score += 2; }
+        else { ok = false; break; }
+      }
+      if(ok){ score += (asNorm(e.title).indexOf(asNorm(query))===0 ? 3 : 0); scored.push({ e:e, s:score }); }
+    }
+    scored.sort(function(a,b){ return b.s - a.s; });
+    return scored.slice(0,20).map(function(x){ return x.e; });
+  }
+  // exposed for tests + runtime
+  window.ATLAS_SEARCH = { search: searchIndex };
+
+  function escHtml(s){ return String(s).replace(/[&<>"]/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]; }); }
+  function highlight(text, terms){
+    var out = escHtml(text);
+    for(var i=0;i<terms.length;i++){
+      var re = new RegExp('(' + terms[i].replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + ')', 'ig');
+      out = out.replace(re, '<mark>$1</mark>');
+    }
+    return out;
+  }
+  function getIndex(){ return (window.ATLAS_SEARCH_INDEX && window.ATLAS_SEARCH_INDEX.entries) || null; }
+
+  var box = document.querySelector('.atlas-search');
+  if(box){
+    var input = box.querySelector('.as-input');
+    var results = box.querySelector('.as-results');
+    var base = box.getAttribute('data-atlas-base') || '';
+    var active = -1, current = [];
+    function hrefFor(e){ return base + e.page + (e.anchor ? '#' + e.anchor : ''); }
+    function close(){ results.hidden = true; results.innerHTML = ''; active = -1; current = []; }
+    function render(){
+      var q = input.value.trim();
+      if(!q){ close(); return; }
+      var idx = getIndex();
+      if(!idx){ results.hidden = false; results.innerHTML = '<div class="as-empty">Search index unavailable — view this Atlas via a local server.</div>'; return; }
+      current = searchIndex(idx, q);
+      active = -1;
+      if(!current.length){ results.hidden = false; results.innerHTML = '<div class="as-empty">No matches.</div>'; return; }
+      var terms = asTerms(q);
+      results.innerHTML = current.map(function(e){
+        var crumb = escHtml(e.domain || '') + (e.heading ? ' › ' + escHtml(e.heading) : '');
+        return '<a class="as-res" href="' + escHtml(hrefFor(e)) + '">' +
+          '<span class="as-crumb">' + crumb + '</span>' +
+          '<span class="as-h">' + highlight(e.title, terms) + '</span></a>';
+      }).join('');
+      results.hidden = false;
+    }
+    function setActive(n){
+      var items = results.querySelectorAll('.as-res');
+      if(!items.length) return;
+      active = (n + items.length) % items.length;
+      for(var i=0;i<items.length;i++){ items[i].classList.toggle('as-active', i===active); }
+      items[active].scrollIntoView({ block:'nearest' });
+    }
+    input.addEventListener('input', render);
+    input.addEventListener('keydown', function(e){
+      if(e.key === 'ArrowDown'){ e.preventDefault(); setActive(active + 1); }
+      else if(e.key === 'ArrowUp'){ e.preventDefault(); setActive(active - 1); }
+      else if(e.key === 'Enter'){
+        var items = results.querySelectorAll('.as-res');
+        var pick = active >= 0 ? items[active] : items[0];
+        if(pick){ e.preventDefault(); window.location.href = pick.getAttribute('href'); }
+      } else if(e.key === 'Escape'){ input.value = ''; close(); input.blur(); }
+    });
+    document.addEventListener('keydown', function(e){
+      if((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')){ e.preventDefault(); input.focus(); input.select(); }
+    });
+    document.addEventListener('click', function(e){ if(!box.contains(e.target)) close(); });
+  }
+})();
+</script>
+</body>
+</html>

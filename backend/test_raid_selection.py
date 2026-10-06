@@ -1,5 +1,5 @@
 import unittest
-from analysis import RAID_ENCOUNTERS, analyze_fights, resolve_report_window
+from analysis import RAID_DATE_WINDOWS, RAID_ENCOUNTERS, analyze_fights, resolve_report_window
 
 
 class RaidSelectionTests(unittest.TestCase):
@@ -60,6 +60,23 @@ class RaidSelectionTests(unittest.TestCase):
                     resolve_report_window(raid, "2026-09-01", "2026-09-12"),
                     ("2026-09-01", "2026-09-12"),
                 )
+
+    def test_season_one_window_closes_after_season_two_opens(self):
+        # Season 2's raids opened 2026-08-18; Season 1 ends 5 days later.
+        for raid in ("midnight-all", "voidspire", "dreamrift", "queldanas"):
+            with self.subTest(raid=raid):
+                self.assertEqual(resolve_report_window(raid, "", ""), ("2026-03-12", "2026-08-23"))
+                self.assertEqual(
+                    resolve_report_window(raid, "2026-04-01", "2026-12-01"),
+                    ("2026-04-01", "2026-08-23"),
+                )
+
+    def test_only_the_newest_tier_is_open_ended(self):
+        newest = max(start for start, _ in RAID_DATE_WINDOWS.values())
+        for raid, (start, end) in RAID_DATE_WINDOWS.items():
+            if start != newest:
+                with self.subTest(raid=raid):
+                    self.assertIsNotNone(end, f"{raid} has no end date but a newer tier exists")
 
 
 if __name__ == "__main__":
