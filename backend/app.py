@@ -37,6 +37,8 @@ from cache import (report_meta_cache, report_deaths_cache as deaths_lru,
                    report_defensive_cache as defensive_lru, report_recap_cache as recap_lru)
 from ratelimit import RateLimiter, limit
 import supabase_client
+import origin
+from streaming import with_heartbeat
 
 # A report whose last event is older than this is treated as finished and
 # its fights/deaths are cached; anything newer may still be live-logging.
@@ -66,6 +68,25 @@ CORS(app,
      resources={r"/api/*": {"origins": _origins}},
      allow_headers=["Content-Type", "Authorization"],
      methods=["GET", "POST", "DELETE", "OPTIONS"])
+
+
+# Paths the Lambda Web Adapter calls itself, from inside the function: its
+# readiness check and the pass-through path for scheduled warm-up events.
+_UNLOCKED = {('GET', '/api/health'), ('POST', '/events')}
+
+
+@app.before_request
+def _only_from_cloudfront():
+    """On AWS, refuse requests that didn't come through our CloudFront."""
+    if origin.secret() and (request.method, request.path) not in _UNLOCKED \
+            and not origin.from_cloudfront():
+        return jsonify({"success": False, "error": "Forbidden"}), 403
+
+
+@app.route('/events', methods=['POST'])
+def warm_event():
+    """Scheduled warm-up ping (EventBridge, via the adapter). Starting the function is the point."""
+    return '', 204
 
 
 # =============================================================================
@@ -615,7 +636,7 @@ def analyze():
             traceback.print_exc()
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
     
-    return Response(generate(), mimetype='text/event-stream', headers={
+    return Response(with_heartbeat(generate()), mimetype='text/event-stream', headers={
         'Cache-Control': 'no-cache',
         'X-Accel-Buffering': 'no'
     })
