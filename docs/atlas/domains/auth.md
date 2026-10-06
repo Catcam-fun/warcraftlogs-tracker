@@ -23,7 +23,7 @@ anchors:
   cache_ttl: backend/auth.py:23
   require_user: backend/auth.py:79
   delete_route: backend/app.py:787
-  delete_impl: backend/supabase_client.py:384
+  delete_impl: backend/supabase_client.py:417
   delete_client: frontend/src/Settings.js:187
 links:
   - frontend
@@ -41,7 +41,7 @@ invariants:
   - "MUST: verify_token return None on any non-200 or network failure, so the route answers 401."
   - "NEVER: store raw tokens in the verification cache; keys are SHA-256 hashes."
   - "NEVER: honor enableCheatDeath without a verified session."
-content_hash: sha256:eaaf43c78423661cfb801a330bd4c12256c4f590b2143801e1223f2ec83bdff7
+content_hash: sha256:8daea4ba5b6bc488dce9223f6f9c08deb676e800498a8cd346c23edb34b40b9f
 ---
 # Accounts & Auth
 
@@ -124,8 +124,8 @@ The browser also reads and writes its own `api_credentials` row directly with th
 
 - **Missing env disables all sign-in checks**: `verify_token` returns `None` when `SUPABASE_URL` or `SUPABASE_KEY` is unset (`backend/auth.py:38`), so every protected route returns 401.
 - **auth.py does not load .env itself**: it reads `os.environ` at import (`backend/auth.py:20`); it works because `backend/app.py:20` calls `load_dotenv()` before importing it.
-- **Account deletion needs the service-role key**: without `SUPABASE_SERVICE_ROLE_KEY` the backend refuses with "Account deletion isn't configured on the server." (`backend/supabase_client.py:388`).
-- **Partial deletion reports an error**: if any table or the auth delete fails, the response is an error asking to retry (`backend/supabase_client.py:407`); share cleanup failures are only logged.
+- **Account deletion needs the service-role key**: without `SUPABASE_SERVICE_ROLE_KEY` the backend refuses with "Account deletion isn't configured on the server." (`backend/supabase_client.py:422`).
+- **Partial deletion reports an error**: if any table or the auth delete fails, the response is an error asking to retry (`backend/supabase_client.py:442`); share cleanup failures are only logged.
 - **Password reset lands back on the site**: the reset link redirects to `window.location.origin` (`frontend/src/Auth.js:95`), and the `PASSWORD_RECOVERY` event opens Settings (`frontend/src/App.js:295`).
 
 ## Glossary

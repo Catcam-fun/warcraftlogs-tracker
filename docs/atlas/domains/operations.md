@@ -21,7 +21,7 @@ anchors:
   supabase_client: backend/supabase_client.py:39
   supabase_startup_log: backend/supabase_client.py:40
   report_cache_budget: backend/supabase_client.py:273
-  report_cache_eviction: backend/supabase_client.py:372
+  report_cache_eviction: backend/supabase_client.py:395
   report_cache_backoff: backend/supabase_client.py:315
   memory_caches: backend/cache.py:111
   cache_version: backend/cache.py:88
@@ -46,7 +46,7 @@ invariants:
   - "MUST: rebuild spell_icons.py after rebuilding defensive_catalog.py; the icon script reads every catalog ability."
   - "MUST: bump CACHE_VERSION in cache.py when what gets fetched or how it is indexed changes, so old shared-cache rows are never served to new code."
   - "NEVER: hand-edit the generated modules (defensive_catalog.py, boss_spell_flags.py, boss_spell_text.py, spell_icons.py, armor_constants.py, raid_wide_damage.py); edit the script and rerun it."
-content_hash: sha256:ef0e9c3f48d3397502f176b09f4f1a8c7d6b65e9928d9a1da26980738b32b641
+content_hash: sha256:f60c034a88ff886e39c84c45f10acc8031580d120a5bb145f1f282872d2817e0
 ---
 ## Summary
 
@@ -94,7 +94,7 @@ Environment variables, from every `os.environ` lookup in the code.
 |---|---|---|---|
 | `SUPABASE_URL` {runtime} | `backend/supabase_client.py:27`, `backend/auth.py:20` | none | Supabase project URL |
 | `SUPABASE_KEY` {runtime} | `backend/supabase_client.py:28`, `backend/auth.py:21` | none | Supabase key; used for token checks, and for storage when no service-role key is set |
-| `SUPABASE_SERVICE_ROLE_KEY` {runtime} | `backend/supabase_client.py:29` | none | preferred storage key (`backend/supabase_client.py:38`); account deletion requires it (`backend/supabase_client.py:398`) |
+| `SUPABASE_SERVICE_ROLE_KEY` {runtime} | `backend/supabase_client.py:29` | none | preferred storage key (`backend/supabase_client.py:38`); account deletion requires it (`backend/supabase_client.py:421`) |
 | `ALLOWED_ORIGINS` {runtime} | `backend/app.py:67` | `*` | comma list of site origins for CORS |
 | `PORT` {runtime} | `backend/gunicorn.conf.py:12`, `backend/app.py:812` | `5000` | listen port |
 | `WEB_CONCURRENCY` {runtime} | `backend/gunicorn.conf.py:13` | `1` | gunicorn worker processes |
@@ -132,7 +132,7 @@ Failure modes visible in the code, and what the user sees:
 | Log prefixes | `[Retry]`, `[WARN]`, `[ERROR]`, `[ReportCache]`, `[Share]`, `[Saved]`, `[Auth]`, `[Delete Account]` | stdout via `print` |
 | Finished reports | a report whose last event is over 2 hours old is treated as finished and cached (`backend/app.py:46`) | code |
 | In-memory caches | LRU per process: 200 report metas, 400 light fight lists, 400 death sets, 200 defensive sets, 400 hit windows (`backend/cache.py:111`) | code |
-| Shared cache | Supabase `report_cache`: rows over 4 MB are not stored; every 20th write deletes least-recently-used rows past 200 MB (`backend/supabase_client.py:273`, `backend/supabase_client.py:372`) | code |
+| Shared cache | Supabase `report_cache`: rows over 4 MB are not stored; every 20th write deletes least-recently-used rows past 200 MB (`backend/supabase_client.py:273`, `backend/supabase_client.py:395`) | code |
 | Shares | expired rows are deleted whenever a new share is stored (`backend/supabase_client.py:230`) | code |
 | WarcraftLogs host | the API calls a Cloudflare Worker proxy for both OAuth and GraphQL (`backend/warcraftlogs.py:15`) | code |
 | Game data host | `wago.tools` for catalog, icons and boss spells (`backend/scripts/build_defensive_catalog.py:404`) | build scripts |

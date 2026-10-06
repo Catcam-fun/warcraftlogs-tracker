@@ -7,7 +7,7 @@ summary:
   - "Finished WarcraftLogs reports never change, so their fight lists, full fights, deaths, defensive events and pre-death hits are cached and reused across analyses and users."
   - "Each of the five report caches is a SharedReportCache: an in-process LRU in front of the Supabase report_cache table."
   - "Only reports whose last event is more than two hours old (REPORT_CACHE_MIN_AGE_MS) are read from or written to the cache."
-  - "The Supabase table is best-effort and kept under 200 MB by deleting the least recently used rows; any error is a cache miss and pauses the shared cache for 5 minutes."
+  - "The Supabase table is best-effort and kept under 200 MB by deleting the least recently used rows; each call is tried up to three times on a fresh connection, and one that still fails is a cache miss and pauses the shared cache for 5 minutes."
   - "Analyze, share and save are rate-limited per client IP with in-memory sliding windows: 60, 20 and 30 calls per hour."
 tagline: The report caches that keep WarcraftLogs costs down, and the per-IP limits on expensive routes.
 anchors:
@@ -22,9 +22,9 @@ anchors:
   report_caches: "backend/cache.py:111"
   budget: "backend/supabase_client.py:273"
   enc: "backend/supabase_client.py:281"
-  cache_get: "backend/supabase_client.py:331"
-  cache_put: "backend/supabase_client.py:350"
-  evict: "backend/supabase_client.py:372"
+  cache_get: "backend/supabase_client.py:354"
+  cache_put: "backend/supabase_client.py:373"
+  evict: "backend/supabase_client.py:395"
   report_cache_table: "backend/migrations/002_report_cache.sql:12"
   client_ip: "backend/ratelimit.py:18"
   rate_limiter: "backend/ratelimit.py:34"
@@ -44,7 +44,7 @@ invariants:
   - "MUST: treat every shared-cache failure as a miss; an analysis never fails because Supabase is down."
   - "NEVER: make an analysis wait on a Supabase cache write; writes run on a background pool."
   - "NEVER: give the anon or authenticated roles access to report_cache; only the service role reads and writes it."
-content_hash: sha256:7eccd1bc0e8442759b3a4ff77ff2cce705e818a75accd7407126e6b6fc2c71bf
+content_hash: sha256:75d2ec4c344ccfc507f039110bf43db223855c512221d4978f96005a9e1c700d
 ---
 ## Summary
 
@@ -61,14 +61,14 @@ A cache read and write, for one finished report.
 - title: Check memory | short: Memory | sub: LRUCache.get
   body: `SharedReportCache.get` first asks its in-process `LRUCache` (`backend/cache.py:69`). A hit moves the key to the most recently used end (`backend/cache.py:27`). The LRU is guarded by a lock, because the analysis fetches reports on several threads.
 - title: Check Supabase | short: Shared table | sub: cache_get
-  body: On a memory miss it calls `supabase_client.cache_get` with a namespaced, versioned key such as `v2:deaths:<repr of key>` (`backend/cache.py:60`, `backend/cache.py:72`). A row found is unpacked, decoded and copied into memory (`backend/cache.py:74`); its `last_used_at` is bumped (`backend/supabase_client.py:344`).
+  body: On a memory miss it calls `supabase_client.cache_get` with a namespaced, versioned key such as `v2:deaths:<repr of key>` (`backend/cache.py:60`, `backend/cache.py:72`). A row found is unpacked, decoded and copied into memory (`backend/cache.py:74`); its `last_used_at` is bumped (`backend/supabase_client.py:367`).
   gotcha: The key is Python's `repr()` of the tuple key. Changing the shape of a key changes its text, which is a miss, not a wrong hit.
 - title: Fetch on a miss | short: WarcraftLogs | sub: only when both miss
   body: Only when both layers miss does the pipeline query WarcraftLogs (`backend/app.py:219`, `backend/app.py:229`, `backend/app.py:377`). See [[backend-analysis-pipeline]].
 - title: Write both layers | short: Store | sub: memory now, Supabase later
-  body: `SharedReportCache.set` writes memory at once and submits `cache_put` to a four-thread background pool (`backend/cache.py:77`, `backend/cache.py:89`), so the analysis never waits on Supabase. `cache_put` skips rows over 4 MB compressed (`backend/supabase_client.py:357`) and upserts the rest. At the end of an analysis, `flush_writes` waits for the queued writes, because Lambda freezes the function once the response ends (`backend/cache.py:99`, `backend/app.py:669`).
+  body: `SharedReportCache.set` writes memory at once and submits `cache_put` to a four-thread background pool (`backend/cache.py:77`, `backend/cache.py:89`), so the analysis never waits on Supabase. `cache_put` skips rows over 4 MB compressed (`backend/supabase_client.py:380`) and upserts the rest. At the end of an analysis, `flush_writes` waits for the queued writes, because Lambda freezes the function once the response ends (`backend/cache.py:99`, `backend/app.py:669`).
 - title: Evict | short: Evict | sub: every 20 writes
-  body: Every 20th successful write in the process (`_EVICT_EVERY`) runs `evict_report_cache` (`backend/supabase_client.py:275`, `backend/supabase_client.py:368`). It reads every row's size, newest use first, and deletes rows past the 200 MB running total, in batches of 100 (`backend/supabase_client.py:372`).
+  body: Every 20th successful write in the process (`_EVICT_EVERY`) runs `evict_report_cache` (`backend/supabase_client.py:275`, `backend/supabase_client.py:391`). It reads every row's size, newest use first, and deletes rows past the 200 MB running total, in batches of 100 (`backend/supabase_client.py:395`).
 ```
 
 #### What is cached, and under which key
@@ -89,7 +89,9 @@ Cached values are Python structures with integer and tuple keys, tuples and sets
 
 #### Failure handling
 
-`_cache_available` is false when Supabase is not configured or after a recent failure (`backend/supabase_client.py:311`). Any read or write error calls `_cache_failed`, which logs and turns the shared cache off for 300 seconds (`backend/supabase_client.py:315`). In that time `cache_get` returns None and `cache_put` does nothing, and the in-memory LRU keeps working.
+Report-cache calls go through `_cache_db`, which gives each thread its own Supabase client (`backend/supabase_client.py:326`). supabase-py sends all of one client's requests over a single HTTP/2 connection, and an analysis reads and writes the cache from many threads at once; on a fresh Lambda that burst got the shared connection reset. `_retrying` tries a read or write up to `CACHE_ATTEMPTS` = 3 times, each retry on a new connection after a short pause (`backend/supabase_client.py:340`).
+
+`_cache_available` is false when Supabase is not configured or after a recent failure (`backend/supabase_client.py:311`). A read or write that still fails after its tries calls `_cache_failed`, which logs and turns the shared cache off for 300 seconds (`backend/supabase_client.py:315`). In that time `cache_get` returns None and `cache_put` does nothing, and the in-memory LRU keeps working. The `last_used_at` bump after a hit is tried once and only logged if it fails (`backend/supabase_client.py:367`).
 
 #### Rate limits
 
@@ -175,7 +177,7 @@ relied-on-by: [[feat-analyze]] — repeat analyses come back faster and cheaper
 - **The defensive cache waits for the deaths**: its key needs the set of dead players, so it is looked up after the deaths are known, from the deaths cache (`backend/app.py:369`) or right after the deaths query (`backend/app.py:384`).
 - **A report with no death that can count writes no defensive or hit cache**: it returns after its deaths (`backend/app.py:387`), so only its fight lists, full fights and deaths are cached.
 - **The 2-hour rule uses the report's end time**: a report still being logged tonight is fetched in full on every analysis until two hours after its last event (`backend/app.py:209`).
-- **Eviction reads every row's key and size**: `evict_report_cache` selects the whole table's `key, size_bytes` each time it runs (`backend/supabase_client.py:376`). That is cheap at 200 MB of large rows but grows with row count.
+- **Eviction reads every row's key and size**: `evict_report_cache` selects the whole table's `key, size_bytes` each time it runs (`backend/supabase_client.py:399`). That is cheap at 200 MB of large rows but grows with row count.
 
 ## Glossary
 

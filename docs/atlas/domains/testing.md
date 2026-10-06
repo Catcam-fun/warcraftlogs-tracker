@@ -36,7 +36,7 @@ links:
   - game-data
   - warcraftlogs
   - operations
-content_hash: sha256:467aac7c80bc43ba87bff490a2695fd777235dbf009a6baac9cda7c172a7ce89
+content_hash: sha256:d2d5e284e5af7a6512b1527080eed4e527fe6eac6ebace0189b7ce9b7365a93f
 ---
 ## Summary
 
@@ -101,7 +101,7 @@ What each check takes and what passing looks like:
 - **No test runs on a pull request**: the unit suites run only when someone starts the AWS deploy workflow. A broken test is otherwise found only when someone runs it locally.
 - **Frontend death counting has no test**: `frontend/src/deathCounting.js` decides what counts when you change "first X" on the Results page, including the fallback for results saved before slots existed. Only the backend half (`rank_pull_deaths`) is tested.
 - **The WarcraftLogs retry path is untested**: `make_request_with_retry` (`backend/warcraftlogs.py:30`), with its 4xx-no-retry rule and `Retry-After` handling, has no test. Only the token cache is (`backend/test_api.py:225`).
-- **Report-cache eviction is untested**: `evict_report_cache` (`backend/supabase_client.py:372`) and the five-minute back-off after an error have no test.
+- **Report-cache eviction is untested**: `evict_report_cache` (`backend/supabase_client.py:395`) and the five-minute back-off after an error have no test; `test_cache.py` covers only the retry of a reset connection (`backend/test_cache.py:60`).
 - **Date windows are tested for one raid**: `test_season_two_default_and_custom_date_windows` covers `midnight-s2-all` only. The other seven windows in `RAID_DATE_WINDOWS` are not asserted.
 - **Some tests read generated data**: `test_defensives.py` runs against the committed `defensive_catalog.py`, and `test_generated_file` expects Sever's text in `boss_spell_text.py` (`backend/test_boss_spell_text.py:34`). Rebuilding those modules can change what these tests see.
 - **The checks only look at Mythic**: `check_deaths.py` and `check_durations.py` pass difficulty 5 to `analyze_fights`. They also pass `None` as the zone, so a raid key missing from `RAID_ENCOUNTERS` fails with a type error rather than a clear message.
