@@ -767,6 +767,16 @@ class LethalWindowTests(unittest.TestCase):
         # 55s is in A's window; 80s and 120s are between deaths (not kept).
         self.assertEqual([h["timestamp"] for h in hits[1]], [55_000, 55_000])
 
+    def test_only_each_players_own_death_windows_are_kept(self):
+        def fake(token, q, v):
+            ev = lambda ts, tid: {"timestamp": ts, "type": "damage", "targetID": tid, "amount": 1, "hitPoints": 5,
+                                  "maxHitPoints": 10, "resourceActor": 2}
+            return {"reportData": {"report": {"p3": {"data": [ev(55_000, 1), ev(55_000, 2), ev(95_000, 2)]}}}}
+        with __import__("unittest.mock").mock.patch.object(defensives, "graphql_query", side_effect=fake):
+            hits = defensives.fetch_death_windows("t", "R", [(3, [(60_000, "A", 1), (100_000, "B", 2)])])
+        # B's hit at 55s is inside A's window, not B's own: dropped.
+        self.assertEqual({k: [h["timestamp"] for h in v] for k, v in hits.items()}, {1: [55_000], 2: [95_000]})
+
     def test_identical_hits_at_the_same_moment_all_count(self):
         # Two droplets soaked in the same millisecond for the same amount are two hits.
         same = [hit(99_978, 301_233, 698_767), hit(99_978, 301_233, 397_534)]      # from full health
