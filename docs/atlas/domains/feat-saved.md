@@ -50,7 +50,7 @@ invariants:
   - "MUST: every saved_analyses read and delete filter on both id and user_id (backend/supabase_client.py:148, backend/supabase_client.py:176)."
   - "NEVER: store or return WarcraftLogs credentials in a save; the config is stripped in the browser and again on write and read (frontend/src/SaveReportDialog.js:28, backend/supabase_client.py:101, backend/supabase_client.py:163)."
   - "MUST: keep at most MAX_SAVED_PER_USER (5) saves per user and clamp retention to 1-30 days (backend/supabase_client.py:93, backend/supabase_client.py:97)."
-content_hash: sha256:75f2756212b76cb4c98d996412863acb5cbf4ef089cf7b1b2e4ba5c2f8fbb163
+content_hash: sha256:d835f1a072b51fa11ea041ada60c6fcdab5c0ddbdbc5d8d5d82eb76fe3fbf969
 ---
 ## Summary
 
@@ -149,7 +149,7 @@ relied-on-by: [[feat-account]] — account deletion removes every save
 
 - **Big analyses are sent compressed**: on AWS, Lambda refuses request bodies over 6 MB, and a big guild's full-season result is larger. Share and Save gzip the body in the browser (`apiFetch(..., {compress: true})`, `frontend/src/api.js`) and the API inflates it with a 64 MB cap (`backend/bodies.py`); an oversized body answers 413. Browsers without `CompressionStream` send plain JSON.
 - **Expiry is lazy but never visible.** Expired rows stay in the table until that user lists, saves or opens a save; each of those first deletes the user's expired rows (`backend/supabase_client.py:94`, `backend/supabase_client.py:133`, `backend/supabase_client.py:148`), so an expired save opened by id answers 404 (`backend/test_api.py`, `test_expired_saves_do_not_load`).
-- **The limiter is per IP and per process.** It keys on Cloudflare's `CF-Connecting-IP` (`backend/ratelimit.py:29`) and lives in memory (`backend/ratelimit.py:36`).
+- **The limiter is per IP and per process.** It keys on the visitor's IP: on AWS the `X-Viewer-Ip` CloudFront writes, otherwise the socket address (`backend/ratelimit.py:18`), and lives in memory (`backend/ratelimit.py:36`).
 - **Alt groups are not saved with the result.** Grouping made on the Results page lives in page state; a save carries `data` and the analysis config only (`frontend/src/SaveReportDialog.js:28`).
 - **No schema migration creates `saved_analyses`.** The migrations only enable RLS on it (`backend/migrations/001_shares_and_rls.sql:24`); the table predates them.
 
