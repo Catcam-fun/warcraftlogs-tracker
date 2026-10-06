@@ -381,17 +381,21 @@ def analyze():
 
                     def_data = defensive_lru.get(def_key(dead_in(deaths))) if finished and deaths is not None else None
                     def_error = hits_error = None
-                    with ThreadPoolExecutor(max_workers=3) as pool:
-                        deaths_job = None if deaths is not None else pool.submit(
-                            get_report_deaths_bulk, token, rid, fights_list, friendlies, ability_map, enable_cheat_death)
+                    # Deaths first, alone: WarcraftLogs charges the first query on a report
+                    # most (about 9 points for a raid night) and the ones after it about 1,
+                    # while queries sent at the same moment each pay the first price
+                    # (measured: 7 vs 11-15 points per hour of raid).
+                    if deaths is None:
+                        deaths = get_report_deaths_bulk(token, rid, fights_list, friendlies, ability_map,
+                                                        enable_cheat_death)
+                        if finished:
+                            deaths_lru.set(cache_key, deaths)
+                        def_data = defensive_lru.get(def_key(dead_in(deaths))) if finished else None
+                    with ThreadPoolExecutor(max_workers=2) as pool:
                         raw_job = None if def_data is not None else pool.submit(
                             defensives.fetch_defensive_raw, token, rid, fight_ids, first_start, last_end, cat)
                         ik_job = None if instakills is not None else pool.submit(
                             defensives.fetch_instakills, token, rid, fight_ids, first_start, last_end)
-                        if deaths_job is not None:
-                            deaths = deaths_job.result()
-                            if finished:
-                                deaths_lru.set(cache_key, deaths)
                         if raw_job is not None:
                             try:
                                 dead = dead_in(deaths)
