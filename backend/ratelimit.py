@@ -12,11 +12,23 @@ from functools import wraps
 
 from flask import jsonify, request
 
+from origin import from_cloudfront
+
 
 def client_ip():
-    # Render (and most hosts) put the real client first in X-Forwarded-For.
-    forwarded = request.headers.get('X-Forwarded-For', '')
-    return forwarded.split(',')[0].strip() or request.remote_addr or 'unknown'
+    # On AWS, a CloudFront Function writes the viewer's IP into
+    # X-Viewer-Ip on every /api request, replacing any value the client sent
+    # (infra/template.yaml); it is trusted only on requests carrying the
+    # origin secret, which only CloudFront sends. On Render, Cloudflare sets CF-Connecting-IP and
+    # overwrites any value the client sent. X-Forwarded-For is not usable:
+    # Render appends to whatever the client put there, so its first entry can
+    # be forged. Otherwise (local dev), use the socket.
+    if from_cloudfront():
+        viewer = request.headers.get('X-Viewer-Ip', '').strip()
+        if viewer:
+            return viewer
+    return (request.headers.get('CF-Connecting-IP', '').strip()
+            or request.remote_addr or 'unknown')
 
 
 class RateLimiter:

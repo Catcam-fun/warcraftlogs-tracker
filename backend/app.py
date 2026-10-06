@@ -7,7 +7,7 @@ Imports from: warcraftlogs, analysis, features, supabase_client, auth
 from flask import Flask, request, jsonify, Response, g
 from flask_cors import CORS
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import os
@@ -34,9 +34,12 @@ import boss_spell_text
 from features import CHEAT_DEATH_ABILITY_IDS
 from auth import require_user, verify_token, forget_token, _bearer_token
 from cache import (report_meta_cache, report_deaths_cache as deaths_lru,
-                   report_defensive_cache as defensive_lru, report_recap_cache as recap_lru)
+                   report_defensive_cache as defensive_lru, report_recap_cache as recap_lru, flush_writes)
 from ratelimit import RateLimiter, limit
 import supabase_client
+import origin
+from streaming import with_heartbeat
+from bodies import BodyTooLarge, json_body
 
 # A report whose last event is older than this is treated as finished and
 # its fights/deaths are cached; anything newer may still be live-logging.
@@ -66,6 +69,30 @@ CORS(app,
      resources={r"/api/*": {"origins": _origins}},
      allow_headers=["Content-Type", "Authorization"],
      methods=["GET", "POST", "DELETE", "OPTIONS"])
+
+
+# Paths the Lambda Web Adapter calls itself, from inside the function: its
+# readiness check and the pass-through path for scheduled warm-up events.
+_UNLOCKED = {('GET', '/api/health'), ('POST', '/events')}
+
+
+@app.before_request
+def _only_from_cloudfront():
+    """On AWS, refuse requests that didn't come through our CloudFront."""
+    if origin.secret() and (request.method, request.path) not in _UNLOCKED \
+            and not origin.from_cloudfront():
+        return jsonify({"success": False, "error": "Forbidden"}), 403
+
+
+@app.errorhandler(BodyTooLarge)
+def _body_too_large(_e):
+    return jsonify({"success": False, "error": "This analysis is too large to send."}), 413
+
+
+@app.route('/events', methods=['POST'])
+def warm_event():
+    """Scheduled warm-up ping (EventBridge, via the adapter). Starting the function is the point."""
+    return '', 204
 
 
 # =============================================================================
@@ -435,6 +462,10 @@ def analyze():
                 pull_counter_by_boss[boss_id] += 1
                 seq_no = pull_counter_by_boss[boss_id]
                 fid = fight['id']
+                # A report we couldn't read has unknown deaths, not zero:
+                # leave its pulls out rather than count them as deathless.
+                if rid in failed_reports:
+                    continue
                 
                 # FIXED: Only count players who were ACTUALLY in this fight
                 fight_parts = set()
@@ -580,7 +611,7 @@ def analyze():
                     "endDate": end_date,
                     "zone": fight_zone,
                     "difficulty": difficulty,
-                    "generatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "generatedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "characterGroups": character_groups,
                     "reportCount": len(reports),
                     "cheatDeathEnabled": enable_cheat_death,
@@ -604,6 +635,8 @@ def analyze():
             }
             
             yield f"data: {json.dumps({'result': response})}\n\n"
+            # Lambda freezes the function once the response ends: finish the cache writes first.
+            flush_writes()
         
         except Exception as e:
             print(f"Error in analyze: {str(e)}")
@@ -611,7 +644,7 @@ def analyze():
             traceback.print_exc()
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
     
-    return Response(generate(), mimetype='text/event-stream', headers={
+    return Response(with_heartbeat(generate()), mimetype='text/event-stream', headers={
         'Cache-Control': 'no-cache',
         'X-Accel-Buffering': 'no'
     })
@@ -633,7 +666,7 @@ def _looks_like_analysis(data):
 @limit(share_limiter, "Too many share links from this network in the last hour. Please wait a bit.")
 def share_results():
     """Create a short share link. Credentials are stripped server-side."""
-    body = request.get_json(silent=True) or {}
+    body = json_body() or {}
     data = body.get('data')
     if not _looks_like_analysis(data):
         return jsonify({"success": False, "error": "Nothing to share"}), 400
@@ -642,8 +675,11 @@ def share_results():
     share_id = secrets.token_urlsafe(9)
     result = supabase_client.store_share(share_id, data, body.get('config'), user_id)
     if "error" in result:
-        return jsonify({"success": False, "error": result["error"]}), 413
-    return jsonify({"success": True, "shareId": share_id, "expiresAt": result["expires_at"]})
+        return _storage_response(result)
+    # `ephemeral`: kept only in this server's memory (database unavailable),
+    # so the link stops working when the server restarts or sleeps.
+    return jsonify({"success": True, "shareId": share_id, "expiresAt": result["expires_at"],
+                    "ephemeral": bool(result.get("ephemeral"))})
 
 
 @app.route('/api/shared/<share_id>', methods=['GET'])
@@ -678,7 +714,7 @@ def list_saved():
 @require_user
 @limit(save_limiter, "Too many saves in the last hour. Please wait a bit.")
 def create_saved():
-    body = request.get_json(silent=True) or {}
+    body = json_body() or {}
     data = body.get('data')
     if not _looks_like_analysis(data):
         return jsonify({"success": False, "error": "Nothing to save"}), 400

@@ -21,16 +21,21 @@ fetched fully automatically (no credentials, no manual screenshots).
 ## Updating for a new raid
 
 1. Add the new boss names to `BOSSES` in
-   `frontend/scripts/fetch-boss-renders.py` **and** to `BOSS_STRIP`
-   in `src/LandingPage.js` (multi-boss fights also go in `COUNCIL`
-   in both files).
+   `frontend/scripts/fetch-boss-renders.py`, to `BOSS_STRIP` in
+   `src/LandingPage.js`, and to the raid's entry in `src/AnalyzeConfig.js`
+   (its `final` boss is the raid-card art, its `bosses` list the lineup).
+   Multi-boss fights also go in `COUNCIL` in all three files.
 2. `python frontend/scripts/fetch-boss-renders.py "Boss One" "Boss Two"`
    (writes the `.webp`s straight into this folder; needs Pillow).
-3. Look at the results; if a journal creature renders badly, pin a
-   display ID in `DISPLAY_OVERRIDE`. `npm run build`. Done.
+3. Look at every result. If a boss's name doesn't match its journal
+   encounter, pin the encounter ID in `ENC_OVERRIDE` (keyed by lowercased
+   name). If a journal creature renders badly, pin display IDs in
+   `DISPLAY_OVERRIDE` (keyed by slug); the list replaces the journal's
+   models, so for a council list every member. `npm run build`. Done.
 
-It resolved 33/33 including unreleased Midnight bosses. If a future
-boss misses, the script logs it (`_results.json`) for a manual grab.
+Each run prints a summary and writes `frontend/scripts/_boss_results.json`
+with every boss's status, so a miss (`no_enc`, `no_disp`, `err:…`) can be
+fixed with an override or grabbed by hand.
 
 > Official Blizzard art, used under fan-content guidelines; footer
 > carries the non-affiliation + trademark notices.

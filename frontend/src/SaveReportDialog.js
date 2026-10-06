@@ -24,6 +24,7 @@ export default function SaveReportDialog({ analysisData, config, onClose, onSave
     const { ok, status, body } = await apiFetch('/api/saved', {
       method: 'POST',
       auth: true,
+      compress: true,   // big analyses exceed the 6 MB a request may carry
       body: { name: name.trim(), data: analysisData, config: stripSecrets(config), retentionDays },
     });
     setSaving(false);

@@ -43,7 +43,7 @@ export default function PrivacyPolicy({ user, onShowAuthModal, onShowSettings, o
       <div className="fpx-legal">
         <h1>Privacy Policy</h1>
         <p style={{ color: 'var(--color-muted)', fontSize: '14px', marginBottom: '40px' }}>
-          Last Updated: November 21, 2024
+          Last Updated: October 4, 2026
         </p>
 
         <div style={{ lineHeight: '1.7', fontSize: '15px' }}>
@@ -67,7 +67,7 @@ export default function PrivacyPolicy({ user, onShowAuthModal, onShowSettings, o
             <ul>
               <li><strong>Email Address:</strong> Used for account creation, authentication, and password resets</li>
               <li><strong>Password:</strong> Encrypted and never stored in plain text using bcrypt hashing</li>
-              <li><strong>WarcraftLogs API Credentials:</strong> If you choose to save your Client ID and Client Secret, these are encrypted at rest and used solely to fetch data on your behalf</li>
+              <li><strong>WarcraftLogs API Credentials:</strong> If you choose to save your Client ID and Client Secret, they are stored with your account in our database, which is encrypted at rest; no other account can read them, and they are used solely to fetch data on your behalf</li>
             </ul>
             <p>
               <strong>Analysis Configurations:</strong>
@@ -139,7 +139,8 @@ export default function PrivacyPolicy({ user, onShowAuthModal, onShowSettings, o
             <h3>4.2 Data Retention</h3>
             <ul>
               <li>Account data: Retained until you delete your account</li>
-              <li>Analysis history: Retained until you delete your account</li>
+              <li>Saved analyses: kept for the period you choose when saving (7, 14 or 30 days), then deleted; deleting one or your account removes it sooner</li>
+              <li>Share links: expire 72 hours after they are created</li>
               <li>Logs and analytics: Retained for up to 90 days</li>
               <li>Deleted account data: Permanently deleted within 30 days</li>
             </ul>

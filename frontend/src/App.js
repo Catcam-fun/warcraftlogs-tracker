@@ -16,6 +16,11 @@ import { API_URL, apiFetch, stripSecrets, loadLocalCredentials, saveLocalCredent
 import SavedReports from './SavedReports';
 import SaveReportDialog from './SaveReportDialog';
 import { countedDeaths, isCounted } from './deathCounting';
+import { analyzedAt } from './analyzedAt';
+import { groupPulls } from './groupPulls';
+import { fitFiltersToResult } from './resultFilters';
+import { prefersReducedMotion } from './reducedMotion';
+import { shareNote } from './shareNote';
 import { DefensiveSummaryChip, DefensiveTopUnused, summarizeDefensives } from './DefensivePanel';
 import { DeathRow } from './DeathRow';
 
@@ -225,6 +230,8 @@ export default function WarcraftLogsApp() {
   const [overviewCollapsed, setOverviewCollapsed] = useState(true);
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareLink, setShareLink] = useState('');
+  const [shareWarning, setShareWarning] = useState(null);
+  const [shareError, setShareError] = useState('');
   const [copied, setCopied] = useState(false);
   const [sharingData, setSharingData] = useState(false);
   const [abortController, setAbortController] = useState(null);
@@ -233,12 +240,21 @@ export default function WarcraftLogsApp() {
   const [characterGroups, setCharacterGroups] = useState({}); // { "MainName": ["Alt1", "Alt2"] }
   const [showGroupingUI, setShowGroupingUI] = useState(false);
   const [selectedForGrouping, setSelectedForGrouping] = useState(new Set());
-  const [showTermsModal, setShowTermsModal] = useState(false);
   const [showInfoModal, setShowInfoModal] = useState(false);
   const [recentRuns, setRecentRuns] = useState([]);
   const [showRecentMenu, setShowRecentMenu] = useState(false);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
 
+
+  // A newly loaded result keeps the filters that still apply to it: the
+  // cutoff can't exceed its maximum and boss choices must be its bosses.
+  useEffect(() => {
+    const fitted = fitFiltersToResult({ cutoff, selectedBosses }, data);
+    if (fitted.cutoff !== cutoff) setCutoff(fitted.cutoff);
+    if (fitted.selectedBosses !== selectedBosses) setSelectedBosses(fitted.selectedBosses);
+    // Only when the result changes, not on every filter change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
 
   // Wake the backend as soon as the site opens. Render's free tier sleeps
   // after ~15 idle minutes and the first request then takes 30-60s; this
@@ -609,10 +625,12 @@ export default function WarcraftLogsApp() {
     if (!data) return;
 
     setSharingData(true);
+    setShareError('');
     try {
       const { ok, body } = await apiFetch('/api/share', {
         method: 'POST',
         auth: user ? 'optional' : false,
+        compress: true,   // big analyses exceed the 6 MB a request may carry
         // Credentials are stripped here and again on the server.
         body: { data, config: stripSecrets(config) },
       });
@@ -621,9 +639,10 @@ export default function WarcraftLogsApp() {
       }
 
       setShareLink(`${window.location.origin}/results?share=${body.shareId}`);
+      setShareWarning(shareNote(body));
       setShowShareModal(true);
     } catch (err) {
-      setError(`Failed to create shareable link: ${err.message}`);
+      setShareError(`Couldn't create a share link: ${err.message}`);
     } finally {
       setSharingData(false);
     }
@@ -717,6 +736,7 @@ export default function WarcraftLogsApp() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let gotResult = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -739,6 +759,7 @@ export default function WarcraftLogsApp() {
             } else if (data.message) {
               setLoadingStage(data.message);
             } else if (data.result) {
+              gotResult = true;
               if (typeof data.result.meta?.cheatDeathEnabled === 'boolean') {
                 setConfig((prev) => ({ ...prev, enableCheatDeath: data.result.meta.cheatDeathEnabled }));
               }
@@ -921,6 +942,11 @@ export default function WarcraftLogsApp() {
           }
         }
         if (done) break;
+      }
+      // The server can stop without a word (out of memory, time limit): say
+      // so instead of leaving the loader spinning.
+      if (!gotResult) {
+        throw new Error('The analysis stopped before it finished. Try again, or use a shorter date range.');
       }
     } catch (err) {
       if (err.name === 'AbortError') {
@@ -1438,6 +1464,9 @@ export default function WarcraftLogsApp() {
             <p style={{ color: '#8b92a0', marginBottom: '15px' }}>
               Copy this link to share your analysis with others:
             </p>
+            {shareWarning && (
+              <p role="alert" style={{ color: '#ffae3b', marginBottom: '15px' }}>{shareWarning}</p>
+            )}
             <div style={{
               background: '#0f1419',
               padding: '12px',
@@ -1520,7 +1549,7 @@ export default function WarcraftLogsApp() {
                     <video
                       src={`${process.env.PUBLIC_URL}/art/ulatek-loader.webm`}
                       poster={`${process.env.PUBLIC_URL}/art/ulatek-loader.jpg`}
-                      autoPlay loop muted playsInline aria-hidden="true"
+                      autoPlay={!prefersReducedMotion()} loop muted playsInline aria-hidden="true"
                     />
                   </div>
                   <h2>ANALYZING REPORTS</h2>
@@ -1640,12 +1669,15 @@ export default function WarcraftLogsApp() {
                         <p>{RAID_ZONES[config.selectedRaid]?.name} · {
                           config.difficulty === '3' ? 'Normal' :
                           config.difficulty === '4' ? 'Heroic' : 'Mythic'
-                        } · Analyzed {new Date().toLocaleDateString('en-US', {
+                        }{analyzedAt(data?.meta) && ` · Analyzed ${analyzedAt(data.meta).toLocaleDateString('en-US', {
                           month: 'short', day: 'numeric', year: 'numeric',
                           hour: 'numeric', minute: '2-digit'
-                        })}</p>
+                        })}`}</p>
                       </div>
                     </div>
+                    {shareError && (
+                      <div className="fpx-error" role="alert"><AlertCircle size={18} /><span>{shareError}</span></div>
+                    )}
 
                     <div className="fpx-results">
 
@@ -2112,7 +2144,7 @@ export default function WarcraftLogsApp() {
                           <DefensiveTopUnused s={defensiveSummary} />
                           {sortBossesByOrder(Object.keys(showBothStats ? totalDeathsByBoss : deathsByBoss), config.selectedRaid).map(boss => {
                             const bossDeaths = deathsByBoss[boss] || [];
-                            const bossPulls = data.bossParticipation[boss]?.[player]?.length || 0;
+                            const bossPulls = groupPulls(data.bossParticipation[boss], player, characterGroups);
                             const realDeathCount = bossDeaths.length;
                             const totalBossDeaths = totalDeathsByBoss[boss] || [];
                             const totalDeathCount = totalBossDeaths.length;
@@ -2277,211 +2309,6 @@ export default function WarcraftLogsApp() {
 
       {/* Info Modal - How It Works */}
       {showInfoModal && <InfoModal onClose={() => setShowInfoModal(false)} />}
-
-      {/* Terms & Privacy Modal */}
-      {showTermsModal && (
-        <div className="fpx-mov" onClick={() => setShowTermsModal(false)}>
-          <div className="fpx-mcard" onClick={(e) => e.stopPropagation()}>
-            <div className="fpx-mhead">
-              <h2>Terms of Service &amp; Privacy Policy</h2>
-              <button className="fpx-mclose" onClick={() => setShowTermsModal(false)} aria-label="Close">
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="fpx-mbody fpx-legalbody">
-              <p style={{ color: '#94a3b8', fontSize: '13px', fontStyle: 'italic', marginBottom: '24px' }}>
-                Last Updated: November 21, 2025
-              </p>
-
-              <h3 style={{ color: 'var(--color-info)', fontSize: '18px', marginTop: 0, marginBottom: '12px' }}>
-                1. Terms of Service
-              </h3>
-              
-              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
-                1.1 Acceptance of Terms
-              </h4>
-              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
-                By accessing or using Floor Pov ("the Service"), you agree to be bound by these Terms of Service. If you do not agree to these terms, please do not use the Service.
-              </p>
-
-              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
-                1.2 Alpha Software Disclaimer
-              </h4>
-              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
-                Floor Pov is currently in <strong>alpha testing</strong>. The Service is provided "as is" without warranties of any kind. Features may change, be removed, or malfunction without notice. We are not liable for any data loss, errors, or issues arising from use of the Service.
-              </p>
-
-              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
-                1.3 WarcraftLogs API Usage
-              </h4>
-              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
-                Floor Pov uses the WarcraftLogs API to retrieve publicly available raid data. You are responsible for providing your own WarcraftLogs API credentials. By using this Service, you agree to comply with WarcraftLogs' Terms of Service and API usage policies.
-              </p>
-
-              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
-                1.4 Acceptable Use
-              </h4>
-              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
-                You agree not to:
-              </p>
-              <ul style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px', paddingLeft: '20px' }}>
-                <li style={{ marginBottom: '8px' }}>Use the Service for any illegal or unauthorized purpose</li>
-                <li style={{ marginBottom: '8px' }}>Attempt to access, modify, or interfere with the Service's infrastructure</li>
-                <li style={{ marginBottom: '8px' }}>Abuse rate limits or attempt to overload the Service</li>
-                <li style={{ marginBottom: '8px' }}>Use the Service to harass, bully, or harm other players</li>
-                <li>Share or distribute others' API credentials without permission</li>
-              </ul>
-
-              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
-                1.5 Account Termination
-              </h4>
-              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
-                We reserve the right to suspend or terminate accounts that violate these terms, abuse the service or API rate limits, or engage in fraudulent or malicious activity. You may delete your account at any time through your account settings.
-              </p>
-
-              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
-                1.6 Disclaimer and Limitation of Liability
-              </h4>
-              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '12px' }}>
-                FLOOR POV IS PROVIDED "AS IS" WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED. TO THE MAXIMUM EXTENT PERMITTED BY LAW, WE DISCLAIM ALL WARRANTIES INCLUDING MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
-              </p>
-              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
-                IN NO EVENT SHALL FLOOR POV OR ITS OPERATORS BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, INCLUDING LOSS OF PROFITS, DATA, OR USE, ARISING OUT OF OR RELATED TO YOUR USE OF THE SERVICE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES. Some jurisdictions do not allow the exclusion of certain warranties or limitation of liability, so the above limitations may not apply to you.
-              </p>
-
-              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
-                1.7 Intellectual Property
-              </h4>
-              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
-                The Floor Pov website design, code, and branding are proprietary and protected by copyright. You may not copy, modify, distribute, or reverse engineer the Service. Analysis results you generate are yours to use and share. WarcraftLogs data remains the property of Warcraft Logs and Blizzard Entertainment.
-              </p>
-
-              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
-                1.8 Governing Law
-              </h4>
-              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
-                These terms are governed by the laws of the State of Florida, United States. Any disputes shall be resolved in the appropriate courts of Florida.
-              </p>
-
-              <h3 style={{ color: 'var(--color-info)', fontSize: '18px', marginTop: '24px', marginBottom: '12px' }}>
-                2. Privacy Policy
-              </h3>
-
-              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
-                2.1 Data We Collect
-              </h4>
-              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '12px' }}>
-                When you create an account, we collect:
-              </p>
-              <ul style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px', paddingLeft: '20px' }}>
-                <li style={{ marginBottom: '8px' }}><strong>Account Information:</strong> Email address and encrypted password</li>
-                <li style={{ marginBottom: '8px' }}><strong>API Credentials:</strong> Your WarcraftLogs API Client ID and Secret (encrypted at rest)</li>
-                <li style={{ marginBottom: '8px' }}><strong>Analysis History:</strong> Guild names, servers, and analysis configurations you've run</li>
-                <li><strong>Usage Data:</strong> Basic analytics about feature usage and errors (no personal identifying information)</li>
-              </ul>
-
-              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
-                2.2 How We Use Your Data
-              </h4>
-              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '12px' }}>
-                We use your data to:
-              </p>
-              <ul style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px', paddingLeft: '20px' }}>
-                <li style={{ marginBottom: '8px' }}>Provide authentication and account management</li>
-                <li style={{ marginBottom: '8px' }}>Store your API credentials securely for future analyses</li>
-                <li style={{ marginBottom: '8px' }}>Improve the Service and fix bugs</li>
-                <li>Send important service updates (account security, major changes)</li>
-              </ul>
-
-              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
-                2.3 Data Security
-              </h4>
-              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
-                We implement industry-standard security measures:
-              </p>
-              <ul style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px', paddingLeft: '20px' }}>
-                <li style={{ marginBottom: '8px' }}>Passwords are hashed using bcrypt</li>
-                <li style={{ marginBottom: '8px' }}>API credentials are encrypted at rest</li>
-                <li style={{ marginBottom: '8px' }}>Database access is protected with Row-Level Security (RLS) policies</li>
-                <li>HTTPS encryption for all data in transit</li>
-              </ul>
-
-              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
-                2.4 Data Sharing
-              </h4>
-              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
-                We <strong>do not sell, rent, or share</strong> your personal data with third parties, except:
-              </p>
-              <ul style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px', paddingLeft: '20px' }}>
-                <li style={{ marginBottom: '8px' }}>Service providers necessary for operation (Supabase for database, Render for hosting)</li>
-                <li style={{ marginBottom: '8px' }}>When required by law or to protect our legal rights</li>
-                <li>With your explicit consent</li>
-              </ul>
-
-              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
-                2.5 Third-Party Services
-              </h4>
-              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
-                Floor Pov integrates with:
-              </p>
-              <ul style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px', paddingLeft: '20px' }}>
-                <li style={{ marginBottom: '8px' }}><strong>WarcraftLogs:</strong> We access publicly available raid data on your behalf using your API credentials</li>
-                <li style={{ marginBottom: '8px' }}><strong>Supabase:</strong> Our authentication and database provider</li>
-                <li style={{ marginBottom: '8px' }}><strong>Resend:</strong> Email delivery service for account confirmations and notifications</li>
-                <li><strong>Cloudflare:</strong> CDN and API proxy for performance</li>
-              </ul>
-              <p style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '16px' }}>
-                Each service has its own privacy policy. We recommend reviewing them.
-              </p>
-
-              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
-                2.6 Your Rights
-              </h4>
-              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '12px' }}>
-                You have the right to:
-              </p>
-              <ul style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px', paddingLeft: '20px' }}>
-                <li style={{ marginBottom: '8px' }}>Access your personal data</li>
-                <li style={{ marginBottom: '8px' }}>Update or correct your information</li>
-                <li style={{ marginBottom: '8px' }}>Delete your account and associated data</li>
-                <li>Opt out of non-essential communications</li>
-              </ul>
-              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
-                To exercise these rights, contact us (contact information coming soon to footer).
-              </p>
-
-              <h4 style={{ color: '#cbd5e1', fontSize: '15px', marginTop: '16px', marginBottom: '8px' }}>
-                2.7 Cookies and Tracking
-              </h4>
-              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
-                We use essential cookies only for:
-              </p>
-              <ul style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px', paddingLeft: '20px' }}>
-                <li style={{ marginBottom: '8px' }}>Authentication session management</li>
-                <li>Remembering your preferences (e.g., dismissing the alpha banner)</li>
-              </ul>
-              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
-                We do not use third-party tracking or advertising cookies.
-              </p>
-
-              <h3 style={{ color: 'var(--color-info)', fontSize: '18px', marginTop: '24px', marginBottom: '12px' }}>
-                3. Changes to These Terms
-              </h3>
-              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
-                We may update these terms as the Service evolves. Continued use of the Service after changes constitutes acceptance of the updated terms. Major changes will be announced via email and on the site.
-              </p>
-
-              <h3 style={{ color: 'var(--color-info)', fontSize: '18px', marginTop: '24px', marginBottom: '12px' }}>
-                4. Contact
-              </h3>
-              <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '0' }}>
-                For questions about these terms or your data, contact information will be added to the footer soon.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
 
       {showSaveDialog && user && data && (
         <SaveReportDialog

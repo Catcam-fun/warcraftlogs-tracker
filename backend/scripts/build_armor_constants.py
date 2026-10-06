@@ -44,11 +44,15 @@ REDUCED_SHARE = 0.9               # at most this: armor reduces it
 
 
 def _events(token, code, fight):
+    # With fightIDs, WCL needs an endTime or it returns an empty second page.
+    bounds = graphql_query(token, """query($c: String!, $f: [Int]) { reportData { report(code: $c) {
+        fights(fightIDs: $f) { startTime endTime } } } }""", {"c": code, "f": [fight]})
+    end = bounds["reportData"]["report"]["fights"][0]["endTime"]
     out, start = [], None
     for _ in range(40):
-        data = graphql_query(token, """query($c: String!, $f: [Int], $s: Float) { reportData { report(code: $c) {
-            events(fightIDs: $f, startTime: $s, dataType: DamageTaken, includeResources: true, limit: 10000)
-            { data nextPageTimestamp } } } }""", {"c": code, "f": [fight], "s": start})
+        data = graphql_query(token, """query($c: String!, $f: [Int], $s: Float, $e: Float) { reportData { report(code: $c) {
+            events(fightIDs: $f, startTime: $s, endTime: $e, dataType: DamageTaken, includeResources: true, limit: 10000)
+            { data nextPageTimestamp } } } }""", {"c": code, "f": [fight], "s": start, "e": end})
         block = data["reportData"]["report"]["events"]
         out += block["data"] or []
         start = block.get("nextPageTimestamp")
