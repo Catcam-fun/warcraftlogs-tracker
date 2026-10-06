@@ -361,7 +361,7 @@
   - aws_template: infra/template.yaml:1
   - aws_workflow: .github/workflows/deploy-aws.yml:1
   - lambda_entry: backend/run.sh:1
-  - malloc_arenas: backend/run.sh:8
+  - malloc_arenas: backend/run.sh:10
   - origin_lock: backend/origin.py:1
   - keepalive: backend/streaming.py:1
   - mem_shares: backend/supabase_client.py:202
