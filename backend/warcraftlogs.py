@@ -330,6 +330,55 @@ def get_guild_roster(token, guild_name, server, region):
     return all_members
 
 
+def get_report_fights(token, report_code):
+    """A report's start and its fights, without players or abilities: the light
+    query (1 WCL point, against 3 for get_fights), read for every report so
+    duplicate pulls can be dropped before anything heavier is fetched. Returns
+      {"report_start", "fights"} (fights as get_fights shapes them, without
+    friendlyPlayers), or empty values if the report can't be read.
+    """
+    query = """
+    query($code: String!) {
+      reportData {
+        report(code: $code) {
+          startTime
+          fights {
+            id
+            startTime
+            endTime
+            name
+            encounterID
+            difficulty
+            kill
+            gameZone {
+              id
+            }
+          }
+        }
+      }
+    }
+    """
+    try:
+        data = graphql_query(token, query, {"code": report_code})
+        report = (data.get("reportData") or {}).get("report") or {}
+    except Exception as e:
+        print(f"Error fetching fights for {report_code}: {e}")
+        report = {}
+    return {
+        "report_start": report.get("startTime", 0),
+        "fights": [{
+            "id": f.get("id"),
+            "start_time": f.get("startTime"),
+            "end_time": f.get("endTime"),
+            "name": f.get("name"),
+            "boss": f.get("encounterID"),
+            "difficulty": f.get("difficulty"),
+            "kill": f.get("kill"),
+            "zoneID": (f.get("gameZone") or {}).get("id"),
+        } for f in report.get("fights") or []],
+    }
+
+
 def get_fights(token, report_code):
     """Fetch a report's fights, players (with class/spec), and ability names.
 
