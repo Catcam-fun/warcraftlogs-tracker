@@ -218,10 +218,10 @@ def _loadout(e):
 def fetch_combatants(token, report_code, fight_ids, start_time, end_time):
     """Talent loadouts recorded at the start of each boss pull (CombatantInfo).
 
-    Also the cheapest first query on a report WarcraftLogs hasn't read in the
-    last hour: measured on fresh Mythic logs, it costs about 2 points there and
-    the queries after it about 1-3 each, while Deaths or Casts sent first cost
-    4-17."""
+    Also the cheapest first query on a cold report: about 2 points on fresh
+    Mythic logs, while Deaths or Casts sent first cost 4-17. The report stays
+    warm for 10-30 seconds, and queries sent in that time cost about 1-3
+    each."""
     return _paged(token, report_code, "CombatantInfo", None, fight_ids=fight_ids, start_time=start_time,
                   end_time=end_time + 1, shape=_loadout)
 
