@@ -15,12 +15,12 @@ anchors:
   api_base_url: frontend/src/api.js:8
   wcl_token: backend/app.py:158
   shared_report_cache: backend/cache.py:42
-  deaths_fetch: backend/app.py:380
-  defensive_analysis: backend/app.py:596
-  final_result: backend/app.py:667
+  deaths_fetch: backend/app.py:376
+  defensive_analysis: backend/app.py:592
+  final_result: backend/app.py:663
 links: [overview, frontend, backend, warcraftlogs, data-model, auth, game-data, feat-analyze, feat-results]
 flows: [request-path, share-path, data-build-path]
-content_hash: sha256:03e4b17f183dd386bc6d7ab6136fcda1ac69222fe77908f89d1d866e8aa144de
+content_hash: sha256:97843299588fc7f005c4da9769dbba97029c25b33d06cd37be23b6cc4d0435f3
 ---
 ## Summary
 
@@ -30,7 +30,7 @@ Start with [[overview]] for the vocabulary (pull, slot, wipe, cheat death), then
 
 ## Diagram
 
-One analysis, end to end. The browser opens a single streaming request (`frontend/src/App.js:723`). The Flask route (`backend/app.py:109`) exchanges the officer's WarcraftLogs client ID and secret for a token (`backend/app.py:158`). It reads the guild's reports and each report's short fight list, drops duplicate pulls, and reads in full only the reports it keeps pulls from, checking the report cache first (`backend/app.py:216`, `backend/app.py:226`, `backend/cache.py:42`). Then, per report, it reads talent loadouts and deaths (`backend/app.py:380`), analyzes each counted death against the pre-built game data (`backend/app.py:596`), and streams progress messages followed by one final result (`backend/app.py:667`).
+One analysis, end to end. The browser opens a single streaming request (`frontend/src/App.js:723`). The Flask route (`backend/app.py:109`) exchanges the officer's WarcraftLogs client ID and secret for a token (`backend/app.py:158`). It reads the guild's reports and each report's short fight list, drops duplicate pulls, and reads in full only the reports it keeps pulls from, checking the report cache first (`backend/app.py:216`, `backend/app.py:226`, `backend/cache.py:42`). Then, per report, it reads talent loadouts and deaths (`backend/app.py:376`), analyzes each counted death against the pre-built game data (`backend/app.py:592`), and streams progress messages followed by one final result (`backend/app.py:663`).
 
 ```diagram
 lane client Browser
@@ -69,9 +69,9 @@ band structural "Substrate · Render + Supabase + static site"
 - title: Deaths and slots | short: Deaths | sub: first X per pull
   body: Deaths are fetched per report, after its talent loadouts, and each death gets a slot (which death of the pull it was) and a wipe flag. A report with no death that can count stops there; the others also get their defensive and hit data. See [[backend-analysis-pipeline]] and [[backend-death-counting]].
 - title: Per-death analysis | short: Analysis | sub: what killed them
-  body: Each counted death is replayed against the pre-built defensive catalog and boss data to describe the death and test which defensives would have saved it (backend/app.py:596). See [[backend-defensive-analysis]] and [[game-data]].
+  body: Each counted death is replayed against the pre-built defensive catalog and boss data to describe the death and test which defensives would have saved it (backend/app.py:592). See [[backend-defensive-analysis]] and [[game-data]].
 - title: Result, then save or share | short: Result | sub: Results page
-  body: The final event carries the whole result (backend/app.py:667). The Results page renders it; a signed-in officer can save it or create a share link, both stored in Supabase. See [[feat-results]], [[feat-saved]] and [[feat-share]].
+  body: The final event carries the whole result (backend/app.py:663). The Results page renders it; a signed-in officer can save it or create a share link, both stored in Supabase. See [[feat-results]], [[feat-saved]] and [[feat-share]].
 ```
 
 ## Environments

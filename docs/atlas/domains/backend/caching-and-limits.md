@@ -44,7 +44,7 @@ invariants:
   - "MUST: treat every shared-cache failure as a miss; an analysis never fails because Supabase is down."
   - "NEVER: make an analysis wait on a Supabase cache write; writes run on a background pool."
   - "NEVER: give the anon or authenticated roles access to report_cache; only the service role reads and writes it."
-content_hash: sha256:75d2ec4c344ccfc507f039110bf43db223855c512221d4978f96005a9e1c700d
+content_hash: sha256:c5682e767147c8a5327dbe5407233890a58f9ac3b11a4c804cfc3f338e7bac86
 ---
 ## Summary
 
@@ -64,9 +64,9 @@ A cache read and write, for one finished report.
   body: On a memory miss it calls `supabase_client.cache_get` with a namespaced, versioned key such as `v2:deaths:<repr of key>` (`backend/cache.py:60`, `backend/cache.py:72`). A row found is unpacked, decoded and copied into memory (`backend/cache.py:74`); its `last_used_at` is bumped (`backend/supabase_client.py:367`).
   gotcha: The key is Python's `repr()` of the tuple key. Changing the shape of a key changes its text, which is a miss, not a wrong hit.
 - title: Fetch on a miss | short: WarcraftLogs | sub: only when both miss
-  body: Only when both layers miss does the pipeline query WarcraftLogs (`backend/app.py:219`, `backend/app.py:229`, `backend/app.py:377`). See [[backend-analysis-pipeline]].
+  body: Only when both layers miss does the pipeline query WarcraftLogs (`backend/app.py:219`, `backend/app.py:229`, `backend/app.py:373`). See [[backend-analysis-pipeline]].
 - title: Write both layers | short: Store | sub: memory now, Supabase later
-  body: `SharedReportCache.set` writes memory at once and submits `cache_put` to a four-thread background pool (`backend/cache.py:77`, `backend/cache.py:89`), so the analysis never waits on Supabase. `cache_put` skips rows over 4 MB compressed (`backend/supabase_client.py:380`) and upserts the rest. At the end of an analysis, `flush_writes` waits for the queued writes, because Lambda freezes the function once the response ends (`backend/cache.py:99`, `backend/app.py:669`).
+  body: `SharedReportCache.set` writes memory at once and submits `cache_put` to a four-thread background pool (`backend/cache.py:77`, `backend/cache.py:89`), so the analysis never waits on Supabase. `cache_put` skips rows over 4 MB compressed (`backend/supabase_client.py:380`) and upserts the rest. At the end of an analysis, `flush_writes` waits for the queued writes, because Lambda freezes the function once the response ends (`backend/cache.py:99`, `backend/app.py:665`).
 - title: Evict | short: Evict | sub: every 20 writes
   body: Every 20th successful write in the process (`_EVICT_EVERY`) runs `evict_report_cache` (`backend/supabase_client.py:275`, `backend/supabase_client.py:391`). It reads every row's size, newest use first, and deletes rows past the 200 MB running total, in batches of 100 (`backend/supabase_client.py:395`).
 ```
@@ -77,11 +77,11 @@ A cache read and write, for one finished report.
 |---|---|---|---|---|---|
 | `report_fights_cache` {cache} | `fights` | 400 | report code | light fight list: report start and fights, no players; only if it has fights | `backend/app.py:221` |
 | `report_meta_cache` {cache} | `meta` | 200 | report code | full fights, actors, abilities, icons; only reports that keep pulls; only if it has fights | `backend/app.py:231` |
-| `report_deaths_cache` {cache} | `deaths` | 400 | report, fight ids, cheat-deaths flag, cheat-death spell ids | deaths by fight | `backend/app.py:356`, `backend/app.py:383` |
-| `report_defensive_cache` {cache} | `defensives` | 200 | report, fight ids, dead players, catalog patch and fingerprint | filtered defensive events | `backend/app.py:363`, `backend/app.py:402` |
-| `report_recap_cache` {cache} | `killing-blows` | 400 | report, fight ids, `instakills`; or report, counted deaths, `lethal-window`, window length | instant kills; hits before deaths | `backend/app.py:411`, `backend/app.py:419` |
+| `report_deaths_cache` {cache} | `deaths` | 400 | report, fight ids, cheat-deaths flag, cheat-death spell ids | deaths by fight | `backend/app.py:352`, `backend/app.py:379` |
+| `report_defensive_cache` {cache} | `defensives` | 200 | report, fight ids, dead players, catalog patch and fingerprint | filtered defensive events | `backend/app.py:359`, `backend/app.py:398` |
+| `report_recap_cache` {cache} | `killing-blows` | 400 | report, fight ids, `instakills`; or report, counted deaths, `lethal-window`, window length | instant kills; hits before deaths | `backend/app.py:407`, `backend/app.py:415` |
 
-The keys carry everything that changes the answer. The deaths key includes the list of cheat-death spells when cheat deaths are on, so adding a spell refetches (`backend/app.py:355`). The defensive key includes the catalog's patch and `CATALOG_FINGERPRINT`, so a rebuilt catalog refetches. See [[backend-defensive-analysis]].
+The keys carry everything that changes the answer. The deaths key includes the list of cheat-death spells when cheat deaths are on, so adding a spell refetches (`backend/app.py:351`). The defensive key includes the catalog's patch and `CATALOG_FINGERPRINT`, so a rebuilt catalog refetches. See [[backend-defensive-analysis]].
 
 #### Encoding
 
@@ -155,7 +155,7 @@ relied-on-by: [[feat-analyze]] — repeat analyses come back faster and cheaper
 
 ## Invariants
 
-- **MUST** read or write the report caches only for finished reports; a live-logged report is always fetched (`backend/app.py:215`, `backend/app.py:225`, `backend/app.py:358`).
+- **MUST** read or write the report caches only for finished reports; a live-logged report is always fetched (`backend/app.py:215`, `backend/app.py:225`, `backend/app.py:354`).
 - **MUST** bump `CACHE_VERSION` when what is fetched or how it is indexed changes, so old rows are never served to new code (`backend/cache.py:46`).
 - **MUST** treat every shared-cache failure as a miss; an analysis never fails because Supabase is down (`backend/supabase_client.py:271`).
 - **NEVER** make an analysis wait on a Supabase cache write; writes run on a background pool (`backend/cache.py:79`).
@@ -174,8 +174,8 @@ relied-on-by: [[feat-analyze]] — repeat analyses come back faster and cheaper
 
 - **Memory caches and limits are per process**: with more than one gunicorn worker, each has its own LRU and its own rate-limit windows, so the effective limit multiplies (see [[backend]]).
 - **The key is never `X-Forwarded-For`**: Render appends to a client-supplied `X-Forwarded-For`, so its first entry can be forged. CloudFront and Cloudflare each overwrite their own header, so those are used instead (`backend/ratelimit.py:19-31`). Without either in front, every client would share the proxy's address and one limit.
-- **The defensive cache waits for the deaths**: its key needs the set of dead players, so it is looked up after the deaths are known, from the deaths cache (`backend/app.py:369`) or right after the deaths query (`backend/app.py:384`).
-- **A report with no death that can count writes no defensive or hit cache**: it returns after its deaths (`backend/app.py:387`), so only its fight lists, full fights and deaths are cached.
+- **The defensive cache waits for the deaths**: its key needs the set of dead players, so it is looked up after the deaths are known, from the deaths cache (`backend/app.py:365`) or right after the deaths query (`backend/app.py:380`).
+- **A report with no death that can count writes no defensive or hit cache**: it returns after its deaths (`backend/app.py:383`), so only its fight lists, full fights and deaths are cached.
 - **The 2-hour rule uses the report's end time**: a report still being logged tonight is fetched in full on every analysis until two hours after its last event (`backend/app.py:209`).
 - **Eviction reads every row's key and size**: `evict_report_cache` selects the whole table's `key, size_bytes` each time it runs (`backend/supabase_client.py:399`). That is cheap at 200 MB of large rows but grows with row count.
 
