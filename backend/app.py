@@ -34,7 +34,7 @@ import boss_spell_text
 from features import CHEAT_DEATH_ABILITY_IDS
 from auth import require_user, verify_token, forget_token, _bearer_token
 from cache import (report_meta_cache, report_deaths_cache as deaths_lru,
-                   report_defensive_cache as defensive_lru, report_recap_cache as recap_lru)
+                   report_defensive_cache as defensive_lru, report_recap_cache as recap_lru, flush_writes)
 from ratelimit import RateLimiter, limit
 import supabase_client
 import origin
@@ -635,6 +635,8 @@ def analyze():
             }
             
             yield f"data: {json.dumps({'result': response})}\n\n"
+            # Lambda freezes the function once the response ends: finish the cache writes first.
+            flush_writes()
         
         except Exception as e:
             print(f"Error in analyze: {str(e)}")
