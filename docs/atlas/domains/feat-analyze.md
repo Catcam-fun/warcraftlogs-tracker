@@ -20,7 +20,7 @@ anchors:
   stream_reader: "frontend/src/App.js:736"
   loader: "frontend/src/App.js:1535"
   cancel: "frontend/src/App.js:657"
-  local_credentials: "frontend/src/api.js:20"
+  local_credentials: "frontend/src/api.js:21"
   analyze_endpoint: "backend/app.py:109"
   max_cutoff_clamp: "backend/app.py:134"
   cheat_death_gate: "backend/app.py:143"
@@ -51,7 +51,7 @@ invariants:
   - "NEVER: run cheat-death detection for a caller without a valid Supabase session, whatever the request body says (backend/app.py:143)."
   - "MUST: fights be kept only when their encounter ID is in the selected raid's RAID_ENCOUNTERS set (backend/analysis.py:315)."
   - "NEVER: store the Client ID or Secret in the browser's analysis history; stripSecrets removes them before IndexedDB writes (frontend/src/App.js:552)."
-content_hash: sha256:7e8fa724213b7449db23d9a91fe2d98abe945037a3233be55e9ac4cede260ad8
+content_hash: sha256:be18846b1317339f687f0ecca2447ed0a33c384d4eb6f5593da1bfa940294ad9
 ---
 ## Summary
 
@@ -70,7 +70,7 @@ You reach the page from the landing page's run button (`frontend/src/App.js:1568
   body: The raid grid comes from the RAIDS list in frontend/src/AnalyzeConfig.js:12 (Manaforge Omega, Liberation of Undermine, Nerub'ar Palace, Midnight Season 1, and the Season 2 entries from frontend/src/seasonTwoRaids.js:6). Clicking a card calls handleRaidChange (frontend/src/App.js:670), which writes selectedRaid plus that raid's reportZone and fightZone from RAID_ZONES (frontend/src/App.js:30). The lineup under the grid shows the selected raid's bosses.
   gotcha: The initial config selects 'manaforge' (frontend/src/App.js:203), not the newest tier. If selectedRaid is not in RAIDS, the lineup falls back to RAIDS[0] (frontend/src/AnalyzeConfig.js:34).
 - title: Fill credentials and scope | short: Credentials & scope | sub: client, guild, server, region
-  body: Client ID and Secret are required. Signed out, they are remembered in this browser under localStorage key fpx.wclCredentials (frontend/src/api.js:20, saved on every change at frontend/src/App.js:217). Signed in, they also load from and save to the api_credentials table (frontend/src/App.js:561, frontend/src/App.js:587). Guild name, server and region (us, eu, kr, tw, cn) identify the guild; difficulty is Normal (3), Heroic (4) or Mythic (5) (frontend/src/AnalyzeConfig.js:160).
+  body: Client ID and Secret are required. Signed out, they are remembered in this browser under localStorage key fpx.wclCredentials (frontend/src/api.js:21, saved on every change at frontend/src/App.js:217). Signed in, they also load from and save to the api_credentials table (frontend/src/App.js:561, frontend/src/App.js:587). Guild name, server and region (us, eu, kr, tw, cn) identify the guild; difficulty is Normal (3), Heroic (4) or Mythic (5) (frontend/src/AnalyzeConfig.js:160).
   gotcha: handleSubmit only checks that Client ID, Secret, guild and server are filled (frontend/src/App.js:682). A wrong guild name is discovered only when WarcraftLogs returns no reports.
 - title: Set dates and deaths tracked | short: Dates & first X | sub: optional window, 1-10
   body: Start and end dates are optional; blank means the start of the tier and today (frontend/src/AnalyzeConfig.js:171). Max Deaths to Track is the "first X deaths per pull" ceiling, 1 to 10 (frontend/src/AnalyzeConfig.js:191). On the server the date range is intersected with RAID_DATE_WINDOWS (backend/analysis.py:262) by resolve_report_window (backend/analysis.py:280), and maxCutoff is clamped to 1-10 (backend/app.py:134).
@@ -150,7 +150,7 @@ relied-on-by: [[feat-share]] — shares the result and its config
 | `rosterOnly` {field} | `backend/app.py:145` | default on; off skips the roster fetch |
 | `RAID_ENCOUNTERS` {server} | `backend/analysis.py:234` | per-raid encounter ID allowlist |
 | `RAID_DATE_WINDOWS` {server} | `backend/analysis.py:262` | per-raid outer date bounds |
-| `fpx.wclCredentials` {storage} | `frontend/src/api.js:20` | localStorage, this browser only |
+| `fpx.wclCredentials` {storage} | `frontend/src/api.js:21` | localStorage, this browser only |
 | `sharedAnalysisData` {storage} | `frontend/src/App.js:552` | IndexedDB `FloorPovDB`, last result |
 | `recentRuns` {storage} | `frontend/src/App.js:453` | IndexedDB, last 5 runs |
 

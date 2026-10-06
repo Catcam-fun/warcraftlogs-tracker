@@ -21,7 +21,7 @@ anchors:
   saved_id_re: backend/app.py:684
   storage_response: backend/app.py:726
   require_user: backend/auth.py:79
-  limit_decorator: backend/ratelimit.py:56
+  limit_decorator: backend/ratelimit.py:54
   frontend_sse_reader: frontend/src/App.js:754
 links:
   - backend
@@ -40,13 +40,13 @@ invariants:
   - "MUST: an /api/analyze stream ends with exactly one result event or one error event; the client treats the first error as final."
   - "MUST: cheat-death detection runs only for a request with a valid bearer token, whatever enableCheatDeath says."
   - "NEVER: return stored credentials; shares and saves pass config through strip_secrets on the way in and out."
-content_hash: sha256:583f37e37ee58ef8f99fd57fccbfc09488f2c5c5396823bc48356413e05bbf46
+content_hash: sha256:80af57946527947229658654ce7f69f7fb400914e4c3e26a8223db076290ad52
 ---
 ## Summary
 
 - All routes live in `backend/app.py`. CORS covers `/api/*` with the origins from `ALLOWED_ORIGINS`, headers `Content-Type` and `Authorization`, and methods GET, POST, DELETE, OPTIONS (`backend/app.py:68`).
 - Authentication is a Supabase access token in `Authorization: Bearer ...`. `require_user` answers 401 `{"success": false, "error": "Please sign in again."}` when it is missing or invalid, and stores the user id in `g.user_id` (`backend/auth.py:79`). See [[auth]].
-- Rate-limited routes use the `limit` decorator, which answers 429 `{"success": false, "error": <message>}` and skips OPTIONS preflights (`backend/ratelimit.py:56`). See [[backend-caching-and-limits]].
+- Rate-limited routes use the `limit` decorator, which answers 429 `{"success": false, "error": <message>}` and skips OPTIONS preflights (`backend/ratelimit.py:54`). See [[backend-caching-and-limits]].
 
 ## Reference
 

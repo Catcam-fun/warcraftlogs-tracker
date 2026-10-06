@@ -18,7 +18,7 @@ anchors:
   session_only: "frontend/src/supabaseClient.js:15"
   session_restore: "frontend/src/App.js:269"
   auth_listener: "frontend/src/App.js:292"
-  local_credentials: "frontend/src/api.js:20"
+  local_credentials: "frontend/src/api.js:21"
   remember_local: "frontend/src/App.js:217"
   load_db_credentials: "frontend/src/App.js:561"
   save_db_credentials: "frontend/src/App.js:587"
@@ -50,13 +50,13 @@ invariants:
   - "NEVER: delete an account without the service-role key; the call refuses instead (backend/supabase_client.py:422)."
   - "MUST: a signed-in user read and write only their own api_credentials row (backend/migrations/001_shares_and_rls.sql:36)."
   - "MUST: cheat-death detection run only for a request with a valid session (backend/app.py:143)."
-content_hash: sha256:dc253b50b0675675d4baa5ffefb54af25ac492350fcbb91670827f4a36040576
+content_hash: sha256:bdb330652a72696a5400870205a4d3df3d1a3b96ceef54139eb78be044b1718b
 ---
 ## Summary
 
 - **What it is.** Optional email-and-password accounts on Supabase Auth (`frontend/src/Auth.js:135`, `frontend/src/Auth.js:139`). The header shows Sign In or Settings and Logout depending on `user` (`frontend/src/App.js:1653`).
 - **What an account unlocks.** Saved reports, which every `/api/saved` route gates with `require_user` (`backend/app.py:734`), and cheat-death detection, which the server turns off for calls without a valid session (`backend/app.py:120`, `backend/app.py:143`). Credentials also follow the user between browsers.
-- **Where credentials live.** Always in this browser's localStorage under `fpx.wclCredentials` (`frontend/src/api.js:20`); for signed-in users also in `api_credentials`, which the browser reaches directly with the public anon key (`frontend/src/App.js:561`).
+- **Where credentials live.** Always in this browser's localStorage under `fpx.wclCredentials` (`frontend/src/api.js:21`); for signed-in users also in `api_credentials`, which the browser reaches directly with the public anon key (`frontend/src/App.js:561`).
 - **Leaving.** Settings deletes the account through the backend, which uses the service-role key (`frontend/src/Settings.js:199`, `backend/supabase_client.py:417`).
 
 ## How it works
@@ -131,7 +131,7 @@ relied-on-by: [[feat-analyze]] — credentials pre-fill and the cheat-death gate
 | `delete_user_account` {code} | `backend/supabase_client.py:417` | rows, shares, then auth user |
 | `verify_token` {code} | `backend/auth.py:36` | asks Supabase `/auth/v1/user`; caches 60 s by token hash |
 | `forget_token` {code} | `backend/auth.py:72` | drop a token from that cache |
-| `fpx.wclCredentials` {localStorage} | `frontend/src/api.js:20` | Client ID and Secret, any visitor |
+| `fpx.wclCredentials` {localStorage} | `frontend/src/api.js:21` | Client ID and Secret, any visitor |
 | `fp.sessionOnly` {localStorage} | `frontend/src/supabaseClient.js:12` | "Stay logged in" unchecked |
 | `fp_session_alive` {cookie} | `frontend/src/supabaseClient.js:13` | session cookie paired with the flag |
 | `api_credentials` {table} | `backend/migrations/001_shares_and_rls.sql:36` | client_id, client_secret per user; own-row policies |
@@ -151,7 +151,7 @@ relied-on-by: [[feat-analyze]] — credentials pre-fill and the cheat-death gate
 
 ## Gotchas
 
-- **Credentials outlive logout, not account deletion.** Logging out keeps `fpx.wclCredentials` on purpose: the browser remembers the key signed in or not (`frontend/src/api.js:16-20`, `frontend/src/App.js:615`). Deleting the account clears it (`frontend/src/Settings.js:206`, `frontend/src/accountDeletion.test.js`).
+- **Credentials outlive logout, not account deletion.** Logging out keeps `fpx.wclCredentials` on purpose: the browser remembers the key signed in or not (`frontend/src/api.js:17-21`, `frontend/src/App.js:615`). Deleting the account clears it (`frontend/src/Settings.js:206`, `frontend/src/accountDeletion.test.js`).
 - **Saved credentials are protected by the database, not the app.** The browser writes `client_secret` to the row as plain text (`frontend/src/Settings.js:96`); row-level security keeps other accounts from reading it (`backend/migrations/001_shares_and_rls.sql:36-43`) and Supabase encrypts its storage at rest. Settings and the Privacy Policy say exactly that (`frontend/src/Settings.js:239-240`, `frontend/src/PrivacyPolicy.js:70`), and `frontend/src/credentialsCopy.test.js` fails if either promises more.
 - **Privacy Policy retention matches the code.** It says saved analyses are kept for the chosen 7, 14 or 30 days and share links expire after 72 hours (`frontend/src/PrivacyPolicy.js:142-143`), as `save_analysis` clamps retention to 30 days (`backend/supabase_client.py:93`) and shares last `SHARE_TTL_HOURS` (`backend/supabase_client.py:34`); `frontend/src/credentialsCopy.test.js` checks the wording.
 - **Deleted tokens can linger up to a minute elsewhere.** `forget_token` clears only the token used for the delete, in the process that handled it (`backend/auth.py:72`); the cache TTL is 60 s (`backend/auth.py:23`).

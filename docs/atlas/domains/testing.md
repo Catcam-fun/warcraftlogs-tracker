@@ -36,7 +36,7 @@ links:
   - game-data
   - warcraftlogs
   - operations
-content_hash: sha256:9cd14ba730c3e933c703dcac35555ca5f20da4c9da54a565635e69dfbe750f75
+content_hash: sha256:32c8cad1b1e3da80936fb14249bb5e2142de139ad6efdf931ca6762ec9b106af
 ---
 ## Summary
 
@@ -59,7 +59,7 @@ Every test file and check script. Filter by kind.
 | `backend/test_defensives.py` {backend} | `defensives.py` against the committed catalog (`backend/test_defensives.py:38`) | talents decide which abilities a player has; cooldowns, charges and resets between pulls; would-it-have-saved replays (immunities, school-limited reductions, combined defensives, shields); consumable estimates; per-patch catalog choice (`backend/test_defensives.py:400`); per-pull spec; lethal-window hits, set-up hit and rot labels; armor and Bear Form |
 | `backend/test_boss_spell_text.py` {backend} | `render` in `scripts/build_boss_spell_text.py` and the generated `boss_spell_text.py` (`backend/test_boss_spell_text.py:24`) | description templates filled only where game data is exact; the generated file has Sever's text |
 | `backend/test_bodies.py` {backend} | `json_body`, the gzip-aware request reader (`backend/test_bodies.py:12`) | plain JSON still works; gzip bodies are read; bad bodies give `None`; a compressed body cannot expand past the size cap |
-| `backend/test_ratelimit.py` {backend} | `client_ip()`, the rate limiter's key (`backend/test_ratelimit.py:12`) | Cloudflare's `CF-Connecting-IP` is used; a forged `X-Forwarded-For` does not change the key; on AWS `X-Viewer-Ip` is trusted only with the origin secret (`backend/test_ratelimit.py:33`) |
+| `backend/test_ratelimit.py` {backend} | `client_ip()`, the rate limiter's key (`backend/test_ratelimit.py:12`) | headers a client can set (`X-Forwarded-For`, `CF-Connecting-IP`, `X-Viewer-Ip` without the secret) do not change the key; `X-Viewer-Ip` is trusted only with the origin secret (`backend/test_ratelimit.py:24`) |
 | `backend/test_origin_lock.py` {backend} | The CloudFront-only lock on AWS (`backend/test_origin_lock.py:8`) | without a secret everything is open; requests without it get 403; health check and warm-up ping stay open |
 | `backend/test_streaming.py` {backend} | The SSE keepalive wrapper (`backend/test_streaming.py:7`) | messages pass through in order; keepalives while the source is quiet; source errors reach the caller |
 | `backend/test_wago_cache.py` {backend} | `WAGO_CACHE` in the catalog build script (`backend/test_wago_cache.py:11`) | live tables are never served from the cache; pinned builds are |

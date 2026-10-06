@@ -46,12 +46,12 @@ invariants:
   - "MUST: rebuild spell_icons.py after rebuilding defensive_catalog.py; the icon script reads every catalog ability."
   - "MUST: bump CACHE_VERSION in cache.py when what gets fetched or how it is indexed changes, so old shared-cache rows are never served to new code."
   - "NEVER: hand-edit the generated modules (defensive_catalog.py, boss_spell_flags.py, boss_spell_text.py, spell_icons.py, armor_constants.py, raid_wide_damage.py); edit the script and rerun it."
-content_hash: sha256:f52067bbcb99d6dc00a6b544d995abc86c50e5955b3f3d20280b82461d5c4f9f
+content_hash: sha256:f89bc51b4c4e66d6abfc014aaa6aed85b6bc386e304114f03ad55255a0301095
 ---
 ## Summary
 
 - **Config is small.** The API reads seven environment variables; the build and check scripts read three more. No WarcraftLogs key lives on the server.
-- **Health** is `GET /api/health`, which returns `{"status": "healthy", "supabase": <bool>}` (`backend/app.py:797`). The site calls it as soon as it opens to wake a sleeping instance (`frontend/src/App.js:263`).
+- **Health** is `GET /api/health`, which returns `{"status": "healthy", "supabase": <bool>}` (`backend/app.py:797`). The site calls it as soon as it opens to start a cold Lambda copy (`frontend/src/App.js:263`).
 - **Logging** is `print` to standard output with bracketed prefixes; there is no `logging` setup and no log levels.
 - **Caches evict themselves**: in-process LRUs drop the oldest entry, and the shared Supabase cache keeps itself under 200 MB.
 - **A new raid tier** is mostly data: encounter IDs and a date window in the backend, one raid entry in the frontend, art, then a fixed order of build scripts. The steps are below; `git show --stat 0e825bb` is the Season 2 example (backend raid tables, a raid-selection test, `seasonTwoRaids.js`, `AnalyzeConfig.js` and its test, `App.js`, `fp-design.css`).
@@ -99,7 +99,7 @@ Environment variables, from every `os.environ` lookup in the code.
 | `PORT` {runtime} | `backend/gunicorn.conf.py:12`, `backend/app.py:808` | `5000` | listen port |
 | `WEB_CONCURRENCY` {runtime} | `backend/gunicorn.conf.py:13` | `1` | gunicorn worker processes |
 | `GUNICORN_THREADS` {runtime} | `backend/gunicorn.conf.py:15` | `16` | threads per worker |
-| `REACT_APP_API_URL` {build} | `frontend/src/api.js:8` | localhost:5000 on localhost, else the Render URL | API base URL baked in at build time |
+| `REACT_APP_API_URL` {build} | `frontend/src/api.js:9` | localhost:5000 on localhost, else the page's own host | API base URL baked in at build time |
 | `WCL_CLIENT_ID`, `WCL_CLIENT_SECRET` {scripts} | `backend/scripts/check_deaths.py:27` and every `check_*` / `build_armor_constants.py` / `build_raid_wide.py` | none, required | the operator's own WarcraftLogs API client |
 | `WAGO_CACHE` {scripts} | `backend/scripts/build_defensive_catalog.py:410` | unset (no cache) | folder for downloaded wago.tools tables; the other wago scripts import `table` from this script, so they use it too |
 
@@ -121,7 +121,7 @@ Failure modes visible in the code, and what the user sees:
 | Supabase insert for a share fails {supabase} | `backend/supabase_client.py:240` | falls back to memory; the response carries `ephemeral: true` |
 | Shared report cache errors {supabase} | `backend/supabase_client.py:315` | treated as a miss, and the shared cache is skipped for 5 minutes |
 | Sign-in check unreachable {supabase} | `backend/auth.py:38` | treated as signed out: cheat-death detection is off and signed-in routes refuse |
-| Too many requests from one IP {limits} | `backend/ratelimit.py:61`, `backend/app.py:52` | HTTP 429; 60 analyses, 20 shares and 30 saves per hour per IP |
+| Too many requests from one IP {limits} | `backend/ratelimit.py:59`, `backend/app.py:52` | HTTP 429; 60 analyses, 20 shares and 30 saves per hour per IP |
 
 ## Standing it up
 

@@ -12,7 +12,7 @@ summary:
 anchors:
   analyze_route: backend/app.py:109
   analyze_stream_client: frontend/src/App.js:723
-  api_base_url: frontend/src/api.js:8
+  api_base_url: frontend/src/api.js:9
   wcl_token: backend/app.py:158
   shared_report_cache: backend/cache.py:42
   deaths_fetch: backend/app.py:376
@@ -20,7 +20,7 @@ anchors:
   final_result: backend/app.py:663
 links: [overview, frontend, backend, warcraftlogs, data-model, auth, game-data, feat-analyze, feat-results]
 flows: [request-path, share-path, data-build-path]
-content_hash: sha256:97843299588fc7f005c4da9769dbba97029c25b33d06cd37be23b6cc4d0435f3
+content_hash: sha256:cc205f478ce3b1a350e9165396a2fc05d06c8f3e89d59e1e62fc98c77c1ddda4
 ---
 ## Summary
 
@@ -36,7 +36,7 @@ One analysis, end to end. The browser opens a single streaming request (`fronten
 lane client Browser
 node user lane=client color=process "Raid officer" "Analyze form"
 node site lane=client color=process "React site" "App.js · api.js"
-lane api Flask API on Render
+lane api Flask API on AWS Lambda
 node route lane=api color=process "POST /api/analyze" "rate limited · SSE"
 node pipeline lane=api color=safe "Analysis pipeline" "pulls · slots · wipes"
 node defs lane=api color=safe "Defensive analysis" "per counted death"
@@ -54,14 +54,14 @@ edge pipeline -> defs color=safe "counted deaths"
 edge defs -> catalog color=structural "spell data"
 edge defs -> site color=safe "progress + result"
 edge site -> supa color=caution "save / share"
-band structural "Substrate · Render + Supabase + static site"
+band structural "Substrate · AWS (CloudFront, S3, Lambda) + Supabase"
 ```
 
 ## How it works
 
 ```steps
 - title: The officer fills in the Analyze form | short: Analyze form | sub: guild, raid, deaths tracked
-  body: The Analyze page collects the guild, server, region, raid, difficulty, date range and how many deaths per pull to count. It also takes the officer's own WarcraftLogs client ID and secret, which stay in the browser except for the analyze call itself (frontend/src/api.js:12). See [[feat-analyze]].
+  body: The Analyze page collects the guild, server, region, raid, difficulty, date range and how many deaths per pull to count. It also takes the officer's own WarcraftLogs client ID and secret, which stay in the browser except for the analyze call itself (frontend/src/api.js:13). See [[feat-analyze]].
 - title: One streaming request | short: Stream opens | sub: POST /api/analyze
   body: The site POSTs the form to /api/analyze and reads the response as a stream of server-sent events (frontend/src/App.js:723, frontend/src/App.js:736). The route is rate limited per network (backend/app.py:110).
 - title: Reports and fights | short: Reports | sub: WarcraftLogs + cache
@@ -79,8 +79,8 @@ band structural "Substrate · Render + Supabase + static site"
 | Aspect | Local | Production |
 |---|---|---|
 | Frontend | `npm start` on localhost | static build of `frontend/` |
-| API base URL | `http://localhost:5000` when the page is on localhost | `https://deathwarcraftlogs-api.onrender.com`, unless `REACT_APP_API_URL` is set at build time (`frontend/src/api.js:8`) |
-| Backend | Flask on port 5000 | gunicorn `gthread` on Render (`backend/gunicorn.conf.py`) |
+| API base URL | `http://localhost:5000` when the page is on localhost | `/api` on the page's own host, unless `REACT_APP_API_URL` is set at build time (`frontend/src/api.js:9`) |
+| Backend | Flask on port 5000 | gunicorn `gthread` on AWS Lambda (`backend/gunicorn.conf.py`, `backend/run.sh`) |
 | Storage | Supabase if configured, otherwise in-memory fallbacks | Supabase |
 
 See [[deployment]] for detail.

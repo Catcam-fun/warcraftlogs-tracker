@@ -50,7 +50,7 @@ invariants:
   - "MUST: every saved_analyses read and delete filter on both id and user_id (backend/supabase_client.py:148, backend/supabase_client.py:176)."
   - "NEVER: store or return WarcraftLogs credentials in a save; the config is stripped in the browser and again on write and read (frontend/src/SaveReportDialog.js:28, backend/supabase_client.py:101, backend/supabase_client.py:163)."
   - "MUST: keep at most MAX_SAVED_PER_USER (5) saves per user and clamp retention to 1-30 days (backend/supabase_client.py:93, backend/supabase_client.py:97)."
-content_hash: sha256:cb5529c3e6d47b10ce0cd287a2e74f78bc2813851f810d52d591f469ac113ad4
+content_hash: sha256:75f2756212b76cb4c98d996412863acb5cbf4ef089cf7b1b2e4ba5c2f8fbb163
 ---
 ## Summary
 
@@ -65,7 +65,7 @@ content_hash: sha256:cb5529c3e6d47b10ce0cd287a2e74f78bc2813851f810d52d591f469ac1
 - title: Press Save on a result | short: Save | sub: signed-in only
   body: The Results header shows Save only for a signed-in user (frontend/src/App.js:1642). It opens SaveReportDialog, which needs both a user and loaded data (frontend/src/App.js:2313). The name defaults to "<guild> · <today>" (frontend/src/SaveReportDialog.js:8) and the keep-for select offers 7, 14 or 30 days, default 30 (frontend/src/SaveReportDialog.js:11).
 - title: Send it | short: POST /api/saved | sub: name, data, config, retentionDays
-  body: The dialog POSTs with the session token attached (auth true) and the config passed through stripSecrets, which drops clientId and clientSecret (frontend/src/SaveReportDialog.js:24, frontend/src/api.js:42). The route is rate limited to 30 saves per hour per client IP (backend/app.py:54, backend/app.py:741) and rejects a body that has no events object (backend/app.py:687, backend/app.py:745).
+  body: The dialog POSTs with the session token attached (auth true) and the config passed through stripSecrets, which drops clientId and clientSecret (frontend/src/SaveReportDialog.js:24, frontend/src/api.js:43). The route is rate limited to 30 saves per hour per client IP (backend/app.py:54, backend/app.py:741) and rejects a body that has no events object (backend/app.py:687, backend/app.py:745).
 - title: Server checks and stores | short: save_analysis | sub: purge, count, size
   body: save_analysis clamps retention, deletes this user's expired rows, counts what is left, refuses a 6th save, packs the payload, refuses over 3 MB compressed, then inserts a row with a fresh UUID, the name and guild cut to 100 characters, size_bytes and expires_at (backend/supabase_client.py:89).
   gotcha: The count check and the insert are separate calls, so save_analysis recounts after inserting; if two saves at once went over the limit, the one that went over deletes its own row and answers limit (backend/supabase_client.py:118).
@@ -149,7 +149,7 @@ relied-on-by: [[feat-account]] — account deletion removes every save
 
 - **Big analyses are sent compressed**: on AWS, Lambda refuses request bodies over 6 MB, and a big guild's full-season result is larger. Share and Save gzip the body in the browser (`apiFetch(..., {compress: true})`, `frontend/src/api.js`) and the API inflates it with a 64 MB cap (`backend/bodies.py`); an oversized body answers 413. Browsers without `CompressionStream` send plain JSON.
 - **Expiry is lazy but never visible.** Expired rows stay in the table until that user lists, saves or opens a save; each of those first deletes the user's expired rows (`backend/supabase_client.py:94`, `backend/supabase_client.py:133`, `backend/supabase_client.py:148`), so an expired save opened by id answers 404 (`backend/test_api.py`, `test_expired_saves_do_not_load`).
-- **The limiter is per IP and per process.** It keys on Cloudflare's `CF-Connecting-IP` (`backend/ratelimit.py:30`) and lives in memory (`backend/ratelimit.py:38`).
+- **The limiter is per IP and per process.** It keys on Cloudflare's `CF-Connecting-IP` (`backend/ratelimit.py:29`) and lives in memory (`backend/ratelimit.py:36`).
 - **Alt groups are not saved with the result.** Grouping made on the Results page lives in page state; a save carries `data` and the analysis config only (`frontend/src/SaveReportDialog.js:28`).
 - **No schema migration creates `saved_analyses`.** The migrations only enable RLS on it (`backend/migrations/001_shares_and_rls.sql:24`); the table predates them.
 
