@@ -46,7 +46,7 @@ links:
   - feat-results
   - game-data
   - testing
-content_hash: sha256:61d5faa478a172255851dbfede4a72cddeb07f78a410a7c13dbd6299bb3103cc
+content_hash: sha256:8142791a80e71d3c76219751407cc61584352ffa4b51558dc5228a73985e5c62
 ---
 ## Summary
 
@@ -182,7 +182,7 @@ relied-on-by: [[frontend-results-view]] — BOSS_ORDER sorts boss chips and per-
 ## Gotchas
 
 - **Raid lineups exist twice**: `RAIDS[].bosses` in `AnalyzeConfig.js` and `BOSS_ORDER` in `App.js` are separate copies for the four older entries; only `SEASON_TWO_RAIDS` feeds both (`frontend/src/AnalyzeConfig.js:12`, `frontend/src/App.js:73`). The comment at `frontend/src/AnalyzeConfig.js:10` says RAIDS mirrors them; nothing enforces it.
-- **Season 1 is one combined card**: `voidspire`, `dreamrift` and `queldanas` are in `RAID_ZONES` and `BOSS_ORDER` (`frontend/src/App.js:34-48`) but have no card of their own in `RAIDS`. The Analyze page offers them together as `midnight-all`, whose encounter set is the union of all three (`backend/analysis.py:200`). The per-raid keys remain valid backend selections. The test pins five cards (`frontend/src/AnalyzeConfig.test.js:28`).
+- **Season 1 is one combined card**: `voidspire`, `dreamrift` and `queldanas` are in `RAID_ZONES` and `BOSS_ORDER` (`frontend/src/App.js:34-48`) but have no card of their own in `RAIDS`. The Analyze page offers them together as `midnight-all`, whose encounter set is the union of all three (`backend/analysis.py:246`). The per-raid keys remain valid backend selections. The test pins five cards (`frontend/src/AnalyzeConfig.test.js:28`).
 - **The script's council dict is a count, not a flag**: `COUNCIL` in the script maps slug to a number of models (`frontend/scripts/fetch-boss-renders.py:36`). A council whose journal lists the same display ID twice still gets fewer distinct models than asked.
 - **DISPLAY_OVERRIDE replaces, it does not merge**: when a slug is in `DISPLAY_OVERRIDE`, the council count is ignored and exactly the listed IDs are used (`frontend/scripts/fetch-boss-renders.py:116`). The Lost Explorers tile is one model for that reason.
 - **Journal search is fuzzy**: the encounter match accepts substring matches either way for names longer than five letters (`frontend/scripts/fetch-boss-renders.py:98-101`), then takes the highest ID. A short or common name can pick the wrong encounter; `ENC_OVERRIDE` exists for that (`l'ura`).

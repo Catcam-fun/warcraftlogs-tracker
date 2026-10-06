@@ -5,9 +5,9 @@ domain: warcraftlogs
 status: documented
 summary:
   - "Every number on the site starts as a WarcraftLogs (WCL) v2 GraphQL query made with the officer's own API client ID and secret."
-  - "The backend fetches a token, the guild roster, the guild's reports in the tier window, each report's fights and players, and then per-report event streams (deaths, defensives, hits before deaths)."
+  - "The backend fetches a token, the guild roster, the guild's reports in the tier window, every report's light fight list, the full fights and players of the reports pulls are kept from, and then per-report event streams (talent loadouts, deaths, defensives, hits before deaths)."
   - "All traffic goes through one Cloudflare Worker proxy URL, not straight to warcraftlogs.com."
-  - "Queries are batched per report and finished reports are cached, because WCL meters each API key by points."
+  - "Queries are batched and ordered per report and finished reports are cached, because WCL meters each API key by points."
 tagline: What the backend asks WarcraftLogs for, in what order, and with whose key.
 anchors:
   endpoints: backend/warcraftlogs.py:15
@@ -15,14 +15,16 @@ anchors:
   graphql: backend/warcraftlogs.py:140
   guild_reports: backend/warcraftlogs.py:176
   guild_roster: backend/warcraftlogs.py:252
-  fights: backend/warcraftlogs.py:333
-  deaths_bulk: backend/analysis.py:311
-  defensive_raw: backend/defensives.py:207
-  death_windows: backend/defensives.py:768
-  instakills: backend/defensives.py:811
+  light_fights: backend/warcraftlogs.py:333
+  fights: backend/warcraftlogs.py:382
+  deaths_bulk: backend/analysis.py:357
+  combatants: backend/defensives.py:218
+  defensive_raw: backend/defensives.py:229
+  death_windows: backend/defensives.py:805
+  instakills: backend/defensives.py:851
   analyze_credentials: backend/app.py:125
   analyze_token: backend/app.py:158
-  report_fetch: backend/app.py:320
+  report_fetch: backend/app.py:335
   script_credentials: backend/scripts/build_raid_wide.py:79
 links:
   - warcraftlogs-api-client
@@ -40,18 +42,18 @@ invariants:
   - "NEVER: a guild-reports query filters by zoneID; mixed raid and dungeon reports would be dropped."
 flows:
   - request-path
-content_hash: sha256:0e277bbc1e9b713f9c74a41a78621f4c1b3b2e691fa17bf1e4e8c03d99eef8b5
+content_hash: sha256:82f2eb618c2ca286bff91403c05eeb8fac20bf0440db07ba11e7387c178d7c38
 ---
 ## Summary
 
 - The backend is a **client of WarcraftLogs' v2 GraphQL API**. It owns no game logs; everything is read from WCL at analysis time, or from the cache of an earlier read.
 - Credentials are **the officer's own**: the Analyze request carries `clientId` and `clientSecret` (`backend/app.py:125`), and the backend trades them for an OAuth token with the client-credentials grant (`backend/warcraftlogs.py:91`).
 - Both endpoints point at a **Cloudflare Worker proxy** (`backend/warcraftlogs.py:15`), and the token request uses Basic auth because that Worker requires it (`backend/warcraftlogs.py:99`).
-- The read order is: token, guild roster, guild reports, each report's fights, then per-report event queries. The details of each call live in [[warcraftlogs-api-client]]; how the code keeps the cost down lives in [[warcraftlogs-point-budget]].
+- The read order is: token, guild roster, guild reports, each report's light fight list, the full read of the reports pulls are kept from, then per-report event queries. The details of each call live in [[warcraftlogs-api-client]]; how the code keeps the cost down lives in [[warcraftlogs-point-budget]].
 
 ## How it works
 
-One Analyze request walks through the WCL reads below, in the order `generate()` in `backend/app.py` issues them. Reports are read in parallel, and the event queries for one report run side by side.
+One Analyze request walks through the WCL reads below, in the order `generate()` in `backend/app.py` issues them. Reports are read in parallel, but the event queries for one report run one after another.
 
 ```steps
 - title: Get a token | short: Token | sub: OAuth client credentials
@@ -61,16 +63,21 @@ One Analyze request walks through the WCL reads below, in the order `generate()`
   body: With rosterOnly on, get_guild_roster reads guildData.guild.members 100 at a time, the first 3 pages at once, then any remaining pages up to last_page (backend/warcraftlogs.py:321-323). Names are accent-stripped and lowercased into a set (backend/warcraftlogs.py:317-319). With the toggle off, the roster is not fetched at all (backend/app.py:165-166).
   gotcha: The roster is best-effort. A failed page is skipped, and an empty roster means everyone counts (backend/app.py:181-184).
 - title: Guild reports | short: Reports | sub: scoped to the tier window
-  body: get_guild_reports pages reportData.reports 100 at a time with startTime and endTime pushed into the query, up to 50 pages (backend/warcraftlogs.py:200-246). The window is the tier's RAID_DATE_WINDOWS entry, which the user's dates can only narrow (backend/analysis.py:234, backend/app.py:189-191).
+  body: get_guild_reports pages reportData.reports 100 at a time with startTime and endTime pushed into the query, up to 50 pages (backend/warcraftlogs.py:200-246). The window is the tier's RAID_DATE_WINDOWS entry, which the user's dates can only narrow (backend/analysis.py:280, backend/app.py:189-191).
   gotcha: There is no zoneID filter on purpose. WCL gives a report one zone, so a night that mixes a raid and Mythic+ would be classified as the dungeon and dropped (docstring at backend/warcraftlogs.py:177-186).
-- title: Fights and players | short: Fights | sub: one query per report
-  body: get_fights reads fights, Player actors, ability names, school bitmasks and icons, and playerDetails (spec per player) in one GraphQL round trip (backend/warcraftlogs.py:341-377). analyze_fights then keeps only pulls whose encounter ID is in the raid's RAID_ENCOUNTERS set at the chosen difficulty (backend/analysis.py:256-270).
+- title: Fight lists | short: Fight lists | sub: every report, light
+  body: get_report_fights reads only the report start and its fights, no players or abilities (backend/warcraftlogs.py:333-381). analyze_fights keeps only pulls whose encounter ID is in the raid's RAID_ENCOUNTERS set at the chosen difficulty (backend/analysis.py:302-316, called at backend/app.py:245). Pulls are sorted by start, report code and fight ID, and duplicates across logs are dropped (backend/app.py:257-275).
+- title: Fights and players | short: Full read | sub: kept reports only
+  body: get_fights reads fights, Player actors, ability names, school bitmasks and icons, and playerDetails (spec per player) in one GraphQL round trip (backend/warcraftlogs.py:390-426), only for the reports that pulls were kept from (backend/app.py:267-275).
+  gotcha: A report whose full read comes back empty is dropped and dedup runs again, so its pulls go to another log's copy of the same pull (backend/app.py:259-275).
+- title: Talent loadouts | short: Loadouts | sub: first, alone
+  body: When a report's deaths aren't cached, fetch_combatants reads CombatantInfo for the kept pulls before anything else, because it is the cheapest first query on a report WCL hasn't read recently (backend/app.py:368-375, backend/defensives.py:218-226).
 - title: Deaths | short: Deaths | sub: whole report, one call
-  body: get_report_deaths_bulk asks for Deaths events from the first kept pull's start to the last one's end, plus (signed-in, cheat-death on) Debuffs and Healing filtered to cheat-death ability IDs, all as aliases of one query (backend/analysis.py:349-424). Extra pages are followed with nextPageTimestamp (backend/analysis.py:429-438).
-- title: Defensive data | short: Defensives | sub: four queries at once
-  body: fetch_defensive_raw runs Casts, Buffs, Healing and CombatantInfo queries in parallel (backend/defensives.py:229-239). Casts and buffs cover the time range from 3 minutes before the first pull; heals and talent loadouts are scoped to the boss pulls.
+  body: get_report_deaths_bulk asks for Deaths events from the first kept pull's start to the last one's end, plus (signed-in, cheat-death on) Debuffs and Healing filtered to cheat-death ability IDs, all as aliases of one query (backend/analysis.py:395-470). Extra pages are followed with nextPageTimestamp (backend/analysis.py:475-484).
+- title: Defensive data | short: Defensives | sub: three queries, one at a time
+  body: Only when at least one death in the report can count (backend/app.py:382-385). fetch_defensive_raw then runs Casts, Buffs and Healing one after another, reusing the loadouts already read (backend/defensives.py:252-266). Casts and buffs cover the time range from 3 minutes before the first pull; heals are scoped to the boss pulls.
 - title: Hits before deaths | short: Death windows | sub: DamageTaken by name
-  body: For the deaths that can count, fetch_death_windows asks for DamageTaken events filtered by target.name, one block per group of pulls within 15 minutes, many blocks per request (backend/defensives.py:768-808). fetch_instakills adds instant-kill events from the All stream (backend/defensives.py:811-816).
+  body: For the deaths that can count, fetch_death_windows asks for DamageTaken events filtered by target.name, one block per group of pulls within 15 minutes, many blocks per request (backend/defensives.py:805-848). fetch_instakills adds instant-kill events from the All stream (backend/defensives.py:851-856).
 ```
 
 ## Diagram
@@ -85,13 +92,16 @@ node analyze lane=app color=process "Analyze stream" "generate()"
 node token lane=wcl color=process "OAuth token" "client credentials"
 node roster lane=wcl color=process "Guild roster" "100 per page"
 node reports lane=wcl color=process "Guild reports" "tier window"
-node fights lane=wcl color=process "Fights + players" "1 query / report"
+node light lane=wcl color=process "Fight lists" "1 query / report"
+node fights lane=wcl color=process "Fights + players" "kept reports only"
 node events lane=wcl color=process "Event queries" "deaths, defensives, hits"
 node cache lane=store color=structural "Report cache" "memory + Supabase"
 edge analyze -> token "auth"
 edge token -> roster "if rosterOnly"
 edge roster -> reports "list"
-edge reports -> fights "per report"
+edge reports -> light "per report"
+edge light -> fights "after dedup"
+edge light -> cache color=safe "finished only"
 edge fights -> events "per report"
 edge fights -> cache color=safe "finished only"
 edge events -> cache color=safe "finished only"
@@ -107,11 +117,13 @@ What is read from WCL, and where.
 | OAuth token {auth} | `POST /oauth/token` | `get_access_token` (`backend/warcraftlogs.py:91`) |
 | Guild roster {query} | `guildData.guild.members` | `get_guild_roster` (`backend/warcraftlogs.py:252`) |
 | Guild reports {query} | `reportData.reports` | `get_guild_reports` (`backend/warcraftlogs.py:176`) |
-| Fights, actors, abilities, specs {query} | `reportData.report` (`fights`, `masterData`, `playerDetails`) | `get_fights` (`backend/warcraftlogs.py:333`) |
-| Deaths and cheat deaths {events} | `report.events` (Deaths, Debuffs, Healing) | `get_report_deaths_bulk` (`backend/analysis.py:311`) |
-| Defensive casts, buffs, heals, talents {events} | `report.events` (Casts, Buffs, Healing, CombatantInfo) | `fetch_defensive_raw` (`backend/defensives.py:207`) |
-| Hits before deaths {events} | `report.events` (DamageTaken) | `fetch_death_windows` (`backend/defensives.py:768`) |
-| Instant kills {events} | `report.events` (All, `type = 'instakill'`) | `fetch_instakills` (`backend/defensives.py:811`) |
+| Light fight list {query} | `reportData.report` (`startTime`, `fights`) | `get_report_fights` (`backend/warcraftlogs.py:333`) |
+| Fights, actors, abilities, specs {query} | `reportData.report` (`fights`, `masterData`, `playerDetails`) | `get_fights` (`backend/warcraftlogs.py:382`) |
+| Deaths and cheat deaths {events} | `report.events` (Deaths, Debuffs, Healing) | `get_report_deaths_bulk` (`backend/analysis.py:357`) |
+| Talent loadouts {events} | `report.events` (CombatantInfo) | `fetch_combatants` (`backend/defensives.py:218`) |
+| Defensive casts, buffs, heals {events} | `report.events` (Casts, Buffs, Healing) | `fetch_defensive_raw` (`backend/defensives.py:229`) |
+| Hits before deaths {events} | `report.events` (DamageTaken) | `fetch_death_windows` (`backend/defensives.py:805`) |
+| Instant kills {events} | `report.events` (All, `type = 'instakill'`) | `fetch_instakills` (`backend/defensives.py:851`) |
 | Top kills per boss {scripts} | `worldData.encounter.fightRankings` | `build_armor_constants.py:118`, `build_raid_wide.py:33` |
 
 ## Standing it up
@@ -127,14 +139,14 @@ What is read from WCL, and where.
 ## Invariants
 
 - **MUST** authenticate each analysis with the client ID and secret sent in that request; tokens are cached per credential pair (`backend/warcraftlogs.py:93`), so one officer never spends another's quota.
-- **MUST** decide which pulls belong to a raid by encounter ID (`RAID_ENCOUNTERS`, `backend/analysis.py:188`), because several raids can share one WCL zone.
+- **MUST** decide which pulls belong to a raid by encounter ID (`RAID_ENCOUNTERS`, `backend/analysis.py:234`), because several raids can share one WCL zone.
 - **NEVER** filter guild reports by zoneID: a report mixing a raid with dungeons is filed under the dungeon zone and would vanish with all its raid pulls (`backend/warcraftlogs.py:179-184`).
 
 ## Gotchas
 
 - **The endpoints are a proxy, not WCL**: `GRAPHQL_ENDPOINT` and `OAUTH_TOKEN_URL` both point at a Cloudflare Worker (`backend/warcraftlogs.py:15-16`). If that Worker is down, every analysis fails at the token step, even when warcraftlogs.com is up.
-- **Names are stored two ways**: `get_fights` keeps an accent-stripped `name` for matching and the raw `logName` for WCL filter expressions (`backend/warcraftlogs.py:400-405`). Filters need the raw spelling; matching uses the stripped one.
-- **Specs are read twice**: `playerDetails` gives a report-level spec (`backend/warcraftlogs.py:421-434`), while CombatantInfo gives the spec per pull, which the defensive analysis prefers (`backend/defensives.py:285-287`).
+- **Names are stored two ways**: `get_fights` keeps an accent-stripped `name` for matching and the raw `logName` for WCL filter expressions (`backend/warcraftlogs.py:449-454`). Filters need the raw spelling; matching uses the stripped one.
+- **Specs are read twice**: `playerDetails` gives a report-level spec (`backend/warcraftlogs.py:470-483`), while CombatantInfo gives the spec per pull, which the defensive analysis prefers (`backend/defensives.py:313-315`).
 
 ## Related
 
