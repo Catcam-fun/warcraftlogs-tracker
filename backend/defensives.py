@@ -178,8 +178,9 @@ PERSONAL, EXTERNAL, CONSUMABLE = _LATEST.personal, _LATEST.external, _LATEST.con
 # =============================================================================
 
 def _paged(token, report_code, data_type, flt, fight_ids=None, start_time=None, end_time=None,
-           resources=False):
-    """All pages of one event query, scoped either to boss pulls or to a time range."""
+           resources=False, shape=None):
+    """All pages of one event query, scoped either to boss pulls or to a time range.
+    `shape(event)`, if given, is what's kept of each event as its page arrives."""
     events, start = [], start_time
     for _ in range(50):
         args, decl, variables = [], ["$c: String!"], {"c": report_code}
@@ -197,11 +198,21 @@ def _paged(token, report_code, data_type, flt, fight_ids=None, start_time=None, 
                  f"events({', '.join(args)}, dataType: {data_type}, limit: 10000) "
                  f"{{ data nextPageTimestamp }} }} }} }}")
         block = ((graphql_query(token, query, variables).get("reportData") or {}).get("report") or {}).get("events") or {}
-        events += block.get("data") or []
+        page = block.get("data") or []
+        events += page if shape is None else [shape(e) for e in page]
         start = block.get("nextPageTimestamp")
         if not start:
             break
     return events
+
+
+def _loadout(e):
+    """What index_defensive_events reads from a CombatantInfo event (who, which pull, spec, talent
+    picks), not the gear, stats and auras each one also carries."""
+    out = {k: e[k] for k in ("type", "timestamp", "fight", "sourceID", "specID") if k in e}
+    if e.get("talentTree") is not None:
+        out["talentTree"] = [{k: t[k] for k in ("id", "rank") if k in t} for t in e["talentTree"]]
+    return out
 
 
 def fetch_combatants(token, report_code, fight_ids, start_time, end_time):
@@ -212,7 +223,7 @@ def fetch_combatants(token, report_code, fight_ids, start_time, end_time):
     queries after it about 1 each, while Deaths or Casts sent first cost 4-17
     and queries sent at the same moment each pay that first price."""
     return _paged(token, report_code, "CombatantInfo", None, fight_ids=fight_ids, start_time=start_time,
-                  end_time=end_time + 1)
+                  end_time=end_time + 1, shape=_loadout)
 
 
 def fetch_defensive_raw(token, report_code, fight_ids, start_time, end_time, cat=None, combatants=None):
@@ -243,12 +254,12 @@ def fetch_defensive_raw(token, report_code, fight_ids, start_time, end_time, cat
         "buffs": ("Buffs", buff_filter, None, lookback, False),
         "heals": ("Healing", heal_filter, fight_ids, start_time, True),
     }
-    if combatants is None:
-        jobs["combatants"] = ("CombatantInfo", None, fight_ids, start_time, False)
-    with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+    with ThreadPoolExecutor(max_workers=len(jobs) + 1) as pool:
         futures = {k: pool.submit(_paged, token, report_code, dt, flt, fight_ids=ids, start_time=start,
                                   end_time=end_time + 1, resources=res)
                    for k, (dt, flt, ids, start, res) in jobs.items()}
+        if combatants is None:
+            futures["combatants"] = pool.submit(fetch_combatants, token, report_code, fight_ids, start_time, end_time)
         out = {k: f.result() for k, f in futures.items()}
     if combatants is not None:
         out["combatants"] = combatants
@@ -755,8 +766,10 @@ def _events_query(blocks):
     return "query($c: String!) { reportData { report(code: $c) { " + " ".join(parts) + " } } }"
 
 
-def _fetch_blocks(token, report_code, blocks):
+def _fetch_blocks(token, report_code, blocks, keep=None):
     """All events of several blocks, fetched together; blocks that don't fit one page are followed up.
+    `keep(event)`, if given, picks the events kept as each block's page arrives, so the
+    others aren't held in memory while the rest download.
 
     Always with an endTime: WCL returns an empty second page for a block scoped
     by fightIDs without one (verified on a live log).
@@ -772,9 +785,12 @@ def _fetch_blocks(token, report_code, blocks):
             chunk = dict(items[i:i + WINDOW_BLOCKS_PER_REQUEST])
             data = graphql_query(token, _events_query(chunk), {"c": report_code})
             report = (data.get("reportData") or {}).get("report") or {}
+            del data
             for alias, spec in chunk.items():
-                block = report.get(alias) or {}
-                out[alias] += block.get("data") or []
+                block = report.pop(alias, None) or {}
+                events = block.get("data") or []
+                out[alias] += events if keep is None else [e for e in events if keep(e)]
+                del events
                 if block.get("nextPageTimestamp"):
                     nxt[alias] = (spec[0], block["nextPageTimestamp"]) + tuple(spec[2:])
         pending = nxt
@@ -820,8 +836,11 @@ def fetch_death_windows(token, report_code, pulls):
         i = bisect_right(windows, (ts, float("inf"))) - 1
         return i >= 0 and ts <= windows[i][1]
 
-    events = [e for evs in _fetch_blocks(token, report_code, blocks).values() for e in evs]
-    return index_hits(e for e in events if e.get("type") == "damage" and in_a_window(e.get("timestamp", 0)))
+    def keep(e):
+        return e.get("type") == "damage" and in_a_window(e.get("timestamp", 0))
+
+    events = [e for evs in _fetch_blocks(token, report_code, blocks, keep).values() for e in evs]
+    return index_hits(events)
 
 
 def fetch_instakills(token, report_code, fight_ids, start_time, end_time):
