@@ -218,17 +218,17 @@ def _loadout(e):
 def fetch_combatants(token, report_code, fight_ids, start_time, end_time):
     """Talent loadouts recorded at the start of each boss pull (CombatantInfo).
 
-    Also the cheapest first query on a report WarcraftLogs hasn't read lately:
-    measured on fresh Mythic logs, it costs about 2 points there and the
-    queries after it about 1 each, while Deaths or Casts sent first cost 4-17
-    and queries sent at the same moment each pay that first price."""
+    Also the cheapest first query on a report WarcraftLogs hasn't read in the
+    last hour: measured on fresh Mythic logs, it costs about 2 points there and
+    the queries after it about 1-3 each, while Deaths or Casts sent first cost
+    4-17."""
     return _paged(token, report_code, "CombatantInfo", None, fight_ids=fight_ids, start_time=start_time,
                   end_time=end_time + 1, shape=_loadout)
 
 
 def fetch_defensive_raw(token, report_code, fight_ids, start_time, end_time, cat=None, combatants=None):
     """Defensive casts, defensive auras, talent loadouts and consumable heals for one report,
-    for every player (the four queries run at once). Keep only the players who
+    for every player (the queries run one after another). Keep only the players who
     died with filter_defensive_raw.
 
     - Casts and auras cover the whole time range (trash and time between pulls
@@ -254,13 +254,14 @@ def fetch_defensive_raw(token, report_code, fight_ids, start_time, end_time, cat
         "buffs": ("Buffs", buff_filter, None, lookback, False),
         "heals": ("Healing", heal_filter, fight_ids, start_time, True),
     }
-    with ThreadPoolExecutor(max_workers=len(jobs) + 1) as pool:
-        futures = {k: pool.submit(_paged, token, report_code, dt, flt, fight_ids=ids, start_time=start,
-                                  end_time=end_time + 1, resources=res)
-                   for k, (dt, flt, ids, start, res) in jobs.items()}
-        if combatants is None:
-            futures["combatants"] = pool.submit(fetch_combatants, token, report_code, fight_ids, start_time, end_time)
-        out = {k: f.result() for k, f in futures.items()}
+    # One at a time: measured on fresh Mythic logs, after the first query on a report
+    # the next ones cost about a quarter less sent one by one than all at once.
+    out = {}
+    if combatants is None:
+        out["combatants"] = fetch_combatants(token, report_code, fight_ids, start_time, end_time)
+    for k, (dt, flt, ids, start, res) in jobs.items():
+        out[k] = _paged(token, report_code, dt, flt, fight_ids=ids, start_time=start, end_time=end_time + 1,
+                        resources=res)
     if combatants is not None:
         out["combatants"] = combatants
     return out
