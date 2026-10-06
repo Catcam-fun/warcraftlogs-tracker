@@ -11,7 +11,7 @@ Supabase (SharedReportCache), so each one is downloaded from WCL only once.
 
 import threading
 from collections import OrderedDict
-from concurrent.futures import ThreadPoolExecutor, wait
+from concurrent.futures import ThreadPoolExecutor
 
 
 class LRUCache:
@@ -76,40 +76,19 @@ class SharedReportCache:
 
     def set(self, key, value):
         self.memory.set(key, value)
-        future = _WRITER.submit(self._backend().cache_put, self._key(key), value)
-        with _PENDING_LOCK:
-            _PENDING.add(future)
-        future.add_done_callback(_written)
+        _WRITER.submit(self._backend().cache_put, self._key(key), value)
 
     def __len__(self):
         return len(self.memory)
 
 
 CACHE_VERSION = "v2"
-_WRITER = ThreadPoolExecutor(max_workers=4, thread_name_prefix="report-cache")
-_PENDING = set()
-_PENDING_LOCK = threading.Lock()
+_WRITER = ThreadPoolExecutor(max_workers=2, thread_name_prefix="report-cache")
 
 
-def _written(future):
-    with _PENDING_LOCK:
-        _PENDING.discard(future)
-
-
-def flush_writes(timeout=120):
-    """Wait for the shared-cache writes queued so far. On Lambda the function
-    is frozen once a response ends, so writes still queued then are lost:
-    the analysis calls this after sending its result."""
-    with _PENDING_LOCK:
-        pending = list(_PENDING)
-    if pending:
-        wait(pending, timeout=timeout)
-
-
-# A report's fights (read for every report in the window: a few KB each),
-# then the players and ability names of the pulls kept from it (tens of KB).
-report_meta_cache = SharedReportCache("fights", 400)
-report_details_cache = SharedReportCache("details", 200)
+# Sized for Render's small instances: a report's fights+abilities entry is
+# typically tens of KB, its deaths well under that.
+report_meta_cache = SharedReportCache("meta", 200)
 report_deaths_cache = SharedReportCache("deaths", 400)
 # Casts, defensive buffs and talent loadouts, indexed by player.
 report_defensive_cache = SharedReportCache("defensives", 200)
