@@ -318,12 +318,22 @@ def _cache_failed(what, e):
     print(f"[ReportCache] {what} failed, skipping the shared cache for 5 min: {e}")
 
 
+def _twice(call):
+    """Run a Supabase call, once more if it fails: after Lambda thaws a frozen
+    function its pooled connection is often dead ("Connection reset by peer"),
+    and the retry opens a fresh one."""
+    try:
+        return call()
+    except Exception:
+        return call()
+
+
 def cache_get(key):
     """The cached value for `key`, or None."""
     if not _cache_available():
         return None
     try:
-        result = db.table('report_cache').select('payload').eq('key', key).limit(1).execute()
+        result = _twice(lambda: db.table('report_cache').select('payload').eq('key', key).limit(1).execute())
         if not result.data:
             return None
         value = _dec(unpack(result.data[0]['payload']))
@@ -347,8 +357,8 @@ def cache_put(key, value):
         if len(blob) > REPORT_CACHE_MAX_ROW_BYTES:
             return
         now = _now().isoformat()
-        db.table('report_cache').upsert({'key': key, 'payload': blob, 'size_bytes': len(blob),
-                                         'created_at': now, 'last_used_at': now}).execute()
+        _twice(lambda: db.table('report_cache').upsert({'key': key, 'payload': blob, 'size_bytes': len(blob),
+                                                         'created_at': now, 'last_used_at': now}).execute())
     except Exception as e:
         _cache_failed("write", e)
         return
