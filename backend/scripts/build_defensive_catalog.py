@@ -307,7 +307,9 @@ TALENTS_REVIEWED = {
     "Well-Honed Instincts": "casts Frenzied Regeneration by itself",
     "Guardian of Elune": "depends on the previous Mangle", "Heart of the Wild": "a separate button",
     "Aspects' Favor": "boosts Black Attunement, an aura that isn't tracked",
-    "Foci of Life": "heals back damage over time after the hit", "Natural Mending": "cooldown from Focus spent",
+    "Foci of Life": "heals back damage over time after the hit",
+    "Renewing Blaze": "since Midnight a passive on Obsidian Scales: heals back damage over time after the hit",
+    "Natural Mending": "cooldown from Focus spent",
     "Cryo-Freeze": "heals inside Ice Block, which already makes them immune",
     "Reduplication": "cooldown when images die", "Reabsorption": "heals when an image dies",
     "Master of Time": "cooldown of Alter Time", "Blackout Combo": "depends on the previous Blackout Kick",
@@ -362,7 +364,9 @@ HEAL_EFFECT = "10"
 FORM_REQUIRED = {"Frenzied Regeneration": ("Bear Form", "Empowered Shapeshifting")}
 
 # Buffs that live on a spell the button doesn't point to in the game data.
-AURA_SPELLS = {"Fortifying Brew": [120954], "Rallying Cry": [97463], "Renewing Blaze": [374349]}
+# Not Renewing Blaze's 374349: that's the heal-back that follows the 8s window
+# (374348, the button's own aura), and Foci of Life shortens only the heal-back.
+AURA_SPELLS = {"Fortifying Brew": [120954], "Rallying Cry": [97463]}
 
 # talent -> catalog spell whose modifier it copies onto potions and Healthstones.
 ALSO_CONSUMABLES = {"Iron Stomach": 185311}
@@ -580,7 +584,7 @@ class Modifiers:
         m = [int(row[f"EffectSpellClassMask_{i}"]) & 0xffffffff for i in range(4)]
         return any(a & b for a, b in zip(m, mask))
 
-    def _source_rows(self, aura):
+    def _source_rows(self, aura, with_mastery=False):
         """Effects of always-on talents and spec passives. A talent that is a
         button (Incarnation) changes things only while active, so it's skipped."""
         for r in self.gd.by_aura.get(aura, ()):
@@ -589,6 +593,9 @@ class Modifiers:
             who = self.who(int(r["SpellID"]))
             if who and float(r["EffectBasePointsF"]):
                 yield r, who
+            elif who and with_mastery and self.gd.names.get(int(r["SpellID"]), "").startswith("Mastery: "):
+                # A spec's mastery: its size comes from the player's mastery stat (0 in the data).
+                yield r, {**who, "mastery": True}
 
     def effect(self, spell, index, field, ticks):
         """Modifiers of one effect value (a reduction, heal, max health or absorb)."""
@@ -643,11 +650,13 @@ class Modifiers:
         `spells`: the button and the spells its aura lives on."""
         found = []
         for aura in (AURA_ADD_MOD, AURA_PCT_MOD, AURA_ADD_MOD_LABEL, AURA_PCT_MOD_LABEL):
-            for r, who in self._source_rows(aura):
+            for r, who in self._source_rows(aura, with_mastery=True):
                 if int(r["EffectMiscValue_0"]) == MOD_OP_DURATION and any(self._covers(r, s) for s in spells):
                     value = float(r["EffectBasePointsF"])
                     mod = {"talent": self.gd.names.get(int(r["SpellID"])), **who}
-                    if aura in (AURA_PCT_MOD, AURA_PCT_MOD_LABEL):
+                    if mod.get("mastery"):
+                        pass       # longer by the player's mastery: no fixed size, so no "mult"
+                    elif aura in (AURA_PCT_MOD, AURA_PCT_MOD_LABEL):
                         mod["mult"] = round(1 + value / 100, 4)
                     else:
                         mod["add_ms"] = int(value)
@@ -931,6 +940,11 @@ def build_catalog(build):
             continue
         if names[sid] != name:
             problems.append(f"{sid}: expected {name!r}, game data says {names[sid]!r}")
+            continue
+        if kind in ("personal", "external") and sid in gd.passive:
+            # No longer a button: since Midnight, Renewing Blaze is a passive that
+            # comes with Obsidian Scales (no casts of it in Midnight logs).
+            missing.append(f"{name} (a passive, not a button)")
             continue
         max_charges, charge_ms = gd.charges.get(gd.charge_cat.get(sid, 0), (0, 0))
         cd_ms = gd.cooldowns.get(sid, 0)
