@@ -1,6 +1,6 @@
 # Floor Pov on AWS
 
-`template.yaml` runs the whole site on AWS in `us-east-1`:
+The whole site runs on AWS in `us-east-1`:
 
 - **Website:** the React build in a private S3 bucket, served by CloudFront.
   A CloudFront Function sends React routes (`/results`, `/analyze`, ...) to
@@ -19,10 +19,20 @@
   ready. AWS can still recycle it, so an occasional first request is slower.
 - **Unchanged:** Supabase, and the WarcraftLogs proxy.
 
-Each stage (`staging`, `production`) is its own stack with its own address,
-so the live site doesn't change until the domain is pointed at AWS.
+It has its own CloudFront address, so floorpov.gg doesn't change until the
+domain is pointed at AWS.
 
-## One-time setup
+## Deploying (GitHub Actions)
+
+`.github/workflows/deploy-aws.yml` deploys to the hand-built resources below
+on every push to `main` (so merging a pull request deploys), and by hand from
+Actions > *Deploy to AWS* > Run workflow. It runs the backend and frontend
+tests, builds the API zip (`infra/build-api-zip.sh`) and the site, updates
+the Lambda code, uploads the site to S3, refreshes CloudFront, and checks
+the live address. It changes code only: the function's settings and secrets
+stay as set in the console.
+
+One-time setup, so GitHub can deploy without a stored AWS key:
 
 1. **Deploy role.** AWS console, region **N. Virginia (us-east-1)** >
    CloudFormation > Create stack > *Upload a template file* >
@@ -30,15 +40,12 @@ so the live site doesn't change until the domain is pointed at AWS.
    Set `CreateOidcProvider` to `false` only if IAM > Identity providers
    already lists `token.actions.githubusercontent.com`. Tick the IAM
    acknowledgement and create it. Copy the **RoleArn** from the Outputs tab.
-2. **GitHub secrets.** Repository > Settings > Secrets and variables >
-   Actions > New repository secret, one each:
-   - `AWS_DEPLOY_ROLE_ARN`: the RoleArn from step 1
-   - `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`: the same
-     values the Render service has
-   - `ORIGIN_VERIFY_SECRET`: any 32+ random characters (a password
-     generator is fine); you never need to type it again
-3. **Deploy.** Actions > *Deploy to AWS* > Run workflow > stage `staging`.
-   The run tests the code, deploys, and ends with the site's address.
+2. **GitHub secret.** Repository > Settings > Secrets and variables >
+   Actions > New repository secret: `AWS_DEPLOY_ROLE_ARN`, the RoleArn
+   from step 1.
+
+`template.yaml` describes the same setup as a SAM stack; it is a reference
+for rebuilding it, not what is live.
 
 ## Later: the domain
 
@@ -68,9 +75,8 @@ switch the function URL's auth to AWS_IAM instead.
 
 ### Deploying an update by hand
 
-- API: build a zip of `backend/` (tracked files, no tests/scripts/migrations)
-  plus `pip install --platform manylinux2014_x86_64 --python-version 3.12
-  --only-binary=:all: -r requirements.txt`, then
+- API: `infra/build-api-zip.sh api.zip` (backend's tracked files, no
+  tests/scripts/migrations, plus its dependencies built for Lambda), then
   `aws lambda update-function-code --function-name floorpov-staging-api --zip-file fileb://api.zip`.
 - Site: `REACT_APP_API_URL=same-origin npm run build` in `frontend/`, drop
   `build/_redirects.txt`, `aws s3 sync build s3://floorpov-site --delete`,
