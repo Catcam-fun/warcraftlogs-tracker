@@ -318,14 +318,37 @@ def _cache_failed(what, e):
     print(f"[ReportCache] {what} failed, skipping the shared cache for 5 min: {e}")
 
 
-def _twice(call):
-    """Run a Supabase call, once more if it fails: after Lambda thaws a frozen
-    function its pooled connection is often dead ("Connection reset by peer"),
-    and the retry opens a fresh one."""
-    try:
-        return call()
-    except Exception:
-        return call()
+_cache_local = threading.local()
+_DEFAULT_DB = db
+CACHE_ATTEMPTS = 3
+
+
+def _cache_db():
+    """The Supabase client for report-cache calls: one per thread. supabase-py
+    sends every request of a client over one HTTP/2 connection, and an analysis
+    reads and writes the cache from many threads at once; on a fresh Lambda
+    that burst gets the connection reset ("Connection reset by peer"), which
+    used to switch the cache off for the rest of the run."""
+    if db is None or db is not _DEFAULT_DB:      # not configured, or a test's stand-in
+        return db
+    client = getattr(_cache_local, "db", None)
+    if client is None:
+        client = _cache_local.db = create_client(SUPABASE_URL, _key)
+    return client
+
+
+def _retrying(call):
+    """Run a report-cache call up to CACHE_ATTEMPTS times, each retry on a new
+    connection: after Lambda thaws a frozen function, or when a connection is
+    reset, the next attempt usually works."""
+    for attempt in range(CACHE_ATTEMPTS):
+        try:
+            return call()
+        except Exception:
+            if attempt == CACHE_ATTEMPTS - 1:
+                raise
+            _cache_local.db = None
+            time.sleep(0.2 * (attempt + 1))
 
 
 def cache_get(key):
@@ -333,7 +356,7 @@ def cache_get(key):
     if not _cache_available():
         return None
     try:
-        result = _twice(lambda: db.table('report_cache').select('payload').eq('key', key).limit(1).execute())
+        result = _retrying(lambda: _cache_db().table('report_cache').select('payload').eq('key', key).limit(1).execute())
         if not result.data:
             return None
         value = _dec(unpack(result.data[0]['payload']))
@@ -341,7 +364,7 @@ def cache_get(key):
         _cache_failed("read", e)
         return None
     try:
-        db.table('report_cache').update({'last_used_at': _now().isoformat()}).eq('key', key).execute()
+        _cache_db().table('report_cache').update({'last_used_at': _now().isoformat()}).eq('key', key).execute()
     except Exception as e:
         print(f"[ReportCache] last-used update failed: {e}")
     return value
@@ -357,8 +380,8 @@ def cache_put(key, value):
         if len(blob) > REPORT_CACHE_MAX_ROW_BYTES:
             return
         now = _now().isoformat()
-        _twice(lambda: db.table('report_cache').upsert({'key': key, 'payload': blob, 'size_bytes': len(blob),
-                                                         'created_at': now, 'last_used_at': now}).execute())
+        _retrying(lambda: _cache_db().table('report_cache').upsert({
+            'key': key, 'payload': blob, 'size_bytes': len(blob), 'created_at': now, 'last_used_at': now}).execute())
     except Exception as e:
         _cache_failed("write", e)
         return
