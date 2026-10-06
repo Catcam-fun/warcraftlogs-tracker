@@ -22,7 +22,7 @@ anchors:
   npm_test: frontend/package.json:22
   check_deaths: backend/scripts/check_deaths.py:24
   check_deaths_exit: backend/scripts/check_deaths.py:55
-  check_durations: backend/scripts/check_durations.py:27
+  check_durations: backend/scripts/check_durations.py:52
   check_mitigation: backend/scripts/check_mitigation.py:30
   check_defensives: backend/scripts/check_defensives.py:18
   only_workflow: .github/workflows/atlas-sync.yml:1
@@ -35,7 +35,7 @@ links:
   - game-data
   - warcraftlogs
   - operations
-content_hash: sha256:6d4216ebb82b95f14e1a8c01a1be49b7e79be20b6265a5ddda135642f1c91ed4
+content_hash: sha256:2d68370658a7db90b55d05d674d7164a0d8aff16e8f0ffb160044c1b1878f647
 ---
 ## Summary
 
@@ -59,7 +59,7 @@ Every test file and check script. Filter by kind.
 | `frontend/src/AnalyzeConfig.test.js` {frontend} | The raid picker (`frontend/src/AnalyzeConfig.test.js:22`) | five raid cards; Season 2 is one combined card; clicking sends `selectedRaid` and shows the right lineup (9, 9 and 8 bosses) |
 | `frontend/src/api.test.js` {frontend} | `api.js` helpers (`frontend/src/api.test.js:14`) | `stripSecrets`; bearer token on signed-in calls; fail fast without a session; network failure gives a readable error; credentials remembered in `localStorage` and cleared when emptied |
 | `backend/scripts/check_deaths.py` {check} | Deaths the site reads vs WarcraftLogs' own Deaths table (`backend/scripts/check_deaths.py:24`) | Mythic pulls of the raid key only (`backend/scripts/check_deaths.py:32`); compares player, pull, timestamp and killing-blow name |
-| `backend/scripts/check_durations.py` {check} | How long personal defensives with duration talents last, predicted vs real aura uses (`backend/scripts/check_durations.py:27`) | Mythic pulls; within 350 ms is exact (`backend/scripts/check_durations.py:24`) |
+| `backend/scripts/check_durations.py` {check} | How long personal defensives with duration talents last, predicted vs real aura uses (`backend/scripts/check_durations.py:52`) | Mythic pulls; within 350 ms is exact (`backend/scripts/check_durations.py:32`) |
 | `backend/scripts/check_mitigation.py` {check} | Catalog damage reductions vs real hits with and without the defensive up (`backend/scripts/check_mitigation.py:30`) | boss pulls, optionally a list of fight IDs |
 | `backend/scripts/check_defensives.py` {check} | Prints one report's full defensive picture per death (`backend/scripts/check_defensives.py:18`) | warns if talent entry IDs never match the catalog (`backend/scripts/check_defensives.py:45`) |
 
@@ -68,7 +68,7 @@ What each check takes and what passing looks like:
 | Script {check} | Arguments | Passing looks like |
 |---|---|---|
 | `check_deaths.py` {check} | `<reportCode>:<raid key> ...` | `missing 0, extra 0, different killing blow 0` for every report; exit code 1 otherwise (`backend/scripts/check_deaths.py:55`). Stops if a pull has 200 deaths, the table's cap (`backend/scripts/check_deaths.py:42`). |
-| `check_durations.py` {check} | `<reportCode>:<raid key> ...` | no `<-- LONGER` flag; a defensive is flagged when more than a tenth of its uses outlast the prediction (`backend/scripts/check_durations.py:70`). "Ended early" is normal. Raid cooldowns other players cast, Dancing Rune Weapon and Metamorphosis can read longer without affecting a verdict (docstring, `backend/scripts/check_durations.py:10`). |
+| `check_durations.py` {check} | `<reportCode>:<raid key> ...` | no `<-- LONGER` flag; a defensive is flagged when more than a tenth of its uses outlast the prediction (`backend/scripts/check_durations.py:110`). "Ended early" is normal. A press while the aura is up (a refresh) starts a new use that keeps up to 30% of the time left (`carried_over`, `backend/scripts/check_durations.py:42`). Each aura ID is timed on its own, except The War Within's Renewing Blaze heal-back (`NOT_THE_BUTTON`, `backend/scripts/check_durations.py:36`). Uses stretched by a mastery or by Smoke Screen's Exhilaration (`EXTENDED_BY`, `backend/scripts/check_durations.py:39`) count as "extended", not longer. Raid cooldowns other players cast, Dancing Rune Weapon and Metamorphosis can read longer without affecting a verdict (docstring, `backend/scripts/check_durations.py:18`). |
 | `check_mitigation.py` {check} | `<reportCode> [fightID,...]` | no `<-- check` flag: measured and catalog reduction within 0.03 for any defensive with 20 or more hits (`backend/scripts/check_mitigation.py:26`, `backend/scripts/check_mitigation.py:97`). Reads all damage taken, so pass a few fight IDs on a big report. |
 | `check_defensives.py` {check} | `<reportCode> [fightID]` | no pass/fail; read the printed deaths. A `!! Talent entry IDs never match` line means the talent format changed. |
 

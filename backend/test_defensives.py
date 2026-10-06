@@ -641,6 +641,34 @@ class DurationTalentTests(unittest.TestCase):
     def test_improved_barkskin(self):
         self.assertEqual(self.with_talent("Barkskin", "Improved Barkskin"), 12_000)
 
+    def test_renewing_blaze_is_a_button_only_in_the_war_within(self):
+        # Since Midnight (12.0.0) it's a passive on Obsidian Scales: no casts in Midnight logs.
+        for patch, cat in defensives._CATALOGS.items():
+            self.assertEqual("Renewing Blaze" in cat.name_to_id, patch.startswith("11."), patch)
+
+    def test_renewing_blaze_window_is_its_own_aura(self):
+        # The 8s window is 374348; Foci of Life shortens only the heal-back after it (374349).
+        e = defensives._CATALOGS["11.2.7"].all[374348]
+        self.assertEqual(e["aura_ms"], 8_000)
+        self.assertNotIn("Foci of Life", [m["talent"] for m in e["duration_mods"]])
+        # Augmentation's mastery stretches it by the player's mastery stat: listed, not added.
+        mastery = next(m for m in e["duration_mods"] if m["talent"] == "Mastery: Timewalker")
+        self.assertEqual((mastery["specs"], mastery["mastery"]), (["Augmentation"], True))
+        self.assertEqual(defensives._talented_duration(e, {}, "Augmentation"), 8_000)
+
+
+class CheckDurationsTests(unittest.TestCase):
+    """scripts/check_durations.py: a press while the aura is up restarts it (pandemic carry-over)."""
+
+    def test_refresh_keeps_up_to_thirty_percent_of_the_time_left(self):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
+        from check_durations import carried_over
+        self.assertEqual(carried_over([0], 3_000), 0)
+        # Frenzied Regeneration pressed again 1.2s in: 1.8s left, 0.9s kept (seen: 3.8s after the press).
+        self.assertAlmostEqual(carried_over([0, 1_200], 3_000), 900)
+        self.assertAlmostEqual(carried_over([0, 2_600], 3_000), 400)
+        self.assertEqual(carried_over([0, 5_000], 3_000), 0)
+
 
 class LethalWindowTests(unittest.TestCase):
     """The seconds before a death are replayed, not just the killing blow."""

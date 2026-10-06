@@ -16,14 +16,14 @@ invariants:
   - "NEVER: call a death rot unless the dominant ability is in RAID_WIDE."
   - "NEVER: call a one-shot or burst death rot."
 anchors:
-  full_health: "backend/defensives.py:697"
-  one_shot_share: "backend/defensives.py:708"
-  setup_hit_share: "backend/defensives.py:711"
-  rot_thresholds: "backend/defensives.py:715"
-  classify: "backend/defensives.py:1649"
-  biggest_hit: "backend/defensives.py:1660"
-  rot: "backend/defensives.py:1669"
-  burst: "backend/defensives.py:1709"
+  full_health: "backend/defensives.py:701"
+  one_shot_share: "backend/defensives.py:712"
+  setup_hit_share: "backend/defensives.py:715"
+  rot_thresholds: "backend/defensives.py:719"
+  classify: "backend/defensives.py:1653"
+  biggest_hit: "backend/defensives.py:1664"
+  rot: "backend/defensives.py:1673"
+  burst: "backend/defensives.py:1713"
   raid_wide: "backend/raid_wide_damage.py:5"
   raid_wide_share: "backend/scripts/build_raid_wide.py:29"
   text_for: "backend/boss_spell_text.py:7853"
@@ -36,33 +36,33 @@ links:
   - warcraftlogs
   - frontend-results-view
   - feat-results
-content_hash: sha256:1aa7ca097ac235c2f7f8c1eb496029182e6806c2884045f204ab5c886d06e5b7
+content_hash: sha256:fb4cb2392217d520bbc0c67c822eeacc26c4ce70d78be08782688b0d41da5d8e
 ---
 ## Summary
 
-- The description is computed at the end of `assess_survival` in `backend/defensives.py`, on the same replayed hits used for the "would it have saved them" verdict (`backend/defensives.py:1643`). See [[backend-defensive-analysis]] for that replay.
-- The key reference point is **the last moment the player was at high health**: 85% of max health or more (`FULL_HEALTH`, `backend/defensives.py:697`). Damage before that had already been healed back.
-- Four outcomes reach the page: **one-shot**, **burst**, **worn down by** (rot) and **set up by**. Instant kills are a fifth type that skips all of this (`backend/defensives.py:1547`).
+- The description is computed at the end of `assess_survival` in `backend/defensives.py`, on the same replayed hits used for the "would it have saved them" verdict (`backend/defensives.py:1647`). See [[backend-defensive-analysis]] for that replay.
+- The key reference point is **the last moment the player was at high health**: 85% of max health or more (`FULL_HEALTH`, `backend/defensives.py:701`). Damage before that had already been healed back.
+- Four outcomes reach the page: **one-shot**, **burst**, **worn down by** (rot) and **set up by**. Instant kills are a fifth type that skips all of this (`backend/defensives.py:1551`).
 - Only abilities in the generated `RAID_WIDE` list can make a death rot (`backend/raid_wide_damage.py:5`). Soaks and mechanics a player walks into are not on it.
 
 ## How it works
 
-The classification reads the health line built from the hits in the lethal window (`_health_points`, `backend/defensives.py:1199`). Click each step.
+The classification reads the health line built from the hits in the lethal window (`_health_points`, `backend/defensives.py:1203`). Click each step.
 
 ```steps
 - title: Find the last high-health moment | short: Last high | sub: 85% or more
-  body: high is every health point before the killing blow where health was at least FULL_HEALTH (0.85) of max (backend/defensives.py:1649). since is the time of the last one. If the player had 85% or more just before the killing blow itself, since is that moment (backend/defensives.py:1651). run is every hit after since (backend/defensives.py:1653).
+  body: high is every health point before the killing blow where health was at least FULL_HEALTH (0.85) of max (backend/defensives.py:1653). since is the time of the last one. If the player had 85% or more just before the killing blow itself, since is that moment (backend/defensives.py:1655). run is every hit after since (backend/defensives.py:1657).
   gotcha: The health line only covers the 15-second window. A player who was never at 85% in it has no high point, so run is the whole window and the death cannot be a one-shot or burst.
 - title: Was it quick? | short: Quick? | sub: within 1 second
-  body: quick is true when a high point exists and the killing blow came no more than REACTION_MS (1000 ms) after it (backend/defensives.py:1654). The same constant is the press cutoff in the replay, so a quick death is one nobody could react to.
+  body: quick is true when a high point exists and the killing blow came no more than REACTION_MS (1000 ms) after it (backend/defensives.py:1658). The same constant is the press cutoff in the replay, so a quick death is one nobody could react to.
 - title: One-shot or burst | short: One-shot / burst | sub: one hit of 80% or not
-  body: If quick and any single hit in run was at least ONE_SHOT_SHARE (0.80) of max health, deathType is oneShot; if quick without such a hit, burst; otherwise wasLow (backend/defensives.py:1655). Hit size is the whole hit, amount plus overkill plus absorbed (_full_hit, backend/defensives.py:1156). For quick deaths fromPct and burstMs record where they fell from and how fast (backend/defensives.py:1706).
+  body: If quick and any single hit in run was at least ONE_SHOT_SHARE (0.80) of max health, deathType is oneShot; if quick without such a hit, burst; otherwise wasLow (backend/defensives.py:1659). Hit size is the whole hit, amount plus overkill plus absorbed (_full_hit, backend/defensives.py:1160). For quick deaths fromPct and burstMs record where they fell from and how fast (backend/defensives.py:1710).
 - title: List the burst | short: Burst parts | sub: every ability that hit
-  body: For a burst, result.burst lists every ability in run with how many times it hit, sorted by total damage, plus the hit count, total and milliseconds (backend/defensives.py:1709).
+  body: For a burst, result.burst lists every ability in run with how many times it hit, sorted by total damage, plus the hit count, total and milliseconds (backend/defensives.py:1713).
 - title: Find the setup hit | short: Setup hit | sub: biggest since last high
-  body: biggestHit is the largest hit before the killing blow, after since, of at least SETUP_HIT_SHARE (0.10) of max health (backend/defensives.py:1660). On a one-shot it is dropped unless it was itself one-shot sized, because the killing blow was the one hit (backend/defensives.py:1662). If the same ability hit them more than once since then, times, total and over are added (backend/defensives.py:1730).
+  body: biggestHit is the largest hit before the killing blow, after since, of at least SETUP_HIT_SHARE (0.10) of max health (backend/defensives.py:1664). On a one-shot it is dropped unless it was itself one-shot sized, because the killing blow was the one hit (backend/defensives.py:1666). If the same ability hit them more than once since then, times, total and over are added (backend/defensives.py:1734).
 - title: Check for rot | short: Rot? | sub: raid-wide only
-  body: Hits in run are grouped by ability and the ability with the most damage is checked (backend/defensives.py:1674). It is rot only if the death was not quick, the ability is in RAID_WIDE, it hit at least ROT_MIN_HITS (3) times, it did at least ROT_SHARE (60%) of the damage in run, and none of its hits was ROT_MAX_HIT (35% of max) or more (backend/defensives.py:1676). Rot replaces biggestHit (backend/defensives.py:1683).
+  body: Hits in run are grouped by ability and the ability with the most damage is checked (backend/defensives.py:1678). It is rot only if the death was not quick, the ability is in RAID_WIDE, it hit at least ROT_MIN_HITS (3) times, it did at least ROT_SHARE (60%) of the damage in run, and none of its hits was ROT_MAX_HIT (35% of max) or more (backend/defensives.py:1680). Rot replaces biggestHit (backend/defensives.py:1687).
   gotcha: RAID_WIDE is measured, not curated: build_raid_wide.py keeps boss abilities whose median occurrence hits at least half the raid at once (backend/scripts/build_raid_wide.py:29). A heavy DoT on one player is not on it.
 ```
 
@@ -92,16 +92,16 @@ The thresholds, as found in code.
 
 | Constant {threshold} | Value | Used for |
 |---|---|---|
-| `FULL_HEALTH` {threshold} | 0.85 | "high health": the reference point for every label (`backend/defensives.py:697`) |
-| `REACTION_MS` {threshold} | 1000 ms | max time from high health to death for one-shot and burst (`backend/defensives.py:706`) |
-| `ONE_SHOT_SHARE` {threshold} | 0.80 | single hit size of max health that makes a quick death a one-shot (`backend/defensives.py:708`) |
-| `SETUP_HIT_SHARE` {threshold} | 0.10 | minimum size for the "set up by" hit (`backend/defensives.py:711`) |
-| `ROT_MIN_HITS` {rot} | 3 | minimum hits from the raid-wide ability (`backend/defensives.py:715`) |
-| `ROT_SHARE` {rot} | 0.6 | its minimum share of damage since last high (`backend/defensives.py:716`) |
-| `ROT_MAX_HIT` {rot} | 0.35 | no single hit of it may reach this share of max health (`backend/defensives.py:717`) |
-| `LETHAL_WINDOW_MS` {window} | 15000 ms | how far back hits are available at all (`backend/defensives.py:702`) |
+| `FULL_HEALTH` {threshold} | 0.85 | "high health": the reference point for every label (`backend/defensives.py:701`) |
+| `REACTION_MS` {threshold} | 1000 ms | max time from high health to death for one-shot and burst (`backend/defensives.py:710`) |
+| `ONE_SHOT_SHARE` {threshold} | 0.80 | single hit size of max health that makes a quick death a one-shot (`backend/defensives.py:712`) |
+| `SETUP_HIT_SHARE` {threshold} | 0.10 | minimum size for the "set up by" hit (`backend/defensives.py:715`) |
+| `ROT_MIN_HITS` {rot} | 3 | minimum hits from the raid-wide ability (`backend/defensives.py:719`) |
+| `ROT_SHARE` {rot} | 0.6 | its minimum share of damage since last high (`backend/defensives.py:720`) |
+| `ROT_MAX_HIT` {rot} | 0.35 | no single hit of it may reach this share of max health (`backend/defensives.py:721`) |
+| `LETHAL_WINDOW_MS` {window} | 15000 ms | how far back hits are available at all (`backend/defensives.py:706`) |
 
-Output fields that describe the death (`backend/defensives.py:1684`):
+Output fields that describe the death (`backend/defensives.py:1688`):
 
 | Field {output} | Content |
 |---|---|
@@ -127,17 +127,17 @@ relied-on-by: [[feat-results]] — the death breakdown officers read
 
 ## Invariants
 
-- **MUST** classify from the hits since the player was last at 85% health or more (`backend/defensives.py:1649`); earlier damage had already been healed back.
-- **MUST** require high health no more than 1 second before the killing blow for one-shot and burst (`backend/defensives.py:1654`).
-- **NEVER** label a death rot unless the dominant ability is in `RAID_WIDE` (`backend/defensives.py:1676`); a mechanic a player walks into is their own damage, not raid healing falling behind.
-- **NEVER** label a one-shot or burst as rot (`not quick`, `backend/defensives.py:1676`).
+- **MUST** classify from the hits since the player was last at 85% health or more (`backend/defensives.py:1653`); earlier damage had already been healed back.
+- **MUST** require high health no more than 1 second before the killing blow for one-shot and burst (`backend/defensives.py:1658`).
+- **NEVER** label a death rot unless the dominant ability is in `RAID_WIDE` (`backend/defensives.py:1680`); a mechanic a player walks into is their own damage, not raid healing falling behind.
+- **NEVER** label a one-shot or burst as rot (`not quick`, `backend/defensives.py:1680`).
 
 ## Gotchas
 
 - **wasLow is not shown as a word**: the backend's third type is `wasLow`; the page says "worn down by", "at N% after" or "at N%, hit for" depending on which of `rot` and `biggestHit` is present (`frontend/src/DeathRow.js:257`).
-- **Instant kills skip classification**: an `instakill` killing blow returns early with no health data and every button marked as not saving (`backend/defensives.py:1547`).
-- **No survival block, no description**: if the killing blow is missing or has no health of the player's own, `assess_survival` returns `None` and only the killing blow's name is shown (`backend/defensives.py:1563`).
-- **Battle resses cut the window**: `_lethal_hits` drops everything before an earlier death of the same player, so a second death is judged only on the hits after the res (`backend/defensives.py:1484`).
+- **Instant kills skip classification**: an `instakill` killing blow returns early with no health data and every button marked as not saving (`backend/defensives.py:1551`).
+- **No survival block, no description**: if the killing blow is missing or has no health of the player's own, `assess_survival` returns `None` and only the killing blow's name is shown (`backend/defensives.py:1567`).
+- **Battle resses cut the window**: `_lethal_hits` drops everything before an earlier death of the same player, so a second death is judged only on the hits after the res (`backend/defensives.py:1488`).
 - **Rot needs refreshing per tier**: a new raid's abilities are not rot until `build_raid_wide.py` has measured them into `backend/raid_wide_damage.py`.
 
 ## Glossary

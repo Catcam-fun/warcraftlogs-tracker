@@ -18,8 +18,8 @@ anchors:
   fights: backend/warcraftlogs.py:333
   deaths_bulk: backend/analysis.py:311
   defensive_raw: backend/defensives.py:207
-  death_windows: backend/defensives.py:768
-  instakills: backend/defensives.py:811
+  death_windows: backend/defensives.py:772
+  instakills: backend/defensives.py:815
   analyze_credentials: backend/app.py:125
   analyze_token: backend/app.py:158
   report_fetch: backend/app.py:320
@@ -40,7 +40,7 @@ invariants:
   - "NEVER: a guild-reports query filters by zoneID; mixed raid and dungeon reports would be dropped."
 flows:
   - request-path
-content_hash: sha256:0e277bbc1e9b713f9c74a41a78621f4c1b3b2e691fa17bf1e4e8c03d99eef8b5
+content_hash: sha256:f5f05173724b58d9a3733ac02f13c10a4ed090da0473ef06a9f374756ccca7a9
 ---
 ## Summary
 
@@ -70,7 +70,7 @@ One Analyze request walks through the WCL reads below, in the order `generate()`
 - title: Defensive data | short: Defensives | sub: four queries at once
   body: fetch_defensive_raw runs Casts, Buffs, Healing and CombatantInfo queries in parallel (backend/defensives.py:229-239). Casts and buffs cover the time range from 3 minutes before the first pull; heals and talent loadouts are scoped to the boss pulls.
 - title: Hits before deaths | short: Death windows | sub: DamageTaken by name
-  body: For the deaths that can count, fetch_death_windows asks for DamageTaken events filtered by target.name, one block per group of pulls within 15 minutes, many blocks per request (backend/defensives.py:768-808). fetch_instakills adds instant-kill events from the All stream (backend/defensives.py:811-816).
+  body: For the deaths that can count, fetch_death_windows asks for DamageTaken events filtered by target.name, one block per group of pulls within 15 minutes, many blocks per request (backend/defensives.py:772-812). fetch_instakills adds instant-kill events from the All stream (backend/defensives.py:815-820).
 ```
 
 ## Diagram
@@ -110,8 +110,8 @@ What is read from WCL, and where.
 | Fights, actors, abilities, specs {query} | `reportData.report` (`fights`, `masterData`, `playerDetails`) | `get_fights` (`backend/warcraftlogs.py:333`) |
 | Deaths and cheat deaths {events} | `report.events` (Deaths, Debuffs, Healing) | `get_report_deaths_bulk` (`backend/analysis.py:311`) |
 | Defensive casts, buffs, heals, talents {events} | `report.events` (Casts, Buffs, Healing, CombatantInfo) | `fetch_defensive_raw` (`backend/defensives.py:207`) |
-| Hits before deaths {events} | `report.events` (DamageTaken) | `fetch_death_windows` (`backend/defensives.py:768`) |
-| Instant kills {events} | `report.events` (All, `type = 'instakill'`) | `fetch_instakills` (`backend/defensives.py:811`) |
+| Hits before deaths {events} | `report.events` (DamageTaken) | `fetch_death_windows` (`backend/defensives.py:772`) |
+| Instant kills {events} | `report.events` (All, `type = 'instakill'`) | `fetch_instakills` (`backend/defensives.py:815`) |
 | Top kills per boss {scripts} | `worldData.encounter.fightRankings` | `build_armor_constants.py:118`, `build_raid_wide.py:33` |
 
 ## Standing it up

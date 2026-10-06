@@ -24,7 +24,7 @@ anchors:
   remaining_events: backend/analysis.py:283
   deaths_bulk: backend/analysis.py:311
   paged: backend/defensives.py:180
-  fetch_blocks: backend/defensives.py:742
+  fetch_blocks: backend/defensives.py:746
   token_test: backend/test_api.py:173
 links:
   - warcraftlogs
@@ -37,7 +37,7 @@ invariants:
   - "MUST: a GraphQL response with an errors array raises, never returns partial data silently."
   - "MUST: every event fetch follows nextPageTimestamp so long reports don't lose events past the first page."
   - "NEVER: use an accent-stripped name in a WCL filter expression; it matches nobody."
-content_hash: sha256:f2404cd756eecbe1339310db2c9edf935fadaccbe8871f4f95dc594a0d5b311f
+content_hash: sha256:562e4bcade1928e458b6229b72502030cfba0961762df5b571403e5726bb15ca
 ---
 ## Summary
 
@@ -72,7 +72,7 @@ The cache is a module-level dict guarded by a lock (`backend/warcraftlogs.py:26-
 
 #### Name normalization: `normalize_character_name`
 
-`normalize_character_name` (`backend/warcraftlogs.py:65`) decomposes to NFD and drops combining marks, so "Fîshy" becomes "Fishy" (`backend/warcraftlogs.py:80-88`). It is used for roster names, actor names, spec names and death targets. The raw spelling survives as `logName` on each friendly (`backend/warcraftlogs.py:403`) because WCL filters need it (`backend/defensives.py:791-792`).
+`normalize_character_name` (`backend/warcraftlogs.py:65`) decomposes to NFD and drops combining marks, so "Fîshy" becomes "Fishy" (`backend/warcraftlogs.py:80-88`). It is used for roster names, actor names, spec names and death targets. The raw spelling survives as `logName` on each friendly (`backend/warcraftlogs.py:403`) because WCL filters need it (`backend/defensives.py:795-796`).
 
 #### The query functions
 
@@ -99,7 +99,7 @@ WCL returns at most `limit: 10000` events and a `nextPageTimestamp` when more re
 |---|---|---|
 | `_fetch_remaining_events` {paging} | death, debuff and save-heal blocks | one event type, startTime/endTime, optional filter, max 50 pages (`backend/analysis.py:283-308`) |
 | `_paged` {paging} | `fetch_defensive_raw` | builds the query from optional `fightIDs`, `startTime`, `endTime`, filter and `includeResources`, max 50 pages (`backend/defensives.py:180-204`) |
-| `_fetch_blocks` {paging} | `fetch_death_windows`, `fetch_instakills`, `build_raid_wide.py` | many aliased blocks per request, 20 per request; only blocks with a next page are asked again, max 50 rounds (`backend/defensives.py:742-765`) |
+| `_fetch_blocks` {paging} | `fetch_death_windows`, `fetch_instakills`, `build_raid_wide.py` | many aliased blocks per request, 20 per request; only blocks with a next page are asked again, max 50 rounds (`backend/defensives.py:746-769`) |
 
 ## Context map
 
@@ -118,7 +118,7 @@ relied-on-by: the build and check scripts in backend/scripts
 - **MUST** fail 4xx responses other than 429 without retrying (`backend/warcraftlogs.py:48`); retrying cannot fix bad credentials or a bad query, and would only burn time.
 - **MUST** raise when the GraphQL response carries `errors` (`backend/warcraftlogs.py:169`), so partial data is never treated as complete.
 - **MUST** follow `nextPageTimestamp` on every event fetch, so long reports don't silently lose events past the first page (`backend/analysis.py:427-438`).
-- **NEVER** put an accent-stripped name into a WCL filter: filters use the raw `logName` (`backend/defensives.py:791-792`).
+- **NEVER** put an accent-stripped name into a WCL filter: filters use the raw `logName` (`backend/defensives.py:795-796`).
 
 ## Gotchas
 
