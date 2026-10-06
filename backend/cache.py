@@ -109,6 +109,8 @@ def flush_writes(timeout=120):
 # Sized for Render's small instances: a report's fights+abilities entry is
 # typically tens of KB, its deaths well under that.
 report_meta_cache = SharedReportCache("meta", 200)
+# Each report's light fight list (get_report_fights): a few KB.
+report_fights_cache = SharedReportCache("fights", 400)
 report_deaths_cache = SharedReportCache("deaths", 400)
 # Casts, defensive buffs and talent loadouts, indexed by player.
 report_defensive_cache = SharedReportCache("defensives", 200)

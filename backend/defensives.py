@@ -204,7 +204,18 @@ def _paged(token, report_code, data_type, flt, fight_ids=None, start_time=None, 
     return events
 
 
-def fetch_defensive_raw(token, report_code, fight_ids, start_time, end_time, cat=None):
+def fetch_combatants(token, report_code, fight_ids, start_time, end_time):
+    """Talent loadouts recorded at the start of each boss pull (CombatantInfo).
+
+    Also the cheapest first query on a report WarcraftLogs hasn't read lately:
+    measured on fresh Mythic logs, it costs about 2 points there and the
+    queries after it about 1 each, while Deaths or Casts sent first cost 4-17
+    and queries sent at the same moment each pay that first price."""
+    return _paged(token, report_code, "CombatantInfo", None, fight_ids=fight_ids, start_time=start_time,
+                  end_time=end_time + 1)
+
+
+def fetch_defensive_raw(token, report_code, fight_ids, start_time, end_time, cat=None, combatants=None):
     """Defensive casts, defensive auras, talent loadouts and consumable heals for one report,
     for every player (the four queries run at once). Keep only the players who
     died with filter_defensive_raw.
@@ -220,6 +231,7 @@ def fetch_defensive_raw(token, report_code, fight_ids, start_time, end_time, cat
     - Healthstone and potion heals in the boss pulls, with max health: how
       much each player's own consumables really heal (potion rank, talents
       and buffs included). Scoped to boss pulls, which costs least.
+    `combatants`: talent loadouts already read (fetch_combatants), not fetched again.
     """
     cat = cat or _LATEST
     lookback = max(0, start_time - ENCOUNTER_RESET_MS)
@@ -230,13 +242,17 @@ def fetch_defensive_raw(token, report_code, fight_ids, start_time, end_time, cat
         "casts": ("Casts", cast_filter, None, lookback, False),
         "buffs": ("Buffs", buff_filter, None, lookback, False),
         "heals": ("Healing", heal_filter, fight_ids, start_time, True),
-        "combatants": ("CombatantInfo", None, fight_ids, start_time, False),
     }
+    if combatants is None:
+        jobs["combatants"] = ("CombatantInfo", None, fight_ids, start_time, False)
     with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
         futures = {k: pool.submit(_paged, token, report_code, dt, flt, fight_ids=ids, start_time=start,
                                   end_time=end_time + 1, resources=res)
                    for k, (dt, flt, ids, start, res) in jobs.items()}
-        return {k: f.result() for k, f in futures.items()}
+        out = {k: f.result() for k, f in futures.items()}
+    if combatants is not None:
+        out["combatants"] = combatants
+    return out
 
 
 def filter_defensive_raw(raw, player_ids, cat=None):
