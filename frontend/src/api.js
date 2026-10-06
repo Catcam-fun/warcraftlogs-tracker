@@ -1,13 +1,14 @@
 import { supabase } from './supabaseClient';
 
-/* Single source of truth for the backend URL. Set REACT_APP_API_URL at
-   build time to point a deploy elsewhere ("same-origin" when the API is
-   served under /api on the site's own host, as on AWS); otherwise localhost
-   talks to a local backend and everything else to production. */
+/* Single source of truth for the backend URL. The site and its API share
+   one host (CloudFront serves the API under /api), so calls go to the page's
+   own host. Set REACT_APP_API_URL at build time to point a build elsewhere
+   ("same-origin" forces the page's own host); localhost talks to a local
+   backend. */
 const isLocal = ['localhost', '127.0.0.1'].includes(window.location.hostname);
 const configured = process.env.REACT_APP_API_URL;
 export const API_URL = configured === 'same-origin' ? ''
-  : configured || (isLocal ? 'http://localhost:5000' : 'https://REDACTED');
+  : configured || (isLocal ? 'http://localhost:5000' : '');
 
 /* Analysis config fields that must never leave the browser except in the
    /api/analyze call itself (not in shares, saves, or local history). */

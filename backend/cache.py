@@ -106,7 +106,7 @@ def flush_writes(timeout=120):
         wait(pending, timeout=timeout)
 
 
-# Sized for Render's small instances: a report's fights+abilities entry is
+# Sized to stay small in memory: a report's fights+abilities entry is
 # typically tens of KB, its deaths well under that.
 report_meta_cache = SharedReportCache("meta", 200)
 # Each report's light fight list (get_report_fights): a few KB.
