@@ -26,7 +26,7 @@ from warcraftlogs import (
 )
 from analysis import (
     get_report_deaths_bulk, get_main_character,
-    analyze_fights, is_duplicate_pull,
+    analyze_fights, dedup_pulls,
     find_mass_death_start, rank_pull_deaths, resolve_report_window, drop_saves_that_died
 )
 import defensives
@@ -254,9 +254,6 @@ def analyze():
                             'report_abs_start': report_abs_start,
                         })
 
-            # Earliest copy of a pull first. Two logs can start a pull at the same
-            # millisecond (the same log uploaded twice): ties go by report code, so the
-            # copy kept never depends on which report happened to be read first.
             all_fights_raw.sort(key=lambda x: (x['abs_start'], x['reportId'], x['fight']['id']))
 
             # Deduplicate, then read the kept pulls' reports in full. A report that can't
@@ -264,10 +261,9 @@ def analyze():
             yield f"data: {json.dumps({'stage': 'dedup', 'message': 'Removing duplicate pulls...'})}\n\n"
             metas, unreadable = {}, set()
             while True:
-                seen_pulls_by_boss = {}
-                all_fights_deduped = [fd for fd in all_fights_raw if fd['reportId'] not in unreadable
-                                      and not is_duplicate_pull(seen_pulls_by_boss, fd['boss_id'], fd['abs_start'],
-                                                                fd['abs_end'], fd['is_kill'])]
+                # The earliest copy of each pull (ties by report code, so the copy kept never
+                # depends on which report was read first), unless it was cut short.
+                all_fights_deduped = dedup_pulls([fd for fd in all_fights_raw if fd['reportId'] not in unreadable])
                 missing = sorted({fd['reportId'] for fd in all_fights_deduped} - set(metas))
                 if not missing:
                     break
