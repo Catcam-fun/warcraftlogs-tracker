@@ -178,9 +178,8 @@ PERSONAL, EXTERNAL, CONSUMABLE = _LATEST.personal, _LATEST.external, _LATEST.con
 # =============================================================================
 
 def _paged(token, report_code, data_type, flt, fight_ids=None, start_time=None, end_time=None,
-           resources=False, shape=None):
-    """All pages of one event query, scoped either to boss pulls or to a time range.
-    `shape(event)`, if given, is what's kept of each event as its page arrives."""
+           resources=False):
+    """All pages of one event query, scoped either to boss pulls or to a time range."""
     events, start = [], start_time
     for _ in range(50):
         args, decl, variables = [], ["$c: String!"], {"c": report_code}
@@ -198,20 +197,11 @@ def _paged(token, report_code, data_type, flt, fight_ids=None, start_time=None, 
                  f"events({', '.join(args)}, dataType: {data_type}, limit: 10000) "
                  f"{{ data nextPageTimestamp }} }} }} }}")
         block = ((graphql_query(token, query, variables).get("reportData") or {}).get("report") or {}).get("events") or {}
-        page = block.get("data") or []
-        events += page if shape is None else [shape(e) for e in page]
+        events += block.get("data") or []
         start = block.get("nextPageTimestamp")
         if not start:
             break
     return events
-
-
-def _loadout(e):
-    """What index_defensive_events reads from a CombatantInfo event: who, which pull, spec, talents."""
-    out = {k: e[k] for k in ("type", "timestamp", "fight", "sourceID", "specID") if k in e}
-    if e.get("talentTree") is not None:
-        out["talentTree"] = [{k: t[k] for k in ("id", "rank") if k in t} for t in e["talentTree"]]
-    return out
 
 
 def fetch_defensive_raw(token, report_code, fight_ids, start_time, end_time, cat=None):
@@ -237,16 +227,15 @@ def fetch_defensive_raw(token, report_code, fight_ids, start_time, end_time, cat
     buff_filter = "ability.name in (" + ", ".join(f'"{n}"' for n in cat.buff_names) + ")"
     heal_filter = f"ability.id in ({', '.join(map(str, sorted(cat.consumable)))})"
     jobs = {
-        "casts": ("Casts", cast_filter, None, lookback, False, None),
-        "buffs": ("Buffs", buff_filter, None, lookback, False, None),
-        "heals": ("Healing", heal_filter, fight_ids, start_time, True, None),
-        # Each loadout comes with the player's gear, stats and auras: keep only what's read.
-        "combatants": ("CombatantInfo", None, fight_ids, start_time, False, _loadout),
+        "casts": ("Casts", cast_filter, None, lookback, False),
+        "buffs": ("Buffs", buff_filter, None, lookback, False),
+        "heals": ("Healing", heal_filter, fight_ids, start_time, True),
+        "combatants": ("CombatantInfo", None, fight_ids, start_time, False),
     }
     with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
         futures = {k: pool.submit(_paged, token, report_code, dt, flt, fight_ids=ids, start_time=start,
-                                  end_time=end_time + 1, resources=res, shape=shape)
-                   for k, (dt, flt, ids, start, res, shape) in jobs.items()}
+                                  end_time=end_time + 1, resources=res)
+                   for k, (dt, flt, ids, start, res) in jobs.items()}
         return {k: f.result() for k, f in futures.items()}
 
 
@@ -750,10 +739,8 @@ def _events_query(blocks):
     return "query($c: String!) { reportData { report(code: $c) { " + " ".join(parts) + " } } }"
 
 
-def _fetch_blocks(token, report_code, blocks, keep=None):
+def _fetch_blocks(token, report_code, blocks):
     """All events of several blocks, fetched together; blocks that don't fit one page are followed up.
-    `keep(event)`, if given, picks the events kept as each page arrives (so a
-    page's other events aren't held in memory while the rest download).
 
     Always with an endTime: WCL returns an empty second page for a block scoped
     by fightIDs without one (verified on a live log).
@@ -767,12 +754,11 @@ def _fetch_blocks(token, report_code, blocks, keep=None):
         items = list(pending.items())
         for i in range(0, len(items), WINDOW_BLOCKS_PER_REQUEST):
             chunk = dict(items[i:i + WINDOW_BLOCKS_PER_REQUEST])
-            report = (graphql_query(token, _events_query(chunk), {"c": report_code}).get("reportData") or {}) \
-                .get("report") or {}
+            data = graphql_query(token, _events_query(chunk), {"c": report_code})
+            report = (data.get("reportData") or {}).get("report") or {}
             for alias, spec in chunk.items():
                 block = report.get(alias) or {}
-                events = block.get("data") or []
-                out[alias] += events if keep is None else [e for e in events if keep(e)]
+                out[alias] += block.get("data") or []
                 if block.get("nextPageTimestamp"):
                     nxt[alias] = (spec[0], block["nextPageTimestamp"]) + tuple(spec[2:])
         pending = nxt
@@ -782,52 +768,44 @@ def _fetch_blocks(token, report_code, blocks, keep=None):
 def fetch_death_windows(token, report_code, pulls):
     """Every hit the given players took in the seconds before their deaths.
 
-    `pulls`: [(fightID, [(death_ts, log name, player ID)])], the deaths that can count.
+    `pulls`: [(fightID, [(death_ts, log name)])], the deaths that can count.
     WCL charges about a point per page of events and at least one per block,
     so pulls within WINDOW_BLOCK_SPAN_MS of each other share a block: from
     LETHAL_WINDOW_MS before its first death to its last, for the players who
     died (WCL filters by name; `target.id` and timestamps return nothing in a
     filter), scoped to those pulls. Measured on live Mythic logs: 19 -> 8 and
-    11 -> 5 points for a night's reports, each block still one page. A block
-    holds every hit those players took in it, so only each player's hits
-    inside their own death windows are kept (a quarter of them on a Phoenix
-    night). Returns {targetID: [hits, by time]}.
+    11 -> 5 points for a night's reports, each block still one page. Only the
+    hits inside a death's window are kept. Returns {targetID: [hits, by time]}.
     """
-    pulls = sorted(((fid, sorted(d)) for fid, d in pulls if d and any(x[1] for x in d)), key=lambda p: p[1][0][0])
+    pulls = sorted(((fid, sorted(d)) for fid, d in pulls if d and any(n for _, n in d)), key=lambda p: p[1][0][0])
     groups = []
     for fid, deaths in pulls:
         if groups and deaths[-1][0] - (groups[-1][0][1][0][0] - LETHAL_WINDOW_MS) <= WINDOW_BLOCK_SPAN_MS:
             groups[-1].append((fid, deaths))
         else:
             groups.append([(fid, deaths)])
-    blocks, windows = {}, defaultdict(list)
+    blocks, windows = {}, []
     for group in groups:
         deaths = [d for _, ds in group for d in ds]
-        names = sorted({d[1] for d in deaths if d[1]})
+        names = sorted({n for _, n in deaths if n})
         # Names as they are in the log, accents and all (an escaped é matches nobody).
         flt = "target.name in (" + ", ".join(json.dumps(n, ensure_ascii=False) for n in names) + ")"
-        start = max(min(d[0] for d in deaths) - LETHAL_WINDOW_MS, 0)
+        start = max(min(t for t, _ in deaths) - LETHAL_WINDOW_MS, 0)
         # A killing blow can be logged a few ms after the death (_killing_blow).
-        end = max(d[0] for d in deaths) + KILLING_BLOW_AFTER_MS + 1
+        end = max(t for t, _ in deaths) + KILLING_BLOW_AFTER_MS + 1
         blocks[f"p{group[0][0]}"] = ([fid for fid, _ in group], start, end, "DamageTaken", flt)
-        for d in deaths:
-            # Without the player's ID, any death's window keeps a hit.
-            windows[d[2] if len(d) > 2 else None].append((d[0] - LETHAL_WINDOW_MS, d[0] + KILLING_BLOW_AFTER_MS))
+        windows += [(t - LETHAL_WINDOW_MS, t + KILLING_BLOW_AFTER_MS) for t, _ in deaths]
     if not blocks:
         return {}
-    for w in windows.values():
-        w.sort()
+    windows.sort()
 
-    def in_a_window(e):
-        w = windows.get(e.get("targetID")) or windows.get(None) or []
-        ts = e.get("timestamp", 0)
+    def in_a_window(ts):
         # Windows are all as long: the one starting last at or before ts ends last too.
-        i = bisect_right(w, (ts, float("inf"))) - 1
-        return i >= 0 and ts <= w[i][1]
+        i = bisect_right(windows, (ts, float("inf"))) - 1
+        return i >= 0 and ts <= windows[i][1]
 
-    kept = _fetch_blocks(token, report_code, blocks,
-                         keep=lambda e: e.get("type") == "damage" and in_a_window(e))
-    return index_hits(e for evs in kept.values() for e in evs)
+    events = [e for evs in _fetch_blocks(token, report_code, blocks).values() for e in evs]
+    return index_hits(e for e in events if e.get("type") == "damage" and in_a_window(e.get("timestamp", 0)))
 
 
 def fetch_instakills(token, report_code, fight_ids, start_time, end_time):
