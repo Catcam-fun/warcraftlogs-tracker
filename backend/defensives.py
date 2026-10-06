@@ -768,44 +768,51 @@ def _fetch_blocks(token, report_code, blocks):
 def fetch_death_windows(token, report_code, pulls):
     """Every hit the given players took in the seconds before their deaths.
 
-    `pulls`: [(fightID, [(death_ts, log name)])], the deaths that can count.
+    `pulls`: [(fightID, [(death_ts, log name, player ID)])], the deaths that can count.
     WCL charges about a point per page of events and at least one per block,
     so pulls within WINDOW_BLOCK_SPAN_MS of each other share a block: from
     LETHAL_WINDOW_MS before its first death to its last, for the players who
     died (WCL filters by name; `target.id` and timestamps return nothing in a
     filter), scoped to those pulls. Measured on live Mythic logs: 19 -> 8 and
-    11 -> 5 points for a night's reports, each block still one page. Only the
-    hits inside a death's window are kept. Returns {targetID: [hits, by time]}.
+    11 -> 5 points for a night's reports, each block still one page. A block
+    holds every hit those players took in it, so only each player's hits
+    inside their own death windows are kept (a quarter of them on a Phoenix
+    night). Returns {targetID: [hits, by time]}.
     """
-    pulls = sorted(((fid, sorted(d)) for fid, d in pulls if d and any(n for _, n in d)), key=lambda p: p[1][0][0])
+    pulls = sorted(((fid, sorted(d)) for fid, d in pulls if d and any(x[1] for x in d)), key=lambda p: p[1][0][0])
     groups = []
     for fid, deaths in pulls:
         if groups and deaths[-1][0] - (groups[-1][0][1][0][0] - LETHAL_WINDOW_MS) <= WINDOW_BLOCK_SPAN_MS:
             groups[-1].append((fid, deaths))
         else:
             groups.append([(fid, deaths)])
-    blocks, windows = {}, []
+    blocks, windows = {}, defaultdict(list)
     for group in groups:
         deaths = [d for _, ds in group for d in ds]
-        names = sorted({n for _, n in deaths if n})
+        names = sorted({d[1] for d in deaths if d[1]})
         # Names as they are in the log, accents and all (an escaped é matches nobody).
         flt = "target.name in (" + ", ".join(json.dumps(n, ensure_ascii=False) for n in names) + ")"
-        start = max(min(t for t, _ in deaths) - LETHAL_WINDOW_MS, 0)
+        start = max(min(d[0] for d in deaths) - LETHAL_WINDOW_MS, 0)
         # A killing blow can be logged a few ms after the death (_killing_blow).
-        end = max(t for t, _ in deaths) + KILLING_BLOW_AFTER_MS + 1
+        end = max(d[0] for d in deaths) + KILLING_BLOW_AFTER_MS + 1
         blocks[f"p{group[0][0]}"] = ([fid for fid, _ in group], start, end, "DamageTaken", flt)
-        windows += [(t - LETHAL_WINDOW_MS, t + KILLING_BLOW_AFTER_MS) for t, _ in deaths]
+        for d in deaths:
+            # Without the player's ID, any death's window keeps a hit.
+            windows[d[2] if len(d) > 2 else None].append((d[0] - LETHAL_WINDOW_MS, d[0] + KILLING_BLOW_AFTER_MS))
     if not blocks:
         return {}
-    windows.sort()
+    for w in windows.values():
+        w.sort()
 
-    def in_a_window(ts):
+    def in_a_window(e):
+        w = windows.get(e.get("targetID")) or windows.get(None) or []
+        ts = e.get("timestamp", 0)
         # Windows are all as long: the one starting last at or before ts ends last too.
-        i = bisect_right(windows, (ts, float("inf"))) - 1
-        return i >= 0 and ts <= windows[i][1]
+        i = bisect_right(w, (ts, float("inf"))) - 1
+        return i >= 0 and ts <= w[i][1]
 
-    events = [e for evs in _fetch_blocks(token, report_code, blocks).values() for e in evs]
-    return index_hits(e for e in events if e.get("type") == "damage" and in_a_window(e.get("timestamp", 0)))
+    events = (e for evs in _fetch_blocks(token, report_code, blocks).values() for e in evs)
+    return index_hits(e for e in events if e.get("type") == "damage" and in_a_window(e))
 
 
 def fetch_instakills(token, report_code, fight_ids, start_time, end_time):

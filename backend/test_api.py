@@ -323,7 +323,7 @@ class AnalyzeFlowTests(unittest.TestCase):
         self.assertEqual(result["events"]["Bob"][0]["defensives"]["survival"]["deathType"], "oneShot")
         self.assertEqual((fights_calls, bulk_calls), (2, 2))
         # Only the deaths that can count get their seconds fetched: Bob's, by his name in the log.
-        self.assertEqual(self.window_calls[0].args[2], [(1, [(5_000, "Bob")])])
+        self.assertEqual(self.window_calls[0].args[2], [(1, [(5_000, "Bob", 10)])])
 
         # Old reports are finished, so a second run is served from cache.
         _, fights_calls, bulk_calls = self._run()

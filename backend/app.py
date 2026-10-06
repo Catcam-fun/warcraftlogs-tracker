@@ -34,7 +34,7 @@ import boss_spell_text
 from features import CHEAT_DEATH_ABILITY_IDS
 from auth import require_user, verify_token, forget_token, _bearer_token
 from cache import (report_meta_cache, report_details_cache, report_deaths_cache as deaths_lru,
-                   report_defensive_cache as defensive_lru, report_recap_cache as recap_lru)
+                   report_defensive_cache as defensive_lru, report_recap_cache as recap_lru, flush_writes)
 from ratelimit import RateLimiter, limit
 import supabase_client
 import origin
@@ -337,13 +337,13 @@ def analyze():
             report_deaths_cache = {}
             
             def counted_by_fight(deaths, friendlies):
-                """{fightID: [(death ts, log name)]}: the deaths that can count (within the deaths
+                """{fightID: [(death ts, log name, player ID)]}: the deaths that can count (within the deaths
                 tracked, not in a wipe, guild members), the only ones whose defensives are shown."""
                 log_names = {f.get("id"): f.get("logName") or f.get("name") for f in friendlies}
                 out = {}
                 for fid, ds in deaths.items():
                     ds = sorted(drop_saves_that_died(ds), key=lambda d: d["timestamp"])
-                    out[fid] = [(d["timestamp"], log_names.get(d.get("targetID")))
+                    out[fid] = [(d["timestamp"], log_names.get(d.get("targetID")), d.get("targetID"))
                                 for d, (slot, in_wipe) in zip(ds, rank_pull_deaths(ds))
                                 if slot <= max_cutoff and not in_wipe and not d.get("isCheatDeath")
                                 and is_guild_member(normalize_character_name(d.get("targetName") or ""))]
@@ -416,7 +416,7 @@ def analyze():
                     hits = None
                     counted = counted_by_fight(deaths, friendlies)
                     win_key = (rid, tuple((fid, tuple(c)) for fid, c in sorted(counted.items()) if c),
-                               "lethal-window", defensives.LETHAL_WINDOW_MS)
+                               "lethal-window", defensives.LETHAL_WINDOW_MS, "own")
                     windows = recap_lru.get(win_key) if finished else None
                     if windows is None and hits_error is None:
                         try:
@@ -666,6 +666,8 @@ def analyze():
             }
             
             yield f"data: {json.dumps({'result': response})}\n\n"
+            # Lambda freezes the function once the response ends: finish the cache writes first.
+            flush_writes()
         
         except Exception as e:
             print(f"Error in analyze: {str(e)}")
