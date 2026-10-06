@@ -68,6 +68,32 @@ def is_duplicate_pull(seen_by_boss, boss_id, abs_start, abs_end, is_kill=None):
     return False
 
 
+
+def dedup_pulls(pulls):
+    """One copy of each boss pull, from the fewest reports.
+
+    `pulls`: dicts with reportId, boss_id, abs_start, abs_end, is_kill, as
+    logged by every raider who logged them. Reports are taken in order of how
+    many pulls they hold (most first; then earliest, then by code), and a
+    report's pull is kept unless an already-kept one overlaps it
+    (is_duplicate_pull). So each night's pulls come from its fullest log, and
+    another raider's log only adds the pulls that one lacks. Returns the
+    kept pulls by start time.
+    """
+    held = defaultdict(int)
+    first = {}
+    for p in pulls:
+        held[p['reportId']] += 1
+        first[p['reportId']] = min(first.get(p['reportId'], p['abs_start']), p['abs_start'])
+    order = sorted(held, key=lambda rid: (-held[rid], first[rid], rid))
+    rank = {rid: i for i, rid in enumerate(order)}
+    seen, kept = {}, []
+    for p in sorted(pulls, key=lambda p: (rank[p['reportId']], p['abs_start'])):
+        if not is_duplicate_pull(seen, p['boss_id'], p['abs_start'], p['abs_end'], p['is_kill']):
+            kept.append(p)
+    kept.sort(key=lambda p: p['abs_start'])
+    return kept
+
 # =============================================================================
 # MASS DEATH DETECTION
 # =============================================================================

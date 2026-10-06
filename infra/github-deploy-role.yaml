@@ -109,3 +109,8 @@ Resources:
                   - logs:*
                   - events:*
                 Resource: '*'
+
+Outputs:
+  RoleArn:
+    Description: Put this in the repository's GitHub secret AWS_DEPLOY_ROLE_ARN.
+    Value: !GetAtt DeployRole.Arn

@@ -330,13 +330,11 @@ def get_guild_roster(token, guild_name, server, region):
     return all_members
 
 
-def get_fights(token, report_code):
-    """Fetch a report's fights, players (with class/spec), and ability names.
-
-    One GraphQL round-trip per report: ability names used to be a second,
-    separate query. Returns
-      {"report_start", "fights", "friendlies", "player_details", "abilities"}
-    or the same shape with empty values if the report can't be read.
+def get_report_fights(token, report_code):
+    """A report's start and its fights (boss, difficulty, times, who was in
+    each): the light query, read for every report so duplicate pulls can be
+    dropped before anything heavier is fetched. Returns
+      {"report_start", "fights"}, or empty values if the report can't be read.
     """
     query = """
     query($code: String!) {
@@ -356,6 +354,42 @@ def get_fights(token, report_code):
             }
             friendlyPlayers
           }
+        }
+      }
+    }
+    """
+    try:
+        data = graphql_query(token, query, {"code": report_code})
+        report = (data.get("reportData") or {}).get("report") or {}
+    except Exception as e:
+        print(f"Error fetching fights for {report_code}: {e}")
+        report = {}
+    return {
+        "report_start": report.get("startTime", 0),
+        "fights": [{
+            "id": f.get("id"),
+            "start_time": f.get("startTime"),
+            "end_time": f.get("endTime"),
+            "name": f.get("name"),
+            "boss": f.get("encounterID"),
+            "difficulty": f.get("difficulty"),
+            "kill": f.get("kill"),
+            "zoneID": (f.get("gameZone") or {}).get("id"),
+            "friendlyPlayers": f.get("friendlyPlayers") or [],  # IDs of players in THIS fight
+        } for f in report.get("fights") or []],
+    }
+
+
+def get_report_details(token, report_code, fight_ids):
+    """Players (with class/spec) and ability names of one report, for the
+    given pulls only (spec from playerDetails scoped to them). Returns
+      {"friendlies", "player_details", "abilities", "ability_schools", "ability_icons"}.
+    Raises if the report can't be read.
+    """
+    query = """
+    query($code: String!, $ids: [Int]) {
+      reportData {
+        report(code: $code) {
           masterData {
             actors(type: "Player") {
               id
@@ -370,78 +404,72 @@ def get_fights(token, report_code):
               icon
             }
           }
-          playerDetails(startTime: 0, endTime: 999999999999)
+          playerDetails(fightIDs: $ids)
         }
       }
     }
     """
-    empty = {"report_start": 0, "fights": [], "friendlies": [], "player_details": {}, "abilities": {},
-             "ability_schools": {}, "ability_icons": {}}
+    data = graphql_query(token, query, {"code": report_code, "ids": sorted(fight_ids)})
+    report = (data.get("reportData") or {}).get("report") or {}
+    master = report.get("masterData") or {}
+    friendlies = [{
+        "id": a.get("id"),
+        "name": normalize_character_name(a.get("name")),
+        "logName": a.get("name"),  # as in the log, for filter expressions
+        "type": a.get("subType"),  # class name
+    } for a in master.get("actors") or [] if a.get("type") == "Player"]
 
+    abilities = {a["gameID"]: a["name"] for a in master.get("abilities") or []
+                 if a.get("gameID") and a.get("name")}
+    # Spell school bitmask (1 = physical, anything else includes magic).
+    ability_schools = {}
+    for a in master.get("abilities") or []:
+        try:
+            ability_schools[a["gameID"]] = int(a.get("type") or 0)
+        except (TypeError, ValueError):
+            pass
+
+    # Icon file names ("spell_shadow_nethercloak.jpg"), for the results page.
+    ability_icons = {a["gameID"]: a["icon"] for a in master.get("abilities") or []
+                     if a.get("gameID") and a.get("icon")}
+
+    # playerDetails: { data: { playerDetails: { tanks: [], healers: [], dps: [] } } }
+    player_spec_map = {}
+    details = ((report.get("playerDetails") or {}).get("data") or {}).get("playerDetails") or {}
+    for role in ("tanks", "healers", "dps"):
+        for player in details.get(role) or []:
+            actor_id = player.get("id")
+            if not actor_id:
+                continue
+            specs = player.get("specs") or []  # [{"spec": "Brewmaster", "count": 31}]
+            player_spec_map[actor_id] = {
+                "class": player.get("type", ""),
+                "spec": specs[0].get("spec", "Unknown") if specs else "Unknown",
+                "name": normalize_character_name(player.get("name", "")),
+            }
+
+    return {
+        "friendlies": friendlies,
+        "player_details": player_spec_map,
+        "abilities": abilities,
+        "ability_schools": ability_schools,
+        "ability_icons": ability_icons,
+    }
+
+
+def get_fights(token, report_code):
+    """A report's fights, players (with class/spec over all its fights) and
+    ability names in one dict (the checking scripts use it):
+      {"report_start", "fights", "friendlies", "player_details", "abilities", ...}
+    or empty values if the report can't be read.
+    """
+    meta = get_report_fights(token, report_code)
+    if not meta["fights"]:
+        return {**meta, "friendlies": [], "player_details": {}, "abilities": {},
+                "ability_schools": {}, "ability_icons": {}}
     try:
-        data = graphql_query(token, query, {"code": report_code})
-        report = (data.get("reportData") or {}).get("report") or {}
-        if not report:
-            return empty
-
-        master = report.get("masterData") or {}
-        fights = [{
-            "id": f.get("id"),
-            "start_time": f.get("startTime"),
-            "end_time": f.get("endTime"),
-            "name": f.get("name"),
-            "boss": f.get("encounterID"),
-            "difficulty": f.get("difficulty"),
-            "kill": f.get("kill"),
-            "zoneID": (f.get("gameZone") or {}).get("id"),
-            "friendlyPlayers": f.get("friendlyPlayers") or [],  # IDs of players in THIS fight
-        } for f in report.get("fights") or []]
-
-        friendlies = [{
-            "id": a.get("id"),
-            "name": normalize_character_name(a.get("name")),
-            "logName": a.get("name"),  # as in the log, for filter expressions
-            "type": a.get("subType"),  # class name
-        } for a in master.get("actors") or [] if a.get("type") == "Player"]
-
-        abilities = {a["gameID"]: a["name"] for a in master.get("abilities") or []
-                     if a.get("gameID") and a.get("name")}
-        # Spell school bitmask (1 = physical, anything else includes magic).
-        ability_schools = {}
-        for a in master.get("abilities") or []:
-            try:
-                ability_schools[a["gameID"]] = int(a.get("type") or 0)
-            except (TypeError, ValueError):
-                pass
-
-        # Icon file names ("spell_shadow_nethercloak.jpg"), for the results page.
-        ability_icons = {a["gameID"]: a["icon"] for a in master.get("abilities") or []
-                         if a.get("gameID") and a.get("icon")}
-
-        # playerDetails: { data: { playerDetails: { tanks: [], healers: [], dps: [] } } }
-        player_spec_map = {}
-        details = ((report.get("playerDetails") or {}).get("data") or {}).get("playerDetails") or {}
-        for role in ("tanks", "healers", "dps"):
-            for player in details.get(role) or []:
-                actor_id = player.get("id")
-                if not actor_id:
-                    continue
-                specs = player.get("specs") or []  # [{"spec": "Brewmaster", "count": 31}]
-                player_spec_map[actor_id] = {
-                    "class": player.get("type", ""),
-                    "spec": specs[0].get("spec", "Unknown") if specs else "Unknown",
-                    "name": normalize_character_name(player.get("name", "")),
-                }
-
-        return {
-            "report_start": report.get("startTime", 0),
-            "fights": fights,
-            "friendlies": friendlies,
-            "player_details": player_spec_map,
-            "abilities": abilities,
-            "ability_schools": ability_schools,
-            "ability_icons": ability_icons,
-        }
+        return {**meta, **get_report_details(token, report_code, [f["id"] for f in meta["fights"]])}
     except Exception as e:
-        print(f"Error fetching fights for {report_code}: {e}")
-        return empty
+        print(f"Error fetching players for {report_code}: {e}")
+        return {**meta, "friendlies": [], "player_details": {}, "abilities": {},
+                "ability_schools": {}, "ability_icons": {}}

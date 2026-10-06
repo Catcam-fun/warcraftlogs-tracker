@@ -22,18 +22,18 @@ load_dotenv()
 # Import from modules
 from warcraftlogs import (
     get_access_token, get_guild_reports, get_guild_roster,
-    get_fights, normalize_character_name
+    get_report_fights, get_report_details, normalize_character_name
 )
 from analysis import (
     get_report_deaths_bulk, get_main_character,
-    analyze_fights, is_duplicate_pull,
+    analyze_fights, dedup_pulls, is_duplicate_pull,
     find_mass_death_start, rank_pull_deaths, resolve_report_window, drop_saves_that_died
 )
 import defensives
 import boss_spell_text
 from features import CHEAT_DEATH_ABILITY_IDS
 from auth import require_user, verify_token, forget_token, _bearer_token
-from cache import (report_meta_cache, report_deaths_cache as deaths_lru,
+from cache import (report_meta_cache, report_details_cache, report_deaths_cache as deaths_lru,
                    report_defensive_cache as defensive_lru, report_recap_cache as recap_lru)
 from ratelimit import RateLimiter, limit
 import supabase_client
@@ -200,45 +200,34 @@ def analyze():
                 yield f"data: {json.dumps({'error': 'No reports found matching criteria'})}\n\n"
                 return
             
-            # Collect all fights. Reports are fetched in parallel (one
-            # GraphQL call each); finished reports come from the cache.
+            # Each report's fight list (the light query), in parallel;
+            # finished reports come from the cache.
             yield f"data: {json.dumps({'stage': 'fights', 'message': 'Collecting fights from reports...'})}\n\n"
-            all_fights_raw = []
             finished_before = int(time.time() * 1000) - REPORT_CACHE_MIN_AGE_MS
             report_finished = {rep["id"]: bool(rep.get("end")) and rep["end"] < finished_before
                                for rep in reports}
 
-            def fetch_report_meta(rep):
+            def fetch_report_fights(rep):
                 rid = rep["id"]
                 if report_finished[rid]:
                     cached = report_meta_cache.get(rid)
                     if cached is not None:
                         return rep, cached
-                meta = get_fights(token, rid)
+                meta = get_report_fights(token, rid)
                 if report_finished[rid] and meta.get("fights"):
                     report_meta_cache.set(rid, meta)
                 return rep, meta
 
+            candidates = []      # this raid's boss pulls, in every report that logged them
             with ThreadPoolExecutor(max_workers=REPORT_FETCH_WORKERS) as executor:
-                futures = [executor.submit(fetch_report_meta, rep) for rep in reports]
+                futures = [executor.submit(fetch_report_fights, rep) for rep in reports]
                 for done, future in enumerate(as_completed(futures), 1):
-                    rep, fights_data = future.result()
-                    rid = rep["id"]
+                    rep, meta = future.result()
                     yield f"data: {json.dumps({'stage': 'fights', 'message': f'Read report {done}/{len(reports)}'})}\n\n"
-
-                    fights = fights_data.get("fights", [])
-                    if not fights:
-                        continue
-                    report_abs_start = fights_data.get("report_start") or rep["start"]
-                    friendlies = fights_data.get("friendlies", [])
-                    player_details = fights_data.get("player_details", {})
-                    ability_map = fights_data.get("abilities", {})
-
-                    # Non-guild members in the raid are filtered out
-                    # per-player below (only roster members count).
-                    for fight in analyze_fights(fights, fight_zone, difficulty, selected_raid):
-                        all_fights_raw.append({
-                            'reportId': rid,
+                    report_abs_start = meta.get("report_start") or rep["start"]
+                    for fight in analyze_fights(meta.get("fights", []), fight_zone, difficulty, selected_raid):
+                        candidates.append({
+                            'reportId': rep["id"],
                             'fight': fight,
                             'boss_name': fight.get('name', 'Unknown'),
                             'boss_id': fight.get('boss', 0),
@@ -246,40 +235,83 @@ def analyze():
                             'abs_start': report_abs_start + fight['start_time'],
                             'abs_end': report_abs_start + fight['end_time'],
                             'report_abs_start': report_abs_start,
-                            'friendlies': friendlies,
-                            'ability_map': ability_map,
-                            'ability_schools': fights_data.get("ability_schools", {}),
-                            'ability_icons': fights_data.get("ability_icons", {}),
-                            'player_details': player_details
                         })
+            yield f"data: {json.dumps({'stage': 'fights', 'message': f'Collected {len(candidates)} total fights'})}\n\n"
 
-            all_fights_raw.sort(key=lambda x: x['abs_start'])
-            yield f"data: {json.dumps({'stage': 'fights', 'message': f'Collected {len(all_fights_raw)} total fights'})}\n\n"
-            
-            if not all_fights_raw:
+            if not candidates:
                 diff_names = {'3': 'Normal', '4': 'Heroic', '5': 'Mythic'}
                 diff_label = diff_names.get(str(difficulty), f'difficulty {difficulty}')
                 yield f"data: {json.dumps({'error': f'No {diff_label} fights found in the reports. Check that the selected difficulty is available for this raid.'})}\n\n"
                 return
-            
-            # Deduplicate
+
+            # Drop duplicate pulls (several raiders log the same night) before
+            # anything heavier is fetched. Each pull is read from one report:
+            # the report logging the most of this raid's pulls first, so a
+            # night's pulls come from one log where possible, and other logs
+            # only fill in the pulls it lacks (its logger sat one out). Every
+            # report read costs WarcraftLogs points for the whole span of its
+            # pulls, so fewer reports cost fewer points.
             yield f"data: {json.dumps({'stage': 'dedup', 'message': 'Removing duplicate pulls...'})}\n\n"
-            seen_pulls_by_boss = {}
-            all_fights_deduped = []
-            
-            for fight_data in all_fights_raw:
-                boss_id = fight_data['boss_id']
-                abs_start = fight_data['abs_start']
-                abs_end = fight_data['abs_end']
-                is_kill = fight_data['is_kill']
-                
-                if is_duplicate_pull(seen_pulls_by_boss, boss_id, abs_start, abs_end, is_kill):
-                    continue
-                
-                all_fights_deduped.append(fight_data)
-            
+            all_fights_deduped = dedup_pulls(candidates)
             yield f"data: {json.dumps({'stage': 'dedup', 'message': f'After deduplication: {len(all_fights_deduped)} unique fights'})}\n\n"
-            
+
+            # Players, specs and ability names, only for the reports and pulls
+            # kept. A report that can't be read gives its pulls to another
+            # raider's log of them, if there is one.
+            def fetch_details(rid, fight_ids):
+                key = (rid, tuple(sorted(fight_ids)))
+                if report_finished.get(rid):
+                    cached = report_details_cache.get(key)
+                    if cached is not None:
+                        return rid, cached
+                try:
+                    details = get_report_details(token, rid, fight_ids)
+                except Exception as e:
+                    print(f"[ERROR] Could not read the players of report {rid}: {e}")
+                    return rid, None
+                if report_finished.get(rid):
+                    report_details_cache.set(key, details)
+                return rid, details
+
+            report_details, fetched_ids, unreadable = {}, {}, set()
+            for _ in range(3):
+                kept_ids = defaultdict(list)
+                for fd in all_fights_deduped:
+                    kept_ids[fd['reportId']].append(fd['fight']['id'])
+                # (Again for a report that took over pulls it wasn't read for.)
+                todo = [(rid, ids) for rid, ids in kept_ids.items()
+                        if rid not in unreadable and not set(ids) <= fetched_ids.get(rid, set())]
+                if not todo:
+                    break
+                with ThreadPoolExecutor(max_workers=REPORT_FETCH_WORKERS) as executor:
+                    for rid, details in executor.map(lambda kv: fetch_details(*kv), todo):
+                        if details is None:
+                            unreadable.add(rid)
+                        else:
+                            report_details[rid] = details
+                            fetched_ids[rid] = set(kept_ids[rid])
+                if not unreadable & set(kept_ids):
+                    break
+                all_fights_deduped = dedup_pulls([c for c in candidates if c['reportId'] not in unreadable])
+            all_fights_deduped = [fd for fd in all_fights_deduped if fd['reportId'] in report_details]
+            # Unreadable reports holding pulls no other log had: those pulls are left out.
+            kept_by_boss = defaultdict(list)
+            for fd in all_fights_deduped:
+                kept_by_boss[fd['boss_id']].append((fd['abs_start'], fd['abs_end'], fd['is_kill']))
+            failed_reports = sorted({
+                c['reportId'] for c in candidates
+                if c['reportId'] in unreadable and not is_duplicate_pull(
+                    {c['boss_id']: list(kept_by_boss[c['boss_id']])}, c['boss_id'], c['abs_start'], c['abs_end'])})
+            for fd in all_fights_deduped:
+                details = report_details[fd['reportId']]
+                fd.update({
+                    'friendlies': details.get("friendlies", []),
+                    'ability_map': details.get("abilities", {}),
+                    'ability_schools': details.get("ability_schools", {}),
+                    'ability_icons': details.get("ability_icons", {}),
+                    'player_details': details.get("player_details", {}),
+                })
+
             # Process deaths
             yield f"data: {json.dumps({'stage': 'deaths', 'message': 'Processing death events...'})}\n\n"
             counted_death_events = defaultdict(list)
@@ -406,7 +438,6 @@ def analyze():
             
             total_reports = len(fights_by_report)
             completed = 0
-            failed_reports = []
             
             report_defensive_data = {}
             report_hits = {}
