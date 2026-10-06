@@ -390,12 +390,16 @@ def _talented_cooldown(entry, talent_entries, spec):
 
 def _talented_duration(entry, talent_entries, spec):
     """How long the aura lasts after the player's talents and spec passives (Anti-Magic Barrier,
-    Improved Barkskin): checked on live logs, e.g. Anti-Magic Shell 5s -> 7s, Barkskin 8s -> 12s."""
+    Improved Barkskin): checked on live logs, e.g. Anti-Magic Shell 5s -> 7s, Barkskin 8s -> 12s.
+    A mastery's stretch (Mastery: Timewalker on Renewing Blaze) depends on the player's
+    mastery stat and isn't added: the base duration stands."""
     ms = entry.get("aura_ms")
     if not ms or ms < 0:
         return ms
     mult = 1.0
     for m in entry.get("duration_mods", ()):
+        if m.get("mastery"):
+            continue
         rank = _mod_rank(m, talent_entries, spec)
         if rank and "add_ms" in m:
             ms += m["add_ms"] * rank
