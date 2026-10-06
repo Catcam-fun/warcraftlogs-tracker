@@ -26,7 +26,7 @@ class SharedReportCacheTests(unittest.TestCase):
         store = FakeStore()
         first = cache.SharedReportCache("deaths", 10, store=store)
         first.set(("R1", (1, 2)), {1: ["death"]})
-        cache._WRITER.submit(lambda: None).result()      # wait for the background write
+        cache.flush_writes()                              # wait for the background write
         # A fresh server (empty memory) finds it in the shared store.
         second = cache.SharedReportCache("deaths", 10, store=store)
         self.assertEqual(second.get(("R1", (1, 2))), {1: ["death"]})
@@ -35,7 +35,7 @@ class SharedReportCacheTests(unittest.TestCase):
     def test_keys_are_namespaced_and_versioned(self):
         store = FakeStore()
         cache.SharedReportCache("meta", 10, store=store).set("R1", {"a": 1})
-        cache._WRITER.submit(lambda: None).result()
+        cache.flush_writes()
         self.assertIsNone(cache.SharedReportCache("deaths", 10, store=store).get("R1"))
         self.assertTrue(all(k.startswith(cache.CACHE_VERSION + ":") for k in store.rows))
 

@@ -948,3 +948,17 @@ class PotionRankTests(unittest.TestCase):
         r = defensives.potion_rank(sid, cat, [(1, sid, 4_500_000, 9_000_000, 1.0, 500)], {}, None)
         self.assertNotIn("rank", r)
         self.assertEqual(r["unknown"], 4.3)
+
+
+class LoadoutTrimTests(unittest.TestCase):
+    def test_trimmed_loadout_indexes_the_same(self):
+        cat = defensives._LATEST
+        entry = next(iter(cat.relevant_talent_entries))
+        full = {"type": "combatantinfo", "timestamp": 5, "fight": 3, "sourceID": 1, "specID": 73,
+                "talentTree": [{"id": entry, "rank": 2, "nodeID": 99}, {"id": -1, "rank": 1, "nodeID": 1}],
+                "gear": [{"id": 1, "itemLevel": 700}] * 16, "auras": [{"ability": 1}] * 30, "stamina": 1}
+        idx = lambda e: defensives.index_defensive_events({"combatants": [e]}, cat)
+        trimmed = defensives._loadout(full)
+        self.assertNotIn("gear", trimmed)
+        self.assertEqual((idx(trimmed)["talents"], idx(trimmed)["specs"]), (idx(full)["talents"], idx(full)["specs"]))
+        self.assertEqual(idx(trimmed)["talents"], {(3, 1): {entry: 2}})
