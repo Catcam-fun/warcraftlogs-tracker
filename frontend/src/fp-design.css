@@ -92,12 +92,7 @@
 .fpx-railhead{display:flex;align-items:center;justify-content:space-between;
   gap:8px;padding:0 6px;min-height:34px}
 .fpx-brand{display:flex;align-items:center;gap:11px;cursor:pointer;min-width:0}
-.fpx-brand .mk{
-  width:32px;height:32px;border-radius:8px;display:grid;place-items:center;flex:none;
-  color:#1a0e00;font-weight:800;font-family:var(--fpx-sans);font-size:13px;
-  background:linear-gradient(150deg,var(--fpx-kill),var(--fpx-kill-2));
-  box-shadow:0 0 0 1px rgba(255,174,59,.4),0 6px 18px -6px rgba(255,138,31,.6);
-}
+.fpx-brand .mk{width:32px;height:32px;flex:none;display:block}
 .fpx-brand .wm{font-family:var(--fpx-display);letter-spacing:.13em;font-size:15px;
   line-height:1;white-space:nowrap}
 .fpx-brand .wm small{display:block;font-family:var(--fpx-sans);font-weight:600;
