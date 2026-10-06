@@ -86,9 +86,10 @@ CACHE_VERSION = "v2"
 _WRITER = ThreadPoolExecutor(max_workers=2, thread_name_prefix="report-cache")
 
 
-# Sized for Render's small instances: a report's fights+abilities entry is
-# typically tens of KB, its deaths well under that.
-report_meta_cache = SharedReportCache("meta", 200)
+# A report's fights (read for every report in the window: a few KB each),
+# then the players and ability names of the pulls kept from it (tens of KB).
+report_meta_cache = SharedReportCache("fights", 400)
+report_details_cache = SharedReportCache("details", 200)
 report_deaths_cache = SharedReportCache("deaths", 400)
 # Casts, defensive buffs and talent loadouts, indexed by player.
 report_defensive_cache = SharedReportCache("defensives", 200)
