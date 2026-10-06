@@ -231,6 +231,7 @@ export default function WarcraftLogsApp() {
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareLink, setShareLink] = useState('');
   const [shareWarning, setShareWarning] = useState(null);
+  const [shareError, setShareError] = useState('');
   const [copied, setCopied] = useState(false);
   const [sharingData, setSharingData] = useState(false);
   const [abortController, setAbortController] = useState(null);
@@ -624,10 +625,12 @@ export default function WarcraftLogsApp() {
     if (!data) return;
 
     setSharingData(true);
+    setShareError('');
     try {
       const { ok, body } = await apiFetch('/api/share', {
         method: 'POST',
         auth: user ? 'optional' : false,
+        compress: true,   // big analyses exceed the 6 MB a request may carry
         // Credentials are stripped here and again on the server.
         body: { data, config: stripSecrets(config) },
       });
@@ -639,7 +642,7 @@ export default function WarcraftLogsApp() {
       setShareWarning(shareNote(body));
       setShowShareModal(true);
     } catch (err) {
-      setError(`Failed to create shareable link: ${err.message}`);
+      setShareError(`Couldn't create a share link: ${err.message}`);
     } finally {
       setSharingData(false);
     }
@@ -733,6 +736,7 @@ export default function WarcraftLogsApp() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let gotResult = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -755,6 +759,7 @@ export default function WarcraftLogsApp() {
             } else if (data.message) {
               setLoadingStage(data.message);
             } else if (data.result) {
+              gotResult = true;
               if (typeof data.result.meta?.cheatDeathEnabled === 'boolean') {
                 setConfig((prev) => ({ ...prev, enableCheatDeath: data.result.meta.cheatDeathEnabled }));
               }
@@ -937,6 +942,11 @@ export default function WarcraftLogsApp() {
           }
         }
         if (done) break;
+      }
+      // The server can stop without a word (out of memory, time limit): say
+      // so instead of leaving the loader spinning.
+      if (!gotResult) {
+        throw new Error('The analysis stopped before it finished. Try again, or use a shorter date range.');
       }
     } catch (err) {
       if (err.name === 'AbortError') {
@@ -1665,6 +1675,9 @@ export default function WarcraftLogsApp() {
                         })}`}</p>
                       </div>
                     </div>
+                    {shareError && (
+                      <div className="fpx-error" role="alert"><AlertCircle size={18} /><span>{shareError}</span></div>
+                    )}
 
                     <div className="fpx-results">
 

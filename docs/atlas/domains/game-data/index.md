@@ -36,7 +36,7 @@ invariants:
   - "MUST: a new raid is added to RAID_ENCOUNTERS before the boss-side scripts run, since all four read it."
 flows:
   - data-build-path
-content_hash: sha256:890603ae6d80ae5b83f645eca00791a61128d7af91be6acb837a8d190a6c6d3c
+content_hash: sha256:9839cbce240c8d4c633759cae2b04c42d12a33cb2d66c1b11f678f88883efa38
 ---
 ## Summary
 
@@ -53,7 +53,7 @@ The generated modules, what writes them, and who reads them.
 |---|---|---|---|---|
 | `defensive_catalog.py` {wago} | `build_defensive_catalog.py` | wago.tools, one build per patch | `PATCHES`, `CATALOGS`, `HEALING_TAKEN`, `LATEST`, `CATALOG` (`backend/defensive_catalog.py:7`, `22`, `15865`, `22354-22355`) | `defensives.py` (`backend/defensives.py:28`); `build_spell_icons.py` (`backend/scripts/build_spell_icons.py:25`) |
 | `boss_spell_flags.py` {wago} | `build_boss_spell_flags.py` | wago.tools, live tables | `IGNORES_IMMUNITY` (`backend/boss_spell_flags.py:4`) | `defensives.py` (`backend/defensives.py:26`) |
-| `boss_spell_text.py` {wago} | `build_boss_spell_text.py` | wago.tools, latest build | `TEXTS`, `SPELLS`, `text_for()` (`backend/boss_spell_text.py:5`, `3341`, `7853`) | `app.py` killing-blow text (`backend/app.py:627`) |
+| `boss_spell_text.py` {wago} | `build_boss_spell_text.py` | wago.tools, latest build | `TEXTS`, `SPELLS`, `text_for()` (`backend/boss_spell_text.py:5`, `3341`, `7853`) | `app.py` killing-blow text (`backend/app.py:633`) |
 | `spell_icons.py` {wago} | `build_spell_icons.py` | wago.tools, latest build, plus the catalog | `ICONS`, `DESCRIPTIONS` (`backend/spell_icons.py:5`, `90`) | `defensives.py` (`backend/defensives.py:29`); icons load from render.worldofwarcraft.com in `frontend/src/DeathRow.js:20` |
 | `armor_constants.py` {wcl} | `build_armor_constants.py` | WCL top-ranked kills, three difficulties | `ARMOR_K`, `IGNORES_ARMOR`, `REDUCED_BY_ARMOR` (`backend/armor_constants.py:6`, `134-135`) | `defensives.py` (`backend/defensives.py:25`) |
 | `raid_wide_damage.py` {wcl} | `build_raid_wide.py` | WCL top-ranked Mythic kills | `RAID_WIDE` (`backend/raid_wide_damage.py:5`) | `defensives.py` rot check (`backend/defensives.py:27`, `1676`) |

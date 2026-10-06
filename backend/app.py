@@ -39,6 +39,7 @@ from ratelimit import RateLimiter, limit
 import supabase_client
 import origin
 from streaming import with_heartbeat
+from bodies import BodyTooLarge, json_body
 
 # A report whose last event is older than this is treated as finished and
 # its fights/deaths are cached; anything newer may still be live-logging.
@@ -81,6 +82,11 @@ def _only_from_cloudfront():
     if origin.secret() and (request.method, request.path) not in _UNLOCKED \
             and not origin.from_cloudfront():
         return jsonify({"success": False, "error": "Forbidden"}), 403
+
+
+@app.errorhandler(BodyTooLarge)
+def _body_too_large(_e):
+    return jsonify({"success": False, "error": "This analysis is too large to send."}), 413
 
 
 @app.route('/events', methods=['POST'])
@@ -658,7 +664,7 @@ def _looks_like_analysis(data):
 @limit(share_limiter, "Too many share links from this network in the last hour. Please wait a bit.")
 def share_results():
     """Create a short share link. Credentials are stripped server-side."""
-    body = request.get_json(silent=True) or {}
+    body = json_body() or {}
     data = body.get('data')
     if not _looks_like_analysis(data):
         return jsonify({"success": False, "error": "Nothing to share"}), 400
@@ -706,7 +712,7 @@ def list_saved():
 @require_user
 @limit(save_limiter, "Too many saves in the last hour. Please wait a bit.")
 def create_saved():
-    body = request.get_json(silent=True) or {}
+    body = json_body() or {}
     data = body.get('data')
     if not _looks_like_analysis(data):
         return jsonify({"success": False, "error": "Nothing to save"}), 400

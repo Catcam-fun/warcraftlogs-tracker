@@ -16,13 +16,13 @@ anchors:
   gunicorn_threads: backend/gunicorn.conf.py:15
   gunicorn_timeout: backend/gunicorn.conf.py:18
   requirements: backend/requirements.txt:1
-  dev_server: backend/app.py:773
+  dev_server: backend/app.py:779
   load_dotenv: backend/app.py:20
-  allowed_origins: backend/app.py:66
-  health: backend/app.py:763
+  allowed_origins: backend/app.py:67
+  health: backend/app.py:769
   supabase_env: backend/supabase_client.py:27
   api_url: frontend/src/api.js:8
-  wake_message: frontend/src/api.js:72
+  wake_message: frontend/src/api.js:104
   build_script: frontend/package.json:21
   spa_rewrite: frontend/public/_redirects.txt:1
   migration_001: backend/migrations/001_shares_and_rls.sql:2
@@ -52,7 +52,7 @@ invariants:
   - "MUST: migrations 001 and 002 be run in the Supabase SQL editor before the features that use them are expected to persist."
   - "NEVER: commit backend/.env; it is gitignored and holds the backend's secrets."
   - "NEVER: rely on in-process state (rate limits, memory shares, caches) across workers or restarts."
-content_hash: sha256:1024836c5d4d4f5ce8d24b7c13b2afe452d27975cc18cc640a114e18c7ffe4a6
+content_hash: sha256:0acbcb3d9448970ef69f40d67a79729416caf0c07506a603be1d26b8b354ee83
 ---
 # Deployment & Environments
 
@@ -100,9 +100,9 @@ edge static -> supa color=process "anon key"
 - title: Build the frontend | short: Static build | sub: react-scripts build
   body: npm run build runs react-scripts build (frontend/package.json:21). REACT_APP_API_URL, if set, is baked into the bundle at this point (frontend/src/api.js:8). Everything in frontend/public, including art and _redirects.txt, is copied into build/. The Supabase URL and anon key are constants in the source (frontend/src/supabaseClient.js:3), not build variables.
 - title: Route every path to the app | short: SPA rewrite | sub: /* to /index.html 200
-  body: The app uses BrowserRouter (frontend/src/index.js:11) with paths like /analyze, /results and /saved (frontend/src/App.js:1567, :1566, :2205). frontend/public/_redirects.txt holds one rule, /* /index.html 200, so a direct visit or refresh on those paths serves the app instead of a 404.
+  body: The app uses BrowserRouter (frontend/src/index.js:11) with paths like /analyze, /results and /saved (frontend/src/App.js:1577, :1566, :2205). frontend/public/_redirects.txt holds one rule, /* /index.html 200, so a direct visit or refresh on those paths serves the app instead of a 404.
 - title: Point the site at the API | short: API base URL | sub: by hostname
-  body: API_URL is the only place the backend address appears (frontend/src/api.js:3). The backend in turn must allow the site's origin in ALLOWED_ORIGINS, or leave it unset to allow any origin (backend/app.py:66).
+  body: API_URL is the only place the backend address appears (frontend/src/api.js:3). The backend in turn must allow the site's origin in ALLOWED_ORIGINS, or leave it unset to allow any origin (backend/app.py:67).
 ```
 
 ## Standing it up
@@ -114,7 +114,7 @@ edge static -> supa color=process "anon key"
 | Backend dependencies | `backend/requirements.txt` | pip |
 | Backend config | `PORT`, `WEB_CONCURRENCY`, `GUNICORN_THREADS`, `ALLOWED_ORIGINS`, `SUPABASE_URL` | host env; `backend/.env` locally |
 | Backend secrets | `SUPABASE_KEY` (anon), `SUPABASE_SERVICE_ROLE_KEY` | host env; `backend/.env` locally (gitignored, `.gitignore:2`) |
-| Health check | `GET /api/health` returns status and whether Supabase is configured | `backend/app.py:763` |
+| Health check | `GET /api/health` returns status and whether Supabase is configured | `backend/app.py:769` |
 | Frontend build | `react-scripts build` to `frontend/build/` (gitignored) | `frontend/package.json:21`, `frontend/.gitignore:12` |
 | Frontend config | `REACT_APP_API_URL` (optional, build time) | build env |
 | Frontend public values | Supabase URL and anon key | constants in `frontend/src/supabaseClient.js:3` |
@@ -129,11 +129,11 @@ edge static -> supa color=process "anon key"
 | Frontend | `react-scripts start` (`frontend/package.json:20`) on localhost | static build of `frontend/` | the same build in S3, served by CloudFront; a CloudFront Function serves `index.html` for React routes (`infra/template.yaml`) |
 | API the site calls | `http://localhost:5000` (`frontend/src/api.js:9`) | `https://deathwarcraftlogs-api.onrender.com` (`frontend/src/api.js:9`) | `''` (same host): built with `REACT_APP_API_URL=same-origin` (`frontend/src/api.js:9`), API under `/api/*` |
 | Override | `REACT_APP_API_URL` | same, at build time | same |
-| Backend server | `python app.py`: Flask dev server, threaded, debug off (`backend/app.py:773`), or gunicorn | gunicorn with `backend/gunicorn.conf.py` | gunicorn on Lambda via the Lambda Web Adapter (`backend/run.sh`), 1 GB, 15-minute limit, response streaming |
+| Backend server | `python app.py`: Flask dev server, threaded, debug off (`backend/app.py:779`), or gunicorn | gunicorn with `backend/gunicorn.conf.py` | gunicorn on Lambda via the Lambda Web Adapter (`backend/run.sh`), 1 GB, 15-minute limit, response streaming |
 | Backend env | `backend/.env` via `load_dotenv()` | host environment variables | Lambda environment variables from the deploy workflow's GitHub secrets |
 | Supabase | same project: the frontend URL and anon key are hard-coded (`frontend/src/supabaseClient.js:3`) | same | same |
 | CORS | `ALLOWED_ORIGINS` usually unset, so `*` | `ALLOWED_ORIGINS` if set, else `*` | not needed: site and API share one host |
-| Cold start | none | the site tells users the server "may be waking up" when a request cannot connect (`frontend/src/api.js:72`) | a schedule pings `POST /events` every 5 minutes to keep a copy warm (`backend/app.py:87`) |
+| Cold start | none | the site tells users the server "may be waking up" when a request cannot connect (`frontend/src/api.js:104`) | a schedule pings `POST /events` every 5 minutes to keep a copy warm (`backend/app.py:93`) |
 
 ## Invariants
 
@@ -147,7 +147,7 @@ edge static -> supa color=process "anon key"
 - **More workers change behavior, not just capacity**: raising `WEB_CONCURRENCY` above 1 gives each worker its own rate-limit counters and memory caches. The config's docstring chooses threads over workers to keep that state shared (`backend/gunicorn.conf.py:6`).
 - **The rewrite file is named `_redirects.txt`**: CRA copies it to `build/_redirects.txt` unchanged, and nothing in the repo renames it. Static hosts that read a rewrite file conventionally look for `_redirects` with no extension, so whether the rule takes effect depends on how the host is configured outside the repo. If deep links like `/results?share=...` 404 on refresh, check this first.
 - **Tests run only on AWS deploys**: the deploy workflow runs the backend and frontend suites before deploying (`.github/workflows/deploy-aws.yml`), but nothing runs them on pull requests or before a Render deploy; see [[testing]].
-- **On AWS the API only answers CloudFront**: the Lambda function URL is public, so CloudFront adds a secret `X-Origin-Verify` header and the app refuses requests without it (`backend/origin.py`, `backend/app.py:79`). Only the adapter's health check (`GET /api/health`) and warm-up path (`POST /events`) stay open. The secret is the `ORIGIN_VERIFY_SECRET` GitHub secret; changing it means redeploying.
+- **On AWS the API only answers CloudFront**: the Lambda function URL is public, so CloudFront adds a secret `X-Origin-Verify` header and the app refuses requests without it (`backend/origin.py`, `backend/app.py:80`). Only the adapter's health check (`GET /api/health`) and warm-up path (`POST /events`) stay open. The secret is the `ORIGIN_VERIFY_SECRET` GitHub secret; changing it means redeploying.
 - **Quiet streams get a keepalive**: CloudFront closes an origin response that sends nothing for 60 seconds, so the analysis stream sends an SSE comment every 15 seconds while it waits (`backend/streaming.py`); the site ignores comment lines.
 - **Per-copy state on Lambda**: each Lambda copy has its own rate-limit counters and memory caches, like extra gunicorn workers. The shared report cache in Supabase is unaffected.
 - **Production API host is a fallback, not config**: a build without `REACT_APP_API_URL` served from any host other than localhost calls the Render URL (`frontend/src/api.js:9`), so any such deploy talks to the production API.

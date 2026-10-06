@@ -26,7 +26,7 @@ anchors:
   cache_budget: backend/supabase_client.py:273
   evict: backend/supabase_client.py:362
   delete_account: backend/supabase_client.py:384
-  creds_client_write: frontend/src/App.js:599
+  creds_client_write: frontend/src/App.js:600
 links:
   - backend
   - auth
@@ -44,7 +44,7 @@ invariants:
   - "MUST: retention_days is clamped to 1-30 before a save is written."
   - "NEVER: the browser reads saved_analyses, shared_results or report_cache directly; they have RLS on and no policies."
   - "NEVER: a report_cache failure breaks an analysis; every cache call is best-effort."
-content_hash: sha256:30099d308d4e4d79bab4c7806d790499357188fc0cc28a8d7369c8993790822b
+content_hash: sha256:d0284a4302f190085ede68435ec361ee6ae9f3eab1f8374beb00bdfb16ea7dff
 ---
 # Data Model
 
@@ -94,9 +94,9 @@ Columns as defined by the migrations, or, for tables created outside this repo, 
 | `retention_days`, `expires_at` {saved} | int 1-30; timestamp | Clamped at `backend/supabase_client.py:93` |
 | `size_bytes`, `created_at` {saved} | int; timestamp | Listing returns these without the payload (`backend/supabase_client.py:135`) |
 | `shared_results` {share} | `001_shares_and_rls.sql:13` | No policies; backend only |
-| `id` {share} | text PK | `secrets.token_urlsafe(9)` from `backend/app.py:667` |
+| `id` {share} | text PK | `secrets.token_urlsafe(9)` from `backend/app.py:673` |
 | `payload`, `size_bytes` {share} | `br64:` text; int | Max 2 MB compressed (`backend/supabase_client.py:33`) |
-| `created_by` {share} | uuid FK `auth.users`, `on delete set null` | Only set when the sharer was signed in (`backend/app.py:666`) |
+| `created_by` {share} | uuid FK `auth.users`, `on delete set null` | Only set when the sharer was signed in (`backend/app.py:672`) |
 | `created_at`, `expires_at` {share} | timestamps; index on `expires_at` | `expires_at` = now + 72h (`SHARE_TTL_HOURS`, `backend/supabase_client.py:34`) |
 | `report_cache` {cache} | `002_report_cache.sql:12` | No policies; backend only |
 | `key` {cache} | text PK, `v2:<namespace>:<repr(key)>` | Built in `backend/cache.py:61` |
@@ -104,7 +104,7 @@ Columns as defined by the migrations, or, for tables created outside this repo, 
 | `created_at`, `last_used_at` {cache} | timestamps; index on `last_used_at` | `last_used_at` bumped on every hit (`backend/supabase_client.py:334`) |
 | `api_credentials` {creds} | created outside the repo; RLS + 4 policies at `001_shares_and_rls.sql:36` | Read and written by the browser |
 | `id`, `user_id` {creds} | ids | Policies require `auth.uid() = user_id` |
-| `client_id`, `client_secret`, `last_used` {creds} | text; timestamp | Written by `frontend/src/App.js:602` and `frontend/src/Settings.js:81` |
+| `client_id`, `client_secret`, `last_used` {creds} | text; timestamp | Written by `frontend/src/App.js:603` and `frontend/src/Settings.js:81` |
 
 ## How it works
 
@@ -145,7 +145,7 @@ Each table has its own write path and its own way of getting rid of old rows.
 - **Eviction reads all rows in one select**: `evict_report_cache` does not page its `select` (`backend/supabase_client.py:366`). If the PostgREST row cap is lower than the table's row count, the oldest rows never enter the running total and are never evicted.
 - **Plain JSON rows still load**: `unpack` accepts text without the `br64:` prefix (`backend/supabase_client.py:78`), so rows from older versions keep working.
 - **Bumping CACHE_VERSION orphans rows**: keys start with `CACHE_VERSION` (`backend/cache.py:85`), so a bump leaves old rows unread until LRU eviction removes them.
-- **Credentials are stored as entered**: `api_credentials.client_secret` holds the WarcraftLogs secret as text, protected by RLS only (`frontend/src/App.js:606`).
+- **Credentials are stored as entered**: `api_credentials.client_secret` holds the WarcraftLogs secret as text, protected by RLS only (`frontend/src/App.js:607`).
 
 ## Glossary
 

@@ -191,6 +191,27 @@ class EndpointAuthTests(unittest.TestCase):
                                return_value={"error": "Could not create the share link."}):
             self.assertEqual(self.client.post('/api/share', json=payload).status_code, 500)
 
+    def test_share_and_save_accept_gzip_bodies(self):
+        import gzip, json as _json
+        body = gzip.compress(_json.dumps({"data": ANALYSIS, "config": {}}).encode())
+        headers = {"Content-Type": "application/json", "Content-Encoding": "gzip"}
+        with mock.patch.object(app_module.supabase_client, 'store_share',
+                               return_value={"success": True, "expires_at": "x"}) as store:
+            resp = self.client.post('/api/share', data=body, headers=headers)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(store.call_args.args[1], ANALYSIS)
+        with mock.patch.object(auth, 'verify_token', return_value='u1'), \
+                mock.patch.object(app_module.supabase_client, 'save_analysis',
+                                  return_value={"success": True, "id": "i"}) as save:
+            resp = self.client.post('/api/saved', data=body, headers={**headers, 'Authorization': 'Bearer t'})
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(save.call_args.kwargs['analysis_data'], ANALYSIS)
+
+    def test_an_oversized_body_is_413(self):
+        with mock.patch.object(app_module, 'json_body', side_effect=app_module.BodyTooLarge):
+            resp = self.client.post('/api/share', data=b'{}', headers={"Content-Type": "application/json"})
+        self.assertEqual(resp.status_code, 413)
+
     def test_share_rejects_non_analysis_payloads(self):
         resp = self.client.post('/api/share', json={"data": "junk"})
         self.assertEqual(resp.status_code, 400)

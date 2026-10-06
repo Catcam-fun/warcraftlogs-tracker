@@ -20,9 +20,9 @@ anchors:
   defensive_raw: backend/defensives.py:207
   death_windows: backend/defensives.py:768
   instakills: backend/defensives.py:811
-  analyze_credentials: backend/app.py:119
-  analyze_token: backend/app.py:152
-  report_fetch: backend/app.py:314
+  analyze_credentials: backend/app.py:125
+  analyze_token: backend/app.py:158
+  report_fetch: backend/app.py:320
   script_credentials: backend/scripts/build_raid_wide.py:79
 links:
   - warcraftlogs-api-client
@@ -40,12 +40,12 @@ invariants:
   - "NEVER: a guild-reports query filters by zoneID; mixed raid and dungeon reports would be dropped."
 flows:
   - request-path
-content_hash: sha256:7421bf041abe425ef8bb6ca3e37ec0bbcca08fb0d06945e9a9f55f5c43a5e776
+content_hash: sha256:0e277bbc1e9b713f9c74a41a78621f4c1b3b2e691fa17bf1e4e8c03d99eef8b5
 ---
 ## Summary
 
 - The backend is a **client of WarcraftLogs' v2 GraphQL API**. It owns no game logs; everything is read from WCL at analysis time, or from the cache of an earlier read.
-- Credentials are **the officer's own**: the Analyze request carries `clientId` and `clientSecret` (`backend/app.py:119`), and the backend trades them for an OAuth token with the client-credentials grant (`backend/warcraftlogs.py:91`).
+- Credentials are **the officer's own**: the Analyze request carries `clientId` and `clientSecret` (`backend/app.py:125`), and the backend trades them for an OAuth token with the client-credentials grant (`backend/warcraftlogs.py:91`).
 - Both endpoints point at a **Cloudflare Worker proxy** (`backend/warcraftlogs.py:15`), and the token request uses Basic auth because that Worker requires it (`backend/warcraftlogs.py:99`).
 - The read order is: token, guild roster, guild reports, each report's fights, then per-report event queries. The details of each call live in [[warcraftlogs-api-client]]; how the code keeps the cost down lives in [[warcraftlogs-point-budget]].
 
@@ -55,13 +55,13 @@ One Analyze request walks through the WCL reads below, in the order `generate()`
 
 ```steps
 - title: Get a token | short: Token | sub: OAuth client credentials
-  body: get_access_token posts grant_type=client_credentials with the client ID and secret as a Basic auth header (backend/warcraftlogs.py:99-121). The token is cached per sha256(client_id:client_secret) until 60 seconds before WCL's expiry (backend/warcraftlogs.py:93, 130-134). The Analyze stream calls it once per request (backend/app.py:152).
+  body: get_access_token posts grant_type=client_credentials with the client ID and secret as a Basic auth header (backend/warcraftlogs.py:99-121). The token is cached per sha256(client_id:client_secret) until 60 seconds before WCL's expiry (backend/warcraftlogs.py:93, 130-134). The Analyze stream calls it once per request (backend/app.py:158).
   gotcha: A cache slot per credential pair is deliberate. A single shared slot would hand one officer's token, and their rate-limit quota, to the next (comment at backend/warcraftlogs.py:23-25).
 - title: Guild roster | short: Roster | sub: only when the toggle is on
-  body: With rosterOnly on, get_guild_roster reads guildData.guild.members 100 at a time, the first 3 pages at once, then any remaining pages up to last_page (backend/warcraftlogs.py:321-323). Names are accent-stripped and lowercased into a set (backend/warcraftlogs.py:317-319). With the toggle off, the roster is not fetched at all (backend/app.py:159-160).
-  gotcha: The roster is best-effort. A failed page is skipped, and an empty roster means everyone counts (backend/app.py:175-178).
+  body: With rosterOnly on, get_guild_roster reads guildData.guild.members 100 at a time, the first 3 pages at once, then any remaining pages up to last_page (backend/warcraftlogs.py:321-323). Names are accent-stripped and lowercased into a set (backend/warcraftlogs.py:317-319). With the toggle off, the roster is not fetched at all (backend/app.py:165-166).
+  gotcha: The roster is best-effort. A failed page is skipped, and an empty roster means everyone counts (backend/app.py:181-184).
 - title: Guild reports | short: Reports | sub: scoped to the tier window
-  body: get_guild_reports pages reportData.reports 100 at a time with startTime and endTime pushed into the query, up to 50 pages (backend/warcraftlogs.py:200-246). The window is the tier's RAID_DATE_WINDOWS entry, which the user's dates can only narrow (backend/analysis.py:234, backend/app.py:183-185).
+  body: get_guild_reports pages reportData.reports 100 at a time with startTime and endTime pushed into the query, up to 50 pages (backend/warcraftlogs.py:200-246). The window is the tier's RAID_DATE_WINDOWS entry, which the user's dates can only narrow (backend/analysis.py:234, backend/app.py:189-191).
   gotcha: There is no zoneID filter on purpose. WCL gives a report one zone, so a night that mixes a raid and Mythic+ would be classified as the dungeon and dropped (docstring at backend/warcraftlogs.py:177-186).
 - title: Fights and players | short: Fights | sub: one query per report
   body: get_fights reads fights, Player actors, ability names, school bitmasks and icons, and playerDetails (spec per player) in one GraphQL round trip (backend/warcraftlogs.py:341-377). analyze_fights then keeps only pulls whose encounter ID is in the raid's RAID_ENCOUNTERS set at the chosen difficulty (backend/analysis.py:256-270).
@@ -120,7 +120,7 @@ What is read from WCL, and where.
 |---|---|---|
 | Runs on | Inside the Flask backend process; no separate service | `backend/app.py` |
 | Depends on | The WCL proxy at `wcl-proxy.catcam-fun.workers.dev` for both GraphQL and OAuth | hard-coded constants, `backend/warcraftlogs.py:15-16` |
-| Credentials (site) | `clientId`, `clientSecret` in each Analyze request body | the officer's own WCL API client, `backend/app.py:119-120` |
+| Credentials (site) | `clientId`, `clientSecret` in each Analyze request body | the officer's own WCL API client, `backend/app.py:125-126` |
 | Credentials (scripts) | `WCL_CLIENT_ID`, `WCL_CLIENT_SECRET` | shell environment, e.g. `backend/scripts/build_raid_wide.py:79`, `backend/scripts/check_deaths.py:27` |
 | Cache for finished reports | Supabase `report_cache` table behind an in-memory LRU | `backend/cache.py:42`; Supabase env vars in `backend/supabase_client.py:27-29` |
 

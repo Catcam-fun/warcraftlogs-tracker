@@ -51,9 +51,41 @@ export function stripSecrets(config) {
    (and the call fails fast when signed out); `auth: 'optional'` attaches
    it only if there is one. Resolves to { ok, status, body } and never
    throws on HTTP or network errors (only on abort). */
-export async function apiFetch(path, { auth = false, method = 'GET', body, signal } = {}) {
+/* Text as gzip bytes, or null when the browser can't compress. Big
+   analyses (shares, saves) are many MB; Lambda refuses request bodies over
+   6 MB, and JSON shrinks about 10x. The API reads either form. */
+async function gzipText(text) {
+  if (typeof CompressionStream === 'undefined' || typeof TextEncoder === 'undefined') return null;
+  const stream = new CompressionStream('gzip');
+  const writer = stream.writable.getWriter();
+  writer.write(new TextEncoder().encode(text));
+  writer.close();
+  const reader = stream.readable.getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value: chunk } = await reader.read();
+    if (done) break;
+    chunks.push(chunk);
+    total += chunk.length;
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  chunks.forEach((c) => { out.set(c, at); at += c.length; });
+  return out;
+}
+
+export async function apiFetch(path, { auth = false, method = 'GET', body, signal, compress = false } = {}) {
   const headers = {};
   if (body !== undefined) headers['Content-Type'] = 'application/json';
+  let payload = body === undefined ? undefined : JSON.stringify(body);
+  if (body !== undefined && compress) {
+    const zipped = await gzipText(payload);
+    if (zipped) {
+      payload = zipped;
+      headers['Content-Encoding'] = 'gzip';
+    }
+  }
   if (auth) {
     const { data: { session } } = await supabase.auth.getSession();
     if (session) headers.Authorization = `Bearer ${session.access_token}`;
@@ -64,7 +96,7 @@ export async function apiFetch(path, { auth = false, method = 'GET', body, signa
     response = await fetch(`${API_URL}${path}`, {
       method,
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: payload,
       signal,
     });
   } catch (err) {

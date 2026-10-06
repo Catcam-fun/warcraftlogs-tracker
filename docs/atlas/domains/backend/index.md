@@ -11,15 +11,15 @@ summary:
   - "Runs under gunicorn with threaded workers (gthread) so one streaming analysis never blocks other requests."
 tagline: The Flask service that fetches, counts and explains raid deaths.
 anchors:
-  flask_app: backend/app.py:59
-  cors: backend/app.py:66
-  analyze_route: backend/app.py:103
-  limiters: backend/app.py:51
+  flask_app: backend/app.py:60
+  cors: backend/app.py:67
+  analyze_route: backend/app.py:109
+  limiters: backend/app.py:52
   gunicorn_worker_class: backend/gunicorn.conf.py:14
   gunicorn_threads: backend/gunicorn.conf.py:15
   supabase_env: backend/supabase_client.py:27
   auth_env: backend/auth.py:20
-  dev_server: backend/app.py:773
+  dev_server: backend/app.py:779
   frontend_api_url: frontend/src/api.js:8
 links:
   - backend-api-endpoints
@@ -37,13 +37,13 @@ invariants:
   - "MUST: run under a threaded worker (gthread); a sync worker lets one analysis stream block every other request."
   - "MUST: keep WEB_CONCURRENCY at 1 unless shared state moves out of process; caches and rate limits live in process memory."
   - "NEVER: hard-code a WarcraftLogs API key on the server; each analysis brings the caller's own clientId and clientSecret."
-content_hash: sha256:2d2ab27013db36ba6652eaee16ed53523c1e4c2dccaef6e1c9ff250ccb1f9e44
+content_hash: sha256:d8802a318d06b35eb7e30746177fe75adb4a32ee0a4dc01dc3c7c4bcf603e59b
 ---
 ## Summary
 
-- The **backend** is one Flask application, `backend/app.py:59`. Its main job is `POST /api/analyze` (`backend/app.py:103`): it signs in to WarcraftLogs with the caller's own API client, reads the guild's reports for one raid tier, counts each pull's early deaths, attaches defensive analysis, and streams progress plus the final result as Server-Sent Events.
+- The **backend** is one Flask application, `backend/app.py:60`. Its main job is `POST /api/analyze` (`backend/app.py:109`): it signs in to WarcraftLogs with the caller's own API client, reads the guild's reports for one raid tier, counts each pull's early deaths, attaches defensive analysis, and streams progress plus the final result as Server-Sent Events.
 - The rest is small storage plumbing on top of Supabase: 72-hour share links, up to five saved analyses per signed-in user, and account deletion.
-- It deliberately keeps no WarcraftLogs credentials of its own. Every analysis request carries `clientId` and `clientSecret` (`backend/app.py:119`), so WarcraftLogs' points budget is the caller's key, not a shared one.
+- It deliberately keeps no WarcraftLogs credentials of its own. Every analysis request carries `clientId` and `clientSecret` (`backend/app.py:125`), so WarcraftLogs' points budget is the caller's key, not a shared one.
 - State that must be fast lives in process memory (LRU caches, rate-limit windows, token cache). State that must survive restarts lives in Supabase.
 
 ## Diagram
@@ -87,17 +87,17 @@ Every route, at a glance. Full request and response shapes are on [[backend-api-
 
 | Route {analysis} | Auth | Rate limit | Purpose |
 |---|---|---|---|
-| `POST /api/analyze` {analysis} | optional (unlocks cheat deaths) | 60 / hour / IP | Stream an analysis as SSE (`backend/app.py:103`) |
-| `POST /api/share` {sharing} | optional (links share to account) | 20 / hour / IP | Create a 72-hour share link (`backend/app.py:657`) |
-| `GET /api/shared/<share_id>` {sharing} | none | none | Read a share link (`backend/app.py:677`) |
-| `GET /api/saved` {saved} | required | none | List the user's saved analyses (`backend/app.py:699`) |
-| `POST /api/saved` {saved} | required | 30 / hour / IP | Save an analysis (`backend/app.py:705`) |
-| `GET /api/saved/<id>` {saved} | required | none | Load one saved analysis (`backend/app.py:723`) |
-| `DELETE /api/saved/<id>` {saved} | required | none | Delete one (`backend/app.py:731`) |
-| `DELETE /api/saved` {saved} | required | none | Delete all of the user's saves (`backend/app.py:739`) |
-| `DELETE /api/account` {account} | required | none | Delete the user's data and auth account (`backend/app.py:749`) |
-| `GET /api/health` {status} | none | none | Liveness plus whether Supabase is configured (`backend/app.py:763`) |
-| `GET /` {status} | none | none | Service banner (`backend/app.py:768`) |
+| `POST /api/analyze` {analysis} | optional (unlocks cheat deaths) | 60 / hour / IP | Stream an analysis as SSE (`backend/app.py:109`) |
+| `POST /api/share` {sharing} | optional (links share to account) | 20 / hour / IP | Create a 72-hour share link (`backend/app.py:663`) |
+| `GET /api/shared/<share_id>` {sharing} | none | none | Read a share link (`backend/app.py:683`) |
+| `GET /api/saved` {saved} | required | none | List the user's saved analyses (`backend/app.py:705`) |
+| `POST /api/saved` {saved} | required | 30 / hour / IP | Save an analysis (`backend/app.py:711`) |
+| `GET /api/saved/<id>` {saved} | required | none | Load one saved analysis (`backend/app.py:729`) |
+| `DELETE /api/saved/<id>` {saved} | required | none | Delete one (`backend/app.py:737`) |
+| `DELETE /api/saved` {saved} | required | none | Delete all of the user's saves (`backend/app.py:745`) |
+| `DELETE /api/account` {account} | required | none | Delete the user's data and auth account (`backend/app.py:755`) |
+| `GET /api/health` {status} | none | none | Liveness plus whether Supabase is configured (`backend/app.py:769`) |
+| `GET /` {status} | none | none | Service banner (`backend/app.py:774`) |
 
 The module map, for finding code:
 
@@ -121,10 +121,10 @@ The module map, for finding code:
 | Bind | `0.0.0.0:$PORT`, default 5000 (`backend/gunicorn.conf.py:12`) | host env |
 | Timeouts | `timeout` 120 s, `graceful_timeout` 30 s, `keepalive` 5 s (`backend/gunicorn.conf.py:18`) | `backend/gunicorn.conf.py` |
 | Depends on | WarcraftLogs v2 GraphQL API ([[warcraftlogs]]); Supabase Postgres and Auth ([[data-model]], [[auth]]) | network |
-| Config | `PORT`, `WEB_CONCURRENCY`, `GUNICORN_THREADS`, `ALLOWED_ORIGINS` (comma list, default `*`, `backend/app.py:66`) | host env; `.env` via `python-dotenv` (`backend/app.py:20`) |
+| Config | `PORT`, `WEB_CONCURRENCY`, `GUNICORN_THREADS`, `ALLOWED_ORIGINS` (comma list, default `*`, `backend/app.py:67`) | host env; `.env` via `python-dotenv` (`backend/app.py:20`) |
 | Secrets | `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (`backend/supabase_client.py:27`); `auth.py` reads the first two (`backend/auth.py:20`) | host env; local `backend/.env` (gitignored) |
 | WarcraftLogs keys | none on the server; sent per request as `clientId` / `clientSecret` | the caller |
-| Request size | bodies over 25 MB are rejected (`backend/app.py:61`) | code |
+| Request size | bodies over 25 MB are rejected (`backend/app.py:62`) | code |
 | Dependencies | Flask 3.0, flask-cors, requests, gunicorn 21.2, brotli, supabase, python-dotenv | `backend/requirements.txt` |
 
 The repository holds no `render.yaml` or `Procfile`; the Render start command and env values are set in Render's dashboard.
@@ -133,7 +133,7 @@ The repository holds no `render.yaml` or `Procfile`; the Render start command an
 
 | Aspect | Local | Production |
 |---|---|---|
-| Server | `python app.py`: Flask's threaded dev server on `PORT` or 5000 (`backend/app.py:773`) | gunicorn with `backend/gunicorn.conf.py` on Render |
+| Server | `python app.py`: Flask's threaded dev server on `PORT` or 5000 (`backend/app.py:779`) | gunicorn with `backend/gunicorn.conf.py` on Render |
 | URL the frontend uses | `http://localhost:5000` when the site runs on localhost (`frontend/src/api.js:9`) | `https://deathwarcraftlogs-api.onrender.com` (`frontend/src/api.js:9`), unless `REACT_APP_API_URL` overrides it at build time (`frontend/src/api.js:8`) |
 | Env source | `backend/.env` loaded by `load_dotenv()` | Render environment settings |
 | Supabase | optional: without it, saves fail, shares fall back to process memory, the shared report cache is skipped | configured; service-role key preferred (`backend/supabase_client.py:38`) |
@@ -143,13 +143,13 @@ The repository holds no `render.yaml` or `Procfile`; the Render start command an
 
 - **MUST** run under a threaded worker (`gthread`); a sync worker lets one analysis stream block every other request (`backend/gunicorn.conf.py:14`).
 - **MUST** keep `WEB_CONCURRENCY` at 1 unless shared state moves out of process; the report LRU caches, rate-limit windows and token cache are per process, so more processes multiply the limits and split the caches.
-- **NEVER** hard-code a WarcraftLogs API key on the server; each analysis brings the caller's own `clientId` and `clientSecret` (`backend/app.py:119`).
+- **NEVER** hard-code a WarcraftLogs API key on the server; each analysis brings the caller's own `clientId` and `clientSecret` (`backend/app.py:125`).
 
 ## Gotchas
 
-- **The analysis body is read before streaming starts**: `request.get_json` and the sign-in check run before the generator (`backend/app.py:109`, `backend/app.py:114`), because the generator runs after Flask's request context is gone.
+- **The analysis body is read before streaming starts**: `request.get_json` and the sign-in check run before the generator (`backend/app.py:115`, `backend/app.py:120`), because the generator runs after Flask's request context is gone.
 - **Errors after the stream starts are not HTTP errors**: once `/api/analyze` returns 200, a failure arrives as a `data: {"error": ...}` event. Only a bad JSON body (400) and the rate limit (429) are real HTTP errors.
-- **Free-tier sleep**: the frontend pings `/api/health` on load (`frontend/src/App.js:262`), which, per the comment at `frontend/src/App.js:257`, starts waking a Render instance that slept after idling, while the user is still filling in the form.
+- **Free-tier sleep**: the frontend pings `/api/health` on load (`frontend/src/App.js:263`), which, per the comment at `frontend/src/App.js:258`, starts waking a Render instance that slept after idling, while the user is still filling in the form.
 
 ## Related
 
