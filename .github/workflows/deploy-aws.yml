@@ -1,0 +1,127 @@
+# Deploy Floor Pov to AWS (infra/template.yaml): the Flask API to Lambda and
+# the React site to S3, both behind CloudFront.
+#
+# Run it by hand: Actions > "Deploy to AWS" > Run workflow, pick the branch and
+# the stage. Each stage is its own stack (floorpov-staging, floorpov-production)
+# with its own CloudFront address, printed at the end of the run.
+#
+# Setup, once: infra/README.md (the deploy role, then these secrets on the
+# repository or on GitHub environments named staging / production):
+#   AWS_DEPLOY_ROLE_ARN, SUPABASE_URL, SUPABASE_KEY, SUPABASE_SERVICE_ROLE_KEY,
+#   ORIGIN_VERIFY_SECRET (32+ random characters).
+name: Deploy to AWS
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: Which copy of the site to deploy
+        type: choice
+        options: [staging, production]
+        default: staging
+
+permissions:
+  id-token: write   # GitHub's OIDC token, exchanged for the AWS deploy role
+  contents: read
+
+concurrency:
+  group: deploy-aws-${{ inputs.stage }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.stage }}
+    env:
+      AWS_REGION: us-east-1
+      STACK: floorpov-${{ inputs.stage }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Backend tests
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt
+          python -m unittest discover -p "test_*.py"
+
+      - name: Frontend tests
+        working-directory: frontend
+        run: |
+          npm ci
+          CI=true npx react-scripts test --watchAll=false
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: Deploy API and CloudFront (SAM)
+        run: |
+          sam build --template-file infra/template.yaml
+          sam deploy \
+            --stack-name "$STACK" \
+            --resolve-s3 \
+            --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND \
+            --no-confirm-changeset --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              Stage=${{ inputs.stage }} \
+              SupabaseUrl='${{ secrets.SUPABASE_URL }}' \
+              SupabaseKey='${{ secrets.SUPABASE_KEY }}' \
+              SupabaseServiceRoleKey='${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}' \
+              OriginVerifySecret='${{ secrets.ORIGIN_VERIFY_SECRET }}'
+
+      - name: Read stack outputs
+        id: out
+        run: |
+          get() { aws cloudformation describe-stacks --stack-name "$STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text; }
+          echo "bucket=$(get SiteBucketName)" >> "$GITHUB_OUTPUT"
+          echo "distribution=$(get DistributionId)" >> "$GITHUB_OUTPUT"
+          echo "url=$(get SiteUrl)" >> "$GITHUB_OUTPUT"
+
+      - name: Build and upload the site
+        working-directory: frontend
+        env:
+          REACT_APP_API_URL: same-origin   # API under /api on the same CloudFront host
+        run: |
+          npm run build
+          # Hashed bundles never change: cache them for a year.
+          aws s3 sync build/static "s3://${{ steps.out.outputs.bucket }}/static" \
+            --cache-control "public,max-age=31536000,immutable" --delete
+          # Everything else (index.html, art, manifest): always revalidate.
+          aws s3 sync build "s3://${{ steps.out.outputs.bucket }}" \
+            --exclude "static/*" --exclude "_redirects.txt" \
+            --cache-control "public,max-age=0,must-revalidate" --delete
+          aws cloudfront create-invalidation --distribution-id "${{ steps.out.outputs.distribution }}" \
+            --paths "/*" > /dev/null
+
+      - name: Smoke test
+        run: |
+          url="${{ steps.out.outputs.url }}"
+          for i in 1 2 3 4 5 6; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$url/api/health") && [ "$code" = 200 ] && break
+            sleep 10
+          done
+          curl -fsS "$url/api/health"; echo
+          curl -fsS -o /dev/null "$url/" && echo "site OK"
+          curl -fsS -o /dev/null "$url/results" && echo "deep link OK"
+          # The Lambda URL itself must refuse requests that skip CloudFront.
+          fn_url=$(aws lambda get-function-url-config --function-name "floorpov-${{ inputs.stage }}-api" \
+            --query FunctionUrl --output text)
+          code=$(curl -s -o /dev/null -w '%{http_code}' "${fn_url}api/shared/abcdefghijkl")
+          [ "$code" = 403 ] && echo "origin lock OK" || { echo "origin lock returned $code"; exit 1; }
+          echo "### $STACK is live at $url" >> "$GITHUB_STEP_SUMMARY"

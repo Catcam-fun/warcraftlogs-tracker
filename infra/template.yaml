@@ -1,0 +1,217 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Floor Pov on AWS: the React site in a private S3 bucket and the Flask API on
+  Lambda (Lambda Web Adapter, response streaming), both behind one CloudFront
+  distribution. /api/* goes to Lambda, everything else to S3.
+
+Parameters:
+  Stage:
+    Type: String
+    AllowedValues: [staging, production]
+    Description: Which copy of the site this stack is.
+  SupabaseUrl:
+    Type: String
+  SupabaseKey:
+    Type: String
+    NoEcho: true
+    Description: Supabase anon key (used to verify sign-in tokens).
+  SupabaseServiceRoleKey:
+    Type: String
+    NoEcho: true
+    Description: Supabase service role key (saves, shares, report cache, account deletion).
+  OriginVerifySecret:
+    Type: String
+    NoEcho: true
+    MinLength: 32
+    Description: >
+      Random value CloudFront adds to every /api request as X-Origin-Verify;
+      the API refuses requests without it (backend/origin.py).
+
+Resources:
+  # ---------------------------------------------------------------- website
+  SiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  SiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref SiteBucket
+      PolicyDocument:
+        Statement:
+          - Sid: CloudFrontReadsTheSite
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${SiteBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+
+  SiteOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub 'floorpov-${Stage}-site'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # Deep links (/results, /analyze, /saved...) are React routes: serve
+  # index.html for any path without a file extension.
+  SpaRewriteFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub 'floorpov-${Stage}-spa-rewrite'
+      AutoPublish: true
+      FunctionConfig:
+        Comment: Serve index.html for React routes
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+          var request = event.request;
+          var last = request.uri.split('/').pop();
+          if (last.indexOf('.') === -1) {
+            request.uri = '/index.html';
+          }
+          return request;
+        }
+
+  # The API's rate limits key on the visitor's IP. Write it into X-Viewer-Ip
+  # here, replacing anything the visitor sent (backend/ratelimit.py).
+  ViewerIpFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub 'floorpov-${Stage}-viewer-ip'
+      AutoPublish: true
+      FunctionConfig:
+        Comment: Pass the viewer IP to the API
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+          var request = event.request;
+          request.headers['x-viewer-ip'] = { value: event.viewer.ip };
+          return request;
+        }
+
+  # ---------------------------------------------------------------- API
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'floorpov-${Stage}-api'
+      CodeUri: ../backend/
+      Handler: run.sh
+      Runtime: python3.12
+      Architectures: [x86_64]
+      MemorySize: 1024
+      # An analysis streams for minutes; Lambda's maximum is 15.
+      Timeout: 900
+      Layers:
+        - !Sub 'arn:aws:lambda:${AWS::Region}:753240598075:layer:LambdaAdapterLayerX86:30'
+      Environment:
+        Variables:
+          AWS_LAMBDA_EXEC_WRAPPER: /opt/bootstrap
+          AWS_LWA_INVOKE_MODE: response_stream
+          AWS_LWA_READINESS_CHECK_PATH: /api/health
+          PORT: '8080'
+          # One request at a time per Lambda copy; a few threads cover the
+          # adapter's readiness check alongside a stream.
+          WEB_CONCURRENCY: '1'
+          GUNICORN_THREADS: '4'
+          SUPABASE_URL: !Ref SupabaseUrl
+          SUPABASE_KEY: !Ref SupabaseKey
+          SUPABASE_SERVICE_ROLE_KEY: !Ref SupabaseServiceRoleKey
+          ORIGIN_VERIFY_SECRET: !Ref OriginVerifySecret
+      LoggingConfig:
+        LogGroup: !Ref ApiLogGroup
+      FunctionUrlConfig:
+        AuthType: NONE
+        InvokeMode: RESPONSE_STREAM
+      Events:
+        # Keeps a copy warm. The adapter hands non-HTTP events to POST /events.
+        Warm:
+          Type: Schedule
+          Properties:
+            Schedule: rate(5 minutes)
+            Input: '{"source": "floorpov.warm"}'
+
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/floorpov-${Stage}-api'
+      RetentionInDays: 30
+
+  # ---------------------------------------------------------------- CDN
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: !Sub 'Floor Pov ${Stage}'
+        Enabled: true
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        PriceClass: PriceClass_100
+        DefaultRootObject: index.html
+        Origins:
+          - Id: site
+            DomainName: !GetAtt SiteBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt SiteOriginAccessControl.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+          - Id: api
+            # https://<id>.lambda-url.<region>.on.aws/ -> <id>.lambda-url.<region>.on.aws
+            DomainName: !Select [2, !Split ['/', !GetAtt ApiFunctionUrl.FunctionUrl]]
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+              # Longest quiet gap allowed; the API sends a keepalive every 15s.
+              OriginReadTimeout: 60
+              OriginKeepaliveTimeout: 60
+            OriginCustomHeaders:
+              - HeaderName: X-Origin-Verify
+                HeaderValue: !Ref OriginVerifySecret
+        DefaultCacheBehavior:
+          TargetOriginId: site
+          ViewerProtocolPolicy: redirect-to-https
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6        # Managed-CachingOptimized
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt SpaRewriteFunction.FunctionMetadata.FunctionARN
+        CacheBehaviors:
+          - PathPattern: /api/*
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            Compress: false                                          # don't buffer the stream
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad      # Managed-CachingDisabled
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac  # Managed-AllViewerExceptHostHeader
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ViewerIpFunction.FunctionMetadata.FunctionARN
+
+Outputs:
+  SiteUrl:
+    Description: The site (and /api) on CloudFront's default address.
+    Value: !Sub 'https://${Distribution.DomainName}'
+  SiteBucketName:
+    Value: !Ref SiteBucket
+  DistributionId:
+    Value: !Ref Distribution
+  ApiFunctionName:
+    Value: !Ref ApiFunction

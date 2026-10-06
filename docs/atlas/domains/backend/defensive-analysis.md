@@ -31,8 +31,8 @@ anchors:
   consumable_estimate: "backend/defensives.py:1084"
   keep: "backend/defensives.py:1168"
   fetch_death_windows: "backend/defensives.py:768"
-  app_gate: "backend/app.py:518"
-  app_counted: "backend/app.py:280"
+  app_gate: "backend/app.py:539"
+  app_counted: "backend/app.py:301"
 links:
   - backend-death-descriptions
   - backend-death-counting
@@ -40,7 +40,7 @@ links:
   - warcraftlogs
   - frontend-results-view
   - feat-results
-content_hash: sha256:a78e4830bd8197093115525f7b6545f993147365aa5b3769df0cd3f8b6691af0
+content_hash: sha256:0ec0c8a91b0f7e993ba84f152fefe8106a858a7769c1404fd5e7af817679de4e
 ---
 ## Summary
 
@@ -57,7 +57,7 @@ The analyze stream in `backend/app.py` drives everything. Per report it fetches 
 ```steps
 - title: Pick the patch catalog | short: Pick catalog | sub: patch live on the log date
   body: catalog_for turns the report's start time into a UTC date and picks the last patch in PATCHES whose first live day is on or before it (backend/defensives.py:122). Each Catalog splits the patch's abilities into personal, external and consumable (healthstone, potion) and records every talent entry the analysis will ever read (backend/defensives.py:70). With no start time it falls back to the latest patch.
-  gotcha: CATALOG_FINGERPRINT (backend/defensives.py:166) is part of the defensive cache key in backend/app.py:317, so a rebuilt catalog never reuses data fetched for an older one.
+  gotcha: CATALOG_FINGERPRINT (backend/defensives.py:166) is part of the defensive cache key in backend/app.py:338, so a rebuilt catalog never reuses data fetched for an older one.
 - title: Fetch defensive events | short: Fetch events | sub: four queries at once
   body: fetch_defensive_raw runs four paged WCL queries in parallel (backend/defensives.py:207). Casts and Buffs cover the whole report range from 3 minutes before the first pull (ENCOUNTER_RESET_MS, backend/defensives.py:34) so a button pressed just before a pull counts. CombatantInfo and consumable Healing are scoped to the boss pulls. filter_defensive_raw then keeps only players who died (backend/defensives.py:242).
   gotcha: The queries are not filtered by player in WCL. The code comment records that source.id / target.id filters return nothing on Casts and Buffs, and the unfiltered query costs fewer points.
@@ -67,7 +67,7 @@ The analyze stream in `backend/app.py` drives everything. Per report it fetches 
   body: For deaths that can count, fetch_death_windows asks WCL for DamageTaken from LETHAL_WINDOW_MS before the first death to just after the last, filtered by target.name (backend/defensives.py:768). Pulls within WINDOW_BLOCK_SPAN_MS (15 minutes) share one block, and up to 20 blocks go in one request (backend/defensives.py:721). fetch_instakills adds instant kills, which carry no damage (backend/defensives.py:811). merge_hits joins both by player (backend/defensives.py:849).
   gotcha: The name filter uses json.dumps with ensure_ascii=False (backend/defensives.py:792) so accented names match; an escaped name matches nobody.
 - title: Gate the death | short: Gate | sub: only deaths that can count
-  body: In backend/app.py:518 analyze_death runs only when defensive data exists, the death has a target ID, is not a cheat death, its slot is within max_cutoff and it is not in a wipe. The spec passed is pull_spec for that fight, with the report's spec as fallback (backend/app.py:524). The armor constant of the boss and whether a Warlock was in the pull (soulwell) are passed too (backend/app.py:536, backend/app.py:462).
+  body: In backend/app.py:539 analyze_death runs only when defensive data exists, the death has a target ID, is not a cheat death, its slot is within max_cutoff and it is not in a wipe. The spec passed is pull_spec for that fight, with the report's spec as fallback (backend/app.py:545). The armor constant of the boss and whether a Warlock was in the pull (soulwell) are passed too (backend/app.py:557, backend/app.py:483).
 - title: Sort the buttons | short: Sort buttons | sub: active, available, cooldown
   body: For every personal defensive the player has (_has_ability, backend/defensives.py:347), analyze_death marks it active if its aura was up, otherwise simulates charges and cooldown up to the death (backend/defensives.py:561). Abilities with a cooldown of 3 minutes or more only look at presses during the pull; shorter ones look back one full recharge cycle (backend/defensives.py:571). Available buttons record when they last came off cooldown in ready_since.
   gotcha: A single-charge button recast faster than its catalog cooldown (by more than CDR_TOLERANCE_MS) uses the observed shortest gap, since talents must have shortened it (backend/defensives.py:412).
@@ -109,7 +109,7 @@ The analyze stream in `backend/app.py` drives everything. Per report it fetches 
 
 ## Reference
 
-What `analyze_death` returns, attached as `death_event['defensives']` (`backend/app.py:539`).
+What `analyze_death` returns, attached as `death_event['defensives']` (`backend/app.py:560`).
 
 | Field {death} | Meaning |
 |---|---|
@@ -139,7 +139,7 @@ Values of `details[].why` from `_explain` (`backend/defensives.py:1413`) and `as
 | `hotTooLate` {why} | No heal-over-time tick would have landed before the killing blow |
 | `instakill` {why} | Instant kill: nothing to reduce, absorb or heal |
 
-Also sent once per result by `backend/app.py`: `abilityInfo` (each ability's general effect, `ability_info`, `backend/defensives.py:147`) and `icons` (`backend/app.py:599`).
+Also sent once per result by `backend/app.py`: `abilityInfo` (each ability's general effect, `ability_info`, `backend/defensives.py:147`) and `icons` (`backend/app.py:620`).
 
 ## Context map
 
@@ -156,10 +156,10 @@ relied-on-by: [[feat-results]] — the death breakdown a raid officer reads
 
 ## Invariants
 
-- **MUST** analyze only deaths that can count: target known, not a cheat death, `slot <= max_cutoff`, not in a wipe (`backend/app.py:518`); the hits are fetched for the same set (`backend/app.py:280`).
+- **MUST** analyze only deaths that can count: target known, not a cheat death, `slot <= max_cutoff`, not in a wipe (`backend/app.py:539`); the hits are fetched for the same set (`backend/app.py:301`).
 - **MUST** press no earlier than the ability was ready (`ready_since`) and no later than `REACTION_MS` (1s) before the killing blow (`backend/defensives.py:1606`, `backend/defensives.py:1501`).
 - **MUST** cap extra health at what the player was missing before each hit and at each heal (`backend/defensives.py:1375`, `backend/defensives.py:1355`); otherwise a defensive on a full-health player would look like it saved them.
-- **MUST** read talents and spec from that pull's CombatantInfo (`backend/defensives.py:519`, `backend/app.py:524`); players change both between pulls.
+- **MUST** read talents and spec from that pull's CombatantInfo (`backend/defensives.py:519`, `backend/app.py:545`); players change both between pulls.
 - **MUST** send an `endTime` with every fightIDs-scoped events query (`backend/defensives.py:745`); WCL returns an empty second page without one.
 - **NEVER** count an immunity against a spell in `IGNORES_IMMUNITY` (`backend/defensives.py:1183`).
 - **NEVER** assume a carried Healthstone or potion the player never used in this log, unless a Warlock in the pull offered a Soulwell (`backend/defensives.py:620`).
@@ -171,7 +171,7 @@ relied-on-by: [[feat-results]] — the death breakdown a raid officer reads
 - **No killing blow with health data means no survival block**: `assess_survival` returns `None` when the killing blow is missing or its health belongs to someone else (`backend/defensives.py:1563`). `index_hits` strips health WCL attached from the source actor (`backend/defensives.py:837`).
 - **Older logs do not mark AoE hits**: if a report has no hit with `isAoE`, AoE-only effects are judged unknown (`null`) instead of not applying (`logs_mark_aoe`, `backend/defensives.py:819`; `backend/defensives.py:878`).
 - **Forms are judged as shift then press**: a button that needs a form the player was not in (Frenzied Regeneration needs Bear Form) is scored together with the form (`backend/defensives.py:646`, `backend/defensives.py:1601`).
-- **Defensive data failure does not drop deaths**: if the defensive fetch fails, the report's deaths still count and the stream warns that defensive details are missing (`backend/app.py:342`, `backend/app.py:410`).
+- **Defensive data failure does not drop deaths**: if the defensive fetch fails, the report's deaths still count and the stream warns that defensive details are missing (`backend/app.py:363`, `backend/app.py:431`).
 
 ## Glossary
 

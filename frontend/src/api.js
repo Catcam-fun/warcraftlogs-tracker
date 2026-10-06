@@ -1,11 +1,13 @@
 import { supabase } from './supabaseClient';
 
 /* Single source of truth for the backend URL. Set REACT_APP_API_URL at
-   build time to point a deploy elsewhere; otherwise localhost talks to a
-   local backend and everything else to production. */
+   build time to point a deploy elsewhere ("same-origin" when the API is
+   served under /api on the site's own host, as on AWS); otherwise localhost
+   talks to a local backend and everything else to production. */
 const isLocal = ['localhost', '127.0.0.1'].includes(window.location.hostname);
-export const API_URL = process.env.REACT_APP_API_URL
-  || (isLocal ? 'http://localhost:5000' : 'https://deathwarcraftlogs-api.onrender.com');
+const configured = process.env.REACT_APP_API_URL;
+export const API_URL = configured === 'same-origin' ? ''
+  : configured || (isLocal ? 'http://localhost:5000' : 'https://deathwarcraftlogs-api.onrender.com');
 
 /* Analysis config fields that must never leave the browser except in the
    /api/analyze call itself (not in shares, saves, or local history). */

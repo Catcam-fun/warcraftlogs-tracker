@@ -10,18 +10,18 @@ summary:
   - "Rate-limited routes answer 429 with {success: false, error} before any work is done."
 tagline: Every route, its auth, its limit, and the SSE protocol of /api/analyze.
 anchors:
-  analyze: backend/app.py:82
-  analyze_config_read: backend/app.py:88
-  sse_response: backend/app.py:618
-  result_payload: backend/app.py:578
-  death_event: backend/app.py:494
-  share_create: backend/app.py:636
-  share_read: backend/app.py:656
-  share_id_re: backend/app.py:628
-  saved_id_re: backend/app.py:629
-  storage_response: backend/app.py:671
+  analyze: backend/app.py:103
+  analyze_config_read: backend/app.py:109
+  sse_response: backend/app.py:639
+  result_payload: backend/app.py:599
+  death_event: backend/app.py:515
+  share_create: backend/app.py:657
+  share_read: backend/app.py:677
+  share_id_re: backend/app.py:649
+  saved_id_re: backend/app.py:650
+  storage_response: backend/app.py:692
   require_user: backend/auth.py:79
-  limit_decorator: backend/ratelimit.py:47
+  limit_decorator: backend/ratelimit.py:56
   frontend_sse_reader: frontend/src/App.js:750
 links:
   - backend
@@ -40,67 +40,67 @@ invariants:
   - "MUST: an /api/analyze stream ends with exactly one result event or one error event; the client treats the first error as final."
   - "MUST: cheat-death detection runs only for a request with a valid bearer token, whatever enableCheatDeath says."
   - "NEVER: return stored credentials; shares and saves pass config through strip_secrets on the way in and out."
-content_hash: sha256:521d80553dbb5edc35e507cc72be770ad13fc5b982a3252debb16b03af94eef0
+content_hash: sha256:712c9040d4792ba79f207098951e2a2657a7d71a711af81c402544592d7e53e8
 ---
 ## Summary
 
-- All routes live in `backend/app.py`. CORS covers `/api/*` with the origins from `ALLOWED_ORIGINS`, headers `Content-Type` and `Authorization`, and methods GET, POST, DELETE, OPTIONS (`backend/app.py:65`).
+- All routes live in `backend/app.py`. CORS covers `/api/*` with the origins from `ALLOWED_ORIGINS`, headers `Content-Type` and `Authorization`, and methods GET, POST, DELETE, OPTIONS (`backend/app.py:67`).
 - Authentication is a Supabase access token in `Authorization: Bearer ...`. `require_user` answers 401 `{"success": false, "error": "Please sign in again."}` when it is missing or invalid, and stores the user id in `g.user_id` (`backend/auth.py:79`). See [[auth]].
-- Rate-limited routes use the `limit` decorator, which answers 429 `{"success": false, "error": <message>}` and skips OPTIONS preflights (`backend/ratelimit.py:47`). See [[backend-caching-and-limits]].
+- Rate-limited routes use the `limit` decorator, which answers 429 `{"success": false, "error": <message>}` and skips OPTIONS preflights (`backend/ratelimit.py:56`). See [[backend-caching-and-limits]].
 
 ## Reference
 
 | Route {analysis} | Auth | Limit | Request | Success response | Errors |
 |---|---|---|---|---|---|
-| `POST /api/analyze` {analysis} | optional bearer | 60/h/IP | JSON config (below) | 200 `text/event-stream` | 400 `{"error": "Invalid request"}` if the body is not a JSON object (`backend/app.py:89`); 429; everything else as SSE `error` events |
-| `POST /api/share` {sharing} | optional bearer (sets `created_by`) | 20/h/IP | `{data, config}`; `data` must have an `events` object (`backend/app.py:632`) | `{success, shareId, expiresAt}` | 400 "Nothing to share"; 413 for any storage error, including too large (`backend/app.py:649`) |
-| `GET /api/shared/<share_id>` {sharing} | none | none | `share_id` matches `^[A-Za-z0-9_-]{6,32}$` (`backend/app.py:628`) | `{success, data, config, timestamp}` | 404 if malformed, missing or expired |
+| `POST /api/analyze` {analysis} | optional bearer | 60/h/IP | JSON config (below) | 200 `text/event-stream` | 400 `{"error": "Invalid request"}` if the body is not a JSON object (`backend/app.py:110`); 429; everything else as SSE `error` events |
+| `POST /api/share` {sharing} | optional bearer (sets `created_by`) | 20/h/IP | `{data, config}`; `data` must have an `events` object (`backend/app.py:653`) | `{success, shareId, expiresAt}` | 400 "Nothing to share"; 413 for any storage error, including too large (`backend/app.py:670`) |
+| `GET /api/shared/<share_id>` {sharing} | none | none | `share_id` matches `^[A-Za-z0-9_-]{6,32}$` (`backend/app.py:649`) | `{success, data, config, timestamp}` | 404 if malformed, missing or expired |
 | `GET /api/saved` {saved} | required | none | none | `{success, analyses: [id, analysis_name, guild_name, created_at, expires_at, retention_days, size_bytes], limit: 5}` | 500 on storage failure |
 | `POST /api/saved` {saved} | required | 30/h/IP | `{name, data, config, retentionDays}`; retention clamped to 1-30 days (`backend/supabase_client.py:93`) | 201 `{success, id, size_bytes}` | 400 "Nothing to save"; 409 at the 5-save limit; 413 too large |
-| `GET /api/saved/<id>` {saved} | required | none | `id` is a 36-char UUID (`backend/app.py:629`) | `{success, analysis_name, guild_name, data, config, created_at, expires_at}` | 404 if malformed or not the user's |
+| `GET /api/saved/<id>` {saved} | required | none | `id` is a 36-char UUID (`backend/app.py:650`) | `{success, analysis_name, guild_name, data, config, created_at, expires_at}` | 404 if malformed or not the user's |
 | `DELETE /api/saved/<id>` {saved} | required | none | UUID | `{success: true}` | 404 if malformed |
 | `DELETE /api/saved` {saved} | required | none | none | `{success: true}` | 500 on storage failure |
-| `DELETE /api/account` {account} | required | none | none | `{success: true}`; the token is dropped from the verify cache (`backend/app.py:734`) | 500 if deletion is not configured or partly failed |
+| `DELETE /api/account` {account} | required | none | none | `{success: true}`; the token is dropped from the verify cache (`backend/app.py:755`) | 500 if deletion is not configured or partly failed |
 | `GET /api/health` {status} | none | none | none | `{status: "healthy", supabase: <bool>}` | none |
 | `GET /` {status} | none | none | none | `{service: "Floor Pov API", status: "running"}` | none |
 
-Storage routes share one mapper, `_storage_response` (`backend/app.py:671`): a result without `error` passes through; otherwise the `code` picks the status (`limit` 409, `too_large` 413, `not_found` 404, anything else 500) and the body is `{"success": false, "error", "code"?}`.
+Storage routes share one mapper, `_storage_response` (`backend/app.py:692`): a result without `error` passes through; otherwise the `code` picks the status (`limit` 409, `too_large` 413, `not_found` 404, anything else 500) and the body is `{"success": false, "error", "code"?}`.
 
 #### The analysis request body
 
 | Field {config} | Meaning | Handling |
 |---|---|---|
-| `clientId`, `clientSecret` {config} | The caller's WarcraftLogs API client | required (`backend/app.py:121`) |
+| `clientId`, `clientSecret` {config} | The caller's WarcraftLogs API client | required (`backend/app.py:142`) |
 | `guildName`, `server`, `region` {config} | Which guild | required |
 | `selectedRaid` {config} | Key into `RAID_ENCOUNTERS` / `RAID_DATE_WINDOWS` | see [[backend-analysis-pipeline]] |
-| `difficulty` {config} | 3 Normal, 4 Heroic, 5 Mythic (`backend/app.py:233`) | compared to each fight's `difficulty` |
+| `difficulty` {config} | 3 Normal, 4 Heroic, 5 Mythic (`backend/app.py:254`) | compared to each fight's `difficulty` |
 | `fightZone` {config} | WCL zone id, used only when the raid key is unknown | fallback filter |
-| `maxCutoff` {config} | Deaths per pull that count | default 5, clamped to 1-10 (`backend/app.py:107`) |
+| `maxCutoff` {config} | Deaths per pull that count | default 5, clamped to 1-10 (`backend/app.py:128`) |
 | `startDate`, `endDate` {config} | `YYYY-MM-DD`, may only narrow the tier window | empty string means none |
 | `authorFilters` {config} | Report owner names to keep | optional list |
 | `characterGroups` {config} | `{main: [alts]}` merging alts into one player | optional |
-| `enableCheatDeath` {config} | Detect cheat deaths | honored only when signed in (`backend/app.py:116`) |
-| `rosterOnly` {config} | Count only guild-roster players | default true; only an explicit `false` turns it off (`backend/app.py:118`) |
+| `enableCheatDeath` {config} | Detect cheat deaths | honored only when signed in (`backend/app.py:137`) |
+| `rosterOnly` {config} | Count only guild-roster players | default true; only an explicit `false` turns it off (`backend/app.py:139`) |
 
 ## How it works
 
 #### The /api/analyze SSE protocol
 
-The route returns `Response(generate(), mimetype='text/event-stream')` with `Cache-Control: no-cache` and `X-Accel-Buffering: no` so proxies do not buffer the stream (`backend/app.py:618`). Each event is a single `data: <json>` line followed by a blank line. There are no `event:` names or ids; the JSON keys say what the event is. The frontend splits on blank lines and dispatches on `error`, then `message`, then `result` (`frontend/src/App.js:750`).
+The route returns `Response(generate(), mimetype='text/event-stream')` with `Cache-Control: no-cache` and `X-Accel-Buffering: no` so proxies do not buffer the stream (`backend/app.py:639`). Each event is a single `data: <json>` line followed by a blank line. There are no `event:` names or ids; the JSON keys say what the event is. The frontend splits on blank lines and dispatches on `error`, then `message`, then `result` (`frontend/src/App.js:750`).
 
 | Event {sse} | Shape | When |
 |---|---|---|
 | progress {sse} | `{"stage": <stage>, "message": <text>}` | many times; only for display |
-| error {sse} | `{"error": <text>}` | at most once, then the stream ends (`backend/app.py:616`) |
-| result {sse} | `{"result": <analysis>}` | once, last (`backend/app.py:610`) |
+| error {sse} | `{"error": <text>}` | at most once, then the stream ends (`backend/app.py:637`) |
+| result {sse} | `{"result": <analysis>}` | once, last (`backend/app.py:631`) |
 
-The stages, in order: `auth` (signing in, or the "needs a signed-in account" notice for cheat deaths, `backend/app.py:126`), `roster`, `reports`, `fights`, `dedup`, `deaths`, `processing`, `complete`. Warnings about unreadable reports or missing defensive detail arrive as ordinary `deaths` progress events (`backend/app.py:406`, `backend/app.py:412`), not as errors.
+The stages, in order: `auth` (signing in, or the "needs a signed-in account" notice for cheat deaths, `backend/app.py:147`), `roster`, `reports`, `fights`, `dedup`, `deaths`, `processing`, `complete`. Warnings about unreadable reports or missing defensive detail arrive as ordinary `deaths` progress events (`backend/app.py:427`, `backend/app.py:433`), not as errors.
 
-Errors that end the stream early: missing required fields, WarcraftLogs authentication failure, no reports after filtering, no fights at the chosen difficulty, or any unexpected exception (`backend/app.py:122`, `backend/app.py:133`, `backend/app.py:173`, `backend/app.py:235`, `backend/app.py:612`).
+Errors that end the stream early: missing required fields, WarcraftLogs authentication failure, no reports after filtering, no fights at the chosen difficulty, or any unexpected exception (`backend/app.py:143`, `backend/app.py:154`, `backend/app.py:194`, `backend/app.py:256`, `backend/app.py:633`).
 
 #### The result object
 
-Built at `backend/app.py:578`:
+Built at `backend/app.py:599`:
 
 | Key {result} | Contents |
 |---|---|
@@ -110,11 +110,11 @@ Built at `backend/app.py:578`:
 | `bossParticipation` {result} | `{bossName: {mainCharacter: [pullKey]}}` |
 | `pullCutoffTimestamps` {result} | `{pullKey: {cutoff: ms from pull start}}`; see [[backend-death-counting]] |
 | `icons` {result} | defensive and consumable icon names, by ability name |
-| `abilityIcons` {result} | killing-blow icon, by spell id (`backend/app.py:601`) |
+| `abilityIcons` {result} | killing-blow icon, by spell id (`backend/app.py:622`) |
 | `abilityInfo` {result} | what each defensive shown does, by name |
-| `abilityText` {result} | in-game text of each killing blow, by spell id; `Melee` and `Falling` use fixed text (`backend/app.py:76`) |
+| `abilityText` {result} | in-game text of each killing blow, by spell id; `Melee` and `Falling` use fixed text (`backend/app.py:97`) |
 
-A death event (`backend/app.py:494`) carries `player` (the main character), `originalCharacter`, `boss`, `bossId`, `phase` (always 1 today), `reportId`, `fightId`, `isKill`, `pullNo` (pull number for that boss, oldest first), `absTs`, `timestamp` (ms from pull start), `abilityName`, `abilityId`, `isCheatDeath`, `slot`, `inWipe`, `class`, `spec`, and, only for a death that can count, `defensives` ([[backend-defensive-analysis]]).
+A death event (`backend/app.py:515`) carries `player` (the main character), `originalCharacter`, `boss`, `bossId`, `phase` (always 1 today), `reportId`, `fightId`, `isKill`, `pullNo` (pull number for that boss, oldest first), `absTs`, `timestamp` (ms from pull start), `abilityName`, `abilityId`, `isCheatDeath`, `slot`, `inWipe`, `class`, `spec`, and, only for a death that can count, `defensives` ([[backend-defensive-analysis]]).
 
 ## Context map
 
@@ -134,14 +134,14 @@ relied-on-by: [[feat-account]] — account deletion
 ## Invariants
 
 - **MUST** end an `/api/analyze` stream with exactly one `result` event or one `error` event; the client throws on the first `error` (`frontend/src/App.js:753`).
-- **MUST** gate cheat-death detection on a valid bearer token, whatever `enableCheatDeath` says, since a shared config or a direct call can set the flag (`backend/app.py:91`).
+- **MUST** gate cheat-death detection on a valid bearer token, whatever `enableCheatDeath` says, since a shared config or a direct call can set the flag (`backend/app.py:112`).
 - **NEVER** return stored credentials: shares and saves pass `config` through `strip_secrets` when stored and when read (`backend/supabase_client.py:223`, `backend/supabase_client.py:259`).
 
 ## Gotchas
 
 - **A 200 does not mean success**: `/api/analyze` commits to 200 before any work. Read the stream for an `error` event.
-- **Share errors use the shared status mapper**: `share_results` answers a storage error through `_storage_response` (`backend/app.py:649`), so too large is 413 and anything else 500.
-- **Shares can live only in memory**: if the Supabase insert fails, the share is kept in process memory (`backend/supabase_client.py:241`) and the route passes `ephemeral: true` to the browser (`backend/app.py:653`), which warns that the link stops working when the server restarts (`frontend/src/App.js:1457`, `frontend/src/shareNote.js`).
+- **Share errors use the shared status mapper**: `share_results` answers a storage error through `_storage_response` (`backend/app.py:670`), so too large is 413 and anything else 500.
+- **Shares can live only in memory**: if the Supabase insert fails, the share is kept in process memory (`backend/supabase_client.py:241`) and the route passes `ephemeral: true` to the browser (`backend/app.py:674`), which warns that the link stops working when the server restarts (`frontend/src/App.js:1457`, `frontend/src/shareNote.js`).
 - **Cutoff keys become strings**: `pullCutoffTimestamps` uses integer keys in Python, which JSON turns into strings.
 
 ## Related

@@ -46,7 +46,7 @@ links:
   - feat-analyze
   - feat-share
   - feat-saved
-content_hash: sha256:4a1a27776c0a7d947c71d02123d60fd63d7cdb2d912119c3b35b0007b5566861
+content_hash: sha256:bd2a63829379d7ba235e676e88a288b9a158ceb05814e575ea132f7001a521d0
 ---
 ## Summary
 
@@ -63,7 +63,7 @@ Changing any filter re-runs the same pipeline. You can think of it as a sieve: e
 
 ```steps
 - title: Choose X | short: Deaths to count | sub: 1 to meta.maxCutoff
-  body: The "Deaths to count" select sets cutoff (default 2, App.js:225). Its options run from 1 to data.meta.maxCutoff (App.js:1683-1688), which the backend clamps to 1-10 from the Analyze form (backend/app.py:107).
+  body: The "Deaths to count" select sets cutoff (default 2, App.js:225). Its options run from 1 to data.meta.maxCutoff (App.js:1683-1688), which the backend clamps to 1-10 from the Analyze form (backend/app.py:128).
   gotcha: When a different result loads, fitFiltersToResult lowers cutoff to that result's maxCutoff if it was higher (frontend/src/App.js:251, frontend/src/resultFilters.js), so the select always has a matching option.
 - title: Decide what counts | short: isCounted | sub: slot <= X and not inWipe
   body: For each death, isCounted returns slot <= cutoff && !inWipe (deathCounting.js:22-25). Results saved before slot existed fall back to data.pullCutoffTimestamps[reportId_fightId][X], or the largest X stored, and count deaths at or before that time (deathCounting.js:14-27). countedDeaths then splits the survivors into real and cheat lists (deathCounting.js:31-38).
@@ -151,7 +151,7 @@ The pieces of the Results view. Filter by kind.
 
 ### Data fields the view reads
 
-From the backend's result (`backend/app.py:594-607`): `events` (deaths per player, each with `boss`, `pullNo`, `reportId`, `fightId`, `absTs`, `abilityName`, `abilityId`, `isCheatDeath`, `slot`, `inWipe`, `class`, `spec`, `defensives`), `pullParticipation`, `bossParticipation`, `pullCutoffTimestamps`, `icons`, `abilityIcons`, `abilityInfo`, `abilityText`, and `meta.maxCutoff`. The defensive shape is documented in the comment at `frontend/src/DefensivePanel.js:3-14`.
+From the backend's result (`backend/app.py:615-628`): `events` (deaths per player, each with `boss`, `pullNo`, `reportId`, `fightId`, `absTs`, `abilityName`, `abilityId`, `isCheatDeath`, `slot`, `inWipe`, `class`, `spec`, `defensives`), `pullParticipation`, `bossParticipation`, `pullCutoffTimestamps`, `icons`, `abilityIcons`, `abilityInfo`, `abilityText`, and `meta.maxCutoff`. The defensive shape is documented in the comment at `frontend/src/DefensivePanel.js:3-14`.
 
 ## Context map
 
@@ -174,14 +174,14 @@ relied-on-by: [[feat-saved]] — an opened saved report renders through this sam
 
 - **MUST** count through `isCounted` / `countedDeaths` everywhere: the matrix (`frontend/src/App.js:1185`, `frontend/src/App.js:1218`), the player list (`frontend/src/App.js:1038`) and `killCounts` (`frontend/src/App.js:1269`). A second rule anywhere would make the tables disagree.
 - **NEVER** count a death with `inWipe`, whatever X is (`frontend/src/deathCounting.js:24`). Mass deaths at a wipe say nothing about who failed first.
-- **NEVER** recompute `slot`, `inWipe`, `deathType` or `wouldSave` in the browser. They come from the backend (`backend/analysis.py:142`, `backend/app.py:510-511`, `backend/defensives.py:1656`); the view only reads them.
+- **NEVER** recompute `slot`, `inWipe`, `deathType` or `wouldSave` in the browser. They come from the backend (`backend/analysis.py:142`, `backend/app.py:531-532`, `backend/defensives.py:1656`); the view only reads them.
 - **MUST** skip defensive data without the current shape (`active` and `available` arrays) so saves and shares from older versions still render (`frontend/src/DeathRow.js:21`, `frontend/src/DefensivePanel.js:17`).
 
 ## Gotchas
 
 - **Merged alts count every character's pulls, everywhere**: the overall row, the matrix and the expanded player card's per-boss line all add up the pulls of the main and its merged alts; the card uses `groupPulls` (`frontend/src/App.js:2134`, `frontend/src/groupPulls.js`), so its per-boss rate matches the matrix.
 - **Filters survive a new result, fitted to it**: `hiddenPlayers`, `minPulls`, `searchQuery` and `characterGroups` carry over when another result loads, and only `expandedPlayers` and `sortConfig` are reset (`frontend/src/App.js:338-339`, `frontend/src/App.js:505-506`). `cutoff` is capped at the new result's maximum and boss chips the new result doesn't have are dropped (`frontend/src/App.js:251`, `frontend/src/resultFilters.js`), so a previous raid's chips can no longer empty the tables.
-- **"Analyzed" is when the analysis ran**: the header shows the result's `meta.generatedAt` (`frontend/src/App.js:1662`, `frontend/src/analyzedAt.js`), which the backend stamps in UTC (`backend/app.py:587`), so a saved or shared report keeps its original date. Older results stamped without a zone are read as UTC; a result with no stamp shows no date rather than today's.
+- **"Analyzed" is when the analysis ran**: the header shows the result's `meta.generatedAt` (`frontend/src/App.js:1662`, `frontend/src/analyzedAt.js`), which the backend stamps in UTC (`backend/app.py:608`), so a saved or shared report keeps its original date. Older results stamped without a zone are read as UTC; a result with no stamp shows no date rather than today's.
 - **Matrix sort only affects the matrix**: the player list is always ordered by real rate (`frontend/src/App.js:1130`). With no sort chosen, matrix rows are alphabetical (`frontend/src/App.js:1143`).
 - **Color scale ignores the search box**: matrix colors are computed over all visible players, not just the searched ones, so a cell keeps its color while you search (`frontend/src/App.js:1958-1969`).
 - **Cheat deaths in the player list are not gated by the toggle**: `computeFilteredStats` counts cheat deaths whatever `enableCheatDeath` says, and only hides them in the display (`frontend/src/App.js:1037-1042`, `frontend/src/App.js:2098`); the matrix gates them (`frontend/src/App.js:1188`). In practice the backend only sends cheat deaths when detection ran.

@@ -1,0 +1,111 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  One-time setup: lets this repository's GitHub Actions deploy Floor Pov
+  (infra/template.yaml) without stored AWS keys, using GitHub's OIDC sign-in.
+  Create this stack once in the AWS console (CloudFormation > Create stack >
+  Upload a template file), then put the RoleArn output in the repository's
+  GitHub secret AWS_DEPLOY_ROLE_ARN.
+
+Parameters:
+  GitHubRepo:
+    Type: String
+    Default: Catcam-fun/warcraftlogs-tracker
+    Description: owner/repo allowed to use the role.
+  CreateOidcProvider:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+    Description: >
+      'false' if this AWS account already has the
+      token.actions.githubusercontent.com identity provider (IAM > Identity providers).
+
+Conditions:
+  MakeProvider: !Equals [!Ref CreateOidcProvider, 'true']
+
+Resources:
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: MakeProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: floorpov-github-deploy
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub 'arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com'
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                # Any branch or the deploy workflow's environments in this repo only.
+                token.actions.githubusercontent.com:sub: !Sub 'repo:${GitHubRepo}:*'
+      Policies:
+        - PolicyName: deploy-floorpov
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: Stacks
+                Effect: Allow
+                Action: cloudformation:*
+                Resource:
+                  - !Sub 'arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/floorpov-*/*'
+                  - !Sub 'arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/aws-sam-cli-managed-default/*'
+                  - !Sub 'arn:aws:cloudformation:${AWS::Region}:aws:transform/Serverless-2016-10-31'
+              - Sid: StackReads
+                Effect: Allow
+                Action:
+                  - cloudformation:ValidateTemplate
+                  - cloudformation:ListStacks
+                  - cloudformation:GetTemplateSummary
+                Resource: '*'
+              - Sid: SiteAndArtifactBuckets
+                Effect: Allow
+                Action: s3:*
+                Resource:
+                  - arn:aws:s3:::floorpov-*
+                  - arn:aws:s3:::floorpov-*/*
+                  - arn:aws:s3:::aws-sam-cli-managed-default-*
+                  - arn:aws:s3:::aws-sam-cli-managed-default-*/*
+              - Sid: Api
+                Effect: Allow
+                Action: lambda:*
+                Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:floorpov-*'
+              - Sid: AdapterLayer
+                Effect: Allow
+                Action: lambda:GetLayerVersion
+                Resource: arn:aws:lambda:*:753240598075:layer:LambdaAdapterLayerX86:*
+              - Sid: ApiRole
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:GetRole
+                  - iam:PassRole
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                  - iam:ListRoleTags
+                  - iam:UpdateAssumeRolePolicy
+                Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/floorpov-*'
+              - Sid: CdnLogsSchedule
+                Effect: Allow
+                Action:
+                  - cloudfront:*
+                  - logs:*
+                  - events:*
+                Resource: '*'

@@ -15,14 +15,14 @@ anchors:
   session_only: frontend/src/supabaseClient.js:15
   sign_in: frontend/src/Auth.js:139
   captcha: frontend/src/Auth.js:72
-  api_fetch: frontend/src/api.js:52
+  api_fetch: frontend/src/api.js:54
   analyze_header: frontend/src/App.js:717
   session_restore: frontend/src/App.js:276
   bearer: backend/auth.py:29
   verify_token: backend/auth.py:36
   cache_ttl: backend/auth.py:23
   require_user: backend/auth.py:79
-  delete_route: backend/app.py:728
+  delete_route: backend/app.py:749
   delete_impl: backend/supabase_client.py:384
   delete_client: frontend/src/Settings.js:187
 links:
@@ -41,14 +41,14 @@ invariants:
   - "MUST: verify_token return None on any non-200 or network failure, so the route answers 401."
   - "NEVER: store raw tokens in the verification cache; keys are SHA-256 hashes."
   - "NEVER: honor enableCheatDeath without a verified session."
-content_hash: sha256:92b8c3b198d4bd3254c011abd9da5f7c7afca01ec2bbf2d245f6c4fbfa3e79d8
+content_hash: sha256:34437681ef22872598bc23feeb17c9945fdd246d2573bc83ce9ca9652bee6e00
 ---
 # Accounts & Auth
 
 ## Summary
 
 - Sign-up, sign-in, password reset, email change and password change all run in the browser against Supabase Auth with the public anon key (`frontend/src/Auth.js:135`, `:139`, `:94`; `frontend/src/Settings.js:136`, `:168`).
-- When the browser calls the backend it attaches `Authorization: Bearer <access token>` (`frontend/src/api.js:57`). The backend turns that into a user id by asking Supabase (`backend/auth.py:49`), never by reading an id from the URL or body.
+- When the browser calls the backend it attaches `Authorization: Bearer <access token>` (`frontend/src/api.js:59`). The backend turns that into a user id by asking Supabase (`backend/auth.py:49`), never by reading an id from the URL or body.
 - The `@require_user` decorator (`backend/auth.py:79`) guards every saved-analysis route and account deletion. Analyze and share check the token without requiring it.
 
 ## Diagram
@@ -83,14 +83,14 @@ edge req -> apifetch color=never "401"
 - title: Stay logged in | short: Session length | sub: localStorage flag + cookie
   body: Supabase always persists the session. Unchecking "Stay logged in" sets a localStorage flag and a session cookie (frontend/src/supabaseClient.js:15). On the next load, flag set and cookie gone means the browser was closed, and App.js signs out locally (frontend/src/App.js:276).
 - title: Call the backend | short: Send token | sub: apiFetch
-  body: apiFetch with auth true reads the current session and adds the Bearer header; with no session it returns a local 401 without a network call. auth 'optional' attaches a token only if there is one (frontend/src/api.js:52). The analyze stream uses fetch directly and adds the same header when signed in (frontend/src/App.js:717).
+  body: apiFetch with auth true reads the current session and adds the Bearer header; with no session it returns a local 401 without a network call. auth 'optional' attaches a token only if there is one (frontend/src/api.js:54). The analyze stream uses fetch directly and adds the same header when signed in (frontend/src/App.js:717).
 - title: Verify the token | short: Verify | sub: GET /auth/v1/user
   body: verify_token (backend/auth.py:36) hashes the token, returns a cached user id if it is under 60 seconds old, otherwise calls SUPABASE_URL/auth/v1/user with the anon key as apikey and a 10 second timeout. Only a 200 with an id counts.
   gotcha: The cache holds up to 1000 entries; when full it drops expired ones, or half the cache if none have expired (backend/auth.py:65).
 - title: Guard the route | short: require_user | sub: 401 or g.user_id
   body: require_user lets OPTIONS through with 204, otherwise returns 401 "Please sign in again." or sets g.user_id and calls the handler (backend/auth.py:84).
 - title: Delete the account | short: Delete account | sub: DELETE /api/account
-  body: Settings asks the user to type DELETE, then calls DELETE /api/account with the session (frontend/src/Settings.js:199). The backend deletes saved_analyses, api_credentials and shares for g.user_id, then the auth user via the admin API (backend/supabase_client.py:392, :394), drops the token from the cache (backend/app.py:734), and the browser signs out locally and goes home (frontend/src/Settings.js:204).
+  body: Settings asks the user to type DELETE, then calls DELETE /api/account with the session (frontend/src/Settings.js:199). The backend deletes saved_analyses, api_credentials and shares for g.user_id, then the auth user via the admin API (backend/supabase_client.py:392, :394), drops the token from the cache (backend/app.py:755), and the browser signs out locally and goes home (frontend/src/Settings.js:204).
   gotcha: Only the token used for the delete is forgotten. Another tab's token for the same user stays cached for up to 60 seconds and would still pass require_user.
 ```
 
@@ -100,14 +100,14 @@ Which backend endpoints use a session (`backend/app.py`).
 
 | Endpoint {required} | Session | What the user id is used for |
 |---|---|---|
-| `GET /api/saved` {required} | required (`backend/app.py:679`) | list only this user's saves |
-| `POST /api/saved` {required} | required (`backend/app.py:685`) | owner of the new save |
-| `GET /api/saved/<id>` {required} | required (`backend/app.py:703`) | load only if owned |
-| `DELETE /api/saved/<id>` {required} | required (`backend/app.py:711`) | delete only if owned |
-| `DELETE /api/saved` {required} | required (`backend/app.py:719`) | delete all of this user's saves |
-| `DELETE /api/account` {required} | required (`backend/app.py:729`) | delete the account |
-| `POST /api/analyze` {optional} | optional (`backend/app.py:93`) | enables cheat-death detection (`backend/app.py:116`) |
-| `POST /api/share` {optional} | optional (`backend/app.py:645`) | sets `created_by` so account deletion removes the share |
+| `GET /api/saved` {required} | required (`backend/app.py:700`) | list only this user's saves |
+| `POST /api/saved` {required} | required (`backend/app.py:706`) | owner of the new save |
+| `GET /api/saved/<id>` {required} | required (`backend/app.py:724`) | load only if owned |
+| `DELETE /api/saved/<id>` {required} | required (`backend/app.py:732`) | delete only if owned |
+| `DELETE /api/saved` {required} | required (`backend/app.py:740`) | delete all of this user's saves |
+| `DELETE /api/account` {required} | required (`backend/app.py:750`) | delete the account |
+| `POST /api/analyze` {optional} | optional (`backend/app.py:114`) | enables cheat-death detection (`backend/app.py:137`) |
+| `POST /api/share` {optional} | optional (`backend/app.py:666`) | sets `created_by` so account deletion removes the share |
 | `GET /api/shared/<id>` {public} | none | shares are public by link |
 | `GET /api/health`, `GET /` {public} | none | status only |
 
@@ -118,7 +118,7 @@ The browser also reads and writes its own `api_credentials` row directly with th
 - **MUST** protected routes take the user id only from `verify_token`, exposed as `g.user_id` (`backend/auth.py:91`); a test sends `?user_id=victim` and checks it is ignored (`backend/test_api.py:141`).
 - **MUST** `verify_token` return `None` on a non-200, a missing id or a network error (`backend/auth.py:54`, `:57`, `:61`), so the route answers 401 rather than guessing.
 - **NEVER** store raw tokens in the verification cache; keys are SHA-256 hex digests (`backend/auth.py:41`).
-- **NEVER** honor `enableCheatDeath` without a verified session; the flag is ANDed with `signed_in` on the server (`backend/app.py:116`).
+- **NEVER** honor `enableCheatDeath` without a verified session; the flag is ANDed with `signed_in` on the server (`backend/app.py:137`).
 
 ## Gotchas
 

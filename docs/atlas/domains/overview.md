@@ -14,7 +14,7 @@ anchors:
   landing_copy: frontend/src/LandingPage.js:186
   footer_blurb: frontend/src/LandingPage.js:258
   api_module: backend/app.py:3
-  analyze_route: backend/app.py:82
+  analyze_route: backend/app.py:103
   raid_encounters: backend/analysis.py:188
   raid_date_windows: backend/analysis.py:216
   analyze_fights: backend/analysis.py:256
@@ -24,8 +24,8 @@ anchors:
   duplicate_pull: backend/analysis.py:56
   cheat_death_ids: backend/features.py:14
   cheat_death_survive: backend/analysis.py:129
-  roster_toggle: backend/app.py:118
-  max_cutoff_clamp: backend/app.py:107
+  roster_toggle: backend/app.py:139
+  max_cutoff_clamp: backend/app.py:128
   frontend_counting: frontend/src/deathCounting.js:22
   raid_cards: frontend/src/AnalyzeConfig.js:12
   raid_zones: frontend/src/App.js:30
@@ -44,12 +44,12 @@ links:
   - operations
   - feat-analyze
   - feat-results
-content_hash: sha256:4c07643c658d6259206731b001af33d85453e5c438de7cf3eaccfb255b1a9cff
+content_hash: sha256:6442394b6152922c5f905977abb324b3604f8aa05dd16a3622a1449ba626fd98
 ---
 ## Summary
 
 - **Floor Pov** is a death-analysis site for World of Warcraft raid guilds. The landing page puts it as: it "reads a WarcraftLogs report and rebuilds the raid night around death — who fell each pull, where the wipes cascaded, and which bosses kept ending you" (`frontend/src/LandingPage.js:186`).
-- You give it a guild, server, region, raid, difficulty and your own WarcraftLogs API client. The Flask API (`backend/app.py:82`) reads that guild's reports for the raid, keeps only that raid's boss pulls, and counts the first deaths of each pull per player.
+- You give it a guild, server, region, raid, difficulty and your own WarcraftLogs API client. The Flask API (`backend/app.py:103`) reads that guild's reports for the raid, keeps only that raid's boss pulls, and counts the first deaths of each pull per player.
 - Every counted death is analyzed: the hits before it, the killing blow, and which defensives the player had ready that would have kept them alive.
 - The site never keeps a WarcraftLogs key of its own. Each analysis brings the caller's `clientId` and `clientSecret`.
 - What it deliberately leaves alone: deaths inside a **wipe** never count, and players outside the guild roster are left out unless you turn the roster filter off.
@@ -117,15 +117,15 @@ The parts of the system, and where each is documented:
 - **Pull**: one boss attempt inside a report, kill or wipe. Only fights whose encounter ID belongs to the chosen raid key and whose difficulty matches are kept (`backend/analysis.py:256`).
 - **Duplicate pull**: the same attempt logged by two raiders. A pull of the same boss that overlaps an earlier one by 15 seconds or more, or by half its length, is dropped (`backend/analysis.py:56`).
 - **Raid tier**: the raid key chosen on the Analyze page, such as `midnight-s2-all`. It fixes which encounter IDs count and which dates are searched (`backend/analysis.py:188`, `backend/analysis.py:216`).
-- **Difficulty**: WarcraftLogs' difficulty number: 3 Normal, 4 Heroic, 5 Mythic (`frontend/src/AnalyzeConfig.js:167`, `backend/app.py:233`).
-- **Deaths tracked**: the "first X deaths per pull" setting, `maxCutoff`. The server clamps it to 1-10 (`backend/app.py:107`).
+- **Difficulty**: WarcraftLogs' difficulty number: 3 Normal, 4 Heroic, 5 Mythic (`frontend/src/AnalyzeConfig.js:167`, `backend/app.py:254`).
+- **Deaths tracked**: the "first X deaths per pull" setting, `maxCutoff`. The server clamps it to 1-10 (`backend/app.py:128`).
 - **Slot**: which death of the pull a death was, 1 for the first. A player who dies, is battle-rezzed and dies again takes two slots; a cheat death gets real deaths so far plus one, so it never pushes a real death out (`backend/analysis.py:142`).
 - **Wipe**: any 8-second stretch holding 8 real deaths (`backend/analysis.py:19`, `backend/analysis.py:111`). Deaths inside it never count; cheat deaths never make one.
 - **Counted death**: a death with `slot <= X` that is not in a wipe. The frontend applies the same rule when you change X on the Results page (`frontend/src/deathCounting.js:22`).
-- **Cheat death**: a lethal hit the player survived through an effect such as Cheat Death, Cauterize, Purgatory or Guardian Spirit, recognised by the debuff or heal it leaves (`backend/features.py:14`). It only counts if the player did not die within 5 seconds (`backend/analysis.py:129`), and detection is for signed-in callers only (`backend/app.py:116`).
+- **Cheat death**: a lethal hit the player survived through an effect such as Cheat Death, Cauterize, Purgatory or Guardian Spirit, recognised by the debuff or heal it leaves (`backend/features.py:14`). It only counts if the player did not die within 5 seconds (`backend/analysis.py:129`), and detection is for signed-in callers only (`backend/app.py:137`).
 - **Killing blow**: the ability WarcraftLogs records as having killed the player (`killingAbilityGameID`, `backend/analysis.py:596`). The results page shows its name, icon and in-game description.
 - **Defensive**: a player's own damage-reduction or healing button, an external or raid cooldown from someone else, or a consumable (healthstone, potion). The catalog of them is built per game patch from game data; see [[game-data]].
-- **Roster filter**: the "Only count guild members" toggle, on by default. On, only players on the guild's WarcraftLogs roster count; off, everyone in the reports counts and the roster is not fetched (`backend/app.py:118`, `backend/app.py:154`).
+- **Roster filter**: the "Only count guild members" toggle, on by default. On, only players on the guild's WarcraftLogs roster count; off, everyone in the reports counts and the roster is not fetched (`backend/app.py:139`, `backend/app.py:175`).
 - **Character groups**: alts folded into a main character, so their deaths and pulls add up under one name (`backend/analysis.py:34`).
 
 ## Gotchas

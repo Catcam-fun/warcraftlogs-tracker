@@ -11,8 +11,8 @@ summary:
   - "Analyze, share and save are rate-limited per client IP with in-memory sliding windows: 60, 20 and 30 calls per hour."
 tagline: The report caches that keep WarcraftLogs costs down, and the per-IP limits on expensive routes.
 anchors:
-  min_age: "backend/app.py:43"
-  limiters: "backend/app.py:49"
+  min_age: "backend/app.py:45"
+  limiters: "backend/app.py:51"
   lru_cache: "backend/cache.py:17"
   shared_cache: "backend/cache.py:42"
   shared_get: "backend/cache.py:69"
@@ -26,9 +26,9 @@ anchors:
   cache_put: "backend/supabase_client.py:340"
   evict: "backend/supabase_client.py:362"
   report_cache_table: "backend/migrations/002_report_cache.sql:12"
-  client_ip: "backend/ratelimit.py:16"
-  rate_limiter: "backend/ratelimit.py:25"
-  limit: "backend/ratelimit.py:47"
+  client_ip: "backend/ratelimit.py:18"
+  rate_limiter: "backend/ratelimit.py:34"
+  limit: "backend/ratelimit.py:56"
 links:
   - backend
   - backend-analysis-pipeline
@@ -44,14 +44,14 @@ invariants:
   - "MUST: treat every shared-cache failure as a miss; an analysis never fails because Supabase is down."
   - "NEVER: make an analysis wait on a Supabase cache write; writes run on a background pool."
   - "NEVER: give the anon or authenticated roles access to report_cache; only the service role reads and writes it."
-content_hash: sha256:a01f2c3ff02aa7669e2e5a4261178d4a3889af34690b221bb1fa57ef6e6d299f
+content_hash: sha256:a86976b3c721863722758870aa2685c9c71da064428f65cdd48cfe6c2bdf6837
 ---
 ## Summary
 
 - An analysis can touch dozens of reports. The caches make a second analysis of the same guild, or another officer's analysis, cost few or no WarcraftLogs API points. The module docstring states the idea: a finished report never changes (`backend/cache.py:4`).
 - There are four caches, one per kind of report data (`backend/cache.py:91`). Each is a **SharedReportCache**: memory first, then the shared Supabase table `report_cache` ([[data-model]]).
-- "Finished" means the report's end time is more than two hours old (`REPORT_CACHE_MIN_AGE_MS`, `backend/app.py:43`, `backend/app.py:181`). Anything newer may still be live-logging, so it is always fetched.
-- Rate limits are separate: `RateLimiter` windows in process memory, keyed by client IP (`backend/ratelimit.py:25`), applied by the `limit` decorator (`backend/ratelimit.py:47`).
+- "Finished" means the report's end time is more than two hours old (`REPORT_CACHE_MIN_AGE_MS`, `backend/app.py:45`, `backend/app.py:202`). Anything newer may still be live-logging, so it is always fetched.
+- Rate limits are separate: `RateLimiter` windows in process memory, keyed by client IP (`backend/ratelimit.py:34`), applied by the `limit` decorator (`backend/ratelimit.py:56`).
 
 ## How it works
 
@@ -64,7 +64,7 @@ A cache read and write, for one finished report.
   body: On a memory miss it calls `supabase_client.cache_get` with a namespaced, versioned key such as `v2:deaths:<repr of key>` (`backend/cache.py:60`, `backend/cache.py:72`). A row found is unpacked, decoded and copied into memory (`backend/cache.py:74`); its `last_used_at` is bumped (`backend/supabase_client.py:334`).
   gotcha: The key is Python's `repr()` of the tuple key. Changing the shape of a key changes its text, which is a miss, not a wrong hit.
 - title: Fetch on a miss | short: WarcraftLogs | sub: only when both miss
-  body: Only when both layers miss does the pipeline query WarcraftLogs (`backend/app.py:190`, `backend/app.py:326`). See [[backend-analysis-pipeline]].
+  body: Only when both layers miss does the pipeline query WarcraftLogs (`backend/app.py:211`, `backend/app.py:347`). See [[backend-analysis-pipeline]].
 - title: Write both layers | short: Store | sub: memory now, Supabase later
   body: `SharedReportCache.set` writes memory at once and submits `cache_put` to a two-thread background pool (`backend/cache.py:77`, `backend/cache.py:86`), so the analysis never waits on Supabase. `cache_put` skips rows over 4 MB compressed (`backend/supabase_client.py:347`) and upserts the rest.
 - title: Evict | short: Evict | sub: every 20 writes
@@ -75,12 +75,12 @@ A cache read and write, for one finished report.
 
 | Cache {cache} | Namespace | Memory items | Key | Value | Written at |
 |---|---|---|---|---|---|
-| `report_meta_cache` {cache} | `meta` | 200 | report code | fights, actors, abilities, icons; only if it has fights | `backend/app.py:192` |
-| `report_deaths_cache` {cache} | `deaths` | 400 | report, fight ids, cheat-deaths flag, cheat-death spell ids | deaths by fight | `backend/app.py:310`, `backend/app.py:335` |
-| `report_defensive_cache` {cache} | `defensives` | 200 | report, fight ids, dead players, catalog patch and fingerprint | filtered defensive events | `backend/app.py:317`, `backend/app.py:341` |
-| `report_recap_cache` {cache} | `killing-blows` | 400 | report, fight ids, `instakills`; or report, counted deaths, `lethal-window`, window length | instant kills; hits before deaths | `backend/app.py:350`, `backend/app.py:366` |
+| `report_meta_cache` {cache} | `meta` | 200 | report code | fights, actors, abilities, icons; only if it has fights | `backend/app.py:213` |
+| `report_deaths_cache` {cache} | `deaths` | 400 | report, fight ids, cheat-deaths flag, cheat-death spell ids | deaths by fight | `backend/app.py:331`, `backend/app.py:356` |
+| `report_defensive_cache` {cache} | `defensives` | 200 | report, fight ids, dead players, catalog patch and fingerprint | filtered defensive events | `backend/app.py:338`, `backend/app.py:362` |
+| `report_recap_cache` {cache} | `killing-blows` | 400 | report, fight ids, `instakills`; or report, counted deaths, `lethal-window`, window length | instant kills; hits before deaths | `backend/app.py:371`, `backend/app.py:387` |
 
-The keys carry everything that changes the answer. The deaths key includes the list of cheat-death spells when cheat deaths are on, so adding a spell refetches (`backend/app.py:309`). The defensive key includes the catalog's patch and `CATALOG_FINGERPRINT`, so a rebuilt catalog refetches. See [[backend-defensive-analysis]].
+The keys carry everything that changes the answer. The deaths key includes the list of cheat-death spells when cheat deaths are on, so adding a spell refetches (`backend/app.py:330`). The defensive key includes the catalog's patch and `CATALOG_FINGERPRINT`, so a rebuilt catalog refetches. See [[backend-defensive-analysis]].
 
 #### Encoding
 
@@ -92,9 +92,9 @@ Cached values are Python structures with integer and tuple keys, tuples and sets
 
 #### Rate limits
 
-`RateLimiter.allow(key)` keeps a deque of hit times per key (`backend/ratelimit.py:32`). It drops hits older than the window, refuses when the window already holds `max_calls` hits, and otherwise records the hit. When more than 10,000 keys are tracked, keys with no hits left are deleted so memory stays bounded (`backend/ratelimit.py:41`).
+`RateLimiter.allow(key)` keeps a deque of hit times per key (`backend/ratelimit.py:41`). It drops hits older than the window, refuses when the window already holds `max_calls` hits, and otherwise records the hit. When more than 10,000 keys are tracked, keys with no hits left are deleted so memory stays bounded (`backend/ratelimit.py:50`).
 
-`limit(limiter, message)` wraps a route: a non-OPTIONS request over the limit gets 429 `{"success": false, "error": message}` before the route runs (`backend/ratelimit.py:47`, `backend/ratelimit.py:51`). The key is `client_ip()`: the first entry of `X-Forwarded-For`, else the socket address, else `unknown` (`backend/ratelimit.py:16`).
+`limit(limiter, message)` wraps a route: a non-OPTIONS request over the limit gets 429 `{"success": false, "error": message}` before the route runs (`backend/ratelimit.py:56`, `backend/ratelimit.py:60`). The key is `client_ip()`: the first entry of `X-Forwarded-For`, else the socket address, else `unknown` (`backend/ratelimit.py:18`).
 
 ## Diagram
 
@@ -123,17 +123,17 @@ edge pipe -> wcl color=caution "both miss"
 
 | Setting {cache} | Value | Where |
 |---|---|---|
-| `REPORT_CACHE_MIN_AGE_MS` {cache} | 2 hours | `backend/app.py:43` |
+| `REPORT_CACHE_MIN_AGE_MS` {cache} | 2 hours | `backend/app.py:45` |
 | `CACHE_VERSION` {cache} | `v2` | `backend/cache.py:85` |
 | Writer pool {cache} | 2 threads, `report-cache` | `backend/cache.py:86` |
 | `REPORT_CACHE_BUDGET_BYTES` {table} | 200 MB | `backend/supabase_client.py:273` |
 | `REPORT_CACHE_MAX_ROW_BYTES` {table} | 4 MB compressed | `backend/supabase_client.py:274` |
 | `_EVICT_EVERY` {table} | 20 writes | `backend/supabase_client.py:275` |
 | Back-off after an error {table} | 300 s | `backend/supabase_client.py:317` |
-| `analyze_limiter` {limit} | 60 per hour per IP | `backend/app.py:50` |
-| `share_limiter` {limit} | 20 per hour per IP | `backend/app.py:49` |
-| `save_limiter` {limit} | 30 per hour per IP | `backend/app.py:51` |
-| Tracked-key cleanup {limit} | above 10,000 keys | `backend/ratelimit.py:41` |
+| `analyze_limiter` {limit} | 60 per hour per IP | `backend/app.py:52` |
+| `share_limiter` {limit} | 20 per hour per IP | `backend/app.py:51` |
+| `save_limiter` {limit} | 30 per hour per IP | `backend/app.py:53` |
+| Tracked-key cleanup {limit} | above 10,000 keys | `backend/ratelimit.py:50` |
 
 The `report_cache` table (`backend/migrations/002_report_cache.sql:12`): `key` text primary key, `payload` text, `size_bytes` integer, `created_at` and `last_used_at` timestamps, an index on `last_used_at`, and row-level security on with no policies, so only the service role can use it (`backend/migrations/002_report_cache.sql:21`).
 
@@ -152,7 +152,7 @@ relied-on-by: [[feat-analyze]] — repeat analyses come back faster and cheaper
 
 ## Invariants
 
-- **MUST** read or write the report caches only for finished reports; a live-logged report is always fetched (`backend/app.py:186`, `backend/app.py:312`).
+- **MUST** read or write the report caches only for finished reports; a live-logged report is always fetched (`backend/app.py:207`, `backend/app.py:333`).
 - **MUST** bump `CACHE_VERSION` when what is fetched or how it is indexed changes, so old rows are never served to new code (`backend/cache.py:46`).
 - **MUST** treat every shared-cache failure as a miss; an analysis never fails because Supabase is down (`backend/supabase_client.py:271`).
 - **NEVER** make an analysis wait on a Supabase cache write; writes run on a background pool (`backend/cache.py:79`).
@@ -170,9 +170,9 @@ relied-on-by: [[feat-analyze]] — repeat analyses come back faster and cheaper
 ## Gotchas
 
 - **Memory caches and limits are per process**: with more than one gunicorn worker, each has its own LRU and its own rate-limit windows, so the effective limit multiplies (see [[backend]]).
-- **The key is `CF-Connecting-IP`, not `X-Forwarded-For`**: Render appends to a client-supplied `X-Forwarded-For`, so its first entry can be forged; Cloudflare sets `CF-Connecting-IP` itself (`backend/ratelimit.py:17-22`). Without Cloudflare in front, every client would share the proxy's address and one limit.
-- **A memory hit for a deaths entry decides whether defensives are looked up**: the defensive cache is consulted only when the deaths came from cache, because its key needs the set of dead players (`backend/app.py:323`).
-- **The 2-hour rule uses the report's end time**: a report still being logged tonight is fetched in full on every analysis until two hours after its last event (`backend/app.py:180`).
+- **The key is `CF-Connecting-IP`, not `X-Forwarded-For`**: Render appends to a client-supplied `X-Forwarded-For`, so its first entry can be forged; Cloudflare sets `CF-Connecting-IP` itself (`backend/ratelimit.py:19-31`). Without Cloudflare in front, every client would share the proxy's address and one limit.
+- **A memory hit for a deaths entry decides whether defensives are looked up**: the defensive cache is consulted only when the deaths came from cache, because its key needs the set of dead players (`backend/app.py:344`).
+- **The 2-hour rule uses the report's end time**: a report still being logged tonight is fetched in full on every analysis until two hours after its last event (`backend/app.py:201`).
 - **Eviction reads every row's key and size**: `evict_report_cache` selects the whole table's `key, size_bytes` each time it runs (`backend/supabase_client.py:366`). That is cheap at 200 MB of large rows but grows with row count.
 
 ## Glossary
