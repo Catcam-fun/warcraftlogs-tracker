@@ -4,8 +4,8 @@ title: Caching and Rate Limits
 domain: backend
 status: documented
 summary:
-  - "Finished WarcraftLogs reports never change, so their fights, deaths, defensive events and pre-death hits are cached and reused across analyses and users."
-  - "Each of the four report caches is a SharedReportCache: an in-process LRU in front of the Supabase report_cache table."
+  - "Finished WarcraftLogs reports never change, so their fight lists, full fights, deaths, defensive events and pre-death hits are cached and reused across analyses and users."
+  - "Each of the five report caches is a SharedReportCache: an in-process LRU in front of the Supabase report_cache table."
   - "Only reports whose last event is more than two hours old (REPORT_CACHE_MIN_AGE_MS) are read from or written to the cache."
   - "The Supabase table is best-effort and kept under 200 MB by deleting the least recently used rows; any error is a cache miss and pauses the shared cache for 5 minutes."
   - "Analyze, share and save are rate-limited per client IP with in-memory sliding windows: 60, 20 and 30 calls per hour."
@@ -17,14 +17,14 @@ anchors:
   shared_cache: "backend/cache.py:42"
   shared_get: "backend/cache.py:69"
   shared_set: "backend/cache.py:77"
-  cache_version: "backend/cache.py:85"
-  writer_pool: "backend/cache.py:86"
-  report_caches: "backend/cache.py:91"
+  cache_version: "backend/cache.py:88"
+  writer_pool: "backend/cache.py:89"
+  report_caches: "backend/cache.py:111"
   budget: "backend/supabase_client.py:273"
   enc: "backend/supabase_client.py:281"
-  cache_get: "backend/supabase_client.py:321"
-  cache_put: "backend/supabase_client.py:340"
-  evict: "backend/supabase_client.py:362"
+  cache_get: "backend/supabase_client.py:331"
+  cache_put: "backend/supabase_client.py:350"
+  evict: "backend/supabase_client.py:372"
   report_cache_table: "backend/migrations/002_report_cache.sql:12"
   client_ip: "backend/ratelimit.py:18"
   rate_limiter: "backend/ratelimit.py:34"
@@ -44,13 +44,13 @@ invariants:
   - "MUST: treat every shared-cache failure as a miss; an analysis never fails because Supabase is down."
   - "NEVER: make an analysis wait on a Supabase cache write; writes run on a background pool."
   - "NEVER: give the anon or authenticated roles access to report_cache; only the service role reads and writes it."
-content_hash: sha256:f69d2a8f868f9563f6dbc38635747d09351b2843b1c6ba22c05f0b6c585b7d00
+content_hash: sha256:7eccd1bc0e8442759b3a4ff77ff2cce705e818a75accd7407126e6b6fc2c71bf
 ---
 ## Summary
 
 - An analysis can touch dozens of reports. The caches make a second analysis of the same guild, or another officer's analysis, cost few or no WarcraftLogs API points. The module docstring states the idea: a finished report never changes (`backend/cache.py:4`).
-- There are four caches, one per kind of report data (`backend/cache.py:91`). Each is a **SharedReportCache**: memory first, then the shared Supabase table `report_cache` ([[data-model]]).
-- "Finished" means the report's end time is more than two hours old (`REPORT_CACHE_MIN_AGE_MS`, `backend/app.py:46`, `backend/app.py:208`). Anything newer may still be live-logging, so it is always fetched.
+- There are five caches, one per kind of report data (`backend/cache.py:111`). Each is a **SharedReportCache**: memory first, then the shared Supabase table `report_cache` ([[data-model]]).
+- "Finished" means the report's end time is more than two hours old (`REPORT_CACHE_MIN_AGE_MS`, `backend/app.py:46`, `backend/app.py:210`). Anything newer may still be live-logging, so it is always fetched.
 - Rate limits are separate: `RateLimiter` windows in process memory, keyed by client IP (`backend/ratelimit.py:34`), applied by the `limit` decorator (`backend/ratelimit.py:56`).
 
 ## How it works
@@ -61,26 +61,27 @@ A cache read and write, for one finished report.
 - title: Check memory | short: Memory | sub: LRUCache.get
   body: `SharedReportCache.get` first asks its in-process `LRUCache` (`backend/cache.py:69`). A hit moves the key to the most recently used end (`backend/cache.py:27`). The LRU is guarded by a lock, because the analysis fetches reports on several threads.
 - title: Check Supabase | short: Shared table | sub: cache_get
-  body: On a memory miss it calls `supabase_client.cache_get` with a namespaced, versioned key such as `v2:deaths:<repr of key>` (`backend/cache.py:60`, `backend/cache.py:72`). A row found is unpacked, decoded and copied into memory (`backend/cache.py:74`); its `last_used_at` is bumped (`backend/supabase_client.py:334`).
+  body: On a memory miss it calls `supabase_client.cache_get` with a namespaced, versioned key such as `v2:deaths:<repr of key>` (`backend/cache.py:60`, `backend/cache.py:72`). A row found is unpacked, decoded and copied into memory (`backend/cache.py:74`); its `last_used_at` is bumped (`backend/supabase_client.py:344`).
   gotcha: The key is Python's `repr()` of the tuple key. Changing the shape of a key changes its text, which is a miss, not a wrong hit.
 - title: Fetch on a miss | short: WarcraftLogs | sub: only when both miss
-  body: Only when both layers miss does the pipeline query WarcraftLogs (`backend/app.py:217`, `backend/app.py:353`). See [[backend-analysis-pipeline]].
+  body: Only when both layers miss does the pipeline query WarcraftLogs (`backend/app.py:219`, `backend/app.py:229`, `backend/app.py:377`). See [[backend-analysis-pipeline]].
 - title: Write both layers | short: Store | sub: memory now, Supabase later
-  body: `SharedReportCache.set` writes memory at once and submits `cache_put` to a two-thread background pool (`backend/cache.py:77`, `backend/cache.py:86`), so the analysis never waits on Supabase. `cache_put` skips rows over 4 MB compressed (`backend/supabase_client.py:347`) and upserts the rest.
+  body: `SharedReportCache.set` writes memory at once and submits `cache_put` to a four-thread background pool (`backend/cache.py:77`, `backend/cache.py:89`), so the analysis never waits on Supabase. `cache_put` skips rows over 4 MB compressed (`backend/supabase_client.py:357`) and upserts the rest. At the end of an analysis, `flush_writes` waits for the queued writes, because Lambda freezes the function once the response ends (`backend/cache.py:99`, `backend/app.py:669`).
 - title: Evict | short: Evict | sub: every 20 writes
-  body: Every 20th successful write in the process (`_EVICT_EVERY`) runs `evict_report_cache` (`backend/supabase_client.py:275`, `backend/supabase_client.py:355`). It reads every row's size, newest use first, and deletes rows past the 200 MB running total, in batches of 100 (`backend/supabase_client.py:362`).
+  body: Every 20th successful write in the process (`_EVICT_EVERY`) runs `evict_report_cache` (`backend/supabase_client.py:275`, `backend/supabase_client.py:368`). It reads every row's size, newest use first, and deletes rows past the 200 MB running total, in batches of 100 (`backend/supabase_client.py:372`).
 ```
 
 #### What is cached, and under which key
 
 | Cache {cache} | Namespace | Memory items | Key | Value | Written at |
 |---|---|---|---|---|---|
-| `report_meta_cache` {cache} | `meta` | 200 | report code | fights, actors, abilities, icons; only if it has fights | `backend/app.py:219` |
-| `report_deaths_cache` {cache} | `deaths` | 400 | report, fight ids, cheat-deaths flag, cheat-death spell ids | deaths by fight | `backend/app.py:337`, `backend/app.py:362` |
-| `report_defensive_cache` {cache} | `defensives` | 200 | report, fight ids, dead players, catalog patch and fingerprint | filtered defensive events | `backend/app.py:344`, `backend/app.py:368` |
-| `report_recap_cache` {cache} | `killing-blows` | 400 | report, fight ids, `instakills`; or report, counted deaths, `lethal-window`, window length | instant kills; hits before deaths | `backend/app.py:377`, `backend/app.py:393` |
+| `report_fights_cache` {cache} | `fights` | 400 | report code | light fight list: report start and fights, no players; only if it has fights | `backend/app.py:221` |
+| `report_meta_cache` {cache} | `meta` | 200 | report code | full fights, actors, abilities, icons; only reports that keep pulls; only if it has fights | `backend/app.py:231` |
+| `report_deaths_cache` {cache} | `deaths` | 400 | report, fight ids, cheat-deaths flag, cheat-death spell ids | deaths by fight | `backend/app.py:356`, `backend/app.py:383` |
+| `report_defensive_cache` {cache} | `defensives` | 200 | report, fight ids, dead players, catalog patch and fingerprint | filtered defensive events | `backend/app.py:363`, `backend/app.py:402` |
+| `report_recap_cache` {cache} | `killing-blows` | 400 | report, fight ids, `instakills`; or report, counted deaths, `lethal-window`, window length | instant kills; hits before deaths | `backend/app.py:411`, `backend/app.py:419` |
 
-The keys carry everything that changes the answer. The deaths key includes the list of cheat-death spells when cheat deaths are on, so adding a spell refetches (`backend/app.py:336`). The defensive key includes the catalog's patch and `CATALOG_FINGERPRINT`, so a rebuilt catalog refetches. See [[backend-defensive-analysis]].
+The keys carry everything that changes the answer. The deaths key includes the list of cheat-death spells when cheat deaths are on, so adding a spell refetches (`backend/app.py:355`). The defensive key includes the catalog's patch and `CATALOG_FINGERPRINT`, so a rebuilt catalog refetches. See [[backend-defensive-analysis]].
 
 #### Encoding
 
@@ -94,7 +95,7 @@ Cached values are Python structures with integer and tuple keys, tuples and sets
 
 `RateLimiter.allow(key)` keeps a deque of hit times per key (`backend/ratelimit.py:41`). It drops hits older than the window, refuses when the window already holds `max_calls` hits, and otherwise records the hit. When more than 10,000 keys are tracked, keys with no hits left are deleted so memory stays bounded (`backend/ratelimit.py:50`).
 
-`limit(limiter, message)` wraps a route: a non-OPTIONS request over the limit gets 429 `{"success": false, "error": message}` before the route runs (`backend/ratelimit.py:56`, `backend/ratelimit.py:60`). The key is `client_ip()`: the first entry of `X-Forwarded-For`, else the socket address, else `unknown` (`backend/ratelimit.py:18`).
+`limit(limiter, message)` wraps a route: a non-OPTIONS request over the limit gets 429 `{"success": false, "error": message}` before the route runs (`backend/ratelimit.py:56`, `backend/ratelimit.py:60`). The key is `client_ip()` (`backend/ratelimit.py:18`): on AWS, the `X-Viewer-Ip` header a CloudFront Function writes, trusted only on requests that carry the origin secret (`backend/ratelimit.py:26`); else `CF-Connecting-IP`, which Cloudflare sets in front of Render; else the socket address; else `unknown` (`backend/ratelimit.py:30`).
 
 ## Diagram
 
@@ -105,7 +106,7 @@ lane app Analysis threads
 node pipe lane=app color=process "Pipeline" "finished reports"
 lane mem Process memory
 node lru lane=mem color=safe "LRUCache" "per namespace"
-node writer lane=mem color=structural "Writer pool" "2 threads"
+node writer lane=mem color=structural "Writer pool" "4 threads"
 lane ext Supabase
 node table lane=ext color=structural "report_cache" "200 MB budget"
 node evict lane=ext color=caution "Evict LRU rows" "every 20 writes"
@@ -124,8 +125,8 @@ edge pipe -> wcl color=caution "both miss"
 | Setting {cache} | Value | Where |
 |---|---|---|
 | `REPORT_CACHE_MIN_AGE_MS` {cache} | 2 hours | `backend/app.py:46` |
-| `CACHE_VERSION` {cache} | `v2` | `backend/cache.py:85` |
-| Writer pool {cache} | 2 threads, `report-cache` | `backend/cache.py:86` |
+| `CACHE_VERSION` {cache} | `v2` | `backend/cache.py:88` |
+| Writer pool {cache} | 4 threads, `report-cache` | `backend/cache.py:89` |
 | `REPORT_CACHE_BUDGET_BYTES` {table} | 200 MB | `backend/supabase_client.py:273` |
 | `REPORT_CACHE_MAX_ROW_BYTES` {table} | 4 MB compressed | `backend/supabase_client.py:274` |
 | `_EVICT_EVERY` {table} | 20 writes | `backend/supabase_client.py:275` |
@@ -142,7 +143,7 @@ The `report_cache` table (`backend/migrations/002_report_cache.sql:12`): `key` t
 ```context
 depends-on: [[data-model]] — the report_cache table and the Supabase client
 depends-on: [[warcraftlogs]] — the source the caches stand in front of
-provides: memory-plus-Supabase caches for meta, deaths, defensives and pre-death hits
+provides: memory-plus-Supabase caches for fight lists, meta, deaths, defensives and pre-death hits
 provides: per-IP rate limits and client_ip
 relied-on-by: [[backend-analysis-pipeline]] — reads and writes the caches for finished reports
 relied-on-by: [[backend-api-endpoints]] — analyze, share and save use the limit decorator
@@ -152,7 +153,7 @@ relied-on-by: [[feat-analyze]] — repeat analyses come back faster and cheaper
 
 ## Invariants
 
-- **MUST** read or write the report caches only for finished reports; a live-logged report is always fetched (`backend/app.py:213`, `backend/app.py:339`).
+- **MUST** read or write the report caches only for finished reports; a live-logged report is always fetched (`backend/app.py:215`, `backend/app.py:225`, `backend/app.py:358`).
 - **MUST** bump `CACHE_VERSION` when what is fetched or how it is indexed changes, so old rows are never served to new code (`backend/cache.py:46`).
 - **MUST** treat every shared-cache failure as a miss; an analysis never fails because Supabase is down (`backend/supabase_client.py:271`).
 - **NEVER** make an analysis wait on a Supabase cache write; writes run on a background pool (`backend/cache.py:79`).
@@ -165,20 +166,21 @@ relied-on-by: [[feat-analyze]] — repeat analyses come back faster and cheaper
 | Shared cache | used only if `SUPABASE_URL` and a key are set (`backend/supabase_client.py:39`); otherwise memory only | on, through the service-role key |
 | Table missing | first error pauses the shared cache for 5 minutes, repeatedly | same; run `backend/migrations/002_report_cache.sql` once |
 | Rate limits | same numbers, per process | same; per gunicorn process |
-| `client_ip` | the socket address, usually `127.0.0.1` | `CF-Connecting-IP` set by Cloudflare in front of Render |
+| `client_ip` | the socket address, usually `127.0.0.1` | `X-Viewer-Ip` from CloudFront on AWS; `CF-Connecting-IP` from Cloudflare on Render |
 
 ## Gotchas
 
 - **Memory caches and limits are per process**: with more than one gunicorn worker, each has its own LRU and its own rate-limit windows, so the effective limit multiplies (see [[backend]]).
-- **The key is `CF-Connecting-IP`, not `X-Forwarded-For`**: Render appends to a client-supplied `X-Forwarded-For`, so its first entry can be forged; Cloudflare sets `CF-Connecting-IP` itself (`backend/ratelimit.py:19-31`). Without Cloudflare in front, every client would share the proxy's address and one limit.
-- **A memory hit for a deaths entry decides whether defensives are looked up**: the defensive cache is consulted only when the deaths came from cache, because its key needs the set of dead players (`backend/app.py:350`).
-- **The 2-hour rule uses the report's end time**: a report still being logged tonight is fetched in full on every analysis until two hours after its last event (`backend/app.py:207`).
-- **Eviction reads every row's key and size**: `evict_report_cache` selects the whole table's `key, size_bytes` each time it runs (`backend/supabase_client.py:366`). That is cheap at 200 MB of large rows but grows with row count.
+- **The key is never `X-Forwarded-For`**: Render appends to a client-supplied `X-Forwarded-For`, so its first entry can be forged. CloudFront and Cloudflare each overwrite their own header, so those are used instead (`backend/ratelimit.py:19-31`). Without either in front, every client would share the proxy's address and one limit.
+- **The defensive cache waits for the deaths**: its key needs the set of dead players, so it is looked up after the deaths are known, from the deaths cache (`backend/app.py:369`) or right after the deaths query (`backend/app.py:384`).
+- **A report with no death that can count writes no defensive or hit cache**: it returns after its deaths (`backend/app.py:387`), so only its fight lists, full fights and deaths are cached.
+- **The 2-hour rule uses the report's end time**: a report still being logged tonight is fetched in full on every analysis until two hours after its last event (`backend/app.py:209`).
+- **Eviction reads every row's key and size**: `evict_report_cache` selects the whole table's `key, size_bytes` each time it runs (`backend/supabase_client.py:376`). That is cheap at 200 MB of large rows but grows with row count.
 
 ## Glossary
 
 - **Finished report**: a report whose `end` is older than `REPORT_CACHE_MIN_AGE_MS`.
-- **Namespace**: the cache's kind (`meta`, `deaths`, `defensives`, `killing-blows`), part of every Supabase key.
+- **Namespace**: the cache's kind (`fights`, `meta`, `deaths`, `defensives`, `killing-blows`), part of every Supabase key.
 - **Sliding window**: the last hour of hit times per client IP; a hit is refused once the window holds `max_calls`.
 
 ## Related

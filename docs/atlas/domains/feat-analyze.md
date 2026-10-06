@@ -51,13 +51,13 @@ invariants:
   - "NEVER: run cheat-death detection for a caller without a valid Supabase session, whatever the request body says (backend/app.py:143)."
   - "MUST: fights be kept only when their encounter ID is in the selected raid's RAID_ENCOUNTERS set (backend/analysis.py:269)."
   - "NEVER: store the Client ID or Secret in the browser's analysis history; stripSecrets removes them before IndexedDB writes (frontend/src/App.js:552)."
-content_hash: sha256:56ca9f81623f4b71c3005012bcb44a46d67589fa8173a99dd49ce9db379ba6ff
+content_hash: sha256:2ce3726356e849d1c8940189ab4a3edf4f3387e8e3817f19d949fa25bc6c9b73
 ---
 ## Summary
 
 - **What it is.** The `/analyze` route renders `AnalyzeConfig` (`frontend/src/App.js:1577`, `frontend/src/AnalyzeConfig.js:28`). You pick a raid card, fill in your WarcraftLogs API client and guild, and press **Analyze Reports**.
 - **What it sends.** `handleSubmit` (`frontend/src/App.js:681`) posts the whole config to `POST /api/analyze` and reads the response as a stream of `data:` lines (`frontend/src/App.js:736`).
-- **What the server does.** `analyze()` (`backend/app.py:109`) authenticates with WarcraftLogs, fetches the roster and reports, filters fights to the raid, ranks deaths and builds the result. See [[backend-analysis-pipeline]] for the internals.
+- **What the server does.** `analyze()` (`backend/app.py:109`) authenticates with WarcraftLogs, fetches the roster and reports, reads each report's short fight list, drops duplicate pulls, reads in full only the reports it keeps pulls from, ranks deaths and builds the result. See [[backend-analysis-pipeline]] for the internals.
 - **What it trusts.** Very little. The server clamps deaths tracked, narrows dates to the tier, and decides cheat-death detection from the bearer token, not from the checkbox.
 - **What it leaves alone.** Nothing is written to Supabase by an analysis except the shared report cache. Results live in your browser until you save or share them ([[feat-saved]], [[feat-share]]).
 
@@ -74,9 +74,9 @@ You reach the page from the landing page's run button (`frontend/src/App.js:1568
   gotcha: handleSubmit only checks that Client ID, Secret, guild and server are filled (frontend/src/App.js:682). A wrong guild name is discovered only when WarcraftLogs returns no reports.
 - title: Set dates and deaths tracked | short: Dates & first X | sub: optional window, 1-10
   body: Start and end dates are optional; blank means the start of the tier and today (frontend/src/AnalyzeConfig.js:171). Max Deaths to Track is the "first X deaths per pull" ceiling, 1 to 10 (frontend/src/AnalyzeConfig.js:191). On the server the date range is intersected with RAID_DATE_WINDOWS (backend/analysis.py:216) by resolve_report_window (backend/analysis.py:234), and maxCutoff is clamped to 1-10 (backend/app.py:134).
-  gotcha: maxCutoff also decides which deaths get defensive analysis at all (backend/app.py:545). Raising the Results page's slider above it later shows deaths without a defensive panel.
+  gotcha: maxCutoff also decides which deaths get defensive analysis at all (backend/app.py:575), and a report with no death inside it reads no defensive data from WarcraftLogs (backend/app.py:387). Raising the Results page's slider above it later shows deaths without a defensive panel.
 - title: Roster and cheat deaths | short: Toggles | sub: who counts, cheat deaths
-  body: Guild Roster (on by default, frontend/src/App.js:213) means only players on the guild's WarcraftLogs roster count; off, everyone in the reports counts and the roster is not fetched (backend/app.py:145, backend/app.py:164). Cheat Death Detection is disabled for signed-out users (frontend/src/AnalyzeConfig.js:195) and enforced on the server from the bearer token (backend/app.py:120, backend/app.py:143).
+  body: Guild Roster (on by default, frontend/src/App.js:213) means only players on the guild's WarcraftLogs roster count; off, everyone in the reports counts and the roster is not fetched (backend/app.py:145, backend/app.py:165). Cheat Death Detection is disabled for signed-out users (frontend/src/AnalyzeConfig.js:195) and enforced on the server from the bearer token (backend/app.py:120, backend/app.py:143).
   gotcha: If the roster fetch fails or returns nobody, is_guild_member lets everyone through (backend/app.py:181) and the stream says so.
 - title: Submit and stream | short: Submit | sub: POST /api/analyze
   body: handleSubmit builds the payload, splitting authorFilters on commas and parsing characterGroups JSON (frontend/src/App.js:703), attaches the Supabase access token when signed in (frontend/src/App.js:719) and fetches /api/analyze. Each SSE line carries either message (shown in the loader), error (thrown) or result (frontend/src/App.js:753).
@@ -167,7 +167,7 @@ relied-on-by: [[feat-share]] — shares the result and its config
 - **A stream that ends without a result is an error**: if the server stops mid-analysis without sending one (out of memory, the 15-minute limit), the page shows "The analysis stopped before it finished" instead of leaving the loader spinning (`frontend/src/App.js`).
 - **The request body carries the WarcraftLogs secret**: `/api/analyze` receives `clientId` and `clientSecret` in the JSON body (`backend/app.py:125`) and uses them to get a token (`backend/app.py:158`). They are not stored by this route.
 - **Old configs still work**: `rosterOnly` treats a missing value as on (`backend/app.py:145`), so saved or shared configs from before the toggle keep their behavior.
-- **A partial result is still a result**: reports that fail to load are listed in `meta.failedReports` and announced in the stream (`backend/app.py:432`); reports missing defensive data are announced separately (`backend/app.py:436`).
+- **A partial result is still a result**: reports that fail to load are listed in `meta.failedReports` and announced in the stream (`backend/app.py:462`); reports missing defensive data are announced separately (`backend/app.py:466`). A report whose full read fails is dropped before deaths are read: its pulls come from another log of the same pull if there is one (`backend/app.py:266-279`), and it is not listed in `failedReports`.
 - **No zone filter on report fetch**: reports are fetched by date only, because a mixed raid and dungeon night can carry a dungeon zone (`backend/warcraftlogs.py:176`). The encounter allowlist does the separation.
 
 ## Related

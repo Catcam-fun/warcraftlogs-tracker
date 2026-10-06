@@ -44,7 +44,7 @@ links:
   - operations
   - feat-analyze
   - feat-results
-content_hash: sha256:efa2f12592871658cc7e8b2033732f62ba51b649fdbbb27a92f002e5d9a5f36c
+content_hash: sha256:b9c6ba5bb0ac43edb6b744beab970e46345443c73de742d6dc900daac15ee1c5
 ---
 ## Summary
 
@@ -113,11 +113,11 @@ The parts of the system, and where each is documented:
 
 ## Glossary
 
-- **Report**: one WarcraftLogs log upload. The API lists a guild's reports inside the raid's date window, then reads each report's fights.
+- **Report**: one WarcraftLogs log upload. The API lists a guild's reports inside the raid's date window, reads each report's short fight list, and reads in full only the reports it keeps pulls from.
 - **Pull**: one boss attempt inside a report, kill or wipe. Only fights whose encounter ID belongs to the chosen raid key and whose difficulty matches are kept (`backend/analysis.py:256`).
-- **Duplicate pull**: the same attempt logged by two raiders. A pull of the same boss that overlaps an earlier one by 15 seconds or more, or by half its length, is dropped (`backend/analysis.py:56`).
+- **Duplicate pull**: the same attempt logged by two raiders. A pull of the same boss that overlaps an earlier one by 15 seconds or more, or by half its length, is dropped (`backend/analysis.py:56`). Pulls are checked earliest first, and two copies that start on the same millisecond go by report code, so the same copy is kept on every run (`backend/app.py:260`).
 - **Raid tier**: the raid key chosen on the Analyze page, such as `midnight-s2-all`. It fixes which encounter IDs count and which dates are searched (`backend/analysis.py:188`, `backend/analysis.py:216`).
-- **Difficulty**: WarcraftLogs' difficulty number: 3 Normal, 4 Heroic, 5 Mythic (`frontend/src/AnalyzeConfig.js:167`, `backend/app.py:260`).
+- **Difficulty**: WarcraftLogs' difficulty number: 3 Normal, 4 Heroic, 5 Mythic (`frontend/src/AnalyzeConfig.js:167`, `backend/app.py:283`).
 - **Deaths tracked**: the "first X deaths per pull" setting, `maxCutoff`. The server clamps it to 1-10 (`backend/app.py:134`).
 - **Slot**: which death of the pull a death was, 1 for the first. A player who dies, is battle-rezzed and dies again takes two slots; a cheat death gets real deaths so far plus one, so it never pushes a real death out (`backend/analysis.py:142`).
 - **Wipe**: any 8-second stretch holding 8 real deaths (`backend/analysis.py:19`, `backend/analysis.py:111`). Deaths inside it never count; cheat deaths never make one.

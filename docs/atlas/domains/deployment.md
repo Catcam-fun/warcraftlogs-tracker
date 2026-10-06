@@ -8,7 +8,7 @@ summary:
   - "The frontend is a static Create React App build; a _redirects.txt file sends every path to index.html for client-side routing."
   - "The browser picks the API by hostname: localhost talks to localhost:5000, everything else to deathwarcraftlogs-api.onrender.com, unless REACT_APP_API_URL is set at build time."
   - "Supabase migrations are SQL files run by hand in the Supabase dashboard; nothing applies them automatically."
-  - "An AWS deployment (S3 + CloudFront for the site, Lambda behind the same CloudFront for the API) is defined in infra/ and deployed by hand from GitHub Actions; Render stays the live host until the domain moves."
+  - "An AWS deployment (S3 + CloudFront for the site, Lambda behind the same CloudFront for the API) is defined in infra/ and deployed from GitHub Actions on every push to main (or by hand); Render stays the live host until the domain moves."
 tagline: How the Flask API and the React site are built, configured and pointed at each other.
 anchors:
   gunicorn_bind: backend/gunicorn.conf.py:12
@@ -16,10 +16,10 @@ anchors:
   gunicorn_threads: backend/gunicorn.conf.py:15
   gunicorn_timeout: backend/gunicorn.conf.py:18
   requirements: backend/requirements.txt:1
-  dev_server: backend/app.py:779
+  dev_server: backend/app.py:811
   load_dotenv: backend/app.py:20
   allowed_origins: backend/app.py:67
-  health: backend/app.py:769
+  health: backend/app.py:801
   supabase_env: backend/supabase_client.py:27
   api_url: frontend/src/api.js:8
   wake_message: frontend/src/api.js:104
@@ -31,6 +31,7 @@ anchors:
   aws_template: infra/template.yaml:1
   aws_workflow: .github/workflows/deploy-aws.yml:1
   lambda_entry: backend/run.sh:1
+  malloc_arenas: backend/run.sh:8
   origin_lock: backend/origin.py:1
   keepalive: backend/streaming.py:1
   mem_shares: backend/supabase_client.py:202
@@ -52,7 +53,7 @@ invariants:
   - "MUST: migrations 001 and 002 be run in the Supabase SQL editor before the features that use them are expected to persist."
   - "NEVER: commit backend/.env; it is gitignored and holds the backend's secrets."
   - "NEVER: rely on in-process state (rate limits, memory shares, caches) across workers or restarts."
-content_hash: sha256:0acbcb3d9448970ef69f40d67a79729416caf0c07506a603be1d26b8b354ee83
+content_hash: sha256:2610b7e72408e5cc7d235d6da0c73672fc87b41cb3b86caa4d8dced068c69863
 ---
 # Deployment & Environments
 
@@ -62,7 +63,7 @@ content_hash: sha256:0acbcb3d9448970ef69f40d67a79729416caf0c07506a603be1d26b8b35
 - The site finds the API through one constant, `API_URL` (`frontend/src/api.js:8`): `REACT_APP_API_URL` if set at build time, else `http://localhost:5000` on localhost, else `https://deathwarcraftlogs-api.onrender.com`.
 - Supabase is shared infrastructure, not deployed from here. Its schema changes live as hand-run SQL in `backend/migrations/` (`backend/migrations/001_shares_and_rls.sql:2`).
 - Render (live today) is configured only in its dashboard: the repo has no `render.yaml` or `Procfile`.
-- The AWS setup is code: `infra/template.yaml` puts the site in a private S3 bucket and the API on Lambda (started by `backend/run.sh` through the Lambda Web Adapter), both behind one CloudFront distribution, with `/api/*` going to Lambda. `.github/workflows/deploy-aws.yml` runs the tests, deploys a stage (`staging` or `production`, one stack each) and smoke-tests it; it runs only when started by hand. One-time setup is in `infra/README.md`.
+- The AWS setup is code: `infra/template.yaml` puts the site in a private S3 bucket and the API on Lambda (started by `backend/run.sh` through the Lambda Web Adapter), both behind one CloudFront distribution, with `/api/*` going to Lambda. `.github/workflows/deploy-aws.yml` runs the tests, updates the hand-built staging Lambda (`floorpov-staging-api`) and site, and smoke-tests it; it runs on every push to `main` and when started by hand (`.github/workflows/deploy-aws.yml:14`). `template.yaml` is a reference for rebuilding the setup, not what is live (`infra/README.md`). One-time setup is in `infra/README.md`.
 
 ## Diagram
 
@@ -114,7 +115,7 @@ edge static -> supa color=process "anon key"
 | Backend dependencies | `backend/requirements.txt` | pip |
 | Backend config | `PORT`, `WEB_CONCURRENCY`, `GUNICORN_THREADS`, `ALLOWED_ORIGINS`, `SUPABASE_URL` | host env; `backend/.env` locally |
 | Backend secrets | `SUPABASE_KEY` (anon), `SUPABASE_SERVICE_ROLE_KEY` | host env; `backend/.env` locally (gitignored, `.gitignore:2`) |
-| Health check | `GET /api/health` returns status and whether Supabase is configured | `backend/app.py:769` |
+| Health check | `GET /api/health` returns status and whether Supabase is configured | `backend/app.py:801` |
 | Frontend build | `react-scripts build` to `frontend/build/` (gitignored) | `frontend/package.json:21`, `frontend/.gitignore:12` |
 | Frontend config | `REACT_APP_API_URL` (optional, build time) | build env |
 | Frontend public values | Supabase URL and anon key | constants in `frontend/src/supabaseClient.js:3` |
@@ -129,7 +130,7 @@ edge static -> supa color=process "anon key"
 | Frontend | `react-scripts start` (`frontend/package.json:20`) on localhost | static build of `frontend/` | the same build in S3, served by CloudFront; a CloudFront Function serves `index.html` for React routes (`infra/template.yaml`) |
 | API the site calls | `http://localhost:5000` (`frontend/src/api.js:9`) | `https://deathwarcraftlogs-api.onrender.com` (`frontend/src/api.js:9`) | `''` (same host): built with `REACT_APP_API_URL=same-origin` (`frontend/src/api.js:9`), API under `/api/*` |
 | Override | `REACT_APP_API_URL` | same, at build time | same |
-| Backend server | `python app.py`: Flask dev server, threaded, debug off (`backend/app.py:779`), or gunicorn | gunicorn with `backend/gunicorn.conf.py` | gunicorn on Lambda via the Lambda Web Adapter (`backend/run.sh`), 1 GB, 15-minute limit, response streaming |
+| Backend server | `python app.py`: Flask dev server, threaded, debug off (`backend/app.py:811`), or gunicorn | gunicorn with `backend/gunicorn.conf.py` | gunicorn on Lambda via the Lambda Web Adapter (`backend/run.sh`); the live staging function has 3008 MB (`infra/README.md`; `infra/template.yaml:120` says 1024 MB, a reference only), a 600-second timeout as configured in the console (`infra/README.md` says 15 minutes), response streaming; `run.sh` sets `MALLOC_ARENA_MAX=2` (`backend/run.sh:8`) |
 | Backend env | `backend/.env` via `load_dotenv()` | host environment variables | Lambda environment variables from the deploy workflow's GitHub secrets |
 | Supabase | same project: the frontend URL and anon key are hard-coded (`frontend/src/supabaseClient.js:3`) | same | same |
 | CORS | `ALLOWED_ORIGINS` usually unset, so `*` | `ALLOWED_ORIGINS` if set, else `*` | not needed: site and API share one host |
@@ -149,6 +150,7 @@ edge static -> supa color=process "anon key"
 - **Tests run only on AWS deploys**: the deploy workflow runs the backend and frontend suites before deploying (`.github/workflows/deploy-aws.yml`), but nothing runs them on pull requests or before a Render deploy; see [[testing]].
 - **On AWS the API only answers CloudFront**: the Lambda function URL is public, so CloudFront adds a secret `X-Origin-Verify` header and the app refuses requests without it (`backend/origin.py`, `backend/app.py:80`). Only the adapter's health check (`GET /api/health`) and warm-up path (`POST /events`) stay open. The secret is the `ORIGIN_VERIFY_SECRET` GitHub secret; changing it means redeploying.
 - **Quiet streams get a keepalive**: CloudFront closes an origin response that sends nothing for 60 seconds, so the analysis stream sends an SSE comment every 15 seconds while it waits (`backend/streaming.py`); the site ignores comment lines.
+- **Lambda memory is tight for big analyses**: glibc gives each thread its own memory arena and keeps it, and an analysis runs many threads. `backend/run.sh` caps them at two with `MALLOC_ARENA_MAX=2` (`backend/run.sh:8`), unless the environment sets another value. Its comment puts a Phoenix-sized analysis's peak at about 0.8 GB with two arenas, against about 1.3 GB without, at the same speed; the live staging function has 3008 MB (`infra/README.md`). Starting gunicorn some other way on Lambda loses that cap.
 - **Per-copy state on Lambda**: each Lambda copy has its own rate-limit counters and memory caches, like extra gunicorn workers. The shared report cache in Supabase is unaffected.
 - **Production API host is a fallback, not config**: a build without `REACT_APP_API_URL` served from any host other than localhost calls the Render URL (`frontend/src/api.js:9`), so any such deploy talks to the production API.
 - **Migrations are not tracked**: there is no migrations table or runner, so which files have been applied is known only by looking in Supabase. Both files are written to be safe to re-run.

@@ -19,7 +19,7 @@ anchors:
   gunicorn_threads: backend/gunicorn.conf.py:15
   supabase_env: backend/supabase_client.py:27
   auth_env: backend/auth.py:20
-  dev_server: backend/app.py:779
+  dev_server: backend/app.py:811
   frontend_api_url: frontend/src/api.js:8
 links:
   - backend-api-endpoints
@@ -37,7 +37,7 @@ invariants:
   - "MUST: run under a threaded worker (gthread); a sync worker lets one analysis stream block every other request."
   - "MUST: keep WEB_CONCURRENCY at 1 unless shared state moves out of process; caches and rate limits live in process memory."
   - "NEVER: hard-code a WarcraftLogs API key on the server; each analysis brings the caller's own clientId and clientSecret."
-content_hash: sha256:d8802a318d06b35eb7e30746177fe75adb4a32ee0a4dc01dc3c7c4bcf603e59b
+content_hash: sha256:9ff9b04e9750573853c827ae97eda7573b01ce88e0164133b1867a65848f56ed
 ---
 ## Summary
 
@@ -88,16 +88,16 @@ Every route, at a glance. Full request and response shapes are on [[backend-api-
 | Route {analysis} | Auth | Rate limit | Purpose |
 |---|---|---|---|
 | `POST /api/analyze` {analysis} | optional (unlocks cheat deaths) | 60 / hour / IP | Stream an analysis as SSE (`backend/app.py:109`) |
-| `POST /api/share` {sharing} | optional (links share to account) | 20 / hour / IP | Create a 72-hour share link (`backend/app.py:663`) |
-| `GET /api/shared/<share_id>` {sharing} | none | none | Read a share link (`backend/app.py:683`) |
-| `GET /api/saved` {saved} | required | none | List the user's saved analyses (`backend/app.py:705`) |
-| `POST /api/saved` {saved} | required | 30 / hour / IP | Save an analysis (`backend/app.py:711`) |
-| `GET /api/saved/<id>` {saved} | required | none | Load one saved analysis (`backend/app.py:729`) |
-| `DELETE /api/saved/<id>` {saved} | required | none | Delete one (`backend/app.py:737`) |
-| `DELETE /api/saved` {saved} | required | none | Delete all of the user's saves (`backend/app.py:745`) |
-| `DELETE /api/account` {account} | required | none | Delete the user's data and auth account (`backend/app.py:755`) |
-| `GET /api/health` {status} | none | none | Liveness plus whether Supabase is configured (`backend/app.py:769`) |
-| `GET /` {status} | none | none | Service banner (`backend/app.py:774`) |
+| `POST /api/share` {sharing} | optional (links share to account) | 20 / hour / IP | Create a 72-hour share link (`backend/app.py:695`) |
+| `GET /api/shared/<share_id>` {sharing} | none | none | Read a share link (`backend/app.py:715`) |
+| `GET /api/saved` {saved} | required | none | List the user's saved analyses (`backend/app.py:737`) |
+| `POST /api/saved` {saved} | required | 30 / hour / IP | Save an analysis (`backend/app.py:743`) |
+| `GET /api/saved/<id>` {saved} | required | none | Load one saved analysis (`backend/app.py:761`) |
+| `DELETE /api/saved/<id>` {saved} | required | none | Delete one (`backend/app.py:769`) |
+| `DELETE /api/saved` {saved} | required | none | Delete all of the user's saves (`backend/app.py:777`) |
+| `DELETE /api/account` {account} | required | none | Delete the user's data and auth account (`backend/app.py:787`) |
+| `GET /api/health` {status} | none | none | Liveness plus whether Supabase is configured (`backend/app.py:801`) |
+| `GET /` {status} | none | none | Service banner (`backend/app.py:806`) |
 
 The module map, for finding code:
 
@@ -106,7 +106,7 @@ The module map, for finding code:
 | `backend/app.py` {core} | Flask app, CORS, all routes, the analysis generator |
 | `backend/analysis.py` {core} | Raid tables, date windows, fight filtering, duplicate pulls, bulk death fetch, death slots |
 | `backend/features.py` {core} | Spell IDs that mark a cheat death (`backend/features.py:14`, `backend/features.py:26`) |
-| `backend/cache.py` {plumbing} | `LRUCache` and `SharedReportCache` and the four report caches |
+| `backend/cache.py` {plumbing} | `LRUCache` and `SharedReportCache` and the five report caches |
 | `backend/ratelimit.py` {plumbing} | `RateLimiter`, the `limit` decorator, `client_ip` |
 | `backend/gunicorn.conf.py` {plumbing} | Production server settings |
 | `backend/defensives.py` {analysis} | Defensive analysis per death; see [[backend-defensive-analysis]] and [[backend-death-descriptions]] |
@@ -133,7 +133,7 @@ The repository holds no `render.yaml` or `Procfile`; the Render start command an
 
 | Aspect | Local | Production |
 |---|---|---|
-| Server | `python app.py`: Flask's threaded dev server on `PORT` or 5000 (`backend/app.py:779`) | gunicorn with `backend/gunicorn.conf.py` on Render |
+| Server | `python app.py`: Flask's threaded dev server on `PORT` or 5000 (`backend/app.py:811`) | gunicorn with `backend/gunicorn.conf.py` on Render |
 | URL the frontend uses | `http://localhost:5000` when the site runs on localhost (`frontend/src/api.js:9`) | `https://deathwarcraftlogs-api.onrender.com` (`frontend/src/api.js:9`), unless `REACT_APP_API_URL` overrides it at build time (`frontend/src/api.js:8`) |
 | Env source | `backend/.env` loaded by `load_dotenv()` | Render environment settings |
 | Supabase | optional: without it, saves fail, shares fall back to process memory, the shared report cache is skipped | configured; service-role key preferred (`backend/supabase_client.py:38`) |
@@ -149,7 +149,7 @@ The repository holds no `render.yaml` or `Procfile`; the Render start command an
 
 - **The analysis body is read before streaming starts**: `request.get_json` and the sign-in check run before the generator (`backend/app.py:115`, `backend/app.py:120`), because the generator runs after Flask's request context is gone.
 - **Errors after the stream starts are not HTTP errors**: once `/api/analyze` returns 200, a failure arrives as a `data: {"error": ...}` event. Only a bad JSON body (400) and the rate limit (429) are real HTTP errors.
-- **Free-tier sleep**: the frontend pings `/api/health` on load (`frontend/src/App.js:263`), which, per the comment at `frontend/src/App.js:258`, starts waking a Render instance that slept after idling, while the user is still filling in the form.
+- **Free-tier sleep**: the frontend pings `/api/health` on load (`frontend/src/App.js:263`), which, per the comment at `frontend/src/App.js:259`, starts waking a Render instance that slept after idling, while the user is still filling in the form.
 
 ## Related
 

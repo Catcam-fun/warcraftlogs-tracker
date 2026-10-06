@@ -26,7 +26,7 @@ anchors:
   loader_overlay: frontend/src/App.js:1535
   scroll_top: frontend/src/App.js:177
   backend_analyze: backend/app.py:109
-  backend_result: backend/app.py:637
+  backend_result: backend/app.py:667
 invariants:
   - "MUST: a given ?share= id is requested at most once per page life (attemptedShareRef), so a failing share cannot loop."
   - "MUST: an incoming ?share= link wins over the IndexedDB restore of the last analysis."
@@ -41,7 +41,7 @@ links:
   - feat-analyze
   - feat-share
   - feat-saved
-content_hash: sha256:b87e4b81351e706d8b0b3643bdaa03284e86d2ea712eb1129b0954dd7d091c9d
+content_hash: sha256:4f77e929b14f9cdb77c7c6e46dc131c9ca268ababb4bb41922e895c3dae86c63
 ---
 ## Summary
 
@@ -84,7 +84,7 @@ These four paths render full-bleed (`fpx-landing-wrap`); anything else gets the 
 
 #### Reading the analysis stream
 
-The backend answers `POST /api/analyze` with a stream of `data: {json}\n\n` frames (`backend/app.py:109`, final frame at `backend/app.py:637`). The browser does not use `EventSource`, because the request is a POST with a JSON body. Instead it reads `response.body` directly:
+The backend answers `POST /api/analyze` with a stream of `data: {json}\n\n` frames (`backend/app.py:109`, final frame at `backend/app.py:667`). The browser does not use `EventSource`, because the request is a POST with a JSON body. Instead it reads `response.body` directly:
 
 - Before the stream, a non-OK HTTP status is turned into an error from the JSON `error` field if there is one (`frontend/src/App.js:730`).
 - Each chunk is decoded and appended to a buffer, the buffer is split on blank lines, and the last partial piece is kept for the next read (`frontend/src/App.js:741`).

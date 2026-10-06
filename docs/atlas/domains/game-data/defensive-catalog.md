@@ -46,7 +46,7 @@ invariants:
   - "NEVER: hand-edit defensive_catalog.py; the curated lists live in the build script."
 flows:
   - data-build-path
-content_hash: sha256:bd079bbaee3ba304a919005871beabc44d71b602b5394aa199b8407e12a16f8e
+content_hash: sha256:8791e88978197b3434c092a247edc270993e8428b7078e81f0789ab4771ca3a0
 ---
 ## Summary
 
@@ -103,7 +103,7 @@ Two related tables live in `backend/defensives.py`, not the build script: `DEMON
 - `HEALING_TAKEN`: per patch, talents and auras that change healing taken (`backend/defensive_catalog.py:15865`).
 - `LATEST` and `CATALOG`: the newest patch and its catalog (`backend/defensive_catalog.py:22354-22355`).
 
-`defensives.py` wraps each patch in a `Catalog` object (`backend/defensives.py:68-119`) and hashes the patches' cast IDs, buff names and talent entries into `CATALOG_FINGERPRINT`, which is part of the defensive cache key (`backend/defensives.py:163-168`).
+`defensives.py` wraps each patch in a `Catalog` object (`backend/defensives.py:70-119`) and hashes the patches' cast IDs, buff names and talent entries into `CATALOG_FINGERPRINT`, which is part of the defensive cache key (`backend/defensives.py:163-168`).
 
 ## Invariants
 
