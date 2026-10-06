@@ -371,8 +371,8 @@ def analyze():
                     combatants = None
                     if deaths is None:
                         # Talent loadouts first, alone: the cheapest first query on a report WCL
-                        # hasn't read lately (about 2 points), after which every query costs about
-                        # 1. Deaths sent first cost 4-17, and queries sent at once each pay that.
+                        # hasn't read in the last hour (about 2 points), after which each query
+                        # costs about 1-3. Deaths or Casts sent first cost 4-17.
                         try:
                             combatants = defensives.fetch_combatants(token, rid, fight_ids, first_start, last_end)
                         except Exception as e:
@@ -391,39 +391,34 @@ def analyze():
                     win_key = (rid, tuple((fid, tuple(c)) for fid, c in sorted(counted.items()) if c),
                                "lethal-window", defensives.LETHAL_WINDOW_MS)
                     windows = recap_lru.get(win_key) if finished else None
-                    with ThreadPoolExecutor(max_workers=3) as pool:
-                        raw_job = None if def_data is not None or def_error is not None else pool.submit(
-                            defensives.fetch_defensive_raw, token, rid, fight_ids, first_start, last_end, cat,
-                            combatants)
-                        ik_job = None if instakills is not None else pool.submit(
-                            defensives.fetch_instakills, token, rid, fight_ids, first_start, last_end)
-                        # The seconds before each death that can count: one request, one block per pull.
-                        win_job = None if windows is not None else pool.submit(
-                            defensives.fetch_death_windows, token, rid, sorted(counted.items()))
-                        if raw_job is not None:
-                            try:
-                                dead = dead_in(deaths)
-                                def_data = defensives.filter_defensive_raw(raw_job.result(), dead, cat)
-                                if finished:
-                                    defensive_lru.set(def_key(dead), def_data)
-                            except Exception as e:
-                                # Deaths still count; this report just lacks defensive detail.
-                                def_error = e
-                                def_data = None
-                        if ik_job is not None:
-                            try:
-                                instakills = ik_job.result()
-                                if finished:
-                                    recap_lru.set(ik_key, instakills)
-                            except Exception as e:
-                                hits_error = e
-                        if win_job is not None:
-                            try:
-                                windows = win_job.result()
-                                if finished and hits_error is None:
-                                    recap_lru.set(win_key, windows)
-                            except Exception as e:
-                                hits_error = hits_error or e
+                    # One query at a time: after the first one on a report, WCL charges about a
+                    # quarter less for the rest sent one by one than all at once.
+                    if def_data is None and def_error is None:
+                        try:
+                            dead = dead_in(deaths)
+                            def_data = defensives.filter_defensive_raw(defensives.fetch_defensive_raw(
+                                token, rid, fight_ids, first_start, last_end, cat, combatants), dead, cat)
+                            if finished:
+                                defensive_lru.set(def_key(dead), def_data)
+                        except Exception as e:
+                            # Deaths still count; this report just lacks defensive detail.
+                            def_error = e
+                            def_data = None
+                    if instakills is None:
+                        try:
+                            instakills = defensives.fetch_instakills(token, rid, fight_ids, first_start, last_end)
+                            if finished:
+                                recap_lru.set(ik_key, instakills)
+                        except Exception as e:
+                            hits_error = e
+                    # The seconds before each death that can count: one request, one block per pull.
+                    if windows is None and hits_error is None:
+                        try:
+                            windows = defensives.fetch_death_windows(token, rid, sorted(counted.items()))
+                            if finished:
+                                recap_lru.set(win_key, windows)
+                        except Exception as e:
+                            hits_error = e
                     if def_error:
                         print(f"[WARN] Defensive data unavailable for report {rid}: {def_error}")
 
