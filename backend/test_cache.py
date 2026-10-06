@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 import cache
 import supabase_client
@@ -51,3 +52,34 @@ class SharedReportCacheTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReportCacheConnectionTests(unittest.TestCase):
+    """A reset connection is retried; the shared cache isn't switched off for it."""
+
+    def test_reset_connection_is_retried(self):
+        import supabase_client
+        from test_api import FakeDB, FakeResult
+
+        class FlakyDB(FakeDB):
+            fails = 2
+
+            def table(self, name):
+                q = super().table(name)
+                real = q.execute
+
+                def execute():
+                    if FlakyDB.fails:
+                        FlakyDB.fails -= 1
+                        raise ConnectionResetError(104, "Connection reset by peer")
+                    return real()
+                q.execute = execute
+                return q
+
+        flaky = FlakyDB()
+        flaky.tables['report_cache'] = [{'key': 'k1', 'payload': supabase_client.pack({"a": 1})}]
+        with mock.patch.object(supabase_client, 'db', flaky), \
+                mock.patch.object(supabase_client, '_cache_disabled_until', 0.0), \
+                mock.patch.object(supabase_client.time, 'sleep'):
+            self.assertEqual(supabase_client.cache_get('k1'), {"a": 1})
+            self.assertTrue(supabase_client._cache_available())
