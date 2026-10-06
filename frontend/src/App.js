@@ -256,9 +256,9 @@ export default function WarcraftLogsApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
-  // Wake the backend as soon as the site opens. Render's free tier sleeps
-  // after ~15 idle minutes and the first request then takes 30-60s; this
-  // starts that warm-up while the user is still reading or filling the form.
+  // Warm the backend as soon as the site opens. A schedule keeps one Lambda
+  // copy warm, but AWS can still recycle it; this starts a cold one while
+  // the user is still reading or filling the form.
   useEffect(() => {
     fetch(`${API_URL}/api/health`).catch(() => {});
   }, []);
