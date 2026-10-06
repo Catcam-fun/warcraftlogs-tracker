@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Home, Crosshair, BarChart3, Bookmark, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import FpMark from './FpMark';
 
 /* Shared left rail — single source of truth so every surface (Analyze,
    Results, Terms, Privacy, Saved, loading) shows an identical nav.
@@ -11,7 +12,7 @@ export default function FpxRail({ collapsed, onToggle, active, onHome, onAnalyze
     <aside className={`fpx-rail${collapsed ? ' collapsed' : ''}`}>
       <div className="fpx-railhead">
         <div className="fpx-brand" onClick={onHome}>
-          <div className="mk">FP</div>
+          <FpMark />
           <div className="wm">FLOOR&nbsp;POV<small>DEATH ANALYSIS</small></div>
         </div>
         <button className="fpx-railtoggle" onClick={onToggle}
