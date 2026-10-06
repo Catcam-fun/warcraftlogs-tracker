@@ -46,3 +46,35 @@ At switch time: a Route 53 hosted zone for `floorpov.gg`, a certificate,
 and the domain on the production CloudFront distribution. Then, at Porkbun,
 the domain's nameservers change to the four Route 53 gives. The domain stays
 registered at Porkbun.
+
+## What's live now (built by hand in the console, Oct 2026)
+
+The staging site was built by hand rather than from `template.yaml`; these
+are the real resources (account REDACTED, us-east-1):
+
+| Piece | Name / ID | Settings |
+|---|---|---|
+| API | Lambda `REDACTED` | Python 3.12, x86_64, handler `run.sh`, layer `LambdaAdapterLayerX86:30`, 3008 MB, 15 min; env vars as in `template.yaml` plus the Supabase keys and `ORIGIN_VERIFY_SECRET` |
+| API URL | `REDACTED/` | auth NONE, RESPONSE_STREAM |
+| Site files | S3 bucket `REDACTED` | private, read by CloudFront only |
+| CDN | CloudFront `REDACTED`, `REDACTED` | origins: the bucket, and `floorpov-api` (the Lambda URL, custom header `X-Origin-Verify`, response and keep-alive timeouts 60 s); behaviors: `/api/*` (CachingDisabled, AllViewerExceptHostHeader, no compression, viewer-request function `floorpov-viewer-ip`) and Default (`floorpov-spa-rewrite`) |
+| Warm-up | EventBridge schedule `REDACTED` | every 5 min, payload `{"source": "floorpov.warm"}` |
+| Budget | `REDACTED` | $10/month, email alerts at 50/80/100% |
+
+The account is on AWS's Free account plan (credits; no charges until it is
+upgraded). Account-wide Lambda concurrency is 10, so reserved concurrency
+can't be set; a budget kill switch, once the account is upgraded, should
+switch the function URL's auth to AWS_IAM instead.
+
+### Deploying an update by hand
+
+- API: build a zip of `backend/` (tracked files, no tests/scripts/migrations)
+  plus `pip install --platform manylinux2014_x86_64 --python-version 3.12
+  --only-binary=:all: -r requirements.txt`, then
+  `aws lambda update-function-code --function-name REDACTED --zip-file fileb://api.zip`.
+- Site: `REACT_APP_API_URL=same-origin npm run build` in `frontend/`, drop
+  `build/_redirects.txt`, `aws s3 sync build s3://REDACTED --delete`,
+  then `aws cloudfront create-invalidation --distribution-id REDACTED --paths "/*"`.
+- Sessions read the deploy key from `FLOORPOV_AWS_ACCESS_KEY_ID` /
+  `FLOORPOV_AWS_SECRET_ACCESS_KEY` (environment variables; the plain
+  `AWS_*` names are taken by the sandbox's proxy placeholders).
