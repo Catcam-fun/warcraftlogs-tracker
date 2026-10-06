@@ -255,7 +255,7 @@ class AnalyzeFlowTests(unittest.TestCase):
 
     def _fights(self, _token, rid):
         return {
-            "report_start": 1_000_000 if rid == "R1" else 9_000_000,
+            "report_start": 1_000_000 if rid == "R1" or getattr(self, "same_night", False) else 9_000_000,
             "fights": [{"id": 1, "start_time": 0, "end_time": 60_000, "name": "Plexus Sentinel",
                         "boss": 3129, "difficulty": 5, "kill": False, "zoneID": 44,
                         "friendlyPlayers": [10, 11]}],
@@ -265,27 +265,37 @@ class AnalyzeFlowTests(unittest.TestCase):
             "abilities": {},
         }
 
+    def _light(self, token, rid):
+        meta = self._fights(token, rid)
+        return {"report_start": meta["report_start"],
+                "fights": [{k: v for k, v in f.items() if k != "friendlyPlayers"} for f in meta["fights"]]}
+
     def _windows(self, _token, _rid, pulls):
         # Bob's killing blow, from full health.
         return {10: [{"timestamp": 5_000, "type": "damage", "targetID": 10, "abilityGameID": 9, "amount": 900,
                       "overkill": 100, "hitPoints": 0, "maxHitPoints": 900, "resourceActor": 2}]}
 
-    def _run(self, roster_patch=True, bulk_effect=None, **extra):
+    def _run(self, roster_patch=True, bulk_effect=None, fights_effect=None, same_night=False, **extra):
         from analysis import RAID_ENCOUNTERS
         raid = next(k for k, v in RAID_ENCOUNTERS.items() if 3129 in v)
         deaths = {1: [{"timestamp": 5_000, "targetName": "Bob", "targetID": 10,
                        "abilityName": "Zap"}]}
         reports = [{"id": "R1", "start": 1_000_000, "end": 1_100_000, "owner": "x"},
                    {"id": "R2", "start": 9_000_000, "end": 9_100_000, "owner": "x"}]
+        self.same_night = same_night
         roster = mock.patch.object(app_module, 'get_guild_roster', return_value={'bob', 'amy'}) if roster_patch \
             else mock.MagicMock()
         with mock.patch.object(app_module, 'get_access_token', return_value='t'), roster, \
                 mock.patch.object(app_module, 'get_guild_reports', return_value=reports), \
-                mock.patch.object(app_module, 'get_fights', autospec=True, side_effect=self._fights) as fights, \
+                mock.patch.object(app_module, 'get_report_fights', autospec=True, side_effect=self._light), \
+                mock.patch.object(app_module, 'get_fights', autospec=True,
+                                  side_effect=fights_effect or self._fights) as fights, \
                 mock.patch.object(app_module, 'get_report_deaths_bulk', autospec=True, return_value=deaths,
                                   side_effect=bulk_effect) as bulk, \
+                mock.patch.object(app_module.defensives, 'fetch_combatants', autospec=True,
+                                  return_value=[]) as combatants, \
                 mock.patch.object(app_module.defensives, 'fetch_defensive_raw', autospec=True,
-                                  return_value={}), \
+                                  return_value={}) as raw, \
                 mock.patch.object(app_module.defensives, 'fetch_instakills', autospec=True,
                                   return_value={}), \
                 mock.patch.object(app_module.defensives, 'fetch_death_windows', autospec=True,
@@ -298,10 +308,12 @@ class AnalyzeFlowTests(unittest.TestCase):
         self.assertEqual(len(results), 1, body)
         import json
         self.window_calls = windows.call_args_list
+        self.combatant_calls, self.raw_calls = combatants.call_args_list, raw.call_args_list
         return json.loads(results[0][6:])["result"], fights.call_count, bulk.call_count
 
     def test_analysis_counts_deaths_and_caches_finished_reports(self):
         app_module.report_meta_cache._data.clear()
+        app_module.report_fights_cache._data.clear()
         app_module.deaths_lru._data.clear()
         app_module.defensive_lru._data.clear()
         app_module.recap_lru._data.clear()
@@ -321,8 +333,47 @@ class AnalyzeFlowTests(unittest.TestCase):
         _, fights_calls, bulk_calls = self._run()
         self.assertEqual((fights_calls, bulk_calls), (0, 0))
 
+    def test_talent_loadouts_are_read_first_and_not_twice(self):
+        for c in (app_module.report_meta_cache, app_module.report_fights_cache, app_module.deaths_lru, app_module.defensive_lru, app_module.recap_lru):
+            c._data.clear()
+        self._run()
+        self.assertEqual(len(self.combatant_calls), 2)
+        # The loadouts already read are handed to the defensive fetch, which doesn't read them again.
+        self.assertTrue(all(c.args[-1] == [] for c in self.raw_calls))
+
+    def test_report_without_a_death_that_counts_reads_no_defensives(self):
+        for c in (app_module.report_meta_cache, app_module.report_fights_cache, app_module.deaths_lru, app_module.defensive_lru, app_module.recap_lru):
+            c._data.clear()
+        with mock.patch.object(app_module, 'get_guild_roster', return_value={'amy'}):
+            result, _, bulk_calls = self._run(roster_patch=False)
+        self.assertEqual(bulk_calls, 2)
+        self.assertNotIn("Bob", result["events"])
+        self.assertEqual((self.raw_calls, self.window_calls), ([], []))
+
+    def test_only_reports_pulls_are_kept_from_are_read_in_full(self):
+        for c in (app_module.report_meta_cache, app_module.report_fights_cache, app_module.deaths_lru, app_module.defensive_lru, app_module.recap_lru):
+            c._data.clear()
+        # Two logs of the same pull: one is read in full, the other only as a fight list.
+        result, fights_calls, bulk_calls = self._run(same_night=True)
+        self.assertEqual((fights_calls, bulk_calls), (1, 1))
+        self.assertEqual(len(result["events"]["Bob"]), 1)
+        self.assertEqual(result["events"]["Bob"][0]["reportId"], "R1")
+
+    def test_pull_moves_to_another_log_when_its_log_cant_be_read_in_full(self):
+        for c in (app_module.report_meta_cache, app_module.report_fights_cache, app_module.deaths_lru, app_module.defensive_lru, app_module.recap_lru):
+            c._data.clear()
+
+        def fights(token, rid):
+            if rid == "R1":
+                return {"report_start": 0, "fights": [], "friendlies": [], "player_details": {}, "abilities": {}}
+            return self._fights(token, rid)
+        result, fights_calls, _ = self._run(same_night=True, fights_effect=fights)
+        self.assertEqual(fights_calls, 2)
+        self.assertEqual([e["reportId"] for e in result["events"]["Bob"]], ["R2"])
+        self.assertEqual(result["meta"]["failedReports"], [])
+
     def test_roster_filter_can_be_turned_off(self):
-        for c in (app_module.report_meta_cache, app_module.deaths_lru, app_module.defensive_lru, app_module.recap_lru):
+        for c in (app_module.report_meta_cache, app_module.report_fights_cache, app_module.deaths_lru, app_module.defensive_lru, app_module.recap_lru):
             c._data.clear()
         with mock.patch.object(app_module, 'get_guild_roster', return_value={'amy'}) as roster:
             # Default: only roster members count, so Bob (not on it) is left out.
@@ -337,7 +388,7 @@ class AnalyzeFlowTests(unittest.TestCase):
             self.assertEqual(roster.call_count, 1)
 
     def test_unreadable_report_adds_no_pulls(self):
-        for c in (app_module.report_meta_cache, app_module.deaths_lru, app_module.defensive_lru, app_module.recap_lru):
+        for c in (app_module.report_meta_cache, app_module.report_fights_cache, app_module.deaths_lru, app_module.defensive_lru, app_module.recap_lru):
             c._data.clear()
         deaths = {1: [{"timestamp": 5_000, "targetName": "Bob", "targetID": 10, "abilityName": "Zap"}]}
 
@@ -354,6 +405,7 @@ class AnalyzeFlowTests(unittest.TestCase):
 
     def test_cheat_death_requires_sign_in(self):
         app_module.report_meta_cache._data.clear()
+        app_module.report_fights_cache._data.clear()
         app_module.deaths_lru._data.clear()
         app_module.defensive_lru._data.clear()
         app_module.recap_lru._data.clear()

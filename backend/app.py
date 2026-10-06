@@ -22,7 +22,7 @@ load_dotenv()
 # Import from modules
 from warcraftlogs import (
     get_access_token, get_guild_reports, get_guild_roster,
-    get_fights, normalize_character_name
+    get_fights, get_report_fights, normalize_character_name
 )
 from analysis import (
     get_report_deaths_bulk, get_main_character,
@@ -33,7 +33,7 @@ import defensives
 import boss_spell_text
 from features import CHEAT_DEATH_ABILITY_IDS
 from auth import require_user, verify_token, forget_token, _bearer_token
-from cache import (report_meta_cache, report_deaths_cache as deaths_lru,
+from cache import (report_meta_cache, report_fights_cache, report_deaths_cache as deaths_lru,
                    report_defensive_cache as defensive_lru, report_recap_cache as recap_lru, flush_writes)
 from ratelimit import RateLimiter, limit
 import supabase_client
@@ -200,42 +200,48 @@ def analyze():
                 yield f"data: {json.dumps({'error': 'No reports found matching criteria'})}\n\n"
                 return
             
-            # Collect all fights. Reports are fetched in parallel (one
-            # GraphQL call each); finished reports come from the cache.
+            # Collect all fights. Every report's light fight list (fights only) is read
+            # in parallel, duplicate pulls are dropped, and only the reports pulls are
+            # kept from are read in full (players, specs, abilities). Finished reports
+            # come from the cache.
             yield f"data: {json.dumps({'stage': 'fights', 'message': 'Collecting fights from reports...'})}\n\n"
             all_fights_raw = []
             finished_before = int(time.time() * 1000) - REPORT_CACHE_MIN_AGE_MS
             report_finished = {rep["id"]: bool(rep.get("end")) and rep["end"] < finished_before
                                for rep in reports}
 
-            def fetch_report_meta(rep):
+            def fetch_light_fights(rep):
                 rid = rep["id"]
+                if report_finished[rid]:
+                    cached = report_fights_cache.get(rid)
+                    if cached is not None:
+                        return rep, cached
+                light = get_report_fights(token, rid)
+                if report_finished[rid] and light.get("fights"):
+                    report_fights_cache.set(rid, light)
+                return rep, light
+
+            def fetch_report_meta(rid):
                 if report_finished[rid]:
                     cached = report_meta_cache.get(rid)
                     if cached is not None:
-                        return rep, cached
+                        return rid, cached
                 meta = get_fights(token, rid)
                 if report_finished[rid] and meta.get("fights"):
                     report_meta_cache.set(rid, meta)
-                return rep, meta
+                return rid, meta
 
             with ThreadPoolExecutor(max_workers=REPORT_FETCH_WORKERS) as executor:
-                futures = [executor.submit(fetch_report_meta, rep) for rep in reports]
+                futures = [executor.submit(fetch_light_fights, rep) for rep in reports]
                 for done, future in enumerate(as_completed(futures), 1):
-                    rep, fights_data = future.result()
+                    rep, light = future.result()
                     rid = rep["id"]
                     yield f"data: {json.dumps({'stage': 'fights', 'message': f'Read report {done}/{len(reports)}'})}\n\n"
 
-                    fights = fights_data.get("fights", [])
+                    fights = light.get("fights", [])
                     if not fights:
                         continue
-                    report_abs_start = fights_data.get("report_start") or rep["start"]
-                    friendlies = fights_data.get("friendlies", [])
-                    player_details = fights_data.get("player_details", {})
-                    ability_map = fights_data.get("abilities", {})
-
-                    # Non-guild members in the raid are filtered out
-                    # per-player below (only roster members count).
+                    report_abs_start = light.get("report_start") or rep["start"]
                     for fight in analyze_fights(fights, fight_zone, difficulty, selected_raid):
                         all_fights_raw.append({
                             'reportId': rid,
@@ -246,38 +252,51 @@ def analyze():
                             'abs_start': report_abs_start + fight['start_time'],
                             'abs_end': report_abs_start + fight['end_time'],
                             'report_abs_start': report_abs_start,
-                            'friendlies': friendlies,
-                            'ability_map': ability_map,
-                            'ability_schools': fights_data.get("ability_schools", {}),
-                            'ability_icons': fights_data.get("ability_icons", {}),
-                            'player_details': player_details
                         })
 
-            all_fights_raw.sort(key=lambda x: x['abs_start'])
+            # Earliest copy of a pull first. Two logs can start a pull at the same
+            # millisecond (the same log uploaded twice): ties go by report code, so the
+            # copy kept never depends on which report happened to be read first.
+            all_fights_raw.sort(key=lambda x: (x['abs_start'], x['reportId'], x['fight']['id']))
+
+            # Deduplicate, then read the kept pulls' reports in full. A report that can't
+            # be read in full gives its pulls to another log's copy, as if it weren't listed.
+            yield f"data: {json.dumps({'stage': 'dedup', 'message': 'Removing duplicate pulls...'})}\n\n"
+            metas, unreadable = {}, set()
+            while True:
+                seen_pulls_by_boss = {}
+                all_fights_deduped = [fd for fd in all_fights_raw if fd['reportId'] not in unreadable
+                                      and not is_duplicate_pull(seen_pulls_by_boss, fd['boss_id'], fd['abs_start'],
+                                                                fd['abs_end'], fd['is_kill'])]
+                missing = sorted({fd['reportId'] for fd in all_fights_deduped} - set(metas))
+                if not missing:
+                    break
+                with ThreadPoolExecutor(max_workers=REPORT_FETCH_WORKERS) as executor:
+                    for rid, meta in executor.map(fetch_report_meta, missing):
+                        if meta.get("fights"):
+                            metas[rid] = meta
+                        else:
+                            unreadable.add(rid)
             yield f"data: {json.dumps({'stage': 'fights', 'message': f'Collected {len(all_fights_raw)} total fights'})}\n\n"
-            
-            if not all_fights_raw:
+
+            if not all_fights_deduped:
                 diff_names = {'3': 'Normal', '4': 'Heroic', '5': 'Mythic'}
                 diff_label = diff_names.get(str(difficulty), f'difficulty {difficulty}')
                 yield f"data: {json.dumps({'error': f'No {diff_label} fights found in the reports. Check that the selected difficulty is available for this raid.'})}\n\n"
                 return
-            
-            # Deduplicate
-            yield f"data: {json.dumps({'stage': 'dedup', 'message': 'Removing duplicate pulls...'})}\n\n"
-            seen_pulls_by_boss = {}
-            all_fights_deduped = []
-            
-            for fight_data in all_fights_raw:
-                boss_id = fight_data['boss_id']
-                abs_start = fight_data['abs_start']
-                abs_end = fight_data['abs_end']
-                is_kill = fight_data['is_kill']
-                
-                if is_duplicate_pull(seen_pulls_by_boss, boss_id, abs_start, abs_end, is_kill):
-                    continue
-                
-                all_fights_deduped.append(fight_data)
-            
+
+            for fd in all_fights_deduped:
+                meta = metas[fd['reportId']]
+                full = {f['id']: f for f in meta.get("fights", [])}
+                fd.update({
+                    'fight': full.get(fd['fight']['id'], fd['fight']),
+                    'friendlies': meta.get("friendlies", []),
+                    'ability_map': meta.get("abilities", {}),
+                    'ability_schools': meta.get("ability_schools", {}),
+                    'ability_icons': meta.get("ability_icons", {}),
+                    'player_details': meta.get("player_details", {}),
+                })
+
             yield f"data: {json.dumps({'stage': 'dedup', 'message': f'After deduplication: {len(all_fights_deduped)} unique fights'})}\n\n"
             
             # Process deaths
@@ -349,17 +368,38 @@ def analyze():
 
                     def_data = defensive_lru.get(def_key(dead_in(deaths))) if finished and deaths is not None else None
                     def_error = hits_error = None
+                    combatants = None
+                    if deaths is None:
+                        # Talent loadouts first, alone: the cheapest first query on a report WCL
+                        # hasn't read lately (about 2 points), after which every query costs about
+                        # 1. Deaths sent first cost 4-17, and queries sent at once each pay that.
+                        try:
+                            combatants = defensives.fetch_combatants(token, rid, fight_ids, first_start, last_end)
+                        except Exception as e:
+                            def_error = e
+                        deaths = get_report_deaths_bulk(token, rid, fights_list, friendlies, ability_map,
+                                                        enable_cheat_death)
+                        if finished:
+                            deaths_lru.set(cache_key, deaths)
+                        def_data = defensive_lru.get(def_key(dead_in(deaths))) if finished else None
+
+                    counted = counted_by_fight(deaths, friendlies)
+                    if not any(counted.values()):
+                        # No death here can count, so nothing reads this report's defensives or hits.
+                        return rid, deaths, defensives.filter_defensive_raw({}, ()), {}, None
+
+                    win_key = (rid, tuple((fid, tuple(c)) for fid, c in sorted(counted.items()) if c),
+                               "lethal-window", defensives.LETHAL_WINDOW_MS)
+                    windows = recap_lru.get(win_key) if finished else None
                     with ThreadPoolExecutor(max_workers=3) as pool:
-                        deaths_job = None if deaths is not None else pool.submit(
-                            get_report_deaths_bulk, token, rid, fights_list, friendlies, ability_map, enable_cheat_death)
-                        raw_job = None if def_data is not None else pool.submit(
-                            defensives.fetch_defensive_raw, token, rid, fight_ids, first_start, last_end, cat)
+                        raw_job = None if def_data is not None or def_error is not None else pool.submit(
+                            defensives.fetch_defensive_raw, token, rid, fight_ids, first_start, last_end, cat,
+                            combatants)
                         ik_job = None if instakills is not None else pool.submit(
                             defensives.fetch_instakills, token, rid, fight_ids, first_start, last_end)
-                        if deaths_job is not None:
-                            deaths = deaths_job.result()
-                            if finished:
-                                deaths_lru.set(cache_key, deaths)
+                        # The seconds before each death that can count: one request, one block per pull.
+                        win_job = None if windows is not None else pool.submit(
+                            defensives.fetch_death_windows, token, rid, sorted(counted.items()))
                         if raw_job is not None:
                             try:
                                 dead = dead_in(deaths)
@@ -377,22 +417,17 @@ def analyze():
                                     recap_lru.set(ik_key, instakills)
                             except Exception as e:
                                 hits_error = e
+                        if win_job is not None:
+                            try:
+                                windows = win_job.result()
+                                if finished and hits_error is None:
+                                    recap_lru.set(win_key, windows)
+                            except Exception as e:
+                                hits_error = hits_error or e
                     if def_error:
                         print(f"[WARN] Defensive data unavailable for report {rid}: {def_error}")
 
-                    # The seconds before each death that can count: one request, one block per pull.
                     hits = None
-                    counted = counted_by_fight(deaths, friendlies)
-                    win_key = (rid, tuple((fid, tuple(c)) for fid, c in sorted(counted.items()) if c),
-                               "lethal-window", defensives.LETHAL_WINDOW_MS)
-                    windows = recap_lru.get(win_key) if finished else None
-                    if windows is None and hits_error is None:
-                        try:
-                            windows = defensives.fetch_death_windows(token, rid, sorted(counted.items()))
-                            if finished:
-                                recap_lru.set(win_key, windows)
-                        except Exception as e:
-                            hits_error = e
                     if hits_error is None:
                         hits = defensives.merge_hits(windows, instakills)
                     else:
