@@ -1127,3 +1127,92 @@ class ReadyTimeTests(unittest.TestCase):
         for patch, cat in defensive_catalog.CATALOGS.items():
             mods = cat[19236].get("cooldown_mods") or []
             self.assertIn(-20000, [m.get("add_ms") for m in mods if m["talent"] == "Angel's Mercy"], patch)
+
+
+class MaxHealthBeforeKillingBlowTests(unittest.TestCase):
+    """Health before the killing blow is taken against the max health the player had just before it.
+
+    WCL logs the killing hit after the death removed the player's auras, so its maxHitPoints has lost
+    every max-health aura they had (live 2026-10-08, every one of the four 105% deaths: Strikepal,
+    nerubar p16, auras stripped at 1910329-1910332, killing hit at 1910349 with max 10061382 against
+    11198315 on every hit and heal before; Zorthar, voidspire p58, and Batchester, midnight-s2 p42,
+    lost a 5% max-health raid buff the same way)."""
+
+    def assess(self, hits, available=(), **kw):
+        durations = {CATALOG[s]["name"]: CATALOG[s].get("aura_ms") for s in available}
+        return defensives.assess_survival(hits, hits[-1]["timestamp"], ready(*available), [], NAMES, SCHOOLS,
+                                          aura_ms=durations, **kw)
+
+    @staticmethod
+    def at(ts, amount, hp_after, max_hp, overkill=0, absorbed=0, ability=500):
+        return dict(hit(ts, amount, hp_after, overkill=overkill, absorbed=absorbed, ability=ability),
+                    maxHitPoints=max_hp)
+
+    def test_strikepal_max_health_is_the_last_hit_before_the_killing_blow(self):
+        # Live: last hit 1908720 at 6243724 / 11198315, healed to 10531185, then Phase Lunge for
+        # 10531185 + 4552041 overkill + 829401 absorbed, logged with max 10061382.
+        hits = [self.at(1_908_720, 60_714, 6_243_724, 11_198_315),
+                self.at(1_910_349, 10_531_185, 0, 10_061_382, overkill=4_552_041, absorbed=829_401)]
+        r = self.assess(hits, available=[DIVINE_SHIELD])
+        self.assertEqual(r["maxHp"], 11_198_315)
+        self.assertEqual(r["hpBeforePct"], 94)
+        self.assertEqual(r["killingHit"]["pctOfMax"], 142)
+        self.assertEqual(r["deathType"], "oneShot")
+        self.assertTrue(r["wouldSave"]["Divine Shield"])
+        missing = 11_198_315 - 10_531_185
+        self.assertLessEqual(r["details"]["Divine Shield"]["amount"], missing + 15_912_627 + 1)
+
+    def test_full_health_one_shot_reads_100_percent(self):
+        # Live (Zorthar, voidspire p58): 557900 / 557900, Melee for 557900 + 501183 overkill, logged
+        # with max 531340 (557900 / 1.05).
+        hits = [self.at(6_941_373, 14_798, 543_102, 557_900),
+                self.at(6_943_162, 557_900, 0, 531_340, overkill=501_183, ability=1)]
+        r = self.assess(hits)
+        self.assertEqual((r["maxHp"], r["hpBeforePct"], r["killingHit"]["pctOfMax"]), (557_900, 100, 190))
+
+    def test_a_max_health_aura_gained_after_the_last_hit_counts(self):
+        # Live (Soulcleavi, manaforge p54): Last Resort put him in Metamorphosis (+40% max health,
+        # 29370419 -> 41118588 on his other Metamorphosis hits) 16 ms before Oblivion; the hit was
+        # logged after the death removed it, so it reads 30743644 health of a 29370419 max.
+        hits = [self.at(8_000_138, 900_304, 15_378_866, 29_370_419),
+                self.at(8_002_696, 30_743_644, 0, 29_370_419, overkill=39_340_044, absorbed=58_740_840)]
+        r = self.assess(hits, max_health_auras=[(8_002_680, 8_002_683, 0.4)])
+        self.assertEqual(r["maxHp"], 41_118_587)
+        self.assertEqual(r["hpBeforePct"], 75)
+        # Without the aura the health before still bounds max health from below.
+        self.assertEqual(self.assess(hits)["hpBeforePct"], 100)
+
+    def test_a_max_health_aura_that_ran_out_before_the_killing_blow_is_gone(self):
+        # Vampiric Blood (+30%) up on the last hit, gone 2 s before the killing blow.
+        hits = [self.at(95_000, 100_000, 900_000, 1_300_000),
+                self.at(100_000, 500_000, 0, 1_000_000, overkill=200_000)]
+        r = self.assess(hits, max_health_auras=[(90_000, 98_000, 0.3)])
+        self.assertEqual((r["maxHp"], r["hpBeforePct"]), (1_000_000, 50))
+
+    def test_a_recorded_gain_on_the_killing_blow_is_kept(self):
+        # The death only removes auras, so a killing blow logged with more max health than the hit
+        # before had gained it before the hit.
+        hits = [self.at(95_000, 100_000, 600_000, 1_000_000),
+                self.at(100_000, 600_000, 0, 1_100_000, overkill=200_000)]
+        self.assertEqual(self.assess(hits)["maxHp"], 1_100_000)
+
+    def test_replay_caps_extra_health_with_the_max_before_the_killing_blow(self):
+        # 94% before a hit logged at a lower max: a defensive's extra health is capped by the 6%
+        # really missing, not by zero.
+        hits = [self.at(95_000, 10_000, 940_000, 1_000_000),
+                self.at(100_000, 940_000, 0, 900_000, overkill=50_000)]
+        r = self.assess(hits, available=[EXHIL])
+        self.assertEqual(r["hpBeforePct"], 94)
+        self.assertTrue(r["wouldSave"]["Exhilaration"])       # 60k missing > 50k overkill
+
+    def test_max_health_auras_from_the_players_buff_events(self):
+        cat = defensives._LATEST
+        meta = cat.name_to_id["Metamorphosis"]
+        names = {meta: "Metamorphosis", 1: "Melee"}
+        events = [(8_002_680, "applybuff", meta, 1, 0), (8_002_683, "removebuff", meta, 1, 0)]
+        self.assertEqual(defensives._max_health_bands(events, cat, names, {}, "Vengeance"),
+                         [(8_002_680, 8_002_683, 0.4)])
+        # Untalented Barkskin adds no max health, so it is no band.
+        bark = cat.name_to_id["Barkskin"]
+        self.assertEqual(defensives._max_health_bands([(1, "applybuff", bark, 1, 0)], cat,
+                                                      {bark: "Barkskin"}, {}, "Guardian"), [])
