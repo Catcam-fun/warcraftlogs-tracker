@@ -44,7 +44,7 @@ links:
   - operations
   - feat-analyze
   - feat-results
-content_hash: sha256:f094d3bc72839fb0fd473643e56271d48c726c7348f671f11ff22bfbd60c9015
+content_hash: sha256:01505c50452ba0552240b5f5baf51d390372acf5335b5f47224c4d367185bb7f
 ---
 ## Summary
 
@@ -108,7 +108,7 @@ The parts of the system, and where each is documented:
 | Generated game data {layer} | defensive catalog, boss spells, armor, raid-wide damage | [[game-data]] |
 | Hosting {layer} | AWS (CloudFront, S3, Lambda), Supabase | [[deployment]] |
 | Trust boundaries {layer} | secrets, RLS, rate limits | [[security]] |
-| Tests and real-log checks {layer} | unittest, jest, `check_*.py` | [[testing]] |
+| Tests and real-log checks {layer} | unittest, jest, the `backend/checks` package | [[testing]] |
 | Running it, new raid tiers {layer} | env vars, health, failure modes | [[operations]] |
 
 ## Glossary

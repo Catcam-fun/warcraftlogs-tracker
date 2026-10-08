@@ -926,10 +926,10 @@
 - status: documented
 - source: domains/testing.md
 - summary:
-  - Two kinds of confidence: offline unit tests (thirteen backend unittest files, two frontend jest files) and real-log check scripts that compare the analysis with live WarcraftLogs data.
+  - Two kinds of confidence: offline unit tests (backend unittest files, two frontend jest files) and the backend/checks package, which compares the analysis with live WarcraftLogs data.
   - Backend tests are unittest.TestCase classes run from backend/ with python -m unittest (pytest also collects them, but it is not in requirements.txt).
   - Frontend tests run under Create React App's jest with npm test in frontend/.
-  - The check scripts need WCL_CLIENT_ID and WCL_CLIENT_SECRET and spend that key's WarcraftLogs points; only check_deaths.py sets a failing exit code.
+  - The checks need WCL_CLIENT_ID and WCL_CLIENT_SECRET and spend that key's WarcraftLogs points; python -m checks exits non-zero when any check fails.
   - Only the hand-started AWS deploy workflow runs the unit tests; nothing runs them on pull requests.
 - anchors:
   - test_api: backend/test_api.py:253
@@ -942,11 +942,21 @@
   - analyze_config_test: frontend/src/AnalyzeConfig.test.js:22
   - api_test: frontend/src/api.test.js:14
   - npm_test: frontend/package.json:22
-  - check_deaths: backend/scripts/check_deaths.py:24
-  - check_deaths_exit: backend/scripts/check_deaths.py:55
-  - check_durations: backend/scripts/check_durations.py:52
-  - check_mitigation: backend/scripts/check_mitigation.py:30
-  - check_defensives: backend/scripts/check_defensives.py:18
+  - check_deaths: backend/checks/source_deaths.py:9
+  - check_selection: backend/checks/source_selection.py:53
+  - check_participation: backend/checks/source_participation.py:24
+  - check_state: backend/checks/source_state.py:169
+  - check_durations: backend/checks/source_durations.py:30
+  - check_mitigation: backend/checks/source_mitigation.py:45
+  - check_slots: backend/checks/rules_slots.py:40
+  - check_counting: backend/checks/rules_counting.py:20
+  - check_labels: backend/checks/rules_labels.py:97
+  - check_verdicts: backend/checks/rules_verdicts.py:70
+  - check_defensives: backend/checks/rules_defensives.py:5
+  - checks_registry: backend/checks/registry.py:6
+  - checks_target: backend/checks/common.py:32
+  - checks_unit_tests: backend/test_checks.py:1
+  - carried_over: backend/checks/source_durations.py:20
   - only_workflow: .github/workflows/atlas-sync.yml:1
 - links: backend, backend-death-counting, backend-defensive-analysis, backend-caching-and-limits, frontend, game-data, warcraftlogs, operations
 

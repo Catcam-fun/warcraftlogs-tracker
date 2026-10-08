@@ -78,7 +78,7 @@ A fail is either a site bug or a check bug. Look at the listed items and at the 
 
 ## Points
 
-Each run prints how many WCL points it spent. The budget is 3600 an hour, so a whole sweep over every raid is fine, but do not run it in a loop.
+Each run prints how many WCL points it spent. The budget is 9000 an hour (measured 2026-10-07), so a whole sweep over every raid is fine, but do not run it in a loop.
 
 ## Limits
 
@@ -90,9 +90,15 @@ Each run prints how many WCL points it spent. The budget is 3600 an hour, so a w
 
 ## Last known-good logs
 
-| Raid key | Target | Points | Date |
-| --- | --- | --- | --- |
-| midnight-s2-all | `FaC4AgJ8vMTfP1VN:midnight-s2-all:Tony Halme Pro Skater/Stormreaver/EU` | 185 | 2026-10-07 |
-| manaforge | `2VtyDR4CF6PGLjbd:manaforge:Honestly/Frostmourne/US` | 494 | 2026-10-07 |
+| Raid key | Target | Date |
+| --- | --- | --- |
+| midnight-s2-all | `FaC4AgJ8vMTfP1VN:midnight-s2-all:Tony Halme Pro Skater/Stormreaver/EU` | 2026-10-08 |
+| manaforge | `2VtyDR4CF6PGLjbd:manaforge:Honestly/Frostmourne/US` | 2026-10-08 |
+| undermine | `yYZJNhcDk37Tj4AM:undermine:Honestly/Frostmourne/US` | 2026-10-08 |
+| nerubar | `WgYbA1r7fXdZKtPF:nerubar:Advance/Draenor/EU` | 2026-10-08 |
+| voidspire | `P6CwHkgFR9Krf1Bz:voidspire:Honestly/Frostmourne/US` | 2026-10-08 |
+| dreamrift | `k2YL7RG89c3MTWnF:dreamrift:Vindicatum/Icecrown/US` | 2026-10-08 |
+| queldanas | `D6RNkvp9qBZfHXYz:queldanas:Honestly/Frostmourne/US` | 2026-10-08 |
+| midnight-all | `P6CwHkgFR9Krf1Bz:midnight-all:Honestly/Frostmourne/US` | 2026-10-08 |
 
-Points are one whole `all` run. Both runs stayed under 600, so `state` reads every counted death (no cap).
+A single `all` run costs about 200-500 WCL points; a sweep of four raids at once costs about 1300-1700, measured on the shared key (each run's own points line includes whatever else the key spent at the same time). `state` reads every counted death (no cap).
