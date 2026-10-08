@@ -4,8 +4,9 @@ from unittest import mock
 
 from checks.registry import CHECKS, select
 from checks.verdict import PASS, Verdict, exit_code, fail, format_lines, skip
+from checks.rules_slots import rank
 from checks.__main__ import run_checks
-from checks import rules_defensives, source_deaths
+from checks import rules_defensives, rules_slots, source_deaths
 from checks.common import AnalysisError, Run, TableCapped, parse_target, points, raid_week, run_analysis
 
 
@@ -132,6 +133,20 @@ class MovedChecksTests(unittest.TestCase):
         self.assertEqual(rules_defensives.check(run).status, "skip")
         run.pulls = []
         self.assertEqual(rules_defensives.check(run).status, "skip")
+
+
+class SlotsRuleTests(unittest.TestCase):
+    def test_rank_clauses(self):
+        d = lambda ts, who, cheat=False: (ts, who, cheat)
+        self.assertEqual(rank([d(10, 1), d(20, 2, True), d(30, 3)]), [(1, False), (2, False), (2, False)])
+        self.assertEqual(rank([d(10, 1), d(10, 2)]), [(1, False), (2, False)])
+        self.assertEqual(rank([d(10, 1), d(50, 1)]), [(1, False), (2, False)])
+        wipe = [d(1000, 0)] + [d(50000 + i, i + 1) for i in range(8)]
+        self.assertEqual([w for _, w in rank(wipe)], [False] + [True] * 8)
+        seven = [d(49999, 9, True)] + [d(50000 + i, i + 1) for i in range(7)]
+        self.assertFalse(any(w for _, w in rank(seven)))
+        before = [d(49999, 9, True)] + [d(50000 + i, i + 1) for i in range(8)]
+        self.assertTrue(rank(before)[0][1])      # a cheat death just before a wipe's first death is inside it
 
 
 if __name__ == "__main__":
