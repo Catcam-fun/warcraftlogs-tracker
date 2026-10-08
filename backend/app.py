@@ -588,6 +588,9 @@ def analyze():
                             aoe_known=aoe_known.get(rid, True),
                             armor_k=defensives.armor_constant(fight.get('boss'), fight.get('difficulty')),
                             soulwell=soulwell,
+                            # Presses in the report's other pulls count with that pull's talents.
+                            pull_starts={fd['fight']['id']: fd['fight']['start_time']
+                                         for fd in fights_by_report.get(rid, [])},
                         )
                         death_event['defensives'] = defensives.analyze_death(**death_args)
                         cat = defensives.catalog_for(report_abs_start)

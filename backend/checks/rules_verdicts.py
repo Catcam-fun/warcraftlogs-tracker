@@ -1,8 +1,8 @@
 """Would-save verdicts obey the press, overkill, immunity and instant-kill rules
 
 A press is never less than 1s before the killing blow, nor before the ability was ready: its ready
-time is recomputed from WCL's casts (source_state.cooldown_window over the report's whole cast
-history, then ready_since; the catalog cooldown and charges with the pull's talents). A Healthstone
+time is recomputed from WCL's casts (source_state.ability_state over the report's whole cast
+history, each press with its own pull's talents, resets such as Cold Snap included). A Healthstone
 or potion is ready from its last use this pull plus its cooldown; unused this pull it is ready all
 along. A name whose ready time can't be
 determined (no killing hit found, not in the catalog, on cooldown at the killing blow) is skipped.
@@ -110,7 +110,8 @@ def ready_times(run, ev, rid, fid, pid, fight_start, kb_ts, names):
     survival = ev["defensives"]["survival"]
     consumables = survival.get("consumables") or {}
     cat = run.cat
-    talents = source_state._talents(run, rid, fid, pid)
+    this_pull = (source_state._talents(run, rid, fid, pid), ev.get("spec"))
+    loadouts = None
     casts = source_state.report_casts(run, rid, fid, pid)
     out = {}
     for name in names:
@@ -129,10 +130,10 @@ def ready_times(run, ev, rid, fid, pid, fight_start, kb_ts, names):
         entry = cat.all.get(sid) if sid is not None else None
         if entry is None:
             continue
-        times, cd, charges = source_state.cooldown_window(entry, sid, casts, talents, ev.get("spec"),
-                                                          fight_start, kb_ts)
-        ok, since = source_state.ready_since(times, kb_ts, cd, charges)
-        if ok and since is not None:
+        if loadouts is None:
+            loadouts = source_state.pull_loadouts(run, rid, fid, pid)
+        left, since = source_state.ability_state(entry, sid, casts, loadouts, this_pull, fight_start, kb_ts)
+        if left > 0 and since is not None:
             out[name] = since
     return out
 

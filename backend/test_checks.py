@@ -11,7 +11,7 @@ from checks.rules_labels import label, death_hits
 from raid_wide_damage import RAID_WIDE
 from checks.__main__ import run_checks
 from checks import rules_verdicts, rules_counting, rules_defensives, rules_labels, rules_slots, source_deaths, source_participation, source_selection, source_state
-from checks.source_state import active_mismatches, death_strip, entry_for, health_mismatch, ready_at
+from checks.source_state import ability_state, active_mismatches, death_strip, entry_for, health_mismatch
 from checks.source_selection import cluster, walk
 from checks.find_logs import good_log
 from checks.common import AnalysisError, Run, TableCapped, parse_target, points, raid_week, run_analysis
@@ -730,6 +730,7 @@ class VerdictRuleTests(unittest.TestCase):
         run = mock.Mock(); run.cat = cat; run.actor_id.return_value = 7
         run.fight.return_value = {"start_time": start, "end_time": start + 120_000}
         run.combatants.return_value = [{"sourceID": 7, "fight": 1, "specID": 104, "talentTree": []}]
+        run.report_combatants.return_value = run.combatants.return_value
         kb = start + 100_000
         run.hits_before.return_value = [{"timestamp": kb - 3_000, "overkill": 0}, {"timestamp": kb, "overkill": 50}]
         # Barkskin pressed 65s before the killing blow (ready again 5s before it); a Healthstone 62s before.
@@ -1009,34 +1010,67 @@ class StateTests(unittest.TestCase):
                  for n, t in (("A", 9100), ("B", 9150), ("C", 9500), ("D", 9800), ("E", 9990))]
         self.assertEqual(death_strip(split, 10_000, 1000), 10_000)
 
-    def test_ready_at_with_charges(self):
-        self.assertTrue(ready_at([], 10_000, 60_000, 1))
-        self.assertFalse(ready_at([5_000], 10_000, 60_000, 1))
-        self.assertTrue(ready_at([5_000], 70_000, 60_000, 1))
-        self.assertTrue(ready_at([5_000], 10_000, 60_000, 2))
-        self.assertFalse(ready_at([5_000, 6_000], 10_000, 60_000, 2))
+    @staticmethod
+    def state(presses, at, cd, charges, resets=(), restores="all", loadouts=(), fight_start=0, mods=None):
+        """ability_state for a made-up ability (spell 1) that spell 9 resets."""
+        entry = {"cooldown_ms": cd, "charges": charges, "reset_by": [{"spell": 9, "restores": restores}],
+                 **({"cooldown_mods": mods} if mods else {})}
+        casts = [{"abilityGameID": 1, "timestamp": t} for t in presses] + \
+                [{"abilityGameID": 9, "timestamp": t} for t in resets]
+        left, since = ability_state(entry, 1, casts, list(loadouts), ({}, None), fight_start, at)
+        return left > 0, since
 
-    def test_ready_since_is_when_the_last_charge_came_back(self):
-        from checks.source_state import ready_since
-        self.assertEqual(ready_since([], 100, 60, 1), (True, None))
-        self.assertEqual(ready_since([10], 100, 60, 1), (True, 70))
-        self.assertEqual(ready_since([10], 50, 60, 1), (False, None))
-        # Two charges: one spent at 10 leaves one, so it never ran out; both spent, the first back at 70.
-        self.assertEqual(ready_since([10], 100, 60, 2), (True, None))
-        self.assertEqual(ready_since([10, 20], 100, 60, 2), (True, 70))
+    def test_ready_with_charges(self):
+        self.assertEqual(self.state([], 10_000, 60_000, 1), (True, None))
+        self.assertFalse(self.state([5_000], 10_000, 60_000, 1)[0])
+        self.assertEqual(self.state([5_000], 70_000, 60_000, 1), (True, 65_000))
+        self.assertEqual(self.state([5_000], 10_000, 60_000, 2), (True, None))
+        self.assertFalse(self.state([5_000, 6_000], 10_000, 60_000, 2)[0])
+        # Two charges, both spent: the first is back one cooldown after the first spend.
+        self.assertEqual(self.state([10, 20], 100, 60, 2), (True, 70))
 
     def test_short_cooldowns_keep_every_earlier_cast(self):
         # Fiery Brand with Down in Flames (2 charges, 48s): spent at 0 and 1s, back at 48s and spent at
         # 49s, back at 96s and spent at 97s; at 143s none is left (next back at 144s). A lookback of
         # cooldown x charges (from 47s) would drop the first two casts and call it ready.
-        from checks.source_state import cooldown_window, ready_at
         from defensive_catalog import CATALOG
         entry = CATALOG[204021]
         talents = {e: 1 for e in entry["talent_entries"]} | {112876: 1}
         casts = [{"abilityGameID": 204021, "timestamp": t} for t in (0, 1_000, 49_000, 97_000)]
-        times, cd, charges = cooldown_window(entry, 204021, casts, talents, "Vengeance", 20_000, 143_000)
-        self.assertEqual((times, cd, charges), ([0, 1_000, 49_000, 97_000], 48_000, 2))
-        self.assertFalse(ready_at(times, 143_000, cd, charges))
+        left, _ = ability_state(entry, 204021, casts, [], (talents, "Vengeance"), 20_000, 143_000)
+        self.assertEqual(left, 0)
+
+    def test_a_reset_brings_every_charge_back_at_once(self):
+        # Cold Snap on Ice Barrier (25s): pressed at 0, reset at 5s: ready again from 5s.
+        self.assertEqual(self.state([0], 10_000, 25_000, 1, resets=[5_000]), (True, 5_000))
+        # Two charges both spent, reset: both back (one press later, one is still left).
+        self.assertEqual(self.state([0, 1_000, 6_000], 10_000, 25_000, 2, resets=[5_000]), (True, 5_000))
+
+    def test_a_one_charge_reset_gives_back_one(self):
+        # Black Ox Brew in Midnight: one charge back; the running recharge goes on.
+        self.assertEqual(self.state([0, 1_000], 10_000, 25_000, 2, resets=[5_000], restores="one"), (True, 5_000))
+        self.assertFalse(self.state([0, 1_000, 6_000], 10_000, 25_000, 2, resets=[5_000], restores="one")[0])
+        self.assertTrue(self.state([0, 1_000, 6_000], 26_000, 25_000, 2, resets=[5_000], restores="one")[0])
+
+    def test_a_gap_ended_by_a_reset_is_not_cooldown_reduction(self):
+        # Pressed at 0, reset at 5s, pressed at 6s: the 6s gap is the reset, not a 6s cooldown, so at
+        # 20s it is still on cooldown (back at 31s).
+        self.assertFalse(self.state([0, 6_000], 20_000, 25_000, 1, resets=[5_000])[0])
+        # Without the reset the same gap proves a 6s cooldown.
+        self.assertTrue(self.state([0, 6_000], 20_000, 25_000, 1)[0])
+
+    def test_each_press_counts_with_its_own_pulls_talents(self):
+        # 60s, or 40s with talent entry 7. Pull 1 (from 0) without it, pull 2 (from 100s) with it. A
+        # press at 50s in pull 1 is back at 110s, not 90s, even though this pull has the talent.
+        mods = [{"add_ms": -20_000, "entries": [7]}]
+        pulls = [(0, {}, None), (100_000, {7: 1}, None)]
+        self.assertFalse(self.state([50_000], 105_000, 60_000, 1, loadouts=pulls, mods=mods)[0])
+        self.assertTrue(self.state([50_000], 111_000, 60_000, 1, loadouts=pulls, mods=mods)[0])
+        # A press before the first pull uses the first pull's loadout; between pulls, the earlier pull's.
+        early = [(20_000, {}, None), (100_000, {7: 1}, None)]
+        self.assertFalse(self.state([10_000], 65_000, 60_000, 1, loadouts=early, mods=mods)[0])
+        later = [(0, {7: 1}, None), (100_000, {}, None)]
+        self.assertTrue(self.state([95_000], 136_000, 60_000, 1, loadouts=later, mods=mods)[0])
 
     def test_health_mismatch_uses_the_killing_event(self):
         s = {"hpBeforePct": 40, "maxHp": 1000, "overkill": 55}
@@ -1090,6 +1124,7 @@ class StateTests(unittest.TestCase):
                    4: {"name": "Healthstone", "kind": "healthstone", "cooldown_ms": 60_000, "charges": 1}}
         run.cat = cat
         run.combatants.return_value = [{"sourceID": 7, "fight": 1, "specID": 104, "talentTree": [{"id": 111, "rank": 1}]}]
+        run.report_combatants.return_value = run.combatants.return_value
         # Barkskin pressed 20s before death (on cooldown); Renewal never pressed (ready).
         run.casts.return_value = [{"type": "cast", "abilityGameID": 1, "timestamp": start + 30_000}]
         run.buffs.return_value = [{"name": "Ironbark", "bands": [{"startTime": start + 45_000, "endTime": start + 57_000}]}]

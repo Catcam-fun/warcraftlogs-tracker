@@ -171,7 +171,7 @@ class DefensiveAnalysisTests(unittest.TestCase):
         self.assertIn("Mirror Image", names(r["cooldown"]))
 
     def test_charges_recover_one_at_a_time(self):
-        left, ready = defensives._charges_at(30_000, [0, 1_000], charges=2, recharge_ms=25_000)
+        left, ready, _ = defensives._replay([0, 1_000], [], 30_000, lambda t: (25_000, 2))
         self.assertEqual((left, ready), (1, 20_000))  # 2nd charge starts after the 1st returns
 
     def test_fetch_keeps_only_dead_players_without_player_filters(self):
@@ -602,8 +602,9 @@ class HealOverTimeTests(unittest.TestCase):
 
     def test_ready_since(self):
         # One charge, 36s cooldown, pressed at 10s: ready again at 46s.
-        self.assertEqual(defensives._ready_since(100_000, [10_000], 1, 36_000), 46_000)
-        self.assertIsNone(defensives._ready_since(100_000, [], 1, 36_000))
+        one = lambda t: (36_000, 1)
+        self.assertEqual(defensives._replay([10_000], [], 100_000, one)[2], 46_000)
+        self.assertIsNone(defensives._replay([], [], 100_000, one)[2])
 
 class PullSpecTests(unittest.TestCase):
     def test_spec_comes_from_each_pulls_record(self):
@@ -1000,12 +1001,52 @@ class ReadyTimeTests(unittest.TestCase):
     earlier cast of the report, not only those within one cooldown of the death."""
     BARKSKIN, FIERY_BRAND = 22812, 204021
 
-    def die(self, player_class, spec, casts, death, talents=frozenset(), fight_start=20_000, big_hit_at=None):
-        indexed = {"casts": {1: sorted(casts)}, "talents": {(7, 1): set(talents)}}
+    def die(self, player_class, spec, casts, death, talents=frozenset(), fight_start=20_000, big_hit_at=None,
+            other_pulls=None):
+        """`other_pulls`: {fight ID: (start, talents)} of the report's other kept pulls."""
+        indexed = {"casts": {1: sorted(casts)},
+                   "talents": {(7, 1): talents if isinstance(talents, dict) else set(talents),
+                               **{(f, 1): t for f, (_, t) in (other_pulls or {}).items()}}}
         hits = [hit(big_hit_at or death - 13_000, 400_000, 600_000), hit(death, 600_000, 0, overkill=50_000)]
+        pull_starts = {7: fight_start, **{f: s for f, (s, _) in (other_pulls or {}).items()}}
         return defensives.analyze_death(1, player_class, spec, 7, fight_start, death, indexed,
                                         {**NAMES, **{sid: d["name"] for sid, d in CATALOG.items()}}, {},
-                                        hits=hits, ability_schools=SCHOOLS)
+                                        hits=hits, ability_schools=SCHOOLS, pull_starts=pull_starts)
+
+    ICE_BARRIER, COLD_SNAP, CELESTIAL_BREW, BLACK_OX_BREW, FADE = 11426, 235219, 322507, 115399, 586
+
+    def test_cold_snap_brings_ice_barrier_back_at_once(self):
+        # Ice Barrier (30s) pressed at 50s, Cold Snap at 55s: back at 55s, not 80s.
+        r = self.die("Mage", "Frost", [(50_000, self.ICE_BARRIER), (55_000, self.COLD_SNAP)], 63_000,
+                     talents=entries(self.ICE_BARRIER), fight_start=40_000, big_hit_at=54_000)
+        self.assertIn("Ice Barrier", names(r["available"]))
+        self.assertLessEqual(r["survival"]["details"]["Ice Barrier"]["pressAgo"], 8.0)
+
+    def test_a_gap_ended_by_a_reset_is_not_cooldown_reduction(self):
+        # Pressed at 50s, Cold Snap at 55s, pressed again at 56s: the 6s gap is the reset, not a 6s
+        # cooldown, so at 70s it is on cooldown until 86s.
+        casts = [(50_000, self.ICE_BARRIER), (55_000, self.COLD_SNAP), (56_000, self.ICE_BARRIER)]
+        r = self.die("Mage", "Frost", casts, 70_000, talents=entries(self.ICE_BARRIER), fight_start=40_000)
+        self.assertEqual([c["readyIn"] for c in r["cooldown"] if c["name"] == "Ice Barrier"], [16])
+
+    def test_black_ox_brew_gives_back_one_charge_in_midnight(self):
+        # Celestial Brew with Endless Draught (2 charges, 90s): both spent at 50s and 51s; Black Ox Brew at
+        # 55s gives one back ("grants one charge"), pressed at 56s: none left at 60s.
+        talents = entries(self.CELESTIAL_BREW) | {117618}
+        casts = [(50_000, self.CELESTIAL_BREW), (51_000, self.CELESTIAL_BREW), (55_000, self.BLACK_OX_BREW)]
+        r = self.die("Monk", "Brewmaster", casts, 60_000, talents=talents, fight_start=40_000)
+        self.assertIn("Celestial Brew", names(r["available"]))
+        r = self.die("Monk", "Brewmaster", casts + [(56_000, self.CELESTIAL_BREW)], 60_000, talents=talents,
+                     fight_start=40_000)
+        self.assertNotIn("Celestial Brew", names(r["available"]))
+
+    def test_each_press_counts_with_its_own_pulls_talents(self):
+        # Fade: 30s, 20s with two ranks of Improved Fade. Pull 3 (from 0) without it, this pull (from 100s)
+        # with it. Pressed at 90s in pull 3: back at 120s, so at 115s it is on cooldown for 5s more.
+        talents = {e: 1 for e in entries(self.FADE)}
+        r = self.die("Priest", "Shadow", [(90_000, self.FADE)], 115_000, talents={**talents, 103836: 2},
+                     fight_start=100_000, other_pulls={3: (0, talents)})
+        self.assertEqual([c["readyIn"] for c in r["cooldown"] if c["name"] == "Fade"], [5])
 
     def test_a_cast_older_than_one_cooldown_still_sets_the_ready_time(self):
         # Barkskin (60s) pressed at 0: back at 60s, 3s before the killing blow at 63s. Pressing it
