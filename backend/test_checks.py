@@ -5,6 +5,7 @@ from unittest import mock
 from checks.registry import CHECKS, select
 from checks.verdict import PASS, Verdict, exit_code, fail, format_lines, skip
 from checks.__main__ import run_checks
+from checks import source_deaths
 from checks.common import AnalysisError, Run, TableCapped, parse_target, points, raid_week, run_analysis
 
 
@@ -51,10 +52,6 @@ class RunnerTests(unittest.TestCase):
         self.assertIn("RuntimeError: wcl down", vs[0].outcome.reason)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TargetTests(unittest.TestCase):
     def test_parse_target_forms(self):
         t = parse_target("ABC123:manaforge")
@@ -97,3 +94,27 @@ class RunTests(unittest.TestCase):
             fake.post.return_value.get_data.return_value = 'data: {"error": "No reports found"}\n\n'
             with self.assertRaises(AnalysisError):
                 run_analysis("t", parse_target("X:manaforge:G/S/US"), "2026-09-29", "2026-10-06")
+
+
+class DeathsCheckTests(unittest.TestCase):
+    def _run(self, theirs):
+        run = mock.Mock(); run.code, run.raid = "X", "manaforge"
+        run.pulls = [{"id": 1, "start_time": 0, "end_time": 9}]
+        run.meta = {"friendlies": [], "abilities": {}}
+        run.deaths_table.return_value = theirs
+        return run
+
+    def test_pass_fail_and_skip(self):
+        ours = {1: [{"targetID": 7, "timestamp": 100, "abilityName": "Zap"}]}
+        with mock.patch("checks.source_deaths.get_report_deaths_bulk", return_value=ours):
+            same = [{"fight": 1, "id": 7, "timestamp": 100, "killingBlow": {"name": "Zap"}}]
+            self.assertEqual(source_deaths.check(self._run(same)).status, "pass")
+            other = [{"fight": 1, "id": 7, "timestamp": 100, "killingBlow": {"name": "Pow"}}, {"fight": 1, "id": 8, "timestamp": 200}]
+            o = source_deaths.check(self._run(other))
+            self.assertEqual((o.status, o.total), ("fail", 2))
+        run = self._run([]); run.pulls = []
+        self.assertEqual(source_deaths.check(run).status, "skip")
+
+
+if __name__ == "__main__":
+    unittest.main()
