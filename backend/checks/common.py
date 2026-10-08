@@ -256,6 +256,14 @@ class Run:
             return defensives.fetch_combatants(self.token, rid, [fid], f["start_time"], f["end_time"])
         return self._memo(("combatants", rid, fid), make)
 
+    def report_combatants(self, rid, fids):
+        """Loadouts of every player in the given pulls of one report, in one query."""
+        def make():
+            fights = [self.fight(rid, f) for f in fids]
+            return defensives.fetch_combatants(self.token, rid, list(fids), min(f["start_time"] for f in fights),
+                                               max(f["end_time"] for f in fights))
+        return self._memo(("report-combatants", rid, tuple(fids)), make)
+
     def counted_deaths(self):
         """Every counted death: within the cutoff, not in a wipe, not a cheat death."""
         r = self.result
