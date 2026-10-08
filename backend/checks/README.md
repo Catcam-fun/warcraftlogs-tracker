@@ -90,3 +90,7 @@ Each run prints how many WCL points it spent. The budget is 3600 an hour, so a w
 
 | Raid key | Target | Points | Date |
 | --- | --- | --- | --- |
+| midnight-s2-all | `FaC4AgJ8vMTfP1VN:midnight-s2-all:Tony Halme Pro Skater/Stormreaver/EU` | 185 | 2026-10-07 |
+| manaforge | `2VtyDR4CF6PGLjbd:manaforge:Honestly/Frostmourne/US` | 494 | 2026-10-07 |
+
+Points are one whole `all` run. Both runs stayed under 600, so `state` reads every counted death (no cap).
