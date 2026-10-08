@@ -174,6 +174,30 @@ class DefensiveAnalysisTests(unittest.TestCase):
         left, ready, _ = defensives._replay([0, 1_000], [], 30_000, lambda t: (25_000, 2))
         self.assertEqual((left, ready), (1, 20_000))  # 2nd charge starts after the 1st returns
 
+    def test_casts_reach_back_to_the_last_encounters_end(self):
+        # Long cooldowns reset when an encounter ends, so a press after the last one ended carries into
+        # the first kept pull: casts are read from that end (at most the longest cooldown back, Lay on
+        # Hands' 10 minutes), and never less than 3 minutes back for short cooldowns.
+        cat = defensives._LATEST
+        self.assertEqual(cat.longest_cooldown_ms, 600_000)
+        self.assertEqual(defensives.cast_lookback(cat, 1_000_000, 500_000), 500_000)
+        self.assertEqual(defensives.cast_lookback(cat, 1_000_000, 0), 400_000)
+        self.assertEqual(defensives.cast_lookback(cat, 1_000_000, 900_000), 820_000)
+        self.assertEqual(defensives.cast_lookback(cat, 100_000, 0), 0)
+        starts = {}
+
+        def fake_paged(_tok, _code, data_type, flt, start_time=None, **_kw):
+            starts[data_type] = start_time
+            return []
+
+        orig = defensives._paged
+        defensives._paged = fake_paged
+        try:
+            defensives.fetch_defensive_raw("t", "R", [7], 1_000_000, 1_100_000, cat, combatants=[], prev_end=500_000)
+        finally:
+            defensives._paged = orig
+        self.assertEqual((starts["Casts"], starts["Buffs"]), (500_000, 820_000))
+
     def test_fetch_keeps_only_dead_players_without_player_filters(self):
         # WCL returns nothing for source.id / target.id filters on Casts and
         # Buffs, so the queries must not use them; filtering happens here.

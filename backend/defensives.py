@@ -82,6 +82,7 @@ class Catalog:
         # Spells that bring a tracked defensive back early (Cold Snap, Black Ox Brew): their casts are read too.
         self.reset_ids = frozenset(r["spell"] for d in self.tracked.values() for r in d.get("reset_by", ()))
         self.cast_ids = sorted(set(self.tracked) | set(self.consumable) | self.reset_ids)
+        self.longest_cooldown_ms = max((d["cooldown_ms"] for d in self.tracked.values()), default=0)
         # Shields a talent adds to a button (Matted Fur): scored from their real size in the log.
         self.observed_auras = sorted({c["aura"] for d in self.all.values() for c in d.get("mitigation") or ()
                                       if isinstance(c, dict) and c.get("aura")})
@@ -228,14 +229,26 @@ def fetch_combatants(token, report_code, fight_ids, start_time, end_time):
                   end_time=end_time + 1, shape=_loadout)
 
 
-def fetch_defensive_raw(token, report_code, fight_ids, start_time, end_time, cat=None, combatants=None):
+def cast_lookback(cat, first_start, prev_end=0):
+    """How far back a report's casts are read: 3 minutes before the first kept pull for short
+    cooldowns (ENCOUNTER_RESET_MS: they carry over), and for long ones back to the end of the last
+    boss encounter before it (they reset when an encounter ends, so a press after that carries into
+    the pull), but never more than the longest tracked cooldown back."""
+    long_from = max(prev_end or 0, first_start - cat.longest_cooldown_ms)
+    return max(0, min(first_start - ENCOUNTER_RESET_MS, long_from))
+
+
+def fetch_defensive_raw(token, report_code, fight_ids, start_time, end_time, cat=None, combatants=None,
+                        prev_end=0):
     """Defensive casts, defensive auras, talent loadouts and consumable heals for one report,
     for every player (the queries run one after another). Keep only the players who
     died with filter_defensive_raw.
 
-    - Casts and auras cover the whole time range (trash and time between pulls
-      included, from 3 minutes before the first pull) so a defensive pressed
-      just before a pull counts. They're filtered to the players who died
+    - Casts cover the whole time range (trash and time between pulls included)
+      from cast_lookback: 3 minutes before the first pull, or back to the end
+      of the last boss encounter before it (`prev_end`, report-relative ms)
+      for long cooldowns, at most the longest tracked cooldown. Auras cover it
+      from 3 minutes before the first pull. Both are filtered to the players who died
       afterwards, not in the query: WCL returns nothing for `source.id in (...)`
       / `target.id in (...)` on Casts and Buffs (verified on a live log), and
       the unfiltered query costs fewer points anyway.
@@ -248,11 +261,12 @@ def fetch_defensive_raw(token, report_code, fight_ids, start_time, end_time, cat
     """
     cat = cat or _LATEST
     lookback = max(0, start_time - ENCOUNTER_RESET_MS)
+    casts_from = cast_lookback(cat, start_time, prev_end)
     cast_filter = f"type = \"cast\" and ability.id in ({', '.join(map(str, cat.cast_ids))})"
     buff_filter = "ability.name in (" + ", ".join(f'"{n}"' for n in cat.buff_names) + ")"
     heal_filter = f"ability.id in ({', '.join(map(str, sorted(cat.consumable)))})"
     jobs = {
-        "casts": ("Casts", cast_filter, None, lookback, False),
+        "casts": ("Casts", cast_filter, None, casts_from, False),
         "buffs": ("Buffs", buff_filter, None, lookback, False),
         "heals": ("Healing", heal_filter, fight_ids, start_time, True),
     }
@@ -448,7 +462,7 @@ def _inferred_cooldown(own_casts_of_spell, reset_times, loadout):
     (cooldown reduction the catalog can't see), or None: their shortest gap between two presses of a
     one-charge ability, leaving out gaps a reset falls in, since the reset, not the cooldown, ended
     those. `reset_times`: casts of a spell that resets it (Cold Snap, Black Ox Brew) and, for a long
-    cooldown, the start and end of every boss encounter (the encounter reset). `loadout(t)` ->
+    cooldown, the end of every boss encounter (the encounter reset). `loadout(t)` ->
     (cooldown, charges) at a press."""
     best = None
     for a, b in zip(own_casts_of_spell, own_casts_of_spell[1:]):
@@ -616,10 +630,10 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
     ready_entries, ready_since = [], {}
 
     pressed_this_pull = {sid for t, sid in own_casts if fight_start <= t <= death_ts}
-    # The talents (and spec) the player had at a moment: those of the latest pull that started by
-    # then (talents change only out of combat, so a press between pulls was made with the last
-    # loadout the log recorded), else the first recorded pull's. Without pull starts or any
-    # recorded loadout: this pull's.
+    # The talents (and spec) the player had at a moment: those of the latest KEPT pull that started
+    # by then (talents change only out of combat, so a press between pulls, or in a pull the site
+    # didn't keep, was made with the last loadout the log recorded), else the first kept pull's.
+    # Without pull starts or any recorded loadout: this pull's.
     loadouts = sorted(((start, indexed["talents"][(f, player_id)],
                         (indexed.get("specs") or {}).get((f, player_id)) or spec)
                        for f, start in (pull_starts or {}).items() if (f, player_id) in indexed["talents"]),
@@ -634,7 +648,10 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
     # Long cooldowns reset when a boss encounter ends (wipe or kill): presses since the last one that
     # ended before this pull count (a press between pulls carries into this one), and a gap between
     # presses that spans an encounter's end is the reset, not cooldown reduction. Without the
-    # report's encounters: from this pull's start, and gaps across any kept pull's start are dropped.
+    # report's encounters (their ends unknown): from this pull's start, and gaps across any kept
+    # pull's start are dropped instead. A gap that spans an encounter's end in the report also spans
+    # the next pull's start, so this drops every gap the end rule drops, plus gaps from a press
+    # between pulls into the next pull (safe: it only loses evidence of cooldown reduction).
     if encounters:
         long_since = max([end for _, end in encounters if end <= fight_start], default=0)
         long_resets = sorted(end for _, end in encounters)
