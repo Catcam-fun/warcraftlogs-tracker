@@ -11,7 +11,7 @@ from checks.rules_labels import label, death_hits
 from raid_wide_damage import RAID_WIDE
 from checks.__main__ import run_checks
 from checks import rules_verdicts, rules_counting, rules_defensives, rules_labels, rules_slots, source_deaths, source_participation, source_selection, source_state
-from checks.source_state import active_mismatches, entry_for, health_mismatch, ready_at
+from checks.source_state import active_mismatches, death_strip, entry_for, health_mismatch, ready_at
 from checks.source_selection import cluster, walk
 from checks.find_logs import good_log
 from checks.common import AnalysisError, Run, TableCapped, parse_target, points, raid_week, run_analysis
@@ -372,6 +372,14 @@ class MitigationCheckTests(unittest.TestCase):
         with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
             o = source_mitigation.check(run)
         self.assertEqual(o.items, ["Sunny Icebound Fortitude: measured 0.37, catalog 0.30 over 25 hits"])
+        # Bloody Fortitude taken into account, a wrong catalog value is still flagged: 0.20 against hits
+        # that read 0.37 at half health and 0.30 at full (0.28 and 0.20 predicted).
+        wrong = {48792: dict(entries[48792], mitigation=[{"dr": 0.2}, entries[48792]["mitigation"][1]])}
+        run = self._wave1_run(wrong, friendlies, {48792: "Icebound Fortitude"}, combatants)
+        run.cat.relevant_talent_entries = {117891}
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
+            o = source_mitigation.check(run)
+        self.assertEqual(o.items, ["Sunny Icebound Fortitude: measured 0.34, catalog 0.25 over 25 hits"])
         # With the talent but no health on the hits, the reduction can't be predicted: left out.
         run = self._wave1_run(entries, friendlies, {48792: "Icebound Fortitude"}, combatants)
         run.cat.relevant_talent_entries = {117891}
@@ -727,17 +735,38 @@ class StateTests(unittest.TestCase):
         # Live 2026-10-08 (dreamrift pull 1, Chickenism): the death stripped all 19 of her auras at
         # 1244582-1244684, Fortitude and Rallying Cry at 1244582, while WCL's death event is at 1244690,
         # 108 ms later. The living kept that Rallying Cry until 1247448.
-        auras = [{"name": "Power Word: Fortitude", "bands": [{"startTime": 1161232, "endTime": 1244582}]},
-                 {"name": "Rallying Cry", "bands": [{"startTime": 1234456, "endTime": 1244582}]},
-                 {"name": "Barkskin", "bands": [{"startTime": 1234000, "endTime": 1244300}]}]
+        pull_long = [("Power Word: Fortitude", 1244582), ("Battle Shout", 1244583), ("Mark of the Wild", 1244583),
+                     ("Arcane Intellect", 1244584), ("Skyfury", 1244584), ("Moonkin Form", 1244597),
+                     ("Lycara's Teachings", 1244684)]
+        auras = [{"name": n, "bands": [{"startTime": 1161232, "endTime": t}]} for n, t in pull_long]
+        auras += [{"name": "Rallying Cry", "bands": [{"startTime": 1234456, "endTime": 1244582}]},
+                  {"name": "Barkskin", "bands": [{"startTime": 1234000, "endTime": 1244300}]}]
         self.assertEqual(active_mismatches(["Rallying Cry"], auras, 1244690, 1161232), [])
         # Without the pull start there is no strip to read: the death event alone, 108 ms off.
         self.assertEqual(active_mismatches(["Rallying Cry"], auras, 1244690), ["Rallying Cry"])
         # A band that ended 282 ms before the strip is still not up at death.
         self.assertEqual(active_mismatches(["Barkskin"], auras, 1244690, 1161232), ["Barkskin"])
         # Only a band up since the pull started marks the strip: a short buff's natural end does not.
-        mid = [dict(auras[0], bands=[{"startTime": 1200000, "endTime": 1244582}]), auras[1]]
+        mid = [dict(a, bands=[dict(a["bands"][0], startTime=1200000)]) for a in auras]
         self.assertEqual(active_mismatches(["Rallying Cry"], mid, 1244690, 1161232), ["Rallying Cry"])
+
+    def test_death_strip_needs_a_cluster_of_pull_long_bands(self):
+        # Review 2026-10-08: one pull-long band ending alone (a form dropped 900 ms before death) is not
+        # the death's strip; a defensive that ended with it was not up at death.
+        auras = [{"name": "Moonkin Form", "bands": [{"startTime": 1000, "endTime": 9100}]},
+                 {"name": "Barkskin", "bands": [{"startTime": 5000, "endTime": 9100}]},
+                 {"name": "Power Word: Fortitude", "bands": [{"startTime": 1000, "endTime": 9890}]},
+                 {"name": "Battle Shout", "bands": [{"startTime": 1000, "endTime": 9900}]},
+                 {"name": "Mark of the Wild", "bands": [{"startTime": 1000, "endTime": 9950}]}]
+        self.assertEqual(death_strip(auras, 10_000, 1000), 9890)
+        self.assertEqual(active_mismatches(["Barkskin"], auras, 10_000, 1000), ["Barkskin"])
+        # The form alone, with nothing else ending: no strip, the death event decides.
+        self.assertEqual(death_strip(auras[:2], 10_000, 1000), 10_000)
+        self.assertEqual(active_mismatches(["Barkskin"], auras[:2], 10_000, 1000), ["Barkskin"])
+        # Two bands ending together while three others end elsewhere in the second: not a majority.
+        split = [{"name": n, "bands": [{"startTime": 1000, "endTime": t}]}
+                 for n, t in (("A", 9100), ("B", 9150), ("C", 9500), ("D", 9800), ("E", 9990))]
+        self.assertEqual(death_strip(split, 10_000, 1000), 10_000)
 
     def test_ready_at_with_charges(self):
         self.assertTrue(ready_at([], 10_000, 60_000, 1))
