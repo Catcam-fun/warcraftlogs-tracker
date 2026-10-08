@@ -20,7 +20,7 @@ invariants:
   - "NEVER: assume a player carries a Healthstone or potion they never used in the log, unless a Warlock in the pull had a Soulwell."
 anchors:
   analyze_death: "backend/defensives.py:565"
-  assess_survival: "backend/defensives.py:1803"
+  assess_survival: "backend/defensives.py:1826"
   simulate: "backend/defensives.py:1414"
   lethal_window: "backend/defensives.py:818"
   reaction_ms: "backend/defensives.py:822"
@@ -41,7 +41,7 @@ links:
   - warcraftlogs
   - frontend-results-view
   - feat-results
-content_hash: sha256:2b3ae5a4bdc48905c9af38cc41d60c91f949781e8f473387af99d29540b987ab
+content_hash: sha256:e93382978799d254349d2199fa4836272b5d3535283f1dee7e69c20fe8fe625a
 ---
 ## Summary
 
@@ -75,7 +75,7 @@ The analyze stream in `backend/app.py` drives everything. Per report it fetches 
 - title: Check consumables | short: Consumables | sub: Healthstone and potion
   body: For each of healthstone and potion, the last use this pull decides whether it is still on cooldown; cooldowns reset between pulls (backend/defensives.py:712). An unused one is only scored if the player used that kind somewhere in this log, or, for a Healthstone, a Warlock was in the pull (backend/defensives.py:732). consumable_estimate turns it into a heal amount (backend/defensives.py:1212).
 - title: Replay the window | short: Replay | sub: best press per button
-  body: assess_survival takes the hits from up to 15s before the killing blow, never reaching back past an earlier death of theirs (_lethal_hits, backend/defensives.py:1598). For each ready button it tries candidate press moments (_press_times) and keeps the one that leaves the most extra health (_best_press). The button would have saved them when that extra health exceeds the killing blow's overkill (backend/defensives.py:1889). It also tries everything pressed together (backend/defensives.py:1909).
+  body: assess_survival takes the hits from up to 15s before the killing blow, never reaching back past an earlier death of theirs (_lethal_hits, backend/defensives.py:1598). For each ready button it tries candidate press moments (_press_times) and keeps the one that leaves the most extra health (_best_press). The button would have saved them when that extra health exceeds the killing blow's overkill (backend/defensives.py:1912). It also tries everything pressed together (backend/defensives.py:1932).
   gotcha: Healers' real heals are left as they were. The replay only adds the defensive's effect on top of the real health line.
 ```
 
@@ -158,7 +158,7 @@ relied-on-by: [[feat-results]] — the death breakdown a raid officer reads
 ## Invariants
 
 - **MUST** analyze only deaths that can count: target known, not a cheat death, `slot <= max_cutoff`, not in a wipe (`backend/app.py:578`); the hits are fetched for the same set (`backend/app.py:325`).
-- **MUST** press no earlier than the ability was ready (`ready_since`) and no later than `REACTION_MS` (1s) before the killing blow (`backend/defensives.py:1885`, `backend/defensives.py:1629`).
+- **MUST** press no earlier than the ability was ready (`ready_since`) and no later than `REACTION_MS` (1s) before the killing blow (`backend/defensives.py:1908`, `backend/defensives.py:1629`).
 - **MUST** cap extra health at what the player was missing before each hit and at each heal (`backend/defensives.py:1503`, `backend/defensives.py:1483`); otherwise a defensive on a full-health player would look like it saved them.
 - **MUST** read talents and spec from that pull's CombatantInfo (`backend/defensives.py:592`, `backend/app.py:584`); players change both between pulls.
 - **MUST** send an `endTime` with every fightIDs-scoped events query (`backend/defensives.py:867`); WCL returns an empty second page without one.
@@ -169,9 +169,9 @@ relied-on-by: [[feat-results]] — the death breakdown a raid officer reads
 
 - **The killing blow's aura list decides what was up**: when a damaging killing blow exists, its `buffs` snapshot is the source of truth for active auras; aura events only add who cast them (`backend/defensives.py:612`). Without one, aura events decide, capped at 1.5 times the aura's longest duration plus a second in case a removal was missed (`backend/defensives.py:49`, `backend/defensives.py:544`).
 - **Pressing a button proves you have it**: `_has_ability` accepts a button pressed this pull even if the talent record disagrees (`backend/defensives.py:397`). Abilities marked `evidence`, or a pull with no talent record, count only if cast somewhere in the log.
-- **No killing blow with health data means no survival block**: `assess_survival` returns `None` when the killing blow is missing or its health belongs to someone else (`backend/defensives.py:1835`). `index_hits` strips health WCL attached from the source actor (`backend/defensives.py:965`).
+- **No killing blow with health data means no survival block**: `assess_survival` returns `None` when the killing blow is missing or its health belongs to someone else (`backend/defensives.py:1858`). `index_hits` strips health WCL attached from the source actor (`backend/defensives.py:965`).
 - **Older logs do not mark AoE hits**: if a report has no hit with `isAoE`, AoE-only effects are judged unknown (`null`) instead of not applying (`logs_mark_aoe`, `backend/defensives.py:947`; `backend/defensives.py:1006`).
-- **Forms are judged as shift then press**: a button that needs a form the player was not in (Frenzied Regeneration needs Bear Form) is scored together with the form (`backend/defensives.py:758`, `backend/defensives.py:1880`).
+- **Forms are judged as shift then press**: a button that needs a form the player was not in (Frenzied Regeneration needs Bear Form) is scored together with the form (`backend/defensives.py:758`, `backend/defensives.py:1903`).
 - **Defensive data failure does not drop deaths**: if the defensive fetch fails, the report's deaths still count and the stream warns that defensive details are missing (`backend/app.py:408`, `backend/app.py:470`).
 
 ## Glossary

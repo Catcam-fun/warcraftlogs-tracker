@@ -22,7 +22,7 @@ anchors:
   icons_main: backend/scripts/build_spell_icons.py:58
   use_immunity: backend/defensives.py:1311
   use_armor: backend/defensives.py:1034
-  use_rot: backend/defensives.py:1973
+  use_rot: backend/defensives.py:1996
   use_icons: backend/defensives.py:135
   use_text: backend/app.py:670
   icon_url: frontend/src/DeathRow.js:22
@@ -42,13 +42,13 @@ invariants:
   - "NEVER: store boss damage amounts in boss spell text; the game scales them at run time, so the tooltip shows the real hit from the log."
 flows:
   - data-build-path
-content_hash: sha256:49be5a2d7672f4dffb00541a4ae5888745bf56b7000529b7d121d979c18ad8f4
+content_hash: sha256:9ff9d48d33b2e139071eeb0e5d541be5bee8276be7a4ca9036816f128cbae55f
 ---
 ## Summary
 
 - These five scripts produce the boss-side facts the analysis looks up, plus the icons and descriptions of the defensives. Each overwrites one module in `backend/` (see the inventory on [[game-data]]).
 - **wago.tools scripts** reuse `table()` and `patches()` from `build_defensive_catalog.py` (`backend/scripts/build_boss_spell_flags.py:23`, `backend/scripts/build_boss_spell_text.py:31`, `backend/scripts/build_spell_icons.py:24`), so `WAGO_CACHE` applies to them too.
-- **`build_max_health_auras.py`** writes `backend/max_health_auras.py`: how much each aura changes max health, per patch, from game data (EffectAura 133 max health %, 137 with Stamina in its stat mask, 34/230 flat; computed values from the aura's own text or a short curated list; flat Stamina auras are unsized). The death analysis and the checks size the auras a killing hit's list differs by with it.
+- **`build_max_health_auras.py`** writes `backend/max_health_auras.py`: how much each aura changes max health, per patch, as terms read from game data wherever the effect lives (the aura's own EffectAura 133, 137 or 80 on Stamina, 34/230 flat; a spell its text names, under the text's condition; a talent whose text raises it; the value a talent's proc puts on it; a two-entry curated list for description variables), each with the talents and spec passives that change it (EffectAura 107/108/219/220 aimed at that effect). Stamina percent counts as max health percent (a Bear Form shift reads x1.3000 on logs: 25% + Ursoc's Spirit 5%). Its values match the defensive catalog's for every max-health button in all 14 patches, with and without talents, except Bear Form, where the catalog folds in Ursine Vigor (a separate 4 s aura, 393903, here). The death analysis and the checks size the auras a killing hit's list differs by with it, each with its own code.
 - **WCL scripts** read the top of `fightRankings` for each boss and download those kills' damage taken, using the site's own client (`backend/scripts/build_armor_constants.py:33`, `backend/scripts/build_raid_wide.py:24`).
 
 ## How it works
@@ -62,7 +62,7 @@ Run as `python backend/scripts/build_boss_spell_flags.py`; needs wago.tools (`ba
 3. Keeps damaging spells whose `SpellMisc.Attributes_0` has the "no immunities" bit `0x20000000`, if their ID is 400,000 or higher (The War Within onward) or they were found in the journal walk (`backend/scripts/build_boss_spell_flags.py:25-26`, `backend/scripts/build_boss_spell_flags.py:54-58`).
 4. Writes the sorted IDs as the frozenset `IGNORES_IMMUNITY` (`backend/scripts/build_boss_spell_flags.py:60-68`).
 
-`defensives.py` uses it so an immunity never zeroes such a hit, and labels the verdict `pierces` (`backend/defensives.py:1310-1312`, `backend/defensives.py:1583-1584`, `backend/defensives.py:1999`).
+`defensives.py` uses it so an immunity never zeroes such a hit, and labels the verdict `pierces` (`backend/defensives.py:1310-1312`, `backend/defensives.py:1583-1584`, `backend/defensives.py:2022`).
 
 #### build_boss_spell_text.py: killing-blow descriptions
 
@@ -95,7 +95,7 @@ Run as `WCL_CLIENT_ID=... WCL_CLIENT_SECRET=... python backend/scripts/build_rai
 3. An ability needs at least 3 occurrences in a kill; its per-kill median shares are medianed again, and it is raid-wide at 0.5 or more (`backend/scripts/build_raid_wide.py:27-29`, `backend/scripts/build_raid_wide.py:85-90`).
 4. Writes `RAID_WIDE = {abilityID: share}` with the ability and boss name as a comment (`backend/scripts/build_raid_wide.py:95-102`).
 
-The death description only calls a death "rot" when the dominant ability is in `RAID_WIDE`, hit at least 3 times, and no hit was a big chunk (`backend/defensives.py:832-837`, `backend/defensives.py:1973-1975`).
+The death description only calls a death "rot" when the dominant ability is in `RAID_WIDE`, hit at least 3 times, and no hit was a big chunk (`backend/defensives.py:832-837`, `backend/defensives.py:1996-1998`).
 
 #### build_spell_icons.py: defensive icons and descriptions
 
@@ -120,7 +120,7 @@ Run as `python backend/scripts/build_spell_icons.py` after rebuilding the catalo
 ## Invariants
 
 - **MUST** never credit an immunity against a spell in `IGNORES_IMMUNITY` (`backend/defensives.py:1310-1312`).
-- **MUST** only let abilities in `RAID_WIDE` make a death read as worn down (`backend/defensives.py:1973`).
+- **MUST** only let abilities in `RAID_WIDE` make a death read as worn down (`backend/defensives.py:1996`).
 - **NEVER** store boss damage amounts in spell text; they scale by difficulty and item level, so the tooltip shows the log's real hit (`backend/scripts/build_boss_spell_text.py:11-14`).
 
 ## Gotchas

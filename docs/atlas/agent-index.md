@@ -219,11 +219,11 @@
   - one_shot_share: backend/defensives.py:828
   - setup_hit_share: backend/defensives.py:831
   - rot_thresholds: backend/defensives.py:835
-  - classify: backend/defensives.py:1939
-  - one_shot_hit: backend/defensives.py:1951
-  - biggest_hit: backend/defensives.py:1959
-  - rot: backend/defensives.py:1966
-  - burst: backend/defensives.py:2006
+  - classify: backend/defensives.py:1962
+  - one_shot_hit: backend/defensives.py:1974
+  - biggest_hit: backend/defensives.py:1982
+  - rot: backend/defensives.py:1989
+  - burst: backend/defensives.py:2029
   - raid_wide: backend/raid_wide_damage.py:5
   - raid_wide_share: backend/scripts/build_raid_wide.py:29
   - text_for: backend/boss_spell_text.py:7853
@@ -251,7 +251,7 @@
   - NEVER: assume a player carries a Healthstone or potion they never used in the log, unless a Warlock in the pull had a Soulwell.
 - anchors:
   - analyze_death: backend/defensives.py:565
-  - assess_survival: backend/defensives.py:1803
+  - assess_survival: backend/defensives.py:1826
   - simulate: backend/defensives.py:1414
   - lethal_window: backend/defensives.py:818
   - reaction_ms: backend/defensives.py:822
@@ -733,7 +733,7 @@
   - icons_main: backend/scripts/build_spell_icons.py:58
   - use_immunity: backend/defensives.py:1311
   - use_armor: backend/defensives.py:1034
-  - use_rot: backend/defensives.py:1973
+  - use_rot: backend/defensives.py:1996
   - use_icons: backend/defensives.py:135
   - use_text: backend/app.py:670
   - icon_url: frontend/src/DeathRow.js:22
@@ -953,7 +953,7 @@
   - check_mitigation: backend/checks/source_mitigation.py:127
   - check_slots: backend/checks/rules_slots.py:40
   - check_counting: backend/checks/rules_counting.py:27
-  - check_labels: backend/checks/rules_labels.py:232
+  - check_labels: backend/checks/rules_labels.py:315
   - check_verdicts: backend/checks/rules_verdicts.py:168
   - check_defensives: backend/checks/rules_defensives.py:5
   - checks_registry: backend/checks/registry.py:6

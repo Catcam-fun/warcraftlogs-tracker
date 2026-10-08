@@ -29,7 +29,7 @@ anchors:
   check_mitigation: backend/checks/source_mitigation.py:127
   check_slots: backend/checks/rules_slots.py:40
   check_counting: backend/checks/rules_counting.py:27
-  check_labels: backend/checks/rules_labels.py:232
+  check_labels: backend/checks/rules_labels.py:315
   check_verdicts: backend/checks/rules_verdicts.py:168
   check_defensives: backend/checks/rules_defensives.py:5
   checks_registry: backend/checks/registry.py:6
@@ -46,7 +46,7 @@ links:
   - game-data
   - warcraftlogs
   - operations
-content_hash: sha256:c49b97a931a3df4e4ea8329522638f45e158a3c04e5c0c91c5c5ff13718a72fe
+content_hash: sha256:3a605c513c5dd78309764bba9ae79df294517b7bb4fb2b06531ac1e817fa85b2
 ---
 ## Summary
 
@@ -84,7 +84,7 @@ Every test file and check script. Filter by kind.
 | `backend/checks/source_mitigation.py` {check} | `mitigation` (source): Catalog damage reductions match real hits with and without the defensive (`backend/checks/source_mitigation.py:127`) | run with `python -m checks mitigation <target>` |
 | `backend/checks/rules_slots.py` {check} | `slots` (rules): Slots and wipes follow the owner's rules (`backend/checks/rules_slots.py:40`) | run with `python -m checks slots <target>` |
 | `backend/checks/rules_counting.py` {check} | `counting` (rules): A death counts when slot <= X and not in a wipe; defensives exist exactly on deaths that can count (`backend/checks/rules_counting.py:27`) | run with `python -m checks counting <target>` |
-| `backend/checks/rules_labels.py` {check} | `labels` (rules): Death labels follow the rules: one-shot, burst, rot (raid-wide only) or set up by (`backend/checks/rules_labels.py:232`) | run with `python -m checks labels <target>` |
+| `backend/checks/rules_labels.py` {check} | `labels` (rules): Death labels follow the rules: one-shot, burst, rot (raid-wide only) or set up by (`backend/checks/rules_labels.py:315`) | run with `python -m checks labels <target>` |
 | `backend/checks/rules_verdicts.py` {check} | `verdicts` (rules): Would-save verdicts obey the press, overkill, immunity and instant-kill rules (`backend/checks/rules_verdicts.py:168`) | run with `python -m checks verdicts <target>` |
 | `backend/checks/rules_defensives.py` {check} | `defensives` (rules): Talent entry IDs in the log match the catalog (`backend/checks/rules_defensives.py:5`) | run with `python -m checks defensives <target>` |
 | `backend/test_checks.py` {backend} | Unit tests of the checks package with WarcraftLogs mocked (`backend/test_checks.py:1`) | `test_defensives.py` imports `carried_over` from `checks.source_durations` (`backend/checks/source_durations.py:20`) |
