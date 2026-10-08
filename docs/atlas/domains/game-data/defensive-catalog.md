@@ -30,8 +30,8 @@ anchors:
   fail_latest: backend/scripts/build_defensive_catalog.py:1118
   output_patches: backend/defensive_catalog.py:7
   output_catalogs: backend/defensive_catalog.py:22
-  catalog_for: backend/defensives.py:125
-  standard_potion: backend/defensives.py:58
+  catalog_for: backend/defensives.py:126
+  standard_potion: backend/defensives.py:59
 links:
   - game-data
   - game-data-boss-and-raid-data
@@ -46,13 +46,13 @@ invariants:
   - "NEVER: hand-edit defensive_catalog.py; the curated lists live in the build script."
 flows:
   - data-build-path
-content_hash: sha256:08e8b75613977580eeb735a1de93428e3a90a60f012d420bf89655794fe8991d
+content_hash: sha256:1bb4493dd7bcdbb870b7b5b0d452d980ae3d57efc58340445a1b04ef93e98f5c
 ---
 ## Summary
 
 - `backend/scripts/build_defensive_catalog.py` is the largest build script. It writes `backend/defensive_catalog.py`, which `backend/defensives.py` reads to know every defensive's cooldown, charges, effect and the talents that change them (`backend/defensives.py:28`).
 - The split of work is stated at the top of the script: **the curated list decides which abilities count and for whom; the game data supplies the numbers** (`backend/scripts/build_defensive_catalog.py:3-5`).
-- There is **one catalog per patch**, because cooldowns and talents change between patches. `catalog_for` picks the patch that was live on the report's start day (`backend/defensives.py:125-131`).
+- There is **one catalog per patch**, because cooldowns and talents change between patches. `catalog_for` picks the patch that was live on the report's start day (`backend/defensives.py:126-132`).
 
 ## How it works
 
@@ -67,7 +67,7 @@ content_hash: sha256:08e8b75613977580eeb735a1de93428e3a90a60f012d420bf89655794fe
 - title: Fill in the numbers | short: Numbers | sub: cooldown, charges, effect
   body: The cooldown is the longer of RecoveryTime and CategoryRecoveryTime, replaced by the charge recharge for charged spells, with COOLDOWN_FALLBACK for the few stored elsewhere (backend/scripts/build_defensive_catalog.py:1013-1018, 399). components() reads each effect from the game data at the places EFFECTS names, with talent modifiers attached (backend/scripts/build_defensive_catalog.py:777). The entry also gets known (baseline, talent or evidence), major (cooldown of 60s or more), talent_entries and aura_ms (backend/scripts/build_defensive_catalog.py:1022-1033).
 - title: Attach talents | short: Talents | sub: cooldown, charges, duration
-  body: Modifiers collects the talents and spec passives that change a spell's cooldown, charges or duration, each tagged with who gets it (talent entries or specs) (backend/scripts/build_defensive_catalog.py:552-558, 968-976). Cooldown modifiers come from spell modifiers on the cooldown, charge-category recharge changes, and spell-category cooldown changes (aura 341: Angel's Mercy takes 20 seconds off Desperate Prayer through its category) (backend/scripts/build_defensive_catalog.py:628-655). A spec's mastery that stretches a duration (Augmentation's Mastery: Timewalker on Obsidian Scales, Zephyr and The War Within's Renewing Blaze) has 0 in the data because its size comes from the player's mastery stat; it is kept as a duration modifier marked mastery, with no size, and the analysis keeps the base duration (backend/scripts/build_defensive_catalog.py:599-601, 656-672; backend/defensives.py:445). TALENT_EFFECTS adds effects the data doesn't attach to the button's own spell (backend/scripts/build_defensive_catalog.py:256-264).
+  body: Modifiers collects the talents and spec passives that change a spell's cooldown, charges or duration, each tagged with who gets it (talent entries or specs) (backend/scripts/build_defensive_catalog.py:552-558, 968-976). Cooldown modifiers come from spell modifiers on the cooldown, charge-category recharge changes, and spell-category cooldown changes (aura 341: Angel's Mercy takes 20 seconds off Desperate Prayer through its category) (backend/scripts/build_defensive_catalog.py:628-655). A spec's mastery that stretches a duration (Augmentation's Mastery: Timewalker on Obsidian Scales, Zephyr and The War Within's Renewing Blaze) has 0 in the data because its size comes from the player's mastery stat; it is kept as a duration modifier marked mastery, with no size, and the analysis keeps the base duration (backend/scripts/build_defensive_catalog.py:599-601, 656-672; backend/defensives.py:446). TALENT_EFFECTS adds effects the data doesn't attach to the button's own spell (backend/scripts/build_defensive_catalog.py:256-264).
 - title: Potions and Healthstones | short: Consumables | sub: measured heals
   body: A potion with a POTION_TYPICAL value gets that heal as an observed amount, and potion_ranks adds each quality rank's item level and tooltip heal (backend/scripts/build_defensive_catalog.py:1043-1046, 703-736). Iron Stomach, Soulburn and Gorebound Fortitude are added to consumables by hand-written rules (backend/scripts/build_defensive_catalog.py:1070-1098).
 - title: Review new talents | short: Review | sub: survival words
@@ -92,7 +92,7 @@ These live at the top of the script and are what a person edits:
 | `POTION_TYPICAL` {measured} | median heal per potion from real logs of its tier | `backend/scripts/build_defensive_catalog.py:345` |
 | `COOLDOWN_FALLBACK` {data} | cooldowns the data stores elsewhere, in seconds | `backend/scripts/build_defensive_catalog.py:400` |
 
-Two related tables live in `backend/defensives.py`, not the build script: `DEMONIC_HEALTHSTONE_MEASURED` (measured share of max health per tier) and `STANDARD_POTION` (the potion most raiders drank on bosses in each tier, used when a player's own potion heal isn't in the pulls) (`backend/defensives.py:53`, `backend/defensives.py:58-59`).
+Two related tables live in `backend/defensives.py`, not the build script: `DEMONIC_HEALTHSTONE_MEASURED` (measured share of max health per tier) and `STANDARD_POTION` (the potion most raiders drank on bosses in each tier, used when a player's own potion heal isn't in the pulls) (`backend/defensives.py:54`, `backend/defensives.py:59-60`).
 
 #### Output shape
 
@@ -103,7 +103,7 @@ Two related tables live in `backend/defensives.py`, not the build script: `DEMON
 - `HEALING_TAKEN`: per patch, talents and auras that change healing taken (`backend/defensive_catalog.py:15823`).
 - `LATEST` and `CATALOG`: the newest patch and its catalog (`backend/defensive_catalog.py:22312-22313`).
 
-`defensives.py` wraps each patch in a `Catalog` object (`backend/defensives.py:68-122`) and hashes the patches' cast IDs, buff names and talent entries into `CATALOG_FINGERPRINT`, which is part of the defensive cache key (`backend/defensives.py:166-171`).
+`defensives.py` wraps each patch in a `Catalog` object (`backend/defensives.py:69-123`) and hashes the patches' cast IDs, buff names and talent entries into `CATALOG_FINGERPRINT`, which is part of the defensive cache key (`backend/defensives.py:167-172`).
 
 ## Invariants
 
@@ -114,7 +114,7 @@ Two related tables live in `backend/defensives.py`, not the build script: `DEMON
 
 ## Gotchas
 
-- **A patch's "first day" is its earliest build on wago.tools**: `patches()` takes the minimum `created_at` of the patch's builds (`backend/scripts/build_defensive_catalog.py:445-447`), and `catalog_for` compares that against the report's UTC start day (`backend/defensives.py:129-131`). A build created before the patch went live moves the switch-over earlier.
+- **A patch's "first day" is its earliest build on wago.tools**: `patches()` takes the minimum `created_at` of the patch's builds (`backend/scripts/build_defensive_catalog.py:445-447`), and `catalog_for` compares that against the report's UTC start day (`backend/defensives.py:130-132`). A build created before the patch went live moves the switch-over earlier.
 - **`WAGO_CACHE` holds pinned builds only**: a table fetched for a specific build is cached and reused as long as its file exists, which is safe because a build never changes. A table fetched without a build (the live data) is never cached, since it changes with every game build (`backend/scripts/build_defensive_catalog.py:419-423`, `backend/test_wago_cache.py`).
 - **Potions are scored from logs first**: the script's comment says each player's own potion heals in the same report are used when they drank one there; `POTION_TYPICAL` stands in otherwise (`backend/scripts/build_defensive_catalog.py:341-344`). A potion with no `POTION_TYPICAL` value keeps no typical heal.
 - **Renewing Blaze's window is its own aura**: in The War Within the 8s window is the button's aura (374348); the same-named 374349 is the heal-back that runs on after it, and Foci of Life shortens only that heal-back. So 374349 is not in `AURA_SPELLS`, and Foci of Life doesn't change the window (`backend/scripts/build_defensive_catalog.py:366-369`). Checked on live logs: the window lasts 8s with or without the heal-back still running.

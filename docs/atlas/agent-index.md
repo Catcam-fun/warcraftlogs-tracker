@@ -214,16 +214,16 @@
   - NEVER: call a death rot unless the dominant ability is in RAID_WIDE.
   - NEVER: call a one-shot or burst death rot.
 - anchors:
-  - full_health: backend/defensives.py:810
-  - burst_window: backend/defensives.py:823
-  - one_shot_share: backend/defensives.py:825
-  - setup_hit_share: backend/defensives.py:828
-  - rot_thresholds: backend/defensives.py:832
-  - classify: backend/defensives.py:1850
-  - one_shot_hit: backend/defensives.py:1862
-  - biggest_hit: backend/defensives.py:1870
-  - rot: backend/defensives.py:1877
-  - burst: backend/defensives.py:1917
+  - full_health: backend/defensives.py:813
+  - burst_window: backend/defensives.py:826
+  - one_shot_share: backend/defensives.py:828
+  - setup_hit_share: backend/defensives.py:831
+  - rot_thresholds: backend/defensives.py:835
+  - classify: backend/defensives.py:1939
+  - one_shot_hit: backend/defensives.py:1951
+  - biggest_hit: backend/defensives.py:1959
+  - rot: backend/defensives.py:1966
+  - burst: backend/defensives.py:2006
   - raid_wide: backend/raid_wide_damage.py:5
   - raid_wide_share: backend/scripts/build_raid_wide.py:29
   - text_for: backend/boss_spell_text.py:7853
@@ -250,19 +250,19 @@
   - NEVER: credit an immunity against a spell listed in IGNORES_IMMUNITY.
   - NEVER: assume a player carries a Healthstone or potion they never used in the log, unless a Warlock in the pull had a Soulwell.
 - anchors:
-  - analyze_death: backend/defensives.py:564
-  - assess_survival: backend/defensives.py:1729
-  - simulate: backend/defensives.py:1411
-  - lethal_window: backend/defensives.py:815
-  - reaction_ms: backend/defensives.py:819
-  - press_times: backend/defensives.py:1616
-  - catalog_for: backend/defensives.py:125
-  - has_ability: backend/defensives.py:391
-  - index_events: backend/defensives.py:342
-  - consumable_estimate: backend/defensives.py:1209
-  - keep: backend/defensives.py:1293
-  - fetch_combatants: backend/defensives.py:221
-  - fetch_death_windows: backend/defensives.py:890
+  - analyze_death: backend/defensives.py:565
+  - assess_survival: backend/defensives.py:1803
+  - simulate: backend/defensives.py:1414
+  - lethal_window: backend/defensives.py:818
+  - reaction_ms: backend/defensives.py:822
+  - press_times: backend/defensives.py:1619
+  - catalog_for: backend/defensives.py:126
+  - has_ability: backend/defensives.py:392
+  - index_events: backend/defensives.py:343
+  - consumable_estimate: backend/defensives.py:1212
+  - keep: backend/defensives.py:1296
+  - fetch_combatants: backend/defensives.py:222
+  - fetch_death_windows: backend/defensives.py:893
   - app_gate: backend/app.py:578
   - app_counted: backend/app.py:325
 - links: backend-death-descriptions, backend-death-counting, game-data, warcraftlogs, frontend-results-view, feat-results
@@ -731,10 +731,10 @@
   - raid_wide_shares: backend/scripts/build_raid_wide.py:49
   - raid_wide_main: backend/scripts/build_raid_wide.py:78
   - icons_main: backend/scripts/build_spell_icons.py:58
-  - use_immunity: backend/defensives.py:1308
-  - use_armor: backend/defensives.py:1031
-  - use_rot: backend/defensives.py:1884
-  - use_icons: backend/defensives.py:134
+  - use_immunity: backend/defensives.py:1311
+  - use_armor: backend/defensives.py:1034
+  - use_rot: backend/defensives.py:1973
+  - use_icons: backend/defensives.py:135
   - use_text: backend/app.py:670
   - icon_url: frontend/src/DeathRow.js:22
 - links: game-data, game-data-defensive-catalog, backend-defensive-analysis, backend-death-descriptions, backend, warcraftlogs-api-client, warcraftlogs-point-budget, operations, testing
@@ -774,8 +774,8 @@
   - fail_latest: backend/scripts/build_defensive_catalog.py:1118
   - output_patches: backend/defensive_catalog.py:7
   - output_catalogs: backend/defensive_catalog.py:22
-  - catalog_for: backend/defensives.py:125
-  - standard_potion: backend/defensives.py:58
+  - catalog_for: backend/defensives.py:126
+  - standard_potion: backend/defensives.py:59
 - links: game-data, game-data-boss-and-raid-data, backend-defensive-analysis, backend, operations, testing
 
 ## Game Data Catalogs
@@ -948,12 +948,12 @@
   - check_deaths: backend/checks/source_deaths.py:9
   - check_selection: backend/checks/source_selection.py:57
   - check_participation: backend/checks/source_participation.py:24
-  - check_state: backend/checks/source_state.py:278
+  - check_state: backend/checks/source_state.py:281
   - check_durations: backend/checks/source_durations.py:30
   - check_mitigation: backend/checks/source_mitigation.py:127
   - check_slots: backend/checks/rules_slots.py:40
   - check_counting: backend/checks/rules_counting.py:27
-  - check_labels: backend/checks/rules_labels.py:186
+  - check_labels: backend/checks/rules_labels.py:232
   - check_verdicts: backend/checks/rules_verdicts.py:168
   - check_defensives: backend/checks/rules_defensives.py:5
   - checks_registry: backend/checks/registry.py:6
@@ -992,8 +992,8 @@
   - fights: backend/warcraftlogs.py:382
   - remaining_events: backend/analysis.py:329
   - deaths_bulk: backend/analysis.py:357
-  - paged: backend/defensives.py:183
-  - fetch_blocks: backend/defensives.py:859
+  - paged: backend/defensives.py:184
+  - fetch_blocks: backend/defensives.py:862
   - token_test: backend/test_api.py:225
 - links: warcraftlogs, warcraftlogs-point-budget, backend, backend-defensive-analysis, testing
 
@@ -1019,10 +1019,10 @@
   - light_fights: backend/warcraftlogs.py:333
   - fights: backend/warcraftlogs.py:382
   - deaths_bulk: backend/analysis.py:357
-  - combatants: backend/defensives.py:221
-  - defensive_raw: backend/defensives.py:232
-  - death_windows: backend/defensives.py:890
-  - instakills: backend/defensives.py:936
+  - combatants: backend/defensives.py:222
+  - defensive_raw: backend/defensives.py:233
+  - death_windows: backend/defensives.py:893
+  - instakills: backend/defensives.py:939
   - analyze_credentials: backend/app.py:125
   - analyze_token: backend/app.py:158
   - report_fetch: backend/app.py:338
@@ -1065,15 +1065,15 @@
   - get_report_fights: backend/warcraftlogs.py:333
   - deaths_bulk: backend/analysis.py:357
   - remaining_events: backend/analysis.py:329
-  - fetch_combatants: backend/defensives.py:221
-  - defensive_raw: backend/defensives.py:232
-  - paged: backend/defensives.py:183
-  - fetch_blocks: backend/defensives.py:859
-  - death_windows: backend/defensives.py:890
-  - instakills: backend/defensives.py:936
-  - block_span: backend/defensives.py:838
-  - blocks_per_request: backend/defensives.py:840
-  - catalog_fingerprint: backend/defensives.py:167
+  - fetch_combatants: backend/defensives.py:222
+  - defensive_raw: backend/defensives.py:233
+  - paged: backend/defensives.py:184
+  - fetch_blocks: backend/defensives.py:862
+  - death_windows: backend/defensives.py:893
+  - instakills: backend/defensives.py:939
+  - block_span: backend/defensives.py:841
+  - blocks_per_request: backend/defensives.py:843
+  - catalog_fingerprint: backend/defensives.py:168
   - shared_cache: backend/cache.py:42
   - cache_version: backend/cache.py:88
   - fights_cache: backend/cache.py:112

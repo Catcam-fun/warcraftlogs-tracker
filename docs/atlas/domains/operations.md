@@ -46,7 +46,7 @@ invariants:
   - "MUST: rebuild spell_icons.py after rebuilding defensive_catalog.py; the icon script reads every catalog ability."
   - "MUST: bump CACHE_VERSION in cache.py when what gets fetched or how it is indexed changes, so old shared-cache rows are never served to new code."
   - "NEVER: hand-edit the generated modules (defensive_catalog.py, boss_spell_flags.py, boss_spell_text.py, spell_icons.py, armor_constants.py, raid_wide_damage.py); edit the script and rerun it."
-content_hash: sha256:a7ef49cdd04b9e146fde87167ad37f86c49b235b1f120db365e14612acc93dd2
+content_hash: sha256:b221d1c896e4e1d6f3f120e08b505ffbe881a96493aae4525dd5e1629cdf1818
 ---
 ## Summary
 
@@ -72,7 +72,7 @@ Adding a raid tier, in the order the code's dependencies require. Click each ste
 - title: Landing page and art | short: Landing + art | sub: strip, backgrounds, loader
   body: Add the bosses to BOSS_STRIP with their zone label (frontend/src/LandingPage.js:11) and multi-boss slugs to its COUNCIL (frontend/src/LandingPage.js:64). Boss tiles are fetched by frontend/scripts/fetch-boss-renders.py into frontend/public/art/bosses; add the names to its BOSSES list (frontend/scripts/fetch-boss-renders.py:14), and its COUNCIL and DISPLAY_OVERRIDE if needed. Put the new tier's backgrounds in CURRENT_TIER_BACKGROUNDS and move the previous ones into BACKGROUNDS (frontend/src/LandingPage.js:84). The analysis loader video is referenced by path in App.js (frontend/src/App.js:1550). Add a line to UPDATES (frontend/src/LandingPage.js:97). See [[frontend-landing-and-art]].
 - title: Rebuild the defensive catalog | short: Catalog | sub: wago.tools, every patch
-  body: python backend/scripts/build_defensive_catalog.py builds one catalog per retail patch from 11.0.2 on, each from that patch's last build (backend/scripts/build_defensive_catalog.py:406). Set WAGO_CACHE to a folder to keep downloaded tables between runs (backend/scripts/build_defensive_catalog.py:411). Patch names as arguments do a dry run that writes nothing (backend/scripts/build_defensive_catalog.py:1128). New potions need a typical heal in POTION_TYPICAL (backend/scripts/build_defensive_catalog.py:345); the per-tier STANDARD_POTION and DEMONIC_HEALTHSTONE_MEASURED tables in backend/defensives.py:53 and backend/defensives.py:58 are maintained by hand from real logs.
+  body: python backend/scripts/build_defensive_catalog.py builds one catalog per retail patch from 11.0.2 on, each from that patch's last build (backend/scripts/build_defensive_catalog.py:406). Set WAGO_CACHE to a folder to keep downloaded tables between runs (backend/scripts/build_defensive_catalog.py:411). Patch names as arguments do a dry run that writes nothing (backend/scripts/build_defensive_catalog.py:1128). New potions need a typical heal in POTION_TYPICAL (backend/scripts/build_defensive_catalog.py:345); the per-tier STANDARD_POTION and DEMONIC_HEALTHSTONE_MEASURED tables in backend/defensives.py:54 and backend/defensives.py:59 are maintained by hand from real logs.
   gotcha: If the newest patch's spell data no longer matches the curated list, the script stops with "spell data changed; update CURATED / EFFECTS" (backend/scripts/build_defensive_catalog.py:1119). Older patches only print a note.
 - title: Rebuild the icons | short: Icons | sub: after the catalog
   body: python backend/scripts/build_spell_icons.py writes backend/spell_icons.py, the icon and description of every catalog ability. Its docstring says to rerun it after rebuilding the catalog (backend/scripts/build_spell_icons.py:10); it imports the catalog it just rebuilt.
@@ -83,7 +83,7 @@ Adding a raid tier, in the order the code's dependencies require. Click each ste
 - title: Raid-wide damage | short: Raid-wide | sub: WCL credentials
   body: WCL_CLIENT_ID=... WCL_CLIENT_SECRET=... python backend/scripts/build_raid_wide.py writes backend/raid_wide_damage.py, the boss abilities whose median occurrence hits at least half the raid (backend/scripts/build_raid_wide.py:29). Only those can make a death read as worn down by rot. It costs about 10 WarcraftLogs points per encounter (backend/scripts/build_raid_wide.py:12).
 - title: Check against real logs | short: Real-log checks | sub: every raid key
-  body: Run python -m checks all reportCode:raidKey (from backend/) on a Mythic log for each raid key, the new tier included (all runs the mitigation check too). Passing output is described on [[testing]]. If WarcraftLogs reports a spec the code does not know, the API prints "[WARN] Unknown specID" until it is added to SPEC_NAMES (backend/defensives.py:309, backend/defensives.py:362).
+  body: Run python -m checks all reportCode:raidKey (from backend/) on a Mythic log for each raid key, the new tier included (all runs the mitigation check too). Passing output is described on [[testing]]. If WarcraftLogs reports a spec the code does not know, the API prints "[WARN] Unknown specID" until it is added to SPEC_NAMES (backend/defensives.py:310, backend/defensives.py:363).
 ```
 
 ## Reference
