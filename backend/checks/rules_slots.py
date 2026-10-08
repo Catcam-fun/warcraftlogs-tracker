@@ -15,7 +15,7 @@ def rank(deaths):
     """deaths: (timestamp, player id, is cheat death) in combat-log order; returns (slot, in_wipe) per death."""
     real_ts = [ts for ts, _, cheat in deaths if not cheat]
     stretches = []
-    for i, t in enumerate(real_ts):
+    for t in real_ts:
         stretches.append((t, t + WIPE_MS))
         stretches.append((t - WIPE_MS, t))
     wipes = [(lo, hi) for lo, hi in stretches
@@ -44,6 +44,8 @@ def check(run):
         return skip("no death events in the result")
     pulls = {}
     for e in events:
+        if e.get("isCheatDeath"):
+            continue  # WCL's Deaths table has no cheat deaths
         pulls.setdefault((e["reportId"], e["fightId"]), []).append(e)
     items = []
     for (rid, fid), evs in pulls.items():
