@@ -1136,7 +1136,9 @@ class MaxHealthBeforeKillingBlowTests(unittest.TestCase):
     every max-health aura they had (live 2026-10-08, every one of the four 105% deaths: Strikepal,
     nerubar p16, auras stripped at 1910329-1910332, killing hit at 1910349 with max 10061382 against
     11198315 on every hit and heal before; Zorthar, voidspire p58, and Batchester, midnight-s2 p42,
-    lost a 5% max-health raid buff the same way)."""
+    lost 5% the same way)."""
+
+    NERUBAR = defensives.catalog_for(1740420145769)          # WgYbA1r7fXdZKtPF, patch 11.0.7
 
     def assess(self, hits, available=(), **kw):
         durations = {CATALOG[s]["name"]: CATALOG[s].get("aura_ms") for s in available}
@@ -1144,9 +1146,13 @@ class MaxHealthBeforeKillingBlowTests(unittest.TestCase):
                                           aura_ms=durations, **kw)
 
     @staticmethod
-    def at(ts, amount, hp_after, max_hp, overkill=0, absorbed=0, ability=500):
+    def at(ts, amount, hp_after, max_hp, overkill=0, absorbed=0, ability=500, buffs=()):
         return dict(hit(ts, amount, hp_after, overkill=overkill, absorbed=absorbed, ability=ability),
-                    maxHitPoints=max_hp)
+                    maxHitPoints=max_hp, buffs="".join(f"{a}." for a in buffs))
+
+    def sizer(self, player_class="Warrior", spec="Arms", cat=None, names=None):
+        cat = cat or self.NERUBAR
+        return defensives._aura_sizer(cat, player_class, spec, {}, names or {})
 
     def test_strikepal_max_health_is_the_last_hit_before_the_killing_blow(self):
         # Live: last hit 1908720 at 6243724 / 11198315, healed to 10531185, then Phase Lunge for
@@ -1170,49 +1176,89 @@ class MaxHealthBeforeKillingBlowTests(unittest.TestCase):
         r = self.assess(hits)
         self.assertEqual((r["maxHp"], r["hpBeforePct"], r["killingHit"]["pctOfMax"]), (557_900, 100, 190))
 
-    def test_a_max_health_aura_gained_after_the_last_hit_counts(self):
-        # Live (Soulcleavi, manaforge p54): Last Resort put him in Metamorphosis (+40% max health,
-        # 29370419 -> 41118588 on his other Metamorphosis hits) 16 ms before Oblivion; the hit was
-        # logged after the death removed it, so it reads 30743644 health of a 29370419 max.
-        hits = [self.at(8_000_138, 900_304, 15_378_866, 29_370_419),
-                self.at(8_002_696, 30_743_644, 0, 29_370_419, overkill=39_340_044, absorbed=58_740_840)]
-        r = self.assess(hits, max_health_auras=[(8_002_680, 8_002_683, 0.4)])
-        self.assertEqual(r["maxHp"], 41_118_587)
-        self.assertEqual(r["hpBeforePct"], 75)
-        # Without the aura the health before still bounds max health from below.
-        self.assertEqual(self.assess(hits)["hpBeforePct"], 100)
+    def test_auras_lost_before_the_killing_blow_come_off_by_game_data(self):
+        # Live (Nerub-ar, 11.0.7): Black Attunement (403295, +2% max health) on the last hit, not on the
+        # killing hit; the killing hit took exactly 7587780, its own max. 98% was wrong, 100% is right.
+        hits = [self.at(8_773_545, 10_000, 7_700_000, 7_739_535, buffs=[403295]),
+                self.at(8_775_890, 7_587_780, 0, 7_587_780, overkill=1_000_000)]
+        r = self.assess(hits, aura_size=self.sizer())
+        self.assertEqual((r["maxHp"], r["hpBeforePct"]), (7_587_780, 100))
+        # gZBT7Y1j8dNCbwqp actor 14 at 3182550: Fortitude of the Bear (388035, +20% in 11.0.7) ran out.
+        hits = [self.at(3_177_579, 10_000, 3_000_000, 9_256_106, buffs=[388035]),
+                self.at(3_182_550, 2_246_960, 0, 7_713_421, overkill=500_000)]
+        r = self.assess(hits, aura_size=self.sizer("Hunter", "BeastMastery"))
+        self.assertEqual((r["maxHp"], r["hpBeforePct"]), (7_713_422, 29))
+        # An aura on the killing hit that wasn't on the last hit came up in between (Vampiric Blood +30%).
+        hits = [self.at(95_000, 10_000, 500_000, 1_000_000), self.at(100_000, 600_000, 0, 1_000_000,
+                                                                       overkill=1, buffs=[55233])]
+        r = self.assess(hits, aura_size=self.sizer("DeathKnight", "Blood"))
+        self.assertEqual((r["maxHp"], r["hpBeforePct"]), (1_300_000, 46))
 
-    def test_a_max_health_aura_that_ran_out_before_the_killing_blow_is_gone(self):
-        # Vampiric Blood (+30%) up on the last hit, gone 2 s before the killing blow.
-        hits = [self.at(95_000, 100_000, 900_000, 1_300_000),
-                self.at(100_000, 500_000, 0, 1_000_000, overkill=200_000)]
-        r = self.assess(hits, max_health_auras=[(90_000, 98_000, 0.3)])
-        self.assertEqual((r["maxHp"], r["hpBeforePct"]), (1_000_000, 50))
+    def test_a_list_change_the_max_has_not_caught_up_with(self):
+        # Live (bpQCAqm89GhTLW7Z actor 19): Black Attunement left the list at 3055385 but the max read
+        # 7359162 until later; the killing hit at 3055954 took exactly 7214865 = 7359162 / 1.02.
+        hits = [self.at(3_054_635, 10_000, 7_300_000, 7_359_162, buffs=[403295]),
+                self.at(3_055_385, 10_000, 7_290_000, 7_359_162),
+                self.at(3_055_954, 7_214_865, 0, 7_214_865, overkill=1_000_000)]
+        r = self.assess(hits, aura_size=self.sizer())
+        self.assertEqual((r["maxHp"], r["hpBeforePct"]), (7_214_865, 100))
+
+    def test_havoc_metamorphosis_is_not_vengeances(self):
+        # Havoc's Metamorphosis (162264) has no max-health effect; Vengeance's (187827) is +40%.
+        names = {162264: "Metamorphosis", 187827: "Metamorphosis"}
+        hits = [self.at(95_000, 10_000, 1_000_000, 1_000_000),
+                self.at(100_000, 1_000_000, 0, 1_000_000, overkill=1, buffs=[162264])]
+        r = self.assess(hits, aura_size=self.sizer("DemonHunter", "Havoc", names=names))
+        self.assertEqual((r["maxHp"], r["hpBeforePct"], r["deathType"]), (1_000_000, 100, "oneShot"))
+        hits[-1]["buffs"] = "187827."
+        r = self.assess(hits, aura_size=self.sizer("DemonHunter", "Vengeance", names=names))
+        self.assertEqual(r["maxHp"], 1_400_000)
+        cat = defensives._LATEST
+        events = [(1, "applybuff", 162264, 1, 0), (2, "removebuff", 162264, 1, 0)]
+        self.assertEqual(defensives._max_health_bands(events, cat, names, {}, "Havoc", "DemonHunter"), [])
+        events = [(1, "applybuff", 187827, 1, 0), (2, "removebuff", 187827, 1, 0)]
+        self.assertEqual(defensives._max_health_bands(events, cat, names, {}, "Vengeance", "DemonHunter"),
+                         [(1, 2, 187827, 0.4)])
+        self.assertEqual(defensives._max_health_bands(events, cat, names, {}, "Vengeance", "Warrior"), [])
+
+    def test_an_aura_the_killing_hit_set_off_is_not_health_before_it(self):
+        # Live (Soulcleavi, manaforge p54): at 18995479 / 29370419 when Oblivion landed; Last Resort
+        # absorbed part of it and put him in Metamorphosis (applied 8002680), which healed 11748168
+        # (40% of 29370419); the death removed it (8002683) and the hit was logged at 8002696 with
+        # 30743644 taken. Health before the blow is what he had when it landed: 65%.
+        hits = [self.at(8_000_138, 900_304, 15_378_866, 29_370_419),
+                dict(hit(8_001_031, 0, 0), resourceActor=None, maxHitPoints=None, hitPoints=None),
+                self.at(8_002_696, 30_743_644, 0, 29_370_419, overkill=39_340_044, absorbed=58_740_840)]
+        bands = [(8_002_680, 8_002_683, 187827, 0.4)]
+        r = self.assess(hits, max_health_auras=bands)
+        self.assertEqual((r["maxHp"], r["hpBeforePct"]), (29_370_419, 65))
+        # A band that came up with the hit before it (Defy Fate-like, same millisecond) is not the killing hit's.
+        hits[1]["timestamp"] = 8_002_680
+        self.assertEqual(self.assess(hits, max_health_auras=bands)["hpBeforePct"], 100)
+        # More than DEATH_STRIP_MS before the killing hit: not set off by it.
+        self.assertEqual(defensives.DEATH_STRIP_MS, 50)
+
+    def test_earlier_hits_are_measured_against_the_max_they_had_then(self):
+        # A 300k hit at 1M max is 30% of max, even though Vampiric Blood ran out before the killing blow.
+        hits = [self.at(90_000, 300_000, 700_000, 1_300_000, buffs=[55233]),
+                self.at(99_000, 10_000, 680_000, 1_000_000),
+                self.at(100_000, 680_000, 0, 1_000_000, overkill=50_000)]
+        r = self.assess(hits, aura_size=self.sizer("DeathKnight", "Blood"))
+        self.assertEqual(r["biggestHit"]["pctOfMax"], 23)          # 300k of 1.3M
+        self.assertEqual(r["deathType"], "wasLow")
 
     def test_a_recorded_gain_on_the_killing_blow_is_kept(self):
-        # The death only removes auras, so a killing blow logged with more max health than the hit
-        # before had gained it before the hit.
         hits = [self.at(95_000, 100_000, 600_000, 1_000_000),
                 self.at(100_000, 600_000, 0, 1_100_000, overkill=200_000)]
         self.assertEqual(self.assess(hits)["maxHp"], 1_100_000)
 
     def test_replay_caps_extra_health_with_the_max_before_the_killing_blow(self):
-        # 94% before a hit logged at a lower max: a defensive's extra health is capped by the 6%
-        # really missing, not by zero.
         hits = [self.at(95_000, 10_000, 940_000, 1_000_000),
                 self.at(100_000, 940_000, 0, 900_000, overkill=50_000)]
         r = self.assess(hits, available=[EXHIL])
         self.assertEqual(r["hpBeforePct"], 94)
         self.assertTrue(r["wouldSave"]["Exhilaration"])       # 60k missing > 50k overkill
 
-    def test_max_health_auras_from_the_players_buff_events(self):
-        cat = defensives._LATEST
-        meta = cat.name_to_id["Metamorphosis"]
-        names = {meta: "Metamorphosis", 1: "Melee"}
-        events = [(8_002_680, "applybuff", meta, 1, 0), (8_002_683, "removebuff", meta, 1, 0)]
-        self.assertEqual(defensives._max_health_bands(events, cat, names, {}, "Vengeance"),
-                         [(8_002_680, 8_002_683, 0.4)])
-        # Untalented Barkskin adds no max health, so it is no band.
-        bark = cat.name_to_id["Barkskin"]
-        self.assertEqual(defensives._max_health_bands([(1, "applybuff", bark, 1, 0)], cat,
-                                                      {bark: "Barkskin"}, {}, "Guardian"), [])
+    def test_soulburn_healthstone_is_a_max_health_aura(self):
+        # Game data: Soulburn: Healthstone (387636), EffectAura 133, +20% max health.
+        self.assertEqual(defensives.max_health_size(387636, "11.0.7"), (0.2, 0))

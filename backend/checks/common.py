@@ -243,6 +243,11 @@ class Run:
         return self._memo(("casts", rid, pid, start, end),
                           lambda: self._events(rid, "Casts", "sourceID", pid, start, end))
 
+    def heals_taken(self, rid, pid, start, end):
+        """Healing the player received in [start, end], with resources (for health around a killing hit)."""
+        return self._memo(("heals", rid, pid, start, end),
+                          lambda: self._events(rid, "Healing", "targetID", pid, start, end, resources=True))
+
     def hits_before(self, rid, fid, pid, death_ts):
         # For DamageTaken, sourceID is the unit that took the damage; targetID returns only the hits
         # the player dealt to themselves (verified live: 13 self-hits instead of 41).

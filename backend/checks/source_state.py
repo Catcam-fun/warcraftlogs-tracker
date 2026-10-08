@@ -78,7 +78,7 @@ def _killing_event(entry):
     return max(kills, key=lambda e: e.get("timestamp", 0)) if kills else None
 
 
-def health_mismatch(survival, entry):
+def health_mismatch(survival, entry, wcl_health=None):
     """What differs between the site's health before the killing blow / overkill and WCL's, or None.
 
     The site's "Died by" is the killing blow's overkill, so it is compared with WCL's killing event,
@@ -86,6 +86,8 @@ def health_mismatch(survival, entry):
     ones included (live 2026-10-08, Weavi, Brewmaster: two Stagger ticks overkilled for 662478 and
     299233 without killing him, and the entry read 3614972 against the killing hit's 2653261).
     Health before the killing blow can never be above max HP; the site showing more is a mismatch.
+    `wcl_health`: the health before the blow from WCL's damage taken (rules_labels.max_hp_before: the
+    killing hit's amount, less what an aura the killing hit set off healed); else the killing event's amount.
     """
     max_hp = survival["maxHp"]
     site_hp = survival["hpBeforePct"] * max_hp / 100
@@ -96,8 +98,9 @@ def health_mismatch(survival, entry):
     if kill is None:
         out.append(f"health before {round(site_hp)} vs wcl none (no killing hit, max {max_hp})")
     else:
-        if abs(kill["amount"] - site_hp) > HP_TOLERANCE * max_hp:
-            out.append(f"health before {round(site_hp)} vs wcl {kill['amount']} (max {max_hp})")
+        wcl_hp = kill["amount"] if wcl_health is None else wcl_health
+        if abs(wcl_hp - site_hp) > HP_TOLERANCE * max_hp:
+            out.append(f"health before {round(site_hp)} vs wcl {wcl_hp} (max {max_hp})")
         if (kill.get("overkill") or 0) != (survival.get("overkill") or 0):
             out.append(f"overkill site {survival.get('overkill')} vs wcl {kill.get('overkill')}")
     return "; ".join(out) if out else None
@@ -105,8 +108,8 @@ def health_mismatch(survival, entry):
 
 def max_hp_mismatch(survival, wcl_max):
     """The site's max HP against WCL's just before the killing hit (rules_labels.max_hp_before: the
-    player's last own-health hit before it, with max-health auras that changed in between; never the
-    killing hit's own max, logged after the death stripped their auras), or None when they agree.
+    player's last own-health hit before it, with the auras its list and the killing hit's differ by, sized
+    from game data; never the killing hit's own max, logged after the death stripped their auras), or None.
     Compared on its own, so a wrong max shows even when health before stays under 100%."""
     site = survival.get("maxHp") or 0
     if not wcl_max:
@@ -319,11 +322,11 @@ def check(run):
         if entry is None:
             items.append(f"{who} pull {fid}: no WCL Deaths table entry at {death_ts}")
             continue
-        diff = health_mismatch(survival, entry)
+        got = death_hits(run.hits_before(rid, fid, pid, death_ts), death_ts)
+        wcl_max, wcl_health = run_max_hp_before(run, rid, fid, pid, *got) if got else (0, None)
+        diff = health_mismatch(survival, entry, wcl_health if wcl_max else None)
         if diff:
             items += [f"{who} pull {fid}: {part}" for part in diff.split("; ")]
-        got = death_hits(run.hits_before(rid, fid, pid, death_ts), death_ts)
-        wcl_max = run_max_hp_before(run, ev, rid, fid, pid, *got) if got else 0
         diff = max_hp_mismatch(survival, wcl_max)
         if diff:
             items.append(f"{who} pull {fid}: {diff}")
