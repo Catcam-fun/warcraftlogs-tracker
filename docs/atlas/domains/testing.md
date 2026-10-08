@@ -24,7 +24,7 @@ anchors:
   check_deaths: backend/checks/source_deaths.py:9
   check_selection: backend/checks/source_selection.py:57
   check_participation: backend/checks/source_participation.py:24
-  check_state: backend/checks/source_state.py:250
+  check_state: backend/checks/source_state.py:258
   check_durations: backend/checks/source_durations.py:30
   check_mitigation: backend/checks/source_mitigation.py:127
   check_slots: backend/checks/rules_slots.py:40
@@ -46,7 +46,7 @@ links:
   - game-data
   - warcraftlogs
   - operations
-content_hash: sha256:7209a868314af6563353d778620c053f2047260dc088b0cab918f3f165ee03f2
+content_hash: sha256:17cd25e515bfdca47fd246960f3df7984b7b45601b9529ae6edfe7fd3c19ccae
 ---
 ## Summary
 
@@ -79,7 +79,7 @@ Every test file and check script. Filter by kind.
 | `backend/checks/source_deaths.py` {check} | `deaths` (source): Deaths the site reads match WCL's Deaths table (`backend/checks/source_deaths.py:9`) | run with `python -m checks deaths <target>` |
 | `backend/checks/source_selection.py` {check} | `selection` (source): The pulls and kills the site kept match the guild's reports on WCL (`backend/checks/source_selection.py:57`) | run with `python -m checks selection <target>` |
 | `backend/checks/source_participation.py` {check} | `participation` (source): Who was in each kept pull, and who counts as roster, match WCL (`backend/checks/source_participation.py:24`) | run with `python -m checks participation <target>` |
-| `backend/checks/source_state.py` {check} | `state` (source): Active, ready and health at death match WCL's auras, casts and Deaths table (`backend/checks/source_state.py:250`) | run with `python -m checks state <target>` |
+| `backend/checks/source_state.py` {check} | `state` (source): Active, ready and health at death match WCL's auras, casts and Deaths table (`backend/checks/source_state.py:258`) | run with `python -m checks state <target>` |
 | `backend/checks/source_durations.py` {check} | `durations` (source): Defensive durations (catalog + talents) match real aura uses (`backend/checks/source_durations.py:30`) | run with `python -m checks durations <target>` |
 | `backend/checks/source_mitigation.py` {check} | `mitigation` (source): Catalog damage reductions match real hits with and without the defensive (`backend/checks/source_mitigation.py:127`) | run with `python -m checks mitigation <target>` |
 | `backend/checks/rules_slots.py` {check} | `slots` (rules): Slots and wipes follow the owner's rules (`backend/checks/rules_slots.py:40`) | run with `python -m checks slots <target>` |
