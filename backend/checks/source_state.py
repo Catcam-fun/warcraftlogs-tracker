@@ -6,15 +6,32 @@ from defensives import CDR_TOLERANCE_MS, ENCOUNTER_RESET_MS
 
 BAND_TOLERANCE_MS, HP_TOLERANCE = 100, 0.01
 ENTRY_TOLERANCE_MS = 50
+STRIP_LOOKBACK_MS = 1000
 CONSUMABLE_KINDS = ("healthstone", "potion")
 
 
-def active_mismatches(active_names, auras, death_ts):
-    """Active names with no same-named aura band around death_ts (within BAND_TOLERANCE_MS)."""
+def death_strip(auras, death_ts, fight_start):
+    """When the death stripped the player's auras: the first end, in the STRIP_LOOKBACK_MS before the
+    death event, of an aura band up since the pull started (raid buffs, forms: only death ends those).
+    WCL's death event can come after the strip (live 2026-10-08, dreamrift pull 1: Chickenism's 19 auras,
+    Fortitude and Battle Shout among them, ended at 1244582-1244684, the death event at 1244690; the same
+    Rallying Cry stayed up on the living until 1247448). Without such a band, the death event itself."""
+    ends = [b["endTime"] for a in auras for b in a.get("bands") or []
+            if b["startTime"] <= fight_start + BAND_TOLERANCE_MS
+            and death_ts - STRIP_LOOKBACK_MS <= b["endTime"] <= death_ts]
+    return min(ends) if ends else death_ts
+
+
+def active_mismatches(active_names, auras, death_ts, fight_start=None):
+    """Active names with no same-named aura band around the death (within BAND_TOLERANCE_MS of the
+    death event, or of the moment the death stripped the player's auras when fight_start is given)."""
+    moments = {death_ts}
+    if fight_start is not None:
+        moments.add(death_strip(auras, death_ts, fight_start))
     out = []
     for name in active_names:
-        covered = any(b["startTime"] - BAND_TOLERANCE_MS <= death_ts <= b["endTime"] + BAND_TOLERANCE_MS
-                      for a in auras if a.get("name") == name for b in a.get("bands") or [])
+        covered = any(b["startTime"] - BAND_TOLERANCE_MS <= t <= b["endTime"] + BAND_TOLERANCE_MS
+                      for a in auras if a.get("name") == name for b in a.get("bands") or [] for t in moments)
         if not covered:
             out.append(name)
     return out
@@ -160,7 +177,7 @@ def check(run):
         active = [a["name"] for a in d.get("active") or []]
         if active:
             auras = run.buffs(rid, fid, pid)
-            missing = active_mismatches(active, auras, death_ts)
+            missing = active_mismatches(active, auras, death_ts, fight_start)
             # A defensive that is a debuff on the enemy (Fiery Brand) is never a band on the player;
             # WCL's killing hit lists it when it was up.
             not_buffs = [n for n in missing if not any(a.get("name") == n for a in auras)]
