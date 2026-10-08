@@ -947,7 +947,7 @@
   - check_participation: backend/checks/source_participation.py:24
   - check_state: backend/checks/source_state.py:201
   - check_durations: backend/checks/source_durations.py:30
-  - check_mitigation: backend/checks/source_mitigation.py:45
+  - check_mitigation: backend/checks/source_mitigation.py:127
   - check_slots: backend/checks/rules_slots.py:40
   - check_counting: backend/checks/rules_counting.py:27
   - check_labels: backend/checks/rules_labels.py:97
