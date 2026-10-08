@@ -44,7 +44,7 @@ links:
   - operations
   - feat-analyze
   - feat-results
-content_hash: sha256:01505c50452ba0552240b5f5baf51d390372acf5335b5f47224c4d367185bb7f
+content_hash: sha256:fface1f6e05168e4599205a6846b8b49811ae6765310853deb03e3a8f5c3ce07
 ---
 ## Summary
 
@@ -117,7 +117,7 @@ The parts of the system, and where each is documented:
 - **Pull**: one boss attempt inside a report, kill or wipe. Only fights whose encounter ID belongs to the chosen raid key and whose difficulty matches are kept (`backend/analysis.py:302`).
 - **Duplicate pull**: the same attempt logged by two raiders. A pull of the same boss that overlaps an earlier one by 15 seconds or more, or by half its length, is dropped (`backend/analysis.py:66`). The earliest copy is kept, and two copies that start on the same millisecond go by report code, so the same copy is kept on every run; a copy cut short by more than 5 s gives way to the longest one (`dedup_pulls`, `backend/analysis.py:84`).
 - **Raid tier**: the raid key chosen on the Analyze page, such as `midnight-s2-all`. It fixes which encounter IDs count and which dates are searched (`backend/analysis.py:234`, `backend/analysis.py:262`).
-- **Difficulty**: WarcraftLogs' difficulty number: 3 Normal, 4 Heroic, 5 Mythic (`frontend/src/AnalyzeConfig.js:167`, `backend/app.py:279`).
+- **Difficulty**: WarcraftLogs' difficulty number: 3 Normal, 4 Heroic, 5 Mythic (`frontend/src/AnalyzeConfig.js:167`, `backend/app.py:282`).
 - **Deaths tracked**: the "first X deaths per pull" setting, `maxCutoff`. The server clamps it to 1-10 (`backend/app.py:134`).
 - **Slot**: which death of the pull a death was, 1 for the first. A player who dies, is battle-rezzed and dies again takes two slots; a cheat death gets real deaths so far plus one, so it never pushes a real death out (`backend/analysis.py:188`).
 - **Wipe**: any 8-second stretch holding 8 real deaths (`backend/analysis.py:19`, `backend/analysis.py:157`). Deaths inside it never count; cheat deaths never make one.

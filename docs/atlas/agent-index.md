@@ -51,7 +51,7 @@
   - verify_token: backend/auth.py:36
   - cache_ttl: backend/auth.py:23
   - require_user: backend/auth.py:79
-  - delete_route: backend/app.py:786
+  - delete_route: backend/app.py:790
   - delete_impl: backend/supabase_client.py:417
   - delete_client: frontend/src/Settings.js:187
 - links: frontend, backend, data-model, security, feat-account, feat-saved, feat-share
@@ -78,16 +78,16 @@
   - roster_toggle: backend/app.py:145
   - is_guild_member: backend/app.py:181
   - report_window: backend/app.py:189
-  - report_finished: backend/app.py:210
-  - fetch_light_fights: backend/app.py:213
-  - fetch_report_meta: backend/app.py:224
-  - pull_sort: backend/app.py:257
-  - dedup_loop: backend/app.py:263
-  - fetch_report_deaths: backend/app.py:335
-  - no_counted_death: backend/app.py:383
+  - report_finished: backend/app.py:211
+  - fetch_light_fights: backend/app.py:214
+  - fetch_report_meta: backend/app.py:225
+  - pull_sort: backend/app.py:260
+  - dedup_loop: backend/app.py:266
+  - fetch_report_deaths: backend/app.py:338
+  - no_counted_death: backend/app.py:386
   - get_report_fights: backend/warcraftlogs.py:333
-  - processing_loop: backend/app.py:473
-  - result: backend/app.py:634
+  - processing_loop: backend/app.py:476
+  - result: backend/app.py:638
   - raid_encounters: backend/analysis.py:234
   - raid_date_windows: backend/analysis.py:262
   - resolve_report_window: backend/analysis.py:280
@@ -115,14 +115,14 @@
 - anchors:
   - analyze: backend/app.py:109
   - analyze_config_read: backend/app.py:115
-  - sse_response: backend/app.py:676
-  - result_payload: backend/app.py:634
-  - death_event: backend/app.py:547
-  - share_create: backend/app.py:694
-  - share_read: backend/app.py:714
-  - share_id_re: backend/app.py:686
-  - saved_id_re: backend/app.py:687
-  - storage_response: backend/app.py:729
+  - sse_response: backend/app.py:680
+  - result_payload: backend/app.py:638
+  - death_event: backend/app.py:550
+  - share_create: backend/app.py:698
+  - share_read: backend/app.py:718
+  - share_id_re: backend/app.py:690
+  - saved_id_re: backend/app.py:691
+  - storage_response: backend/app.py:733
   - require_user: backend/auth.py:79
   - limit_decorator: backend/ratelimit.py:54
   - frontend_sse_reader: frontend/src/App.js:754
@@ -190,9 +190,9 @@
   - rank_pull_deaths: backend/analysis.py:188
   - is_in_mass_death: backend/analysis.py:121
   - find_mass_death_start: backend/analysis.py:213
-  - app_rank: backend/app.py:530
-  - app_defensive_gate: backend/app.py:571
-  - app_cutoffs: backend/app.py:607
+  - app_rank: backend/app.py:533
+  - app_defensive_gate: backend/app.py:574
+  - app_cutoffs: backend/app.py:611
   - frontend_is_counted: frontend/src/deathCounting.js:22
   - tests: backend/test_death_slots.py:14
 - links: backend, backend-analysis-pipeline, backend-api-endpoints, backend-defensive-analysis, warcraftlogs, data-model, frontend-results-view, feat-analyze
@@ -214,20 +214,20 @@
   - NEVER: call a death rot unless the dominant ability is in RAID_WIDE.
   - NEVER: call a one-shot or burst death rot.
 - anchors:
-  - full_health: backend/defensives.py:775
-  - burst_window: backend/defensives.py:788
-  - one_shot_share: backend/defensives.py:790
-  - setup_hit_share: backend/defensives.py:793
-  - rot_thresholds: backend/defensives.py:797
-  - classify: backend/defensives.py:1739
-  - one_shot_hit: backend/defensives.py:1751
-  - biggest_hit: backend/defensives.py:1759
-  - rot: backend/defensives.py:1766
-  - burst: backend/defensives.py:1806
+  - full_health: backend/defensives.py:786
+  - burst_window: backend/defensives.py:799
+  - one_shot_share: backend/defensives.py:801
+  - setup_hit_share: backend/defensives.py:804
+  - rot_thresholds: backend/defensives.py:808
+  - classify: backend/defensives.py:1750
+  - one_shot_hit: backend/defensives.py:1762
+  - biggest_hit: backend/defensives.py:1770
+  - rot: backend/defensives.py:1777
+  - burst: backend/defensives.py:1817
   - raid_wide: backend/raid_wide_damage.py:5
   - raid_wide_share: backend/scripts/build_raid_wide.py:29
   - text_for: backend/boss_spell_text.py:7853
-  - ability_text: backend/app.py:661
+  - ability_text: backend/app.py:665
   - death_row_ctx: frontend/src/DeathRow.js:253
 - links: backend-defensive-analysis, backend-death-counting, game-data, warcraftlogs, frontend-results-view, feat-results
 
@@ -250,21 +250,21 @@
   - NEVER: credit an immunity against a spell listed in IGNORES_IMMUNITY.
   - NEVER: assume a player carries a Healthstone or potion they never used in the log, unless a Warlock in the pull had a Soulwell.
 - anchors:
-  - analyze_death: backend/defensives.py:548
-  - assess_survival: backend/defensives.py:1624
-  - simulate: backend/defensives.py:1376
-  - lethal_window: backend/defensives.py:780
-  - reaction_ms: backend/defensives.py:784
-  - press_times: backend/defensives.py:1581
+  - analyze_death: backend/defensives.py:550
+  - assess_survival: backend/defensives.py:1635
+  - simulate: backend/defensives.py:1387
+  - lethal_window: backend/defensives.py:791
+  - reaction_ms: backend/defensives.py:795
+  - press_times: backend/defensives.py:1592
   - catalog_for: backend/defensives.py:124
   - has_ability: backend/defensives.py:377
   - index_events: backend/defensives.py:328
-  - consumable_estimate: backend/defensives.py:1174
-  - keep: backend/defensives.py:1258
+  - consumable_estimate: backend/defensives.py:1185
+  - keep: backend/defensives.py:1269
   - fetch_combatants: backend/defensives.py:220
-  - fetch_death_windows: backend/defensives.py:855
-  - app_gate: backend/app.py:571
-  - app_counted: backend/app.py:322
+  - fetch_death_windows: backend/defensives.py:866
+  - app_gate: backend/app.py:574
+  - app_counted: backend/app.py:325
 - links: backend-death-descriptions, backend-death-counting, game-data, warcraftlogs, frontend-results-view, feat-results
 
 ## Backend API
@@ -290,7 +290,7 @@
   - gunicorn_threads: backend/gunicorn.conf.py:15
   - supabase_env: backend/supabase_client.py:27
   - auth_env: backend/auth.py:20
-  - dev_server: backend/app.py:810
+  - dev_server: backend/app.py:814
   - frontend_api_url: frontend/src/api.js:9
 - links: backend-api-endpoints, backend-analysis-pipeline, backend-death-counting, backend-caching-and-limits, backend-defensive-analysis, backend-death-descriptions, warcraftlogs, data-model, auth, frontend, feat-analyze
 
@@ -350,10 +350,10 @@
   - gunicorn_threads: backend/gunicorn.conf.py:15
   - gunicorn_timeout: backend/gunicorn.conf.py:18
   - requirements: backend/requirements.txt:1
-  - dev_server: backend/app.py:810
+  - dev_server: backend/app.py:814
   - load_dotenv: backend/app.py:20
   - allowed_origins: backend/app.py:67
-  - health: backend/app.py:800
+  - health: backend/app.py:804
   - supabase_env: backend/supabase_client.py:27
   - api_url: frontend/src/api.js:9
   - wake_message: frontend/src/api.js:105
@@ -394,7 +394,7 @@
   - Settings changes credentials, password and email, and deletes the account through DELETE /api/account, which removes saves, stored credentials, shares and the login itself.
   - Terms of Service and Privacy Policy are static pages at /terms and /privacy, linked from sign-up and the landing page footer.
 - invariants:
-  - MUST: the server identify the account to delete from the verified bearer token, never from the URL or body (backend/app.py:787, backend/auth.py:88).
+  - MUST: the server identify the account to delete from the verified bearer token, never from the URL or body (backend/app.py:791, backend/auth.py:88).
   - MUST: account deletion remove saved_analyses and api_credentials rows and the auth user, and report failure if any of those fail (backend/supabase_client.py:425, backend/supabase_client.py:442).
   - NEVER: delete an account without the service-role key; the call refuses instead (backend/supabase_client.py:422).
   - MUST: a signed-in user read and write only their own api_credentials row (backend/migrations/001_shares_and_rls.sql:36).
@@ -415,7 +415,7 @@
   - settings_modal: frontend/src/Settings.js:6
   - settings_save_creds: frontend/src/Settings.js:60
   - delete_account_ui: frontend/src/Settings.js:187
-  - account_endpoint: backend/app.py:786
+  - account_endpoint: backend/app.py:790
   - delete_user_account: backend/supabase_client.py:417
   - require_user: backend/auth.py:79
   - verify_token: backend/auth.py:36
@@ -473,7 +473,7 @@
 - invariants:
   - MUST: a death count only when slot <= the chosen cutoff and inWipe is false (frontend/src/deathCounting.js:22).
   - NEVER: let a cheat death take a real death's slot; it is counted separately as +N cheat (frontend/src/deathCounting.js:31).
-  - MUST: defensive analysis exist only for deaths that could count (slot <= maxCutoff, not in a wipe, not a cheat death) (backend/app.py:571).
+  - MUST: defensive analysis exist only for deaths that could count (slot <= maxCutoff, not in a wipe, not a cheat death) (backend/app.py:574).
   - NEVER: call the server when a filter changes; every table is recomputed from the loaded result (frontend/src/App.js:1266).
 - anchors:
   - route: frontend/src/App.js:1595
@@ -488,9 +488,9 @@
   - player_list: frontend/src/App.js:2101
   - death_row: frontend/src/DeathRow.js:237
   - defensive_summary: frontend/src/DefensivePanel.js:20
-  - result_shape: backend/app.py:634
-  - death_event: backend/app.py:547
-  - defensives_gate: backend/app.py:571
+  - result_shape: backend/app.py:638
+  - death_event: backend/app.py:550
+  - defensives_gate: backend/app.py:574
 - links: frontend, frontend-results-view, frontend-pages-and-routing, backend-analysis-pipeline, backend-death-counting, backend-defensive-analysis, backend-death-descriptions, warcraftlogs, game-data, feat-analyze, feat-saved, feat-share
 
 ## Saved Reports
@@ -504,7 +504,7 @@
   - Expired saves are removed lazily, whenever the same user lists or saves; the server refuses a 6th save (409) and anything over 3 MB compressed (413).
   - Opening a save puts it back into app state and routes to /results, the same page a fresh analysis uses.
 - invariants:
-  - MUST: every /api/saved route run behind require_user and use g.user_id from the verified token (backend/app.py:737, backend/auth.py:88).
+  - MUST: every /api/saved route run behind require_user and use g.user_id from the verified token (backend/app.py:741, backend/auth.py:88).
   - MUST: every saved_analyses read and delete filter on both id and user_id (backend/supabase_client.py:148, backend/supabase_client.py:176).
   - NEVER: store or return WarcraftLogs credentials in a save; the config is stripped in the browser and again on write and read (frontend/src/SaveReportDialog.js:28, backend/supabase_client.py:101, backend/supabase_client.py:163).
   - MUST: keep at most MAX_SAVED_PER_USER (5) saves per user and clamp retention to 1-30 days (backend/supabase_client.py:93, backend/supabase_client.py:97).
@@ -516,12 +516,12 @@
   - saved_list: frontend/src/SavedReports.js:10
   - open_saved: frontend/src/SavedReports.js:35
   - load_into_state: frontend/src/App.js:337
-  - list_endpoint: backend/app.py:736
-  - create_endpoint: backend/app.py:742
-  - get_endpoint: backend/app.py:760
-  - delete_endpoint: backend/app.py:768
-  - delete_all_endpoint: backend/app.py:776
-  - status_map: backend/app.py:729
+  - list_endpoint: backend/app.py:740
+  - create_endpoint: backend/app.py:746
+  - get_endpoint: backend/app.py:764
+  - delete_endpoint: backend/app.py:772
+  - delete_all_endpoint: backend/app.py:780
+  - status_map: backend/app.py:733
   - save_limiter: backend/app.py:54
   - limits: backend/supabase_client.py:31
   - save_analysis: backend/supabase_client.py:89
@@ -545,7 +545,7 @@
   - NEVER: put WarcraftLogs credentials in a share; they are stripped in the browser, on write and on read (frontend/src/App.js:635, backend/supabase_client.py:223, backend/supabase_client.py:259).
   - NEVER: let a shared config overwrite the viewer's own credentials (frontend/src/App.js:325).
   - MUST: serve a share only before its expires_at; Supabase rows are filtered on expires_at and memory entries on their own deadline (backend/supabase_client.py:250, backend/supabase_client.py:217).
-  - MUST: reject share ids outside [A-Za-z0-9_-]{6,32} before any lookup (backend/app.py:716).
+  - MUST: reject share ids outside [A-Za-z0-9_-]{6,32} before any lookup (backend/app.py:720).
   - MUST: try each ?share= id once per page; a failed load must not loop (frontend/src/App.js:351).
 - anchors:
   - share_button: frontend/src/App.js:1647
@@ -555,9 +555,9 @@
   - share_param_effect: frontend/src/App.js:349
   - load_shared: frontend/src/App.js:312
   - idb_restore_skip: frontend/src/App.js:532
-  - share_endpoint: backend/app.py:694
-  - shared_endpoint: backend/app.py:714
-  - share_id_re: backend/app.py:686
+  - share_endpoint: backend/app.py:698
+  - shared_endpoint: backend/app.py:718
+  - share_id_re: backend/app.py:690
   - share_limiter: backend/app.py:52
   - share_limits: backend/supabase_client.py:33
   - store_share: backend/supabase_client.py:222
@@ -667,7 +667,7 @@
   - loader_overlay: frontend/src/App.js:1535
   - scroll_top: frontend/src/App.js:177
   - backend_analyze: backend/app.py:109
-  - backend_result: backend/app.py:666
+  - backend_result: backend/app.py:670
 - links: frontend, frontend-results-view, frontend-landing-and-art, backend, auth, feat-analyze, feat-share, feat-saved
 
 ## Results View
@@ -731,11 +731,11 @@
   - raid_wide_shares: backend/scripts/build_raid_wide.py:49
   - raid_wide_main: backend/scripts/build_raid_wide.py:78
   - icons_main: backend/scripts/build_spell_icons.py:58
-  - use_immunity: backend/defensives.py:1273
-  - use_armor: backend/defensives.py:996
-  - use_rot: backend/defensives.py:1773
+  - use_immunity: backend/defensives.py:1284
+  - use_armor: backend/defensives.py:1007
+  - use_rot: backend/defensives.py:1784
   - use_icons: backend/defensives.py:133
-  - use_text: backend/app.py:662
+  - use_text: backend/app.py:666
   - icon_url: frontend/src/DeathRow.js:22
 - links: game-data, game-data-defensive-catalog, backend-defensive-analysis, backend-death-descriptions, backend, warcraftlogs-api-client, warcraftlogs-point-budget, operations, testing
 
@@ -825,8 +825,8 @@
   - raid_cards_spread: frontend/src/AnalyzeConfig.js:21
   - raid_zones_spread: frontend/src/App.js:31
   - boss_order_spread: frontend/src/App.js:74
-  - health_route: backend/app.py:800
-  - dev_server: backend/app.py:810
+  - health_route: backend/app.py:804
+  - dev_server: backend/app.py:814
   - supabase_client: backend/supabase_client.py:39
   - supabase_startup_log: backend/supabase_client.py:40
   - report_cache_budget: backend/supabase_client.py:273
@@ -836,8 +836,8 @@
   - cache_version: backend/cache.py:88
   - wcl_retry: backend/warcraftlogs.py:30
   - wcl_endpoints: backend/warcraftlogs.py:15
-  - report_failure: backend/app.py:428
-  - analyze_error_event: backend/app.py:670
+  - report_failure: backend/app.py:431
+  - analyze_error_event: backend/app.py:674
   - catalog_build: backend/scripts/build_defensive_catalog.py:1107
   - wago_cache: backend/scripts/build_defensive_catalog.py:411
 - links: testing, game-data, backend, frontend-landing-and-art, deployment, backend-caching-and-limits, warcraftlogs, data-model, overview
@@ -905,8 +905,8 @@
   - max_content_length: backend/app.py:62
   - limiters: backend/app.py:52
   - analyze_limit: backend/app.py:110
-  - looks_like_analysis: backend/app.py:690
-  - share_id_re: backend/app.py:686
+  - looks_like_analysis: backend/app.py:694
+  - share_id_re: backend/app.py:690
   - cheat_death_gate: backend/app.py:143
   - client_ip: backend/ratelimit.py:18
   - rate_limiter: backend/ratelimit.py:32
@@ -948,13 +948,13 @@
   - check_deaths: backend/checks/source_deaths.py:9
   - check_selection: backend/checks/source_selection.py:57
   - check_participation: backend/checks/source_participation.py:24
-  - check_state: backend/checks/source_state.py:236
+  - check_state: backend/checks/source_state.py:250
   - check_durations: backend/checks/source_durations.py:30
   - check_mitigation: backend/checks/source_mitigation.py:127
   - check_slots: backend/checks/rules_slots.py:40
   - check_counting: backend/checks/rules_counting.py:27
   - check_labels: backend/checks/rules_labels.py:104
-  - check_verdicts: backend/checks/rules_verdicts.py:167
+  - check_verdicts: backend/checks/rules_verdicts.py:168
   - check_defensives: backend/checks/rules_defensives.py:5
   - checks_registry: backend/checks/registry.py:6
   - checks_target: backend/checks/common.py:36
@@ -993,7 +993,7 @@
   - remaining_events: backend/analysis.py:329
   - deaths_bulk: backend/analysis.py:357
   - paged: backend/defensives.py:182
-  - fetch_blocks: backend/defensives.py:824
+  - fetch_blocks: backend/defensives.py:835
   - token_test: backend/test_api.py:225
 - links: warcraftlogs, warcraftlogs-point-budget, backend, backend-defensive-analysis, testing
 
@@ -1021,11 +1021,11 @@
   - deaths_bulk: backend/analysis.py:357
   - combatants: backend/defensives.py:220
   - defensive_raw: backend/defensives.py:231
-  - death_windows: backend/defensives.py:855
-  - instakills: backend/defensives.py:901
+  - death_windows: backend/defensives.py:866
+  - instakills: backend/defensives.py:912
   - analyze_credentials: backend/app.py:125
   - analyze_token: backend/app.py:158
-  - report_fetch: backend/app.py:335
+  - report_fetch: backend/app.py:338
   - script_credentials: backend/scripts/build_raid_wide.py:79
 - links: warcraftlogs-api-client, warcraftlogs-point-budget, backend, backend-defensive-analysis, backend-death-descriptions, game-data, data-model, security, operations
 
@@ -1052,27 +1052,27 @@
 - anchors:
   - report_cache_age: backend/app.py:46
   - report_workers: backend/app.py:50
-  - light_fights: backend/app.py:213
-  - report_meta: backend/app.py:224
-  - dedup_loop: backend/app.py:262
-  - report_deaths: backend/app.py:335
-  - deaths_cache_key: backend/app.py:352
-  - combatants_first: backend/app.py:368
-  - no_counted_death: backend/app.py:383
-  - window_cache_key: backend/app.py:387
-  - one_at_a_time: backend/app.py:390
-  - deaths_pool: backend/app.py:440
+  - light_fights: backend/app.py:214
+  - report_meta: backend/app.py:225
+  - dedup_loop: backend/app.py:265
+  - report_deaths: backend/app.py:338
+  - deaths_cache_key: backend/app.py:355
+  - combatants_first: backend/app.py:371
+  - no_counted_death: backend/app.py:386
+  - window_cache_key: backend/app.py:390
+  - one_at_a_time: backend/app.py:393
+  - deaths_pool: backend/app.py:443
   - get_report_fights: backend/warcraftlogs.py:333
   - deaths_bulk: backend/analysis.py:357
   - remaining_events: backend/analysis.py:329
   - fetch_combatants: backend/defensives.py:220
   - defensive_raw: backend/defensives.py:231
   - paged: backend/defensives.py:182
-  - fetch_blocks: backend/defensives.py:824
-  - death_windows: backend/defensives.py:855
-  - instakills: backend/defensives.py:901
-  - block_span: backend/defensives.py:803
-  - blocks_per_request: backend/defensives.py:805
+  - fetch_blocks: backend/defensives.py:835
+  - death_windows: backend/defensives.py:866
+  - instakills: backend/defensives.py:912
+  - block_span: backend/defensives.py:814
+  - blocks_per_request: backend/defensives.py:816
   - catalog_fingerprint: backend/defensives.py:166
   - shared_cache: backend/cache.py:42
   - cache_version: backend/cache.py:88

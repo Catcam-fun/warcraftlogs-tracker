@@ -16,10 +16,10 @@ anchors:
   gunicorn_threads: backend/gunicorn.conf.py:15
   gunicorn_timeout: backend/gunicorn.conf.py:18
   requirements: backend/requirements.txt:1
-  dev_server: backend/app.py:810
+  dev_server: backend/app.py:814
   load_dotenv: backend/app.py:20
   allowed_origins: backend/app.py:67
-  health: backend/app.py:800
+  health: backend/app.py:804
   supabase_env: backend/supabase_client.py:27
   api_url: frontend/src/api.js:9
   wake_message: frontend/src/api.js:105
@@ -53,7 +53,7 @@ invariants:
   - "MUST: migrations 001 and 002 be run in the Supabase SQL editor before the features that use them are expected to persist."
   - "NEVER: commit backend/.env; it is gitignored and holds the backend's secrets."
   - "NEVER: rely on in-process state (rate limits, memory shares, caches) across workers or restarts."
-content_hash: sha256:21c495f7aa1b1ae134f3ba8007988c47bdade29b549eb31581ad3021a51bd716
+content_hash: sha256:91244f2613ee5d6b20b99ea31ce3216f102d2ed78067a5f01e9819c473d3dbf2
 ---
 # Deployment & Environments
 
@@ -115,7 +115,7 @@ edge static -> supa color=process "anon key"
 | Backend dependencies | `backend/requirements.txt` | pip |
 | Backend config | `PORT`, `WEB_CONCURRENCY`, `GUNICORN_THREADS`, `ALLOWED_ORIGINS`, `SUPABASE_URL` | host env; `backend/.env` locally |
 | Backend secrets | `SUPABASE_KEY` (anon), `SUPABASE_SERVICE_ROLE_KEY` | host env; `backend/.env` locally (gitignored, `.gitignore:2`) |
-| Health check | `GET /api/health` returns status and whether Supabase is configured | `backend/app.py:800` |
+| Health check | `GET /api/health` returns status and whether Supabase is configured | `backend/app.py:804` |
 | Frontend build | `react-scripts build` to `frontend/build/` (gitignored) | `frontend/package.json:21`, `frontend/.gitignore:12` |
 | Frontend config | `REACT_APP_API_URL` (optional, build time) | build env |
 | Frontend public values | Supabase URL and anon key | constants in `frontend/src/supabaseClient.js:3` |
@@ -130,7 +130,7 @@ edge static -> supa color=process "anon key"
 | Frontend | `react-scripts start` (`frontend/package.json:20`) on localhost | the build in S3, served by CloudFront; a CloudFront Function serves `index.html` for React routes (`infra/template.yaml`) |
 | API the site calls | `http://localhost:5000` (`frontend/src/api.js:10`) | `''` (same host): built with `REACT_APP_API_URL=same-origin`, and `''` is also the default off localhost (`frontend/src/api.js:10`); API under `/api/*` |
 | Override | `REACT_APP_API_URL` | same, at build time |
-| Backend server | `python app.py`: Flask dev server, threaded, debug off (`backend/app.py:810`), or gunicorn | gunicorn on Lambda via the Lambda Web Adapter (`backend/run.sh`); the live function has 3008 MB (`infra/README.md`; `infra/template.yaml:120` says 1024 MB, a reference only), a 600-second timeout as configured in the console (`infra/README.md` says 15 minutes), response streaming; `run.sh` sets `MALLOC_ARENA_MAX=2` (`backend/run.sh:10`) and `PYTHONUNBUFFERED=1` so the app's log lines reach CloudWatch as they happen (`backend/run.sh:11`) |
+| Backend server | `python app.py`: Flask dev server, threaded, debug off (`backend/app.py:814`), or gunicorn | gunicorn on Lambda via the Lambda Web Adapter (`backend/run.sh`); the live function has 3008 MB (`infra/README.md`; `infra/template.yaml:120` says 1024 MB, a reference only), a 600-second timeout as configured in the console (`infra/README.md` says 15 minutes), response streaming; `run.sh` sets `MALLOC_ARENA_MAX=2` (`backend/run.sh:10`) and `PYTHONUNBUFFERED=1` so the app's log lines reach CloudWatch as they happen (`backend/run.sh:11`) |
 | Backend env | `backend/.env` via `load_dotenv()` | Lambda environment variables, set in the console |
 | Supabase | same project: the frontend URL and anon key are hard-coded (`frontend/src/supabaseClient.js:3`) | same |
 | CORS | `ALLOWED_ORIGINS` usually unset, so `*` | not needed: site and API share one host |
