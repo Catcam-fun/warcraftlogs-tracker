@@ -1,8 +1,11 @@
+import os
 import unittest
+from unittest import mock
 
 from checks.registry import CHECKS, select
 from checks.verdict import PASS, Verdict, exit_code, fail, format_lines, skip
 from checks.__main__ import run_checks
+from checks.common import AnalysisError, Run, TableCapped, parse_target, points, raid_week, run_analysis
 
 
 class VerdictTests(unittest.TestCase):
@@ -50,3 +53,47 @@ class RunnerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TargetTests(unittest.TestCase):
+    def test_parse_target_forms(self):
+        t = parse_target("ABC123:manaforge")
+        self.assertEqual((t.code, t.raid, t.guild), ("ABC123", "manaforge", None))
+        t = parse_target("ABC123:nerubar:Big Guild/Area 52/US")
+        self.assertEqual(t.guild, ("Big Guild", "Area 52", "US"))
+        with self.assertRaises(SystemExit):
+            parse_target("ABC123:not-a-raid")
+
+    def test_raid_week_is_the_tuesday_on_or_before(self):
+        # 2026-10-01T00:00Z is a Thursday -> week starts Tuesday 2026-09-29
+        self.assertEqual(raid_week(1790812800000), ("2026-09-29", "2026-10-06"))
+        self.assertEqual(raid_week(1790640000000), ("2026-09-29", "2026-10-06"))   # the Tuesday itself
+
+
+class RunTests(unittest.TestCase):
+    def test_no_mythic_pulls_gives_empty_pulls(self):
+        with mock.patch("checks.common.get_fights", return_value={"report_start": 0, "fights": [
+                {"id": 1, "start_time": 0, "end_time": 1, "boss": 3129, "difficulty": 4, "kill": False, "zoneID": 44}],
+                "friendlies": [], "player_details": {}, "abilities": {}, "ability_schools": {}}):
+            run = Run("t", parse_target("X:manaforge"))
+            self.assertEqual(run.pulls, [])
+
+    def test_deaths_table_cap_raises(self):
+        with mock.patch("checks.common.graphql_query", return_value={"reportData": {"report": {"t": {"data": {"entries": [{}] * 200}}}}}):
+            run = Run("t", parse_target("X:manaforge"))
+            with self.assertRaises(TableCapped):
+                run.deaths_table("X", 5)
+
+    def test_points_is_none_on_error(self):
+        with mock.patch("checks.common.graphql_query", side_effect=Exception("down")):
+            self.assertIsNone(points("t"))
+
+    def test_run_analysis_returns_result_or_raises(self):
+        body = 'data: {"stage": "x", "message": "m"}\n\ndata: {"result": {"events": {}}}\n\n'
+        fake = mock.Mock(); fake.post.return_value.get_data.return_value = body
+        with mock.patch("checks.common.app.app.test_client", return_value=fake), \
+             mock.patch.dict(os.environ, {"WCL_CLIENT_ID": "a", "WCL_CLIENT_SECRET": "b"}):
+            self.assertEqual(run_analysis("t", parse_target("X:manaforge:G/S/US"), "2026-09-29", "2026-10-06"), {"events": {}})
+            fake.post.return_value.get_data.return_value = 'data: {"error": "No reports found"}\n\n'
+            with self.assertRaises(AnalysisError):
+                run_analysis("t", parse_target("X:manaforge:G/S/US"), "2026-09-29", "2026-10-06")
