@@ -556,8 +556,9 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
     replayed with the talents the player had in them: those of the latest KEPT pull that had
     started by then (a press in a pull the site didn't keep, or between pulls, uses the previous
     kept pull's talents; before the first kept pull, the first one's).
-    `encounters`: [(start, end)] of every boss encounter in the report, kept or not. Each one resets
-    long cooldowns, so a gap between presses that spans one is not cooldown reduction.
+    `encounters`: [(start, end)] of every boss encounter in the report, kept or not. Long cooldowns
+    reset when each one ends (wipe or kill): a press after the previous encounter ended carries into
+    this pull, and a gap between presses that spans an encounter's end is not cooldown reduction.
 
     With `hits` (the player's hits in the seconds before their deaths, and
     instant kills: fetch_death_windows, fetch_instakills) it also estimates
@@ -630,10 +631,16 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
         before = [lo for lo in loadouts if lo[0] <= t]
         _, talents, pull_spec_ = before[-1] if before else loadouts[0]
         return talents, pull_spec_
-    # Where long cooldowns reset: every boss encounter's start and end (whether the game resets them
-    # at ENCOUNTER_START or ENCOUNTER_END is not in the game data; a gap spanning either is dropped).
-    barriers = sorted({t for se in (encounters or [(s, s) for s in (pull_starts or {}).values()]) for t in se}
-                      | {fight_start})
+    # Long cooldowns reset when a boss encounter ends (wipe or kill): presses since the last one that
+    # ended before this pull count (a press between pulls carries into this one), and a gap between
+    # presses that spans an encounter's end is the reset, not cooldown reduction. Without the
+    # report's encounters: from this pull's start, and gaps across any kept pull's start are dropped.
+    if encounters:
+        long_since = max([end for _, end in encounters if end <= fight_start], default=0)
+        long_resets = sorted(end for _, end in encounters)
+    else:
+        long_since = fight_start
+        long_resets = sorted(set((pull_starts or {}).values()) | {fight_start})
     for sid, entry in cat.tracked.items():
         if not _has_ability(sid, entry, player_class, spec, talent_entries, casts_by_spell, pressed_this_pull):
             continue
@@ -642,25 +649,23 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
             result["active"].append({"name": name, "kind": "personal", "major": entry["major"]})
             continue
         all_casts = casts_by_spell.get(sid, [])
-        # Long cooldowns reset when the encounter starts. Short ones carry over, and charges come
+        # Long cooldowns reset when an encounter ends (above). Short ones carry over, and charges come
         # back one at a time from the first spend, so every earlier cast in the report counts:
         # the cast that put a one-charge ability on cooldown is always more than one cooldown back
         # when it is ready again, and it decides when it came back. Each press counts with the
         # talents the player had then (loadout_at), and a reset (Cold Snap) brings it back at once.
-        lookback = fight_start if entry["cooldown_ms"] >= ENCOUNTER_RESET_MS else 0
+        long = entry["cooldown_ms"] >= ENCOUNTER_RESET_MS
+        lookback = long_since if long else 0
         how = {r["spell"]: r["restores"] for r in entry.get("reset_by", ())}
         resets = [(t, how[s]) for t, s in own_casts if s in how and lookback <= t <= death_ts]
+
         def per_press(t, entry=entry):
             talents, pull_spec_ = loadout_at(t)
             return _talented_cooldown(entry, talents, pull_spec_), _talented_charges(entry, talents, pull_spec_)
-
-        def this_pull(_t, entry=entry):
-            return _talented_cooldown(entry, talent_entries, spec), _talented_charges(entry, talent_entries, spec)
-        loadout = this_pull if lookback == fight_start else per_press
-        ended = [t for t, s in own_casts if s in how] + (barriers if lookback == fight_start else [])
+        ended = [t for t, s in own_casts if s in how] + (long_resets if long else [])
         inferred = _inferred_cooldown(all_casts, ended, per_press)
         window = [t for t in all_casts if lookback <= t <= death_ts]
-        left, ready_in, since = _replay(window, resets, death_ts, loadout, inferred)
+        left, ready_in, since = _replay(window, resets, death_ts, per_press, inferred)
         if left > 0:
             result["available"].append({"name": name, "major": entry["major"]})
             ready_entries.append(entry)

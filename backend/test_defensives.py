@@ -1051,6 +1051,20 @@ class ReadyTimeTests(unittest.TestCase):
                          other_pulls={3: (150_000, talents), 4: (300_000, talents)}, encounters=encounters)
             self.assertEqual([c["readyIn"] for c in r["cooldown"] if c["name"] == "Divine Shield"], [170])
 
+    def test_a_press_after_a_wipe_carries_into_the_next_pull(self):
+        # Long cooldowns reset when the encounter ends. Divine Shield (300s) pressed at 260s, after pull 3
+        # ended (150s to 250s) and before this pull (from 300s): back only at 560s, so at 400s on cooldown.
+        talents = entries(642)
+        encounters = [(150_000, 250_000), (300_000, 500_000)]
+        r = self.die("Paladin", "Holy", [(260_000, 642)], 400_000, talents=talents, fight_start=300_000,
+                     other_pulls={3: (150_000, talents)}, encounters=encounters)
+        self.assertEqual([(c["readyIn"], c["usedAgo"]) for c in r["cooldown"] if c["name"] == "Divine Shield"],
+                         [(160, 140)])
+        # Pressed at 200s, during pull 3: the wipe at 250s reset it, so it is ready in this pull.
+        r = self.die("Paladin", "Holy", [(200_000, 642)], 400_000, talents=talents, fight_start=300_000,
+                     other_pulls={3: (150_000, talents)}, encounters=encounters)
+        self.assertIn("Divine Shield", names(r["available"]))
+
     def test_each_press_counts_with_its_own_pulls_talents(self):
         # Fade: 30s, 20s with two ranks of Improved Fade. Pull 3 (from 0) without it, this pull (from 100s)
         # with it. Pressed at 90s in pull 3: back at 120s, so at 115s it is on cooldown for 5s more.
