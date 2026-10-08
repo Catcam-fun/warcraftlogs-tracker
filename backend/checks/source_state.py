@@ -10,7 +10,7 @@ cooldown). It therefore validates the casts data the site read, not the inferenc
 import defensives
 from checks.common import TableCapped
 from checks.rules_labels import death_hits, run_max_hp_before
-from checks.verdict import PASS, fail, skip
+from checks.verdict import PASS, Outcome, fail, skip
 from defensives import CDR_TOLERANCE_MS, ENCOUNTER_RESET_MS
 
 BAND_TOLERANCE_MS, HP_TOLERANCE = 100, 0.01
@@ -283,7 +283,7 @@ def check(run):
     deaths = run.counted_deaths()
     if not deaths:
         return skip("no counted deaths")
-    items, capped = [], set()
+    items, capped, skipped = [], set(), []
     for ev in deaths:
         rid, fid, who = ev["reportId"], ev["fightId"], ev["originalCharacter"]
         pid = run.actor_id(rid, who)
@@ -323,11 +323,18 @@ def check(run):
             items.append(f"{who} pull {fid}: no WCL Deaths table entry at {death_ts}")
             continue
         got = death_hits(run.hits_before(rid, fid, pid, death_ts), death_ts)
-        wcl_max, wcl_health = run_max_hp_before(run, rid, fid, pid, *got) if got else (0, None)
+        wcl_max, wcl_health, why = run_max_hp_before(run, rid, fid, pid, *got) if got else (0, None, None)
+        if why:
+            # The max HP can't be worked out from WCL's data and the game data: no verdict on it.
+            skipped.append(f"{who} pull {fid}: {why}")
+            wcl_max, wcl_health = None, None
         diff = health_mismatch(survival, entry, wcl_health if wcl_max else None)
         if diff:
             items += [f"{who} pull {fid}: {part}" for part in diff.split("; ")]
-        diff = max_hp_mismatch(survival, wcl_max)
+        diff = max_hp_mismatch(survival, wcl_max) if wcl_max is not None else None
         if diff:
             items.append(f"{who} pull {fid}: {diff}")
-    return fail(items) if items else PASS
+    note = f"{len(skipped)} deaths' max HP not checked: {'; '.join(skipped[:3])}" if skipped else ""
+    if items:
+        return fail(items, reason=note)
+    return Outcome("pass", reason=note) if note else PASS
