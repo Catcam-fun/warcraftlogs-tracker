@@ -10,7 +10,8 @@ from checks.rules_verdicts import violations
 from checks.rules_labels import label, death_hits
 from raid_wide_damage import RAID_WIDE
 from checks.__main__ import run_checks
-from checks import rules_verdicts, rules_counting, rules_defensives, rules_labels, rules_slots, source_deaths
+from checks import rules_verdicts, rules_counting, rules_defensives, rules_labels, rules_slots, source_deaths, source_selection
+from checks.source_selection import cluster, walk
 from checks.common import AnalysisError, Run, TableCapped, parse_target, points, raid_week, run_analysis
 
 
@@ -348,6 +349,58 @@ class LabelRuleTests(unittest.TestCase):
         self.assertEqual((o.status, o.items), ("fail", ["Bob pull 2: site wasLow/None/None, rule burst/None/None"]))
         ev["defensives"]["survival"]["deathType"] = "instakill"
         self.assertEqual(rules_labels.check(run).status, "skip")
+
+
+class SelectionTests(unittest.TestCase):
+    def test_cluster_overlap_and_boss(self):
+        p = lambda key, boss, s, e, kill=False: {"key": key, "boss": boss, "start": s, "end": e, "kill": kill}
+        cs = cluster([p("A_1", 1, 0, 100), p("B_7", 1, 50, 120), p("A_2", 1, 200, 300), p("B_8", 2, 0, 100)])
+        self.assertEqual(sorted(sorted(x["key"] for x in c) for c in cs), [["A_1", "B_7"], ["A_2"], ["B_8"]])
+
+    def test_check_accepts_either_copy_and_flags_a_missing_one(self):
+        pulls = [{"key": "A_1", "boss": 1, "start": 0, "end": 100, "kill": True},
+                 {"key": "B_7", "boss": 1, "start": 50, "end": 120, "kill": True},
+                 {"key": "A_2", "boss": 1, "start": 200, "end": 300, "kill": False}]
+        run = mock.Mock(); run.guild = ("G", "S", "US"); run.meta = {"report_start": 0}
+        run.result = {"bossParticipation": {"Boss": {"Bob": ["B_7", "A_2"]}}}
+        with mock.patch("checks.source_selection.walk", return_value=pulls):
+            self.assertEqual(source_selection.check(run).status, "pass")
+            run.result = {"bossParticipation": {"Boss": {"Bob": ["B_7"]}}}
+            o = source_selection.check(run)
+            self.assertEqual(o.status, "fail")
+            self.assertTrue(any(i.startswith("cluster 1 ") and i.endswith(": no kept pull") for i in o.items))
+
+    def test_check_flags_two_copies_stray_key_and_kill_counts(self):
+        pulls = [{"key": "A_1", "boss": 1, "name": "Boss", "start": 0, "end": 100, "kill": True},
+                 {"key": "B_7", "boss": 1, "name": "Boss", "start": 50, "end": 120, "kill": False}]
+        run = mock.Mock(); run.guild = ("G", "S", "US"); run.meta = {"report_start": 0}
+        run.result = {"bossParticipation": {"Boss": {"Bob": ["A_1", "B_7", "Z_9"]}}}
+        with mock.patch("checks.source_selection.walk", return_value=pulls):
+            o = source_selection.check(run)
+        self.assertEqual(o.status, "fail")
+        self.assertTrue(any("2 kept pulls" in i and "A_1" in i and "B_7" in i for i in o.items))
+        self.assertIn("kept pull Z_9: not in any cluster", o.items)
+        run.result = {"bossParticipation": {"Boss": {"Bob": ["B_7"]}}}
+        with mock.patch("checks.source_selection.walk", return_value=pulls):
+            o = source_selection.check(run)
+        self.assertEqual(o.items, ["Boss: site kills 0, wcl kills 1"])
+
+    def test_check_skips_without_guild(self):
+        run = mock.Mock(); run.guild = None
+        self.assertEqual(source_selection.check(run).status, "skip")
+
+    def test_walk_keeps_mythic_raid_fights_with_absolute_times(self):
+        import analysis
+        raid = "manaforge"
+        boss = min(analysis.RAID_ENCOUNTERS[raid])
+        run = mock.Mock(); run.guild = ("G", "S", "US"); run.raid = raid; run.token = "t"
+        fights = {"report_start": 1000, "fights": [
+            {"id": 1, "start_time": 10, "end_time": 20, "name": "B", "boss": boss, "difficulty": 5, "kill": True},
+            {"id": 2, "start_time": 10, "end_time": 20, "name": "B", "boss": boss, "difficulty": 4, "kill": True},
+            {"id": 3, "start_time": 10, "end_time": 20, "name": "X", "boss": 999999, "difficulty": 5, "kill": True}]}
+        with mock.patch("checks.source_selection.get_guild_reports", return_value=[{"id": "R"}]),                 mock.patch("checks.source_selection.get_report_fights", return_value=fights):
+            out = walk(run, "2026-01-01", "2026-01-08")
+        self.assertEqual(out, [{"key": "R_1", "boss": boss, "name": "B", "start": 1010, "end": 1020, "kill": True}])
 
 
 if __name__ == "__main__":
