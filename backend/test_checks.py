@@ -10,7 +10,7 @@ from checks.rules_verdicts import violations
 from checks.rules_labels import label, death_hits
 from raid_wide_damage import RAID_WIDE
 from checks.__main__ import run_checks
-from checks import rules_verdicts, rules_counting, rules_defensives, rules_labels, rules_slots, source_deaths, source_selection
+from checks import rules_verdicts, rules_counting, rules_defensives, rules_labels, rules_slots, source_deaths, source_participation, source_selection
 from checks.source_selection import cluster, walk
 from checks.common import AnalysisError, Run, TableCapped, parse_target, points, raid_week, run_analysis
 
@@ -401,6 +401,24 @@ class SelectionTests(unittest.TestCase):
         with mock.patch("checks.source_selection.get_guild_reports", return_value=[{"id": "R"}]),                 mock.patch("checks.source_selection.get_report_fights", return_value=fights):
             out = walk(run, "2026-01-01", "2026-01-08")
         self.assertEqual(out, [{"key": "R_1", "boss": boss, "name": "B", "start": 1010, "end": 1020, "kill": True}])
+
+
+class ParticipationTests(unittest.TestCase):
+    def test_accents_and_roster(self):
+        run = mock.Mock(); run.guild = ("G", "S", "US"); run.token = "t"
+        run.result = {"pullParticipation": {"\u00d1anda": ["R_1"], "Bob": ["R_1"]}}
+        run.summary.return_value = {"composition": [{"name": "\u00d1anda"}, {"name": "Bob"}, {"name": "Pug"}]}
+        with mock.patch("checks.source_participation.get_guild_roster", return_value={"nanda", "bob"}):
+            self.assertEqual(source_participation.check(run).status, "pass")
+        with mock.patch("checks.source_participation.get_guild_roster", return_value=set()):
+            o = source_participation.check(run)
+            self.assertEqual(o.status, "fail"); self.assertIn("pug", o.items[0])
+
+    def test_skips(self):
+        run = mock.Mock(); run.guild = None
+        self.assertEqual(source_participation.check(run).status, "skip")
+        run = mock.Mock(); run.guild = ("G", "S", "US"); run.result = {"pullParticipation": {}}
+        self.assertEqual(source_participation.check(run).status, "skip")
 
 
 if __name__ == "__main__":
