@@ -1,12 +1,16 @@
 """Shared pieces of the checks: targets, the lazy Run with cached WCL fetchers, points, the in-process analysis."""
 import json
 import os
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from unittest import mock
 
 import analysis
 import app
+import cache
 import defensives
+import supabase_client
 from warcraftlogs import (get_access_token, get_fights, get_report_fights, get_guild_reports,  # noqa: F401
                           get_guild_roster, graphql_query, normalize_character_name)
 
@@ -60,8 +64,32 @@ def points(token):
         return None
 
 
+_MEMORY_CACHES = ("report_meta_cache", "report_fights_cache", "report_deaths_cache",
+                  "report_defensive_cache", "report_recap_cache")
+
+
+@contextmanager
+def _no_shared_cache():
+    """For the duration, the site's report caches never reach Supabase: the shared `report_cache`
+    reads as empty and writes go nowhere (`import app` loads backend/.env, real service-role key
+    included). The in-process memory layers are cleared before and after, so a run never reuses
+    an earlier run's rows and leaves none behind."""
+    def clear():
+        for name in _MEMORY_CACHES:
+            getattr(cache, name).memory._data.clear()
+    clear()
+    try:
+        with mock.patch.object(supabase_client, "cache_get", lambda key: None), \
+             mock.patch.object(supabase_client, "cache_put", lambda key, value: None):
+            yield
+            cache.flush_writes()      # queued writes run the no-op while it is still patched in
+    finally:
+        clear()
+
+
 def run_analysis(token_unused, target, start, end):
-    """Post to /api/analyze in process and return the final result."""
+    """Post to /api/analyze in process and return the final result. The run never reads or writes
+    the shared report cache (_no_shared_cache)."""
     name, server, region = target.guild
     body = {
         "clientId": os.environ["WCL_CLIENT_ID"], "clientSecret": os.environ["WCL_CLIENT_SECRET"],
@@ -69,7 +97,8 @@ def run_analysis(token_unused, target, start, end):
         "fightZone": 0, "selectedRaid": target.raid, "difficulty": 5, "maxCutoff": 10,
         "rosterOnly": True, "enableCheatDeath": False, "startDate": start, "endDate": end,
     }
-    raw = app.app.test_client().post("/api/analyze", json=body).get_data(as_text=True)
+    with _no_shared_cache():
+        raw = app.app.test_client().post("/api/analyze", json=body).get_data(as_text=True)
     result = None
     for chunk in raw.split("\n\n"):
         chunk = chunk.strip()
@@ -100,9 +129,17 @@ class Run:
         self._cache = {}
 
     def _memo(self, key, make):
+        """make() once per key. A failed analysis (AnalysisError) is kept too and raised again, so
+        every check that reads the result does not run the analysis over."""
         if key not in self._cache:
-            self._cache[key] = make()
-        return self._cache[key]
+            try:
+                self._cache[key] = make()
+            except AnalysisError as e:
+                self._cache[key] = e
+        value = self._cache[key]
+        if isinstance(value, AnalysisError):
+            raise value
+        return value
 
     def _q(self, query, variables):
         return graphql_query(self.token, query, variables)

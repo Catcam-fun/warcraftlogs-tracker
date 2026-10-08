@@ -40,6 +40,9 @@ def main(argv):
     except ValueError as e:
         print(e)
         return 2
+    if not targets:
+        print(__doc__)
+        return 2
 
     from checks.common import Run, parse_target, points
     from warcraftlogs import get_access_token

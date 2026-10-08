@@ -1,4 +1,11 @@
-"""A death counts when slot <= X and not in a wipe; defensives exist exactly on deaths that can count"""
+"""A death counts when slot <= X and not in a wipe; defensives exist exactly on deaths that can count
+
+The X = 1..10 count comparison recounts with the same rule the frontend applies
+(frontend/src/deathCounting.js), so it is a mirror of that rule: it confirms the result's slot and
+inWipe fields give the counts the rule says, not that the rule itself is right (slots checks that).
+The defensives-presence half is the part that can disagree with the site: the backend decides which
+deaths get defensive analysis on its own.
+"""
 from checks.verdict import PASS, fail, skip
 
 

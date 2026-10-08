@@ -128,6 +128,48 @@ class RunTests(unittest.TestCase):
                 run_analysis("t", parse_target("X:manaforge:G/S/US"), "2026-09-29", "2026-10-06")
 
 
+    def test_run_analysis_never_touches_the_shared_cache(self):
+        import cache, supabase_client
+        cache.report_meta_cache.memory.set("R", {"stale": True})      # an earlier run's row
+        seen = {}
+
+        def post(*a, **k):
+            seen["get"] = cache.report_meta_cache.get("R")
+            cache.report_deaths_cache.set("R", {"rows": 1})
+            resp = mock.Mock(); resp.get_data.return_value = 'data: {"result": {"events": {}}}\n\n'
+            return resp
+        fake = mock.Mock(); fake.post.side_effect = post
+        with mock.patch("checks.common.app.app.test_client", return_value=fake), \
+             mock.patch.object(supabase_client, "cache_get") as get, \
+             mock.patch.object(supabase_client, "cache_put") as put, \
+             mock.patch.dict(os.environ, {"WCL_CLIENT_ID": "a", "WCL_CLIENT_SECRET": "b"}):
+            run_analysis("t", parse_target("X:manaforge:G/S/US"), "2026-09-29", "2026-10-06")
+            cache.flush_writes()
+        get.assert_not_called()
+        put.assert_not_called()
+        self.assertIsNone(seen["get"])
+        self.assertEqual((len(cache.report_meta_cache), len(cache.report_deaths_cache)), (0, 0))
+
+    def test_failed_analysis_is_not_run_again(self):
+        run = Run("t", parse_target("X:manaforge:G/S/US"))
+        run._cache[("meta", "X")] = {"report_start": 0, "fights": []}
+        with mock.patch("checks.common.run_analysis", side_effect=AnalysisError("No reports found")) as ra:
+            for _ in range(3):
+                with self.assertRaises(AnalysisError):
+                    run.result
+        self.assertEqual(ra.call_count, 1)
+
+
+class MainTests(unittest.TestCase):
+    def test_no_targets_prints_usage_before_any_token(self):
+        from checks.__main__ import main
+        with mock.patch("warcraftlogs.get_access_token") as tok, mock.patch("builtins.print") as out:
+            self.assertEqual(main(["all"]), 2)
+            self.assertEqual(main(["verdicts", "--json", "x.json"]), 2)
+        tok.assert_not_called()
+        self.assertIn("python -m checks", out.call_args_list[0].args[0])
+
+
 class DeathsCheckTests(unittest.TestCase):
     def _run(self, theirs):
         run = mock.Mock(); run.code, run.raid = "X", "manaforge"
@@ -480,14 +522,15 @@ class VerdictRuleTests(unittest.TestCase):
         self.assertEqual(len(violations(d, cat)), 1)
         d = self.base(); d["survival"]["deathType"] = "instakill"
         self.assertEqual(len(violations(d, cat)), 1)
-        d = self.base(); d["survival"]["ignoresImmunity"] = True; cat.all[1]["mitigation"] = [{"immune": True}]
-        self.assertEqual(len(violations(d, cat)), 1)
+        cat.all[1]["mitigation"] = [{"immune": True}]
+        self.assertEqual(violations(self.base(), cat), [])
+        self.assertEqual(len(violations(self.base(), cat, ignores_immunity=True)), 1)
 
     def test_check_over_counted_deaths(self):
         cat = mock.Mock(); cat.name_to_id = {}; cat.all = {}
         ev = lambda slot, d, wipe=False: {"slot": slot, "inWipe": wipe, "isCheatDeath": False, "fightId": 2,
                                           "timestamp": slot, "defensives": d}
-        run = mock.Mock(); run.cat = cat
+        run = mock.Mock(); run.cat = cat; run.actor_id.return_value = None
         run.result = {"meta": {"maxCutoff": 2}, "events": {"Bob": [ev(1, {"available": []}), ev(5, self.bad()),
                                                                    ev(2, self.bad(), wipe=True)]}}
         self.assertEqual(rules_verdicts.check(run).status, "skip")
@@ -548,6 +591,84 @@ class VerdictRuleTests(unittest.TestCase):
     def bad(self):
         d = self.base(); d["survival"]["details"]["Barkskin"]["pressAgo"] = 0.4
         return d
+
+    def test_site_immunity_flag_is_not_trusted(self):
+        # The site's ignoresImmunity says False; WCL's killing ability (the death event's abilityId)
+        # is on IGNORES_IMMUNITY, so an immunity marked saves is a violation, and the reverse passes.
+        from boss_spell_flags import IGNORES_IMMUNITY
+        through = min(IGNORES_IMMUNITY)
+        cat = mock.Mock(); cat.name_to_id = {"Barkskin": 1}; cat.all = {1: {"mitigation": [{"immune": True}]}}
+        run = mock.Mock(); run.cat = cat; run.actor_id.return_value = None
+        ev = {"slot": 1, "inWipe": False, "isCheatDeath": False, "fightId": 2, "timestamp": 1, "reportId": "R",
+              "abilityId": through, "defensives": self.base()}
+        run.result = {"meta": {"maxCutoff": 2}, "events": {"Bob": [ev]}}
+        o = rules_verdicts.check(run)
+        self.assertEqual(o.items, ["Bob pull 2 1: Barkskin: immunity marked saves against a hit that ignores immunity"])
+        ev["defensives"]["survival"]["ignoresImmunity"] = True
+        ev["abilityId"] = 1
+        self.assertEqual(rules_verdicts.check(run).status, "pass")
+        # Without abilityId, the report's abilities named like the killing hit decide.
+        del ev["abilityId"]
+        ev["defensives"]["survival"]["killingHit"]["name"] = "Sever"
+        run.meta_for.return_value = {"abilities": {5: "Other", through: "Sever"}}
+        self.assertEqual(rules_verdicts.check(run).status, "fail")
+        run.meta_for.assert_called_with("R")
+        run.meta_for.return_value = {"abilities": {5: "Sever"}}
+        self.assertEqual(rules_verdicts.check(run).status, "pass")
+
+    def test_early_presses(self):
+        details = {"A": {"pressAgo": 3.0}, "B": {"pressAgo": 2.0}, "C": {"amount": 0, "why": "readyTooLate"}}
+        # A ready 2.0s before the killing blow at 10000, pressed 3.0s before: flagged. B pressed within
+        # 100 ms of becoming ready passes; a name with no known ready time is skipped.
+        self.assertEqual(rules_verdicts.early_presses(details, 10_000, {"A": 8_000, "B": 8_050, "C": 9_000}),
+                         ["A: pressed 3.0s before the killing blow but only ready 2.0s before"])
+        self.assertEqual(rules_verdicts.early_presses(details, 10_000, {}), [])
+        self.assertEqual(rules_verdicts.killing_hit_ts(
+            [{"timestamp": 5, "overkill": 9}, {"timestamp": 8, "overkill": 0}, {"timestamp": 60, "overkill": 1}], 9), 5)
+        self.assertIsNone(rules_verdicts.killing_hit_ts([{"timestamp": 5, "overkill": 0}], 9))
+
+    def _press_run(self):
+        start = 100_000
+        cat = mock.Mock()
+        cat.name_to_id = {"Barkskin": 1, "Healthstone": 4}
+        cat.all = {1: {"name": "Barkskin", "kind": "personal", "cooldown_ms": 60_000, "charges": 1},
+                   4: {"name": "Healthstone", "kind": "healthstone", "cooldown_ms": 60_000, "charges": 1}}
+        run = mock.Mock(); run.cat = cat; run.actor_id.return_value = 7
+        run.fight.return_value = {"start_time": start, "end_time": start + 120_000}
+        run.combatants.return_value = [{"sourceID": 7, "fight": 1, "specID": 104, "talentTree": []}]
+        kb = start + 100_000
+        run.hits_before.return_value = [{"timestamp": kb - 3_000, "overkill": 0}, {"timestamp": kb, "overkill": 50}]
+        # Barkskin pressed 65s before the killing blow (ready again 5s before it); a Healthstone 62s before.
+        run.casts.return_value = [{"type": "cast", "abilityGameID": 1, "timestamp": kb - 65_000},
+                                  {"type": "cast", "abilityGameID": 4, "timestamp": kb - 62_000}]
+        d = self.base(); s = d["survival"]
+        s["consumables"] = {"Healthstone": "healthstone"}
+        s["wouldSave"] = {"Barkskin": False, "Healthstone": False}
+        s["details"] = {"Barkskin": {"amount": 50, "pressAgo": 5.0}, "Healthstone": {"amount": 50, "pressAgo": 2.0}}
+        ev = {"slot": 1, "inWipe": False, "isCheatDeath": False, "fightId": 1, "timestamp": 100_000, "reportId": "R",
+              "originalCharacter": "Oak", "spec": "Guardian", "defensives": d}
+        run.result = {"meta": {"maxCutoff": 2}, "events": {"Oak": [ev]}, "pullParticipation": {"Oak": ["R_1"]}}
+        return run, s
+
+    def test_press_never_before_the_ability_was_ready(self):
+        run, s = self._press_run()
+        self.assertEqual(rules_verdicts.check(run).status, "pass")
+        run.hits_before.assert_called_with("R", 1, 7, 200_000)
+        s["details"]["Barkskin"]["pressAgo"] = 6.0
+        s["details"]["Healthstone"]["pressAgo"] = 2.5
+        self.assertEqual(rules_verdicts.check(run).items, [
+            "Oak pull 1 100000: Barkskin: pressed 6.0s before the killing blow but only ready 5.0s before",
+            "Oak pull 1 100000: Healthstone: pressed 2.5s before the killing blow but only ready 2.0s before"])
+        # No killing hit found: the ready times can't be compared, nothing is flagged.
+        run.hits_before.return_value = []
+        self.assertEqual(rules_verdicts.check(run).status, "pass")
+
+    def test_press_ready_all_along_or_unused_consumable_is_not_flagged(self):
+        run, s = self._press_run()
+        run.casts.return_value = []
+        s["details"]["Barkskin"]["pressAgo"] = 14.0
+        s["details"]["Healthstone"]["pressAgo"] = 14.0
+        self.assertEqual(rules_verdicts.check(run).status, "pass")
 
 
 class LabelRuleTests(unittest.TestCase):
@@ -692,6 +813,13 @@ class SelectionTests(unittest.TestCase):
         run = mock.Mock(); run.guild = None
         self.assertEqual(source_selection.check(run).status, "skip")
 
+    def test_check_skips_when_the_walk_finds_no_pulls(self):
+        run = mock.Mock(); run.guild = ("G", "S", "US"); run.meta = {"report_start": 0}; run.raid = "manaforge"
+        run.result = {"bossParticipation": {}}
+        with mock.patch("checks.source_selection.walk", return_value=[]):
+            o = source_selection.check(run)
+        self.assertEqual((o.status, o.reason), ("skip", "no Mythic pulls of manaforge in the guild's reports that week"))
+
     def test_walk_keeps_mythic_raid_fights_with_absolute_times(self):
         import analysis
         raid = "manaforge"
@@ -774,6 +902,15 @@ class StateTests(unittest.TestCase):
         self.assertTrue(ready_at([5_000], 70_000, 60_000, 1))
         self.assertTrue(ready_at([5_000], 10_000, 60_000, 2))
         self.assertFalse(ready_at([5_000, 6_000], 10_000, 60_000, 2))
+
+    def test_ready_since_is_when_the_last_charge_came_back(self):
+        from checks.source_state import ready_since
+        self.assertEqual(ready_since([], 100, 60, 1), (True, None))
+        self.assertEqual(ready_since([10], 100, 60, 1), (True, 70))
+        self.assertEqual(ready_since([10], 50, 60, 1), (False, None))
+        # Two charges: one spent at 10 leaves one, so it never ran out; both spent, the first back at 70.
+        self.assertEqual(ready_since([10], 100, 60, 2), (True, None))
+        self.assertEqual(ready_since([10, 20], 100, 60, 2), (True, 70))
 
     def test_health_mismatch_uses_the_killing_event(self):
         s = {"hpBeforePct": 40, "maxHp": 1000, "overkill": 55}
