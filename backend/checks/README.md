@@ -85,7 +85,8 @@ Each run prints how many WCL points it spent. The budget is 3600 an hour, so a w
 - Mythic only (difficulty 5).
 - The end-to-end run sends no alt groups (`characterGroups`), so alt merging is not covered.
 - Cheat deaths are switched off in the run.
-- `mitigation` cannot measure, and leaves out: Fiery Brand (it cuts the branded enemy's damage, which WCL already counts in the hit's unmitigated size), Dampen Harm (20% to 50% by hit size), Brewmaster Stagger ticks (never reduced at tick time), and a defensive on a spec the catalog doesn't give it to (Bear Form on a Guardian). It judges each defensive by the median gap over its hits, so one boss ability with an untracked modifier can't decide it.
+- `mitigation` cannot measure, and leaves out: Fiery Brand (it cuts the branded enemy's damage, which WCL already counts in the hit's unmitigated size), Dampen Harm (20% to 50% by hit size), Brewmaster Stagger ticks (never reduced at tick time), and a defensive on a spec the catalog doesn't give it to (Bear Form on a Guardian). It judges each defensive by the median gap over its hits, so one boss ability with an untracked modifier can't decide it. A reduction that grows with missing health (Bloody Fortitude on Icebound Fortitude) is predicted from the player's own health on each hit; hits without it are left out.
+- `state` reads an active defensive as up at death when its aura band reaches the death event or the moment the death stripped the player's auras (the first end, in the second before the death event, of a band up since the pull started). WCL's death event can come 100+ ms after that strip. A battle-rezzed player's second death has no such band and uses the death event.
 
 ## Last known-good logs
 

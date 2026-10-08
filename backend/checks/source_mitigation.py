@@ -11,6 +11,10 @@ What it can't measure, and leaves out (each verified on live logs, 2026-10-08):
     defensives up at tick time never change them (Weavi: 246 ticks, through share 0.600 with or without).
   - A defensive on a spec the catalog doesn't give it to (Bear Form on a Guardian): the site never
     judges it there.
+A reduction that grows with missing health (Icebound Fortitude with Bloody Fortitude: up to 20% more
+at no health) is predicted hit by hit from the player's own health on that hit, as the site does; a hit
+without it is left out (Sunnyvi, Quel'Danas, 2026-10-08: Icebound Fortitude read 0.323 at 90%+ health and
+0.364 at 50-75%; judged against a flat 0.30 it was flagged as "measured 0.35").
 Each (player, defensive) is judged by the median of its hits' gaps (measured minus predicted), not the
 mean: a wrong catalog value is off on every ability, while one boss ability with an untracked modifier
 (Sonic Ba-Boom's amplifiers, Entropic Barrage ticks) can pull a mean far off by itself.
@@ -29,6 +33,15 @@ SCALES_WITH_HIT = {"Dampen Harm"}     # 20% to 50% by hit size; the catalog keep
 STAGGER = 124255                      # a Brewmaster's Stagger ticks
 
 
+def missing_share(hit):
+    """Share of max health the player was missing just before this hit (its own health is on it
+    when resourceActor is 2: health after the hit plus what it took), or None without it."""
+    if hit.get("resourceActor") != 2 or not hit.get("maxHitPoints"):
+        return None
+    before = (hit.get("hitPoints") or 0) + (hit.get("amount") or 0)
+    return min(max(1 - before / hit["maxHitPoints"], 0.0), 1.0)
+
+
 def check(run):
     """Catalog damage reductions match real hits with and without the defensive"""
     if not run.pulls:
@@ -41,8 +54,9 @@ def check(run):
     # A WCL event query scoped by fightIDs must also carry an endTime, or it drops events.
     start = min(p["start_time"] for p in run.pulls)
     end = max(p["end_time"] for p in run.pulls) + 1
+    # Resources carry the player's own health on each hit, for reductions that grow with missing health.
     hits = defensives._paged(run.token, run.code, "DamageTaken", None, fight_ids=fights,
-                             start_time=start, end_time=end)
+                             start_time=start, end_time=end, resources=True)
     combatants = [c for fid in fights for c in run.combatants(run.code, fid)]
     # Talents can change between pulls, so each hit is judged by its own pull's loadout.
     loadout = {(e["fight"], e["sourceID"]): {t["id"]: t.get("rank") or 1 for t in e.get("talentTree") or []
@@ -112,19 +126,32 @@ def check(run):
                 same = base.get((pid, ability, talents, others), [])
                 if len(same) < MIN_HITS:
                     continue
-                keep = 1.0
+                keep, by_health = 1.0, False
                 for c in comps or []:
+                    if not (c.get("dr") or c.get("dr_missing")):
+                        continue
                     applies = defensives._school_applies(c.get("school"), dict(e, aoeKnown=aoe_known), schools)
-                    if c.get("dr") and applies is None:
+                    if applies is None:
                         keep = None
                         break
-                    if c.get("dr") and applies:
-                        keep *= 1 - c["dr"]
+                    if not applies:
+                        continue
+                    dr = c.get("dr") or 0
+                    if c.get("dr_missing"):
+                        missing = missing_share(e)
+                        if missing is None:
+                            keep = None      # no health on this hit: its reduction can't be predicted
+                            break
+                        dr += c["dr_missing"] * missing
+                        by_health = True
+                    keep *= 1 - min(dr, 1.0)
                 if keep is not None:
-                    by_predicted[round(1 - keep, 4)].append(1 - through / statistics.median(same))
-            for predicted, got in by_predicted.items():
+                    # Hits judged by their own health each predict a different value: one group.
+                    group = "by health" if by_health else round(1 - keep, 4)
+                    by_predicted[group].append((1 - through / statistics.median(same), 1 - keep))
+            for got in by_predicted.values():
                 if len(got) >= MIN_HITS:
-                    rows[(pid, name)] += [(m, predicted) for m in got]
+                    rows[(pid, name)] += got
 
     # The median gap between measured and predicted over every hit: a wrong catalog value shows on
     # every ability, while one boss ability with an untracked modifier doesn't move the median.

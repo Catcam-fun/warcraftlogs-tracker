@@ -346,6 +346,39 @@ class MitigationCheckTests(unittest.TestCase):
             o = source_mitigation.check(run)
         self.assertEqual(o.items, ["Pumps Barkskin: measured 0.20, catalog 0.30 over 22 hits"])
 
+    def test_reduction_by_missing_health_is_predicted_from_each_hit(self):
+        # Live 2026-10-08 (Sunnyvi, Blood, Quel'Danas): Icebound Fortitude with Bloody Fortitude (up to
+        # 20% more by missing health) read 0.323 at 90%+ health and 0.364 at 50-75%; judged against a
+        # flat 0.30 it was flagged "measured 0.35, catalog 0.30 over 56 hits".
+        from checks import source_mitigation
+        entries = {48792: {"name": "Icebound Fortitude", "kind": "personal", "class": "DeathKnight",
+                           "mitigation": [{"dr": 0.3}, {"dr_missing": 0.2,
+                                                        "needs": {"entries": [117891], "talent": "Bloody Fortitude"}}]}}
+        friendlies = [{"id": 5, "name": "Sunny", "type": "DeathKnight"}]
+        hit = lambda through, buffs, before=None: dict(
+            {"type": "damage", "targetID": 5, "abilityGameID": 9, "fight": 1, "unmitigatedAmount": 1250,
+             "mitigated": 1250 - through, "amount": through, "buffs": buffs},
+            **({"resourceActor": 2, "hitPoints": before - through, "maxHitPoints": 10_000} if before else {}))
+        # Half health missing: 1 - 0.7 x (1 - 0.2 x 0.5) = 0.37 off. Full health: 0.30.
+        hits = [hit(1000, "")] * 10 + [hit(630, "48792.", 5_000)] * 15 + [hit(700, "48792.", 10_000)] * 10
+        combatants = [{"fight": 1, "sourceID": 5, "specID": 250, "talentTree": [{"id": 117891, "rank": 1}]}]
+        run = self._wave1_run(entries, friendlies, {48792: "Icebound Fortitude"}, combatants)
+        run.cat.relevant_talent_entries = {117891}
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
+            self.assertEqual(source_mitigation.check(run).status, "pass")
+        # Without Bloody Fortitude, the half-health hits read 0.37 against a flat 0.30: flagged.
+        run = self._wave1_run(entries, friendlies, {48792: "Icebound Fortitude"},
+                              [dict(combatants[0], talentTree=[])])
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
+            o = source_mitigation.check(run)
+        self.assertEqual(o.items, ["Sunny Icebound Fortitude: measured 0.37, catalog 0.30 over 25 hits"])
+        # With the talent but no health on the hits, the reduction can't be predicted: left out.
+        run = self._wave1_run(entries, friendlies, {48792: "Icebound Fortitude"}, combatants)
+        run.cat.relevant_talent_entries = {117891}
+        bare = [hit(1000, "")] * 10 + [hit(630, "48792.")] * 25
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=bare):
+            self.assertEqual(source_mitigation.check(run).status, "skip")
+
 
 class SlotsRuleTests(unittest.TestCase):
     def test_rank_clauses(self):
@@ -689,6 +722,22 @@ class StateTests(unittest.TestCase):
         self.assertEqual(active_mismatches(["Barkskin"], auras, 5000), [])
         self.assertEqual(len(active_mismatches(["Barkskin"], auras, 9200)), 1)
         self.assertEqual(len(active_mismatches(["Ironbark"], auras, 5000)), 1)
+
+    def test_active_band_reaching_the_death_strip_counts(self):
+        # Live 2026-10-08 (dreamrift pull 1, Chickenism): the death stripped all 19 of her auras at
+        # 1244582-1244684, Fortitude and Rallying Cry at 1244582, while WCL's death event is at 1244690,
+        # 108 ms later. The living kept that Rallying Cry until 1247448.
+        auras = [{"name": "Power Word: Fortitude", "bands": [{"startTime": 1161232, "endTime": 1244582}]},
+                 {"name": "Rallying Cry", "bands": [{"startTime": 1234456, "endTime": 1244582}]},
+                 {"name": "Barkskin", "bands": [{"startTime": 1234000, "endTime": 1244300}]}]
+        self.assertEqual(active_mismatches(["Rallying Cry"], auras, 1244690, 1161232), [])
+        # Without the pull start there is no strip to read: the death event alone, 108 ms off.
+        self.assertEqual(active_mismatches(["Rallying Cry"], auras, 1244690), ["Rallying Cry"])
+        # A band that ended 282 ms before the strip is still not up at death.
+        self.assertEqual(active_mismatches(["Barkskin"], auras, 1244690, 1161232), ["Barkskin"])
+        # Only a band up since the pull started marks the strip: a short buff's natural end does not.
+        mid = [dict(auras[0], bands=[{"startTime": 1200000, "endTime": 1244582}]), auras[1]]
+        self.assertEqual(active_mismatches(["Rallying Cry"], mid, 1244690, 1161232), ["Rallying Cry"])
 
     def test_ready_at_with_charges(self):
         self.assertTrue(ready_at([], 10_000, 60_000, 1))
