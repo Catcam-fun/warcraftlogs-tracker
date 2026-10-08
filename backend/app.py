@@ -359,8 +359,10 @@ def analyze():
                     instakills = recap_lru.get(ik_key) if finished else None
 
                     def def_key(dead):
+                        # "since-last-encounter": casts now reach back to the last boss encounter's
+                        # end (cast_lookback), so rows cached over the shorter span aren't reused.
                         return (rid, tuple(fight_ids), tuple(sorted(dead)), cat.patch, defensives.CATALOG_FINGERPRINT,
-                                "pull-specs")
+                                "pull-specs", "since-last-encounter")
 
                     def dead_in(ds):
                         return {d.get("targetID") for dl in ds.values() for d in dl if d.get("targetID")}
@@ -396,7 +398,9 @@ def analyze():
                         try:
                             dead = dead_in(deaths)
                             def_data = defensives.filter_defensive_raw(defensives.fetch_defensive_raw(
-                                token, rid, fight_ids, first_start, last_end, cat, combatants), dead, cat)
+                                token, rid, fight_ids, first_start, last_end, cat, combatants,
+                                prev_end=max([end for _, end in report_encounters.get(rid, []) if end <= first_start],
+                                             default=0)), dead, cat)
                             if finished:
                                 defensive_lru.set(def_key(dead), def_data)
                         except Exception as e:

@@ -116,11 +116,17 @@ def kept_pulls(run, rid, fid):
 
 
 def report_span(run, rid, fid):
-    """The span the site reads a report's casts over: from 3 minutes before its first kept pull
-    to the end of its last. Without any kept pull listed for the report, the death's own pull."""
+    """The span a report's casts are read over, to the end of its last kept pull. It starts 3 minutes
+    before the first kept pull (short cooldowns carry over), or earlier for long cooldowns: back to
+    the end of the last boss encounter before that pull, since a press after it carries in (long
+    cooldowns reset when an encounter ends), but no further back than the longest tracked cooldown.
+    Without any kept pull listed for the report, the death's own pull."""
     fights = [run.fight(rid, f) for f in kept_pulls(run, rid, fid)]
-    return (max(0, min(f["start_time"] for f in fights) - ENCOUNTER_RESET_MS),
-            max(f["end_time"] for f in fights))
+    first = min(f["start_time"] for f in fights)
+    ended = [f["end_time"] for f in run.meta_for(rid)["fights"] if f.get("boss") and f["end_time"] <= first]
+    longest = max((e["cooldown_ms"] for e in run.cat.all.values() if e.get("kind") == "personal"), default=0)
+    since_last_end = max(max(ended, default=0), first - longest)
+    return max(0, min(first - ENCOUNTER_RESET_MS, since_last_end)), max(f["end_time"] for f in fights)
 
 
 def report_casts(run, rid, fid, pid):
