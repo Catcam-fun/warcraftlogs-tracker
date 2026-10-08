@@ -239,6 +239,21 @@ class VerdictRuleTests(unittest.TestCase):
         self.assertEqual(o.status, "fail")
         self.assertEqual(o.items, ["Bob pull 2 1: Barkskin: pressed 0.4s before the killing blow (rule: at least 1s)"])
 
+    def test_consumables_and_amount_branches(self):
+        cat = mock.Mock(); cat.name_to_id = {}; cat.all = {}
+        d = self.base(); d["potion"] = {"name": "Potion", "usedAgo": 5, "readyIn": 100}
+        d["survival"]["wouldSave"]["Potion"] = False; d["survival"]["details"]["Potion"] = {"amount": 0}
+        self.assertEqual(violations(d, cat), ["Potion: judged but on cooldown"])
+        d = self.base(); d["survival"]["consumables"] = {"Healthstone": "healthstone"}
+        d["survival"]["wouldSave"]["Healthstone"] = False; d["survival"]["details"]["Healthstone"] = {"amount": 0}
+        self.assertEqual(violations(d, cat), [])
+        d = self.base(); d["survival"]["wouldSave"]["Ghost"] = False
+        self.assertEqual(violations(d, cat), ["Ghost: judged but not ready"])
+        d = self.base(); d["survival"]["wouldSave"]["Barkskin"] = False
+        self.assertEqual(violations(d, cat), ["Barkskin: amount 150 vs overkill 100 but marked not saves"])
+        d = self.base(); d["survival"]["details"]["Barkskin"]["why"] = "school"
+        self.assertEqual(violations(d, cat), ["Barkskin: amount 150 vs overkill 100 but marked saves"])
+
     def bad(self):
         d = self.base(); d["survival"]["details"]["Barkskin"]["pressAgo"] = 0.4
         return d
