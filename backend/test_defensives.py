@@ -1262,3 +1262,53 @@ class MaxHealthBeforeKillingBlowTests(unittest.TestCase):
     def test_soulburn_healthstone_is_a_max_health_aura(self):
         # Game data: Soulburn: Healthstone (387636), EffectAura 133, +20% max health.
         self.assertEqual(defensives.max_health_size(387636, "11.0.7"), (0.2, 0))
+
+
+class MaxHealthWhereTheGameDataPutsItTests(unittest.TestCase):
+    """An aura's max-health effect is sized from where the game data puts it (max_health_auras.py)."""
+
+    def assess(self, hits, sizer):
+        return defensives.assess_survival(hits, hits[-1]["timestamp"], [], [], NAMES, SCHOOLS, aura_size=sizer)
+
+    @staticmethod
+    def at(ts, amount, hp_after, max_hp, overkill=0, buffs=()):
+        return dict(hit(ts, amount, hp_after, overkill=overkill), maxHitPoints=max_hp,
+                    buffs="".join(f"{a}." for a in buffs))
+
+    def sizer(self, cls, spec, talents=None):
+        return defensives._aura_sizer(defensives._LATEST, cls, spec, talents or {})
+
+    def test_a_restoration_druid_shifting_to_bear_form(self):
+        # Bear Form (5487) has no max-health effect of its own; its text names its passive 1178's
+        # Stamina +25% ("Stamina increased by $1178s2%"), which every druid's Bear Form carries.
+        hits = [self.at(95_000, 10_000, 600_000, 1_000_000),
+                self.at(100_000, 625_000, 0, 1_000_000, overkill=1, buffs=[5487])]
+        r = self.assess(hits, self.sizer("Druid", "Restoration"))
+        self.assertEqual((r["maxHp"], r["hpBeforePct"]), (1_250_000, 50))
+        # A Guardian's Bear Form also has the spec passive's +10% (270100), Ursoc's Spirit +5% (talent).
+        latest = defensives._LATEST.patch
+        self.assertEqual(defensives.max_health_size(5487, latest, {}, "Guardian"), (0.35, 0))
+        self.assertEqual(defensives.max_health_size(5487, latest, {103297: 1}, "Guardian"), (0.4, 0))
+
+    def test_fount_of_strength_on_frenzied_regeneration(self):
+        # Fount of Strength (441675): "Frenzied Regeneration also increases your maximum health by $s3%"
+        # (10); only with the talent (entry 117218).
+        latest = defensives._LATEST.patch
+        self.assertEqual(defensives.max_health_size(22842, latest, {}, "Guardian"), (0.0, 0))
+        self.assertEqual(defensives.max_health_size(22842, latest, {117218: 1}, "Guardian"), (0.1, 0))
+        hits = [self.at(95_000, 10_000, 500_000, 1_000_000),
+                self.at(100_000, 550_000, 0, 1_000_000, overkill=1, buffs=[22842])]
+        r = self.assess(hits, self.sizer("Druid", "Guardian", {117218: 1}))
+        self.assertEqual((r["maxHp"], r["hpBeforePct"]), (1_100_000, 50))
+
+    def test_talents_on_other_buttons_and_stat_debuffs(self):
+        latest = defensives._LATEST.patch
+        # Fortifying Brew 20% ($health = 115203 s1), Ironshell Brew +10%.
+        self.assertEqual(defensives.max_health_size(120954, latest, {101498: 1}, "Brewmaster"), (0.3, 0))
+        # Desperate Prayer 25%, Light's Inspiration +10%; Barkskin only with Ward of the Forest (+20%).
+        self.assertEqual(defensives.max_health_size(19236, latest, {103826: 1}, "Holy"), (0.35, 0))
+        self.assertEqual(defensives.max_health_size(22812, latest, {}, "Guardian"), (0.0, 0))
+        self.assertEqual(defensives.max_health_size(22812, latest, {103224: 1}, "Guardian"), (0.2, 0))
+        # Havoc's Metamorphosis stays at nothing; Hexing Strike (EffectAura 80, all stats -5%) lowers it.
+        self.assertEqual(defensives.max_health_size(162264, latest, {}, "Havoc"), (0.0, 0))
+        self.assertEqual(defensives.max_health_size(1260567, latest), (-0.05, 0))

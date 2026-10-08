@@ -1667,15 +1667,43 @@ def _best_press(options, earliest, win, kb_index):
 DEATH_STRIP_MS = 50
 
 
-def max_health_size(aura_id, patch):
-    """(share, flat) an aura changes max health by in a patch (max x (1 + share) + flat), from game
-    data (max_health_auras.py); (0.0, 0) for an aura that doesn't; None when the data can't size it."""
-    value = (0.0, 0)
+def max_health_size(aura_id, patch, talents=None, spec=None):
+    """(share, flat) an aura changes this player's max health by in a patch (max x (1 + share) + flat),
+    from game data (max_health_auras.py): every term of the aura that applies to them (a term needing a
+    talent only with that talent in `talents`, {entry: rank}; a spec's only for that spec), its share
+    with the talents and spec passives that change it. (0.0, 0) for an aura that doesn't change max
+    health; None when an applying term isn't in the data."""
+    terms = []
     key = [int(x) for x in patch.split(".")]
-    for first, v in MAX_HEALTH.get(aura_id, ()):
+    for first, ts in MAX_HEALTH.get(aura_id, ()):
         if [int(x) for x in first.split(".")] <= key:
-            value = v
-    return value
+            terms = ts
+    talents = talents or {}
+
+    def rank(who):
+        if "entries" in who:
+            return max((talents.get(e, 0) if isinstance(talents, dict) else int(e in talents)
+                        for e in who["entries"]), default=0)
+        if "specs" in who:
+            return int(bool(spec) and _spec_matches(spec, who["specs"]))
+        return 1
+
+    mult, flat = 1.0, 0
+    for t in terms:
+        if not rank(t):
+            continue
+        if "flat" in t:
+            flat += t["flat"]
+            continue
+        if t["share"] is None:
+            return None
+        share = t["share"]
+        for m in t.get("mods", ()):
+            r = rank(m)
+            if r:
+                share = share + m["add"] * r if "add" in m else share * m["mult"]
+        mult *= 1 + share
+    return (round(mult - 1, 6), flat)
 
 
 def _own_max_health_entries(cat, player_class, spec, talent_entries):
@@ -1702,20 +1730,15 @@ def _own_max_health_entries(cat, player_class, spec, talent_entries):
     return out
 
 
-def _aura_sizer(cat, player_class, spec, talent_entries, ability_names):
-    """aura ID -> (share, flat) or None for this player: game data (max_health_size); a catalog button
-    of theirs with the aura's name uses its talented value (Ironshell Brew: Fortifying Brew +30%).
-    Matched by ID first: an aura with no max-health effect in the game data (Havoc's Metamorphosis,
-    162264) never takes a same-named button's value (Vengeance's, 187827)."""
+def _aura_sizer(cat, player_class, spec, talent_entries, ability_names=None):
+    """aura ID -> (share, flat) or None for this player, from game data with their talents and spec
+    (max_health_size). Sized by aura ID, wherever the game data puts the effect: Havoc's
+    Metamorphosis (162264) has none, Vengeance's (187827) +40%; Bear Form's +25% Stamina is on its
+    passive 1178 (any druid); Fount of Strength puts +10% on Frenzied Regeneration."""
     patch = getattr(cat, "patch", None) or LATEST
-    own = _own_max_health_entries(cat, player_class, spec, talent_entries)
 
     def size(aid):
-        gd = max_health_size(aid, patch)
-        if gd == (0.0, 0):
-            return gd
-        mine = own.get(ability_names.get(aid))
-        return (mine[0], 0) if mine else gd
+        return max_health_size(aid, patch, talent_entries or {}, spec)
     return size
 
 
@@ -1728,7 +1751,7 @@ def _max_health_bands(own_events, cat, ability_names, talent_entries=None, spec=
     patch = getattr(cat, "patch", None) or LATEST
     bands, open_ = [], {}
     for ts, typ, aid, *_ in own_events or ():
-        if ability_names.get(aid) not in own or max_health_size(aid, patch) == (0.0, 0):
+        if ability_names.get(aid) not in own or max_health_size(aid, patch, talent_entries, spec) == (0.0, 0):
             continue
         if typ == "applybuff":
             open_.setdefault(aid, ts)
