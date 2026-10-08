@@ -17,16 +17,19 @@ def violations(defensives, cat):
     would, details = s.get("wouldSave") or {}, s.get("details") or {}
     overkill, max_hp = s.get("overkill") or 0, s.get("maxHp") or 0
     out = []
-    ready = {a["name"] for a in defensives.get("available", [])}
-    ready |= {defensives[k]["name"] for k in ("healthstone", "potion") if (defensives.get(k) or {}).get("name")}
-    ready |= set(s.get("consumables") or {})
+    ready = {a["name"] for a in defensives.get("available", [])} | set(s.get("consumables") or {})
     cooling = {a["name"] for a in defensives.get("cooldown", [])}
+    # A healthstone / potion dict carries a name only when it was used and is on cooldown.
+    cooling |= {defensives[k]["name"] for k in ("healthstone", "potion")
+                if (defensives.get(k) or {}).get("name") and "readyIn" in defensives[k]}
     for name, det in details.items():
         if det.get("pressAgo") is not None and det["pressAgo"] < REACTION_S:
             out.append(f"{name}: pressed {det['pressAgo']}s before the killing blow (rule: at least 1s)")
     for name in would:
-        if name not in ready or name in cooling:
+        if name in cooling:
             out.append(f"{name}: judged but on cooldown")
+        elif name not in ready:
+            out.append(f"{name}: judged but not ready")
     for name, det in details.items():
         verdict = would.get(name)
         if verdict is None:
