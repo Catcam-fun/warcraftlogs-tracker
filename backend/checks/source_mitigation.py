@@ -1,47 +1,30 @@
-"""Check the catalog's damage reductions against real hits in a WarcraftLogs report.
-
-    WCL_CLIENT_ID=... WCL_CLIENT_SECRET=... python backend/scripts/check_mitigation.py <reportCode> [fightID,...]
-
-For every player and defensive with a damage reduction, it compares hits from
-the same boss ability taken with that defensive up against hits taken with no
-tracked defensive up. The share of damage that got through (after armor,
-versatility and everything else) differs only by the defensive, so
-1 - with/without is its real reduction. That's printed next to what the
-catalog predicts for the player's talents (from the report's patch).
-
-Costs WCL points (it reads all damage taken in the chosen pulls), so pass a
-few fight IDs on a big report.
-"""
-import os
+"""Source check: the catalog's damage reductions against real hits."""
 import statistics
-import sys
 from collections import defaultdict
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-
-import defensives  # noqa: E402
-from warcraftlogs import get_access_token, get_fights  # noqa: E402
+import defensives
+from checks.verdict import PASS, fail, skip
 
 MIN_HITS = 3
 FLAG_AT = 0.03
 MIN_FLAG_HITS = 20            # fewer hits than this are too noisy to flag
 
 
-def main():
-    if len(sys.argv) < 2:
-        raise SystemExit(__doc__)
-    code = sys.argv[1]
-    token = get_access_token(os.environ["WCL_CLIENT_ID"], os.environ["WCL_CLIENT_SECRET"])
-    meta = get_fights(token, code)
-    wanted = {int(x) for x in sys.argv[2].split(",")} if len(sys.argv) > 2 else None
-    fights = [f["id"] for f in meta["fights"] if f.get("boss") and (wanted is None or f["id"] in wanted)]
-    cat = defensives.catalog_for(meta.get("report_start"))
+def check(run):
+    """Catalog damage reductions match real hits with and without the defensive"""
+    if not run.pulls:
+        return skip(f"no Mythic pulls of {run.raid} in {run.code}")
+    meta, cat = run.meta, run.cat
+    fights = [p["id"] for p in run.pulls]
     names = meta["abilities"]
     players = {f["id"]: f for f in meta["friendlies"]}
-    print(f"Patch {cat.patch}; {len(fights)} pulls")
 
-    hits = defensives._paged(token, code, "DamageTaken", None, fight_ids=fights)
-    combatants = defensives._paged(token, code, "CombatantInfo", None, fight_ids=fights)
+    # A WCL event query scoped by fightIDs must also carry an endTime, or it drops events.
+    start = min(p["start_time"] for p in run.pulls)
+    end = max(p["end_time"] for p in run.pulls) + 1
+    hits = defensives._paged(run.token, run.code, "DamageTaken", None, fight_ids=fights,
+                             start_time=start, end_time=end)
+    combatants = [c for fid in fights for c in run.combatants(run.code, fid)]
     # Talents can change between pulls, so each hit is judged by its own pull's loadout.
     loadout = {(e["fight"], e["sourceID"]): {t["id"]: t.get("rank") or 1 for t in e.get("talentTree") or []
                                              if t["id"] in cat.relevant_talent_entries} for e in combatants}
@@ -89,14 +72,11 @@ def main():
 
     # Each ability's gap between measured and predicted, weighted by hits:
     # a handful of hits is noisy, a few hundred is not.
-    print(f"{'player':16} {'defensive':28} {'hits':>5} {'measured':>9} {'catalog':>8}")
+    items = []
     for (pid, name), per in sorted(rows.items(), key=lambda kv: (kv[0][1], players[kv[0][0]]["name"])):
-        hits = sum(n for n, _, _ in per)
-        real = sum(n * m for n, m, _ in per) / hits
-        predicted = sum(n * p for n, _, p in per) / hits
-        flag = "  <-- check" if hits >= MIN_FLAG_HITS and abs(real - predicted) > FLAG_AT else ""
-        print(f"{players[pid]['name']:16} {name:28} {hits:5} {real:9.3f} {predicted:8.3f}{flag}")
-
-
-if __name__ == "__main__":
-    main()
+        n = sum(h for h, _, _ in per)
+        real = sum(h * m for h, m, _ in per) / n
+        predicted = sum(h * p for h, _, p in per) / n
+        if n >= MIN_FLAG_HITS and abs(real - predicted) > FLAG_AT:
+            items.append(f"{players[pid]['name']} {name}: measured {real:.2f}, catalog {predicted:.2f} over {n} hits")
+    return fail(items) if items else PASS
