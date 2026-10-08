@@ -13,6 +13,7 @@ from checks.__main__ import run_checks
 from checks import rules_verdicts, rules_counting, rules_defensives, rules_labels, rules_slots, source_deaths, source_participation, source_selection, source_state
 from checks.source_state import active_mismatches, entry_for, health_mismatch, ready_at
 from checks.source_selection import cluster, walk
+from checks.find_logs import good_log
 from checks.common import AnalysisError, Run, TableCapped, parse_target, points, raid_week, run_analysis
 
 
@@ -526,6 +527,18 @@ class FinalRegistryTests(unittest.TestCase):
     def test_final_order(self):
         self.assertEqual([c[0] for c in CHECKS], ["deaths", "selection", "participation", "state", "durations",
                                                   "mitigation", "slots", "counting", "labels", "verdicts", "defensives"])
+
+
+class FindLogsTests(unittest.TestCase):
+    def test_good_log_needs_wipes_and_a_finished_report(self):
+        light = {"report_start": 0, "fights": [{"id": i, "start_time": i * 10, "end_time": i * 10 + 5, "boss": 3129,
+                                                "difficulty": 5, "kill": i == 3} for i in range(4)]}
+        cand = {"code": "X", "guild": ("G", "S", "US")}
+        with mock.patch("checks.find_logs.get_report_fights", return_value=light):
+            self.assertEqual(good_log("t", "manaforge", cand, now_ms=10**12), "X:manaforge:G/S/US")
+            self.assertIsNone(good_log("t", "manaforge", cand, now_ms=1000))
+            light["fights"][0]["kill"] = light["fights"][1]["kill"] = True
+            self.assertIsNone(good_log("t", "manaforge", cand, now_ms=10**12))
 
 
 if __name__ == "__main__":
