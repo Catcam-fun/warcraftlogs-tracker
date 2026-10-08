@@ -10,7 +10,8 @@ from checks.rules_verdicts import violations
 from checks.rules_labels import label, death_hits
 from raid_wide_damage import RAID_WIDE
 from checks.__main__ import run_checks
-from checks import rules_verdicts, rules_counting, rules_defensives, rules_labels, rules_slots, source_deaths, source_participation, source_selection
+from checks import rules_verdicts, rules_counting, rules_defensives, rules_labels, rules_slots, source_deaths, source_participation, source_selection, source_state
+from checks.source_state import active_mismatches, entry_for, health_mismatch, ready_at
 from checks.source_selection import cluster, walk
 from checks.common import AnalysisError, Run, TableCapped, parse_target, points, raid_week, run_analysis
 
@@ -419,6 +420,112 @@ class ParticipationTests(unittest.TestCase):
         self.assertEqual(source_participation.check(run).status, "skip")
         run = mock.Mock(); run.guild = ("G", "S", "US"); run.result = {"pullParticipation": {}}
         self.assertEqual(source_participation.check(run).status, "skip")
+
+
+class StateTests(unittest.TestCase):
+    def test_active_bands(self):
+        auras = [{"name": "Barkskin", "bands": [{"startTime": 1000, "endTime": 9000}]}]
+        self.assertEqual(active_mismatches(["Barkskin"], auras, 5000), [])
+        self.assertEqual(len(active_mismatches(["Barkskin"], auras, 9200)), 1)
+        self.assertEqual(len(active_mismatches(["Ironbark"], auras, 5000)), 1)
+
+    def test_ready_at_with_charges(self):
+        self.assertTrue(ready_at([], 10_000, 60_000, 1))
+        self.assertFalse(ready_at([5_000], 10_000, 60_000, 1))
+        self.assertTrue(ready_at([5_000], 70_000, 60_000, 1))
+        self.assertTrue(ready_at([5_000], 10_000, 60_000, 2))
+        self.assertFalse(ready_at([5_000, 6_000], 10_000, 60_000, 2))
+
+    def test_health_mismatch_uses_the_killing_event(self):
+        s = {"hpBeforePct": 40, "maxHp": 1000, "overkill": 55}
+        entry = {"overkill": 55, "events": [{"type": "damage", "amount": 300, "overkill": 0}, {"type": "damage", "amount": 405, "overkill": 55}]}
+        self.assertIsNone(health_mismatch(s, entry))
+        self.assertIsNotNone(health_mismatch(s, dict(entry, overkill=56)))
+        self.assertIsNotNone(health_mismatch(dict(s, hpBeforePct=43), entry))
+
+    def test_killing_event_is_the_newest_overkill_hit(self):
+        s = {"hpBeforePct": 40, "maxHp": 1000, "overkill": 55}
+        entry = {"overkill": 55, "events": [{"type": "damage", "amount": 400, "overkill": 55, "timestamp": 900},
+                                            {"type": "damage", "amount": 700, "overkill": 10, "timestamp": 800}]}
+        self.assertIsNone(health_mismatch(s, entry))
+
+    def test_second_death_of_a_rezzed_player_matches_its_own_entry(self):
+        entries = [{"id": 7, "timestamp": 1000, "overkill": 1, "events": []}, {"id": 7, "timestamp": 9000, "overkill": 2, "events": []}]
+        self.assertEqual(entry_for(entries, 7, 9010)["overkill"], 2)
+        self.assertIsNone(entry_for(entries, 8, 9010))
+
+    def _run(self):
+        run = mock.Mock()
+        start = 100_000
+        run.fight.return_value = {"start_time": start}
+        run.actor_id.return_value = 7
+        cat = mock.Mock()
+        cat.name_to_id = {"Barkskin": 1, "Ironbark": 2, "Renewal": 3, "Healthstone": 4}
+        cat.all = {1: {"name": "Barkskin", "kind": "personal", "cooldown_ms": 60_000, "charges": 1},
+                   2: {"name": "Ironbark", "kind": "external", "cooldown_ms": 90_000, "charges": 1},
+                   3: {"name": "Renewal", "kind": "personal", "cooldown_ms": 90_000, "charges": 1},
+                   4: {"name": "Healthstone", "kind": "healthstone", "cooldown_ms": 60_000, "charges": 1}}
+        run.cat = cat
+        run.combatants.return_value = [{"sourceID": 7, "fight": 1, "specID": 104, "talentTree": [{"id": 111, "rank": 1}]}]
+        # Barkskin pressed 20s before death (on cooldown); Renewal never pressed (ready).
+        run.casts.return_value = [{"type": "cast", "abilityGameID": 1, "timestamp": start + 30_000}]
+        run.buffs.return_value = [{"name": "Ironbark", "bands": [{"startTime": start + 45_000, "endTime": start + 57_000}]}]
+        ev = {"reportId": "R", "fightId": 1, "timestamp": 50_000, "originalCharacter": "Oak", "spec": "Guardian",
+              "defensives": {"active": [{"name": "Ironbark", "kind": "external"}],
+                             "available": [{"name": "Renewal"}, {"name": "Healthstone"}],
+                             "cooldown": [{"name": "Barkskin", "readyIn": 40, "usedAgo": 20}],
+                             "survival": {"hpBeforePct": 40, "maxHp": 1000, "overkill": 55, "deathType": "damage"}}}
+        run.counted_deaths.return_value = [ev]
+        run.deaths_table.return_value = [{"id": 7, "timestamp": start + 50_000, "overkill": 55,
+                                          "events": [{"type": "damage", "amount": 405, "overkill": 55, "timestamp": start + 50_000}]}]
+        return run, ev
+
+    def test_check_pass(self):
+        run, _ = self._run()
+        self.assertEqual(source_state.check(run).status, "pass")
+        run.casts.assert_called_with("R", 7, 100_000 - 90_000, 150_000)
+
+    def test_check_mismatches(self):
+        run, ev = self._run()
+        d = ev["defensives"]
+        d["available"], d["cooldown"] = [{"name": "Barkskin"}], [{"name": "Renewal", "readyIn": 1, "usedAgo": 1}]
+        d["active"] = [{"name": "Barkskin", "kind": "personal"}]
+        d["survival"] = dict(d["survival"], hpBeforePct=50, overkill=60)
+        o = source_state.check(run)
+        self.assertEqual(o.status, "fail")
+        self.assertIn("Oak pull 1 Barkskin: site ready, wcl casts say on cooldown", o.items)
+        self.assertIn("Oak pull 1 Renewal: site on cooldown, wcl casts say ready", o.items)
+        self.assertIn("Oak pull 1: active Barkskin has no aura band at death", o.items)
+        self.assertIn("Oak pull 1: health before 500 vs wcl 405 (max 1000)", o.items)
+        self.assertIn("Oak pull 1: overkill site 60 vs wcl 55", o.items)
+
+    def test_check_table_capped_and_skip(self):
+        run, _ = self._run()
+        run.deaths_table.side_effect = TableCapped("R", 1)
+        o = source_state.check(run)
+        self.assertEqual((o.status, o.items), ("fail", ["pull 1: 200+ deaths, table capped"]))
+        run.counted_deaths.return_value = []
+        self.assertEqual(source_state.check(run).status, "skip")
+
+    def test_cooldown_reduction_and_encounter_reset(self):
+        run, ev = self._run()
+        start = 100_000
+        # Barkskin pressed twice 5s apart, well under its 60s cooldown: the player's real cooldown is 5s
+        # (reduction the catalog can't see), so 35s after the last press it is ready. Renewal has a
+        # 3-minute cooldown and was pressed before the pull: the encounter reset makes it ready.
+        run.cat.all[3]["cooldown_ms"] = 180_000
+        run.casts.return_value = [{"type": "cast", "abilityGameID": 1, "timestamp": start + 10_000},
+                                  {"type": "cast", "abilityGameID": 1, "timestamp": start + 15_000},
+                                  {"type": "cast", "abilityGameID": 3, "timestamp": start - 5_000}]
+        ev["defensives"]["available"] = [{"name": "Renewal"}, {"name": "Barkskin"}]
+        ev["defensives"]["cooldown"] = []
+        self.assertEqual(source_state.check(run).status, "pass")
+
+
+class FinalRegistryTests(unittest.TestCase):
+    def test_final_order(self):
+        self.assertEqual([c[0] for c in CHECKS], ["deaths", "selection", "participation", "state", "durations",
+                                                  "mitigation", "slots", "counting", "labels", "verdicts", "defensives"])
 
 
 if __name__ == "__main__":
