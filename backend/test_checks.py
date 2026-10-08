@@ -309,6 +309,28 @@ class LabelRuleTests(unittest.TestCase):
         self.assertEqual([x["timestamp"] for x in first[0]], [0, 100])
         self.assertIsNone(death_hits([h(0, 10, 990)], 100))
 
+    def test_exactly_one_second_is_quick(self):
+        self.assertEqual(label([self.hit(0, 10, 990), self.hit(600, 790, 200), self.hit(1000, 200, 0, overkill=5)], 2)["deathType"], "burst")
+
+    def test_check_biggest_hit_only_where_the_page_shows_it(self):
+        h = self.hit
+        run = mock.Mock()
+        run.actor_id.return_value = 7
+        run.fight.return_value = {"start_time": 0}
+        def go(hits, survival):
+            ev = {"slot": 1, "inWipe": False, "isCheatDeath": False, "fightId": 2, "reportId": "R", "timestamp": hits[-1]["timestamp"],
+                  "originalCharacter": "Bob", "defensives": {"survival": survival}}
+            run.counted_deaths.return_value = [ev]
+            run.hits_before.return_value = hits
+            return rules_labels.check(run)
+        burst = [h(0, 10, 990), h(500, 400, 590), h(990, 590, 0, overkill=10)]
+        self.assertEqual(go(burst, {"deathType": "burst", "biggestHit": {"abilityId": 1}}).status, "pass")
+        shot = [h(0, 10, 990), h(1000, 900, 0, overkill=50)]
+        self.assertEqual(go(shot, {"deathType": "oneShot"}).status, "pass")
+        o = go(shot, {"deathType": "oneShot", "biggestHit": {"abilityId": 1}})
+        self.assertEqual((o.status, len(o.items)), ("fail", 1))
+
+
     def test_check_compares_with_the_site(self):
         h = self.hit
         hits = [h(0, 10, 990), h(500, 400, 590), h(990, 590, 0, overkill=10)]
