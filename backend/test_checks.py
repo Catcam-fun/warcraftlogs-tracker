@@ -731,6 +731,7 @@ class VerdictRuleTests(unittest.TestCase):
         run.fight.return_value = {"start_time": start, "end_time": start + 120_000}
         run.combatants.return_value = [{"sourceID": 7, "fight": 1, "specID": 104, "talentTree": []}]
         run.report_combatants.return_value = run.combatants.return_value
+        run.meta_for.return_value = {"fights": []}
         kb = start + 100_000
         run.hits_before.return_value = [{"timestamp": kb - 3_000, "overkill": 0}, {"timestamp": kb, "overkill": 50}]
         # Barkskin pressed 65s before the killing blow (ready again 5s before it); a Healthstone 62s before.
@@ -1059,6 +1060,18 @@ class StateTests(unittest.TestCase):
         # Without the reset the same gap proves a 6s cooldown.
         self.assertTrue(self.state([0, 6_000], 20_000, 25_000, 1)[0])
 
+    def test_a_gap_across_an_encounter_is_not_cooldown_reduction(self):
+        # Divine Shield (300s): presses at 200s (pull 3) and 320s (pull 4) are 120s apart because the
+        # encounter reset it, not because it has a 120s cooldown. Pressed at 610s in this pull: at 740s it
+        # is on cooldown until 910s.
+        entry = {"cooldown_ms": 300_000, "charges": 1}
+        casts = [{"abilityGameID": 1, "timestamp": t} for t in (200_000, 320_000, 610_000)]
+        encounters = [(150_000, 250_000), (300_000, 450_000), (600_000, 800_000)]
+        self.assertEqual(ability_state(entry, 1, casts, [], ({}, None), 600_000, 740_000, encounters), (0, None))
+        self.assertEqual(ability_state(entry, 1, casts, [], ({}, None), 600_000, 911_000, encounters), (1, 910_000))
+        # The same presses inside one encounter do prove a 120s cooldown.
+        self.assertEqual(ability_state(entry, 1, casts, [], ({}, None), 100_000, 740_000, [(100_000, 800_000)])[0], 1)
+
     def test_each_press_counts_with_its_own_pulls_talents(self):
         # 60s, or 40s with talent entry 7. Pull 1 (from 0) without it, pull 2 (from 100s) with it. A
         # press at 50s in pull 1 is back at 110s, not 90s, even though this pull has the talent.
@@ -1134,7 +1147,7 @@ class StateTests(unittest.TestCase):
                              "cooldown": [{"name": "Barkskin", "readyIn": 40, "usedAgo": 20}],
                              "survival": {"hpBeforePct": 40, "maxHp": 1000, "overkill": 55, "deathType": "damage"}}}
         run.counted_deaths.return_value = [ev]
-        run.meta_for.return_value = {"abilities": {207771: "Fiery Brand"}}
+        run.meta_for.return_value = {"abilities": {207771: "Fiery Brand"}, "fights": []}
         run.hits_before.return_value = []
         run.deaths_table.return_value = [{"id": 7, "timestamp": start + 50_000, "overkill": 55,
                                           "events": [{"type": "damage", "amount": 405, "overkill": 55, "timestamp": start + 50_000}]}]
