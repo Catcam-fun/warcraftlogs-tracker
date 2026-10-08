@@ -9,7 +9,8 @@ The owner's rule, from the hits since the player was last at 85%+ health:
   set up by: otherwise, the biggest hit (at least 10% of max HP) since they were last at high health.
 "Last at high health" is the latest hit before the killing blow after which hitPoints >= 0.85 * maxHitPoints,
 or the health before the killing blow (hitPoints + amount of the killing blow) if that is high.
-"Under a second" is strict: the killing blow is less than REACTION_MS after that moment.
+"Under a second" is inclusive: the killing blow is at most REACTION_MS after that moment.
+The Results page shows "set up by" only when deathType is not burst, so biggestHit is not compared for bursts.
 """
 from collections import defaultdict
 
@@ -44,7 +45,7 @@ def label(hits, kb_index):
     if kb.get("maxHitPoints") and (kb.get("hitPoints") or 0) + (kb.get("amount") or 0) >= HIGH * kb["maxHitPoints"]:
         since_i, since_ts = kb_index - 1, kb["timestamp"]     # high just before the killing blow
     run = hits[since_i + 1:kb_index + 1]
-    quick = since_ts is not None and kb["timestamp"] - since_ts < REACTION_MS
+    quick = since_ts is not None and kb["timestamp"] - since_ts <= REACTION_MS
     one_shot = quick and any(full_hit(h) >= ONE_SHOT * max_hp for h in run)
     death_type = "oneShot" if one_shot else "burst" if quick else "wasLow"
     rot = None
@@ -102,6 +103,8 @@ def check(run):
             continue
         rule = label(*got)
         site = (s.get("deathType"), (s.get("rot") or {}).get("abilityId"), (s.get("biggestHit") or {}).get("abilityId"))
+        if rule["deathType"] == "burst" and site[0] == "burst":
+            site = site[:2] + (None,)      # the page hides biggestHit on bursts
         if site != (rule["deathType"], rule["rot"], rule["biggestHit"]):
             items.append(f"{name} pull {fid}: site {site[0]}/{site[1]}/{site[2]}, "
                          f"rule {rule['deathType']}/{rule['rot']}/{rule['biggestHit']}")
