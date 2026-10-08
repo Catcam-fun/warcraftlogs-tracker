@@ -73,6 +73,16 @@ def _talents(run, rid, fid, pid):
     return None
 
 
+def report_span(run, rid):
+    """The span the site reads a report's casts over: from 3 minutes before its first kept pull
+    to the end of its last (the site's kept pulls are the keys of pullParticipation)."""
+    fids = {int(k.rsplit("_", 1)[1]) for keys in (run.result.get("pullParticipation") or {}).values()
+            for k in keys if k.rsplit("_", 1)[0] == rid}
+    fights = [run.fight(rid, f) for f in sorted(fids)]
+    return (max(0, min(f["start_time"] for f in fights) - ENCOUNTER_RESET_MS),
+            max(f["end_time"] for f in fights))
+
+
 def _ready_items(run, rid, fid, pid, who, ev, fight_start, death_ts):
     d = ev["defensives"]
     site_ready = {a["name"] for a in d.get("available") or []}
@@ -88,8 +98,9 @@ def _ready_items(run, rid, fid, pid, who, ev, fight_start, death_ts):
         judged.append((name, sid, entry, cd, charges))
     if not judged:
         return []
-    start = max(0, fight_start - max(cd * charges for *_, cd, charges in judged))
-    casts = [e for e in run.casts(rid, pid, start, death_ts) if e.get("type", "cast") == "cast"]
+    # The whole report's casts, as the site reads them: cooldown reduction shows up as a short
+    # gap anywhere in the report, not only near this death.
+    casts = [e for e in run.casts(rid, pid, *report_span(run, rid)) if e.get("type", "cast") == "cast"]
     items = []
     for name, sid, entry, cd, charges in judged:
         times = sorted(e["timestamp"] for e in casts if e.get("abilityGameID") == sid)

@@ -89,6 +89,18 @@ class RunTests(unittest.TestCase):
             with self.assertRaises(TableCapped):
                 run.deaths_table("X", 5)
 
+    def test_buffs_table_filters_by_the_aura_holder(self):
+        # Live 2026-10-07: a Buffs table with targetID lists the auras the player cast, not the
+        # ones on them (no Rallying Cry from a Warrior, no Bloodlust); sourceID is the holder.
+        reply = {"reportData": {"report": {"t": {"data": {"auras": [{"name": "Rallying Cry"}]}}}}}
+        with mock.patch("checks.common.graphql_query", return_value=reply) as q:
+            run = Run("t", parse_target("X:manaforge"))
+            self.assertEqual(run.buffs("X", 5, 7), [{"name": "Rallying Cry"}])
+            query, variables = q.call_args[0][1], q.call_args[0][2]
+            self.assertIn("sourceID: $p", query)
+            self.assertNotIn("targetID", query)
+            self.assertEqual(variables["p"], 7)
+
     def test_points_is_none_on_error(self):
         with mock.patch("checks.common.graphql_query", side_effect=Exception("down")):
             self.assertIsNone(points("t"))
@@ -140,6 +152,57 @@ class MovedChecksTests(unittest.TestCase):
         self.assertEqual(rules_defensives.check(run).status, "skip")
         run.pulls = []
         self.assertEqual(rules_defensives.check(run).status, "skip")
+
+
+class DurationsCheckTests(unittest.TestCase):
+    def test_auras_extended_mid_fight_are_not_flagged_longer(self):
+        # Live 2026-10-07: Havoc Metamorphosis ran 49.7s against 15s; the owner's rule says
+        # Metamorphosis and Dancing Rune Weapon can read longer. Barkskin doing the same is flagged.
+        from checks import source_durations
+        run = mock.Mock(); run.code = "X"
+        run.pulls = [{"id": 1, "start_time": 0, "end_time": 100_000}]
+        run.meta = {"abilities": {200: "Metamorphosis", 300: "Barkskin"}, "player_details": {}}
+        run.cat.name_to_id = {"Metamorphosis": 200, "Barkskin": 300}
+        run.cat.all = {200: {"name": "Metamorphosis", "kind": "personal", "duration_mods": [{"talent": "x"}]},
+                       300: {"name": "Barkskin", "kind": "personal", "duration_mods": [{"talent": "x"}]}}
+        buffs = []
+        for aid in (200, 300):
+            buffs += [{"type": "applybuff", "abilityGameID": aid, "targetID": 7, "timestamp": 1_000},
+                      {"type": "removebuff", "abilityGameID": aid, "targetID": 7, "timestamp": 50_000}]
+        raw = {"combatants": [{"sourceID": 7}], "casts": [], "buffs": buffs}
+        with mock.patch.object(source_durations.defensives, "fetch_defensive_raw", return_value=raw),              mock.patch.object(source_durations.defensives, "filter_defensive_raw", return_value={"talents": {(1, 7): {}}}),              mock.patch.object(source_durations.defensives, "pull_spec", return_value="Havoc"),              mock.patch.object(source_durations.defensives, "_talented_duration", return_value=15_000):
+            o = source_durations.check(run)
+        self.assertEqual(o.status, "fail")
+        self.assertEqual(o.items, ["Barkskin: 1 of 1 uses longer than predicted, e.g. 49.0s vs 15.0s"])
+
+
+class MitigationCheckTests(unittest.TestCase):
+    def test_compares_with_hits_carrying_the_same_other_auras(self):
+        # Live 2026-10-07: Fade measured 0.16 against 0.10 because Protective Light (an untracked 10%)
+        # was up on many Fade hits and few others; an Evoker's Obsidian Scales shared onto a Warlock
+        # read 0.15 against the Evoker's 0.30; blocked hits read random extra reduction.
+        from checks import source_mitigation
+        run = mock.Mock(); run.code = "X"
+        run.pulls = [{"id": 1, "start_time": 0, "end_time": 100_000}]
+        run.meta = {"abilities": {586: "Fade", 9: "Protective Light", 363916: "Obsidian Scales"},
+                    "friendlies": [{"id": 7, "name": "Priest", "type": "Priest"},
+                                   {"id": 8, "name": "Lock", "type": "Warlock"}],
+                    "player_details": {}, "ability_schools": {}}
+        run.cat.name_to_id = {"Fade": 586, "Obsidian Scales": 363916}
+        run.cat.all = {586: {"name": "Fade", "kind": "personal", "class": "Priest", "mitigation": [{"dr": 0.1}]},
+                       363916: {"name": "Obsidian Scales", "kind": "personal", "class": "Evoker",
+                                "mitigation": [{"dr": 0.3}]}}
+        run.cat.relevant_talent_entries = set()
+        run.combatants.return_value = []
+        hit = lambda who, through, buffs, blocked=0: {"type": "damage", "targetID": who, "abilityGameID": 1, "fight": 1,
+                                                     "unmitigatedAmount": 1250, "mitigated": 1250 - through,
+                                                     "amount": through, "blocked": blocked, "buffs": buffs}
+        hits = [hit(7, 1000, "")] * 20 + [hit(7, 900, "9.")] * 20      # Protective Light alone: 10% off
+        hits += [hit(7, 900, "586.")] * 5 + [hit(7, 810, "586.9.")] * 20  # Fade, mostly with Protective Light
+        hits += [hit(7, 500, "586.", blocked=400)] * 10
+        hits += [hit(8, 1000, "")] * 20 + [hit(8, 850, "363916.")] * 20   # shared Obsidian Scales
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
+            self.assertEqual(source_mitigation.check(run).status, "pass")
 
 
 class SlotsRuleTests(unittest.TestCase):
@@ -211,6 +274,7 @@ class VerdictRuleTests(unittest.TestCase):
         return {"available": [{"name": "Barkskin"}], "cooldown": [{"name": "Survival Instincts"}],
                 "healthstone": {"usedAgo": None}, "potion": {"usedAgo": None},
                 "survival": {"deathType": "wasLow", "overkill": 100, "maxHp": 1000, "ignoresImmunity": False,
+                             "hpBeforePct": 50, "killingHit": {"size": 600},
                              "wouldSave": {"Barkskin": True}, "details": {"Barkskin": {"amount": 150, "pressAgo": 1.2}}}}
 
     def test_each_property(self):
@@ -258,6 +322,19 @@ class VerdictRuleTests(unittest.TestCase):
         self.assertEqual(violations(d, cat), ["Barkskin: amount 150 vs overkill 100 but marked not saves"])
         d = self.base(); d["survival"]["details"]["Barkskin"]["why"] = "school"
         self.assertEqual(violations(d, cat), ["Barkskin: amount 150 vs overkill 100 but marked saves"])
+
+    def test_amount_is_bounded_by_missing_health_plus_the_killing_hit(self):
+        # Live 2026-10-07 (Pelinmerkkii, Obsidian Scales): 30% off a 32.8M one-shot is 10.1M saved,
+        # ten times max HP. Only the extra health is capped (500 missing here), not the cut of the hit.
+        cat = mock.Mock(); cat.name_to_id = {}; cat.all = {}
+        d = self.base(); s = d["survival"]
+        s["killingHit"], s["overkill"], s["wouldSave"]["Barkskin"] = {"size": 32_800}, 31_800, False
+        s["details"]["Barkskin"]["amount"] = 10_100
+        self.assertEqual(violations(d, cat), [])
+        d = self.base(); d["survival"]["details"]["Barkskin"]["amount"] = 1_111
+        self.assertIn("Barkskin: amount 1111 above missing health 500 plus the killing hit 600", violations(d, cat))
+        d = self.base(); d["survival"]["details"]["Barkskin"]["amount"] = 1_110
+        self.assertEqual(violations(d, cat), [])
 
     def bad(self):
         d = self.base(); d["survival"]["details"]["Barkskin"]["pressAgo"] = 0.4
@@ -458,7 +535,8 @@ class StateTests(unittest.TestCase):
     def _run(self):
         run = mock.Mock()
         start = 100_000
-        run.fight.return_value = {"start_time": start}
+        run.fight.return_value = {"start_time": start, "end_time": start + 60_000}
+        run.result = {"pullParticipation": {"Oak": ["R_1"], "Elm": ["S_4"]}}
         run.actor_id.return_value = 7
         cat = mock.Mock()
         cat.name_to_id = {"Barkskin": 1, "Ironbark": 2, "Renewal": 3, "Healthstone": 4}
@@ -484,7 +562,8 @@ class StateTests(unittest.TestCase):
     def test_check_pass(self):
         run, _ = self._run()
         self.assertEqual(source_state.check(run).status, "pass")
-        run.casts.assert_called_with("R", 7, 100_000 - 90_000, 150_000)
+        # The whole report's kept pulls, from 3 minutes before the first: what the site reads.
+        run.casts.assert_called_with("R", 7, 0, 160_000)
 
     def test_check_mismatches(self):
         run, ev = self._run()
@@ -518,6 +597,22 @@ class StateTests(unittest.TestCase):
         run.casts.return_value = [{"type": "cast", "abilityGameID": 1, "timestamp": start + 10_000},
                                   {"type": "cast", "abilityGameID": 1, "timestamp": start + 15_000},
                                   {"type": "cast", "abilityGameID": 3, "timestamp": start - 5_000}]
+        ev["defensives"]["available"] = [{"name": "Renewal"}, {"name": "Barkskin"}]
+        ev["defensives"]["cooldown"] = []
+        self.assertEqual(source_state.check(run).status, "pass")
+
+    def test_cooldown_reduction_seen_anywhere_in_the_report(self):
+        # Live 2026-10-07 (Decoil, Dancing Rune Weapon): the only short gap between presses was in
+        # another pull, after this death. The site reads the whole report's casts, so does the check.
+        run, ev = self._run()
+        start = 100_000
+        presses = [{"type": "cast", "abilityGameID": 1, "timestamp": start + 30_000},
+                   {"type": "cast", "abilityGameID": 1, "timestamp": start + 300_000},
+                   {"type": "cast", "abilityGameID": 1, "timestamp": start + 315_000}]
+        run.fight.side_effect = lambda rid, fid: {"start_time": start + (fid - 1) * 280_000,
+                                                  "end_time": start + (fid - 1) * 280_000 + 60_000}
+        run.result = {"pullParticipation": {"Oak": ["R_1", "R_2"]}}
+        run.casts.side_effect = lambda rid, pid, s, e: [c for c in presses if s <= c["timestamp"] <= e]
         ev["defensives"]["available"] = [{"name": "Renewal"}, {"name": "Barkskin"}]
         ev["defensives"]["cooldown"] = []
         self.assertEqual(source_state.check(run).status, "pass")
