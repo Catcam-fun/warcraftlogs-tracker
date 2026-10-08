@@ -206,6 +206,7 @@ def analyze():
             # come from the cache.
             yield f"data: {json.dumps({'stage': 'fights', 'message': 'Collecting fights from reports...'})}\n\n"
             all_fights_raw = []
+            report_encounters = {}
             finished_before = int(time.time() * 1000) - REPORT_CACHE_MIN_AGE_MS
             report_finished = {rep["id"]: bool(rep.get("end")) and rep["end"] < finished_before
                                for rep in reports}
@@ -241,6 +242,8 @@ def analyze():
                     fights = light.get("fights", [])
                     if not fights:
                         continue
+                    # Every boss encounter of the report, kept or not: each one resets long cooldowns.
+                    report_encounters[rid] = [(f['start_time'], f['end_time']) for f in fights if f.get('boss')]
                     report_abs_start = light.get("report_start") or rep["start"]
                     for fight in analyze_fights(fights, fight_zone, difficulty, selected_raid):
                         all_fights_raw.append({
@@ -591,6 +594,7 @@ def analyze():
                             # Presses in the report's other pulls count with that pull's talents.
                             pull_starts={fd['fight']['id']: fd['fight']['start_time']
                                          for fd in fights_by_report.get(rid, [])},
+                            encounters=report_encounters.get(rid),
                         )
                         death_event['defensives'] = defensives.analyze_death(**death_args)
                         cat = defensives.catalog_for(report_abs_start)

@@ -1002,7 +1002,7 @@ class ReadyTimeTests(unittest.TestCase):
     BARKSKIN, FIERY_BRAND = 22812, 204021
 
     def die(self, player_class, spec, casts, death, talents=frozenset(), fight_start=20_000, big_hit_at=None,
-            other_pulls=None):
+            other_pulls=None, encounters=None):
         """`other_pulls`: {fight ID: (start, talents)} of the report's other kept pulls."""
         indexed = {"casts": {1: sorted(casts)},
                    "talents": {(7, 1): talents if isinstance(talents, dict) else set(talents),
@@ -1011,7 +1011,8 @@ class ReadyTimeTests(unittest.TestCase):
         pull_starts = {7: fight_start, **{f: s for f, (s, _) in (other_pulls or {}).items()}}
         return defensives.analyze_death(1, player_class, spec, 7, fight_start, death, indexed,
                                         {**NAMES, **{sid: d["name"] for sid, d in CATALOG.items()}}, {},
-                                        hits=hits, ability_schools=SCHOOLS, pull_starts=pull_starts)
+                                        hits=hits, ability_schools=SCHOOLS, pull_starts=pull_starts,
+                                        encounters=encounters)
 
     ICE_BARRIER, COLD_SNAP, CELESTIAL_BREW, BLACK_OX_BREW, FADE = 11426, 235219, 322507, 115399, 586
 
@@ -1039,6 +1040,16 @@ class ReadyTimeTests(unittest.TestCase):
         r = self.die("Monk", "Brewmaster", casts + [(56_000, self.CELESTIAL_BREW)], 60_000, talents=talents,
                      fight_start=40_000)
         self.assertNotIn("Celestial Brew", names(r["available"]))
+
+    def test_a_gap_across_an_encounter_is_not_cooldown_reduction(self):
+        # Divine Shield (300s): pressed at 200s (pull 3) and 320s (pull 4) is the encounter reset, not a
+        # 120s cooldown. Pressed at 610s in this pull (from 600s): back at 910s, so at 740s on cooldown.
+        talents = entries(642)
+        casts = [(200_000, 642), (320_000, 642), (610_000, 642)]
+        for encounters in (None, [(150_000, 250_000), (300_000, 450_000), (600_000, 800_000)]):
+            r = self.die("Paladin", "Holy", casts, 740_000, talents=talents, fight_start=600_000,
+                         other_pulls={3: (150_000, talents), 4: (300_000, talents)}, encounters=encounters)
+            self.assertEqual([c["readyIn"] for c in r["cooldown"] if c["name"] == "Divine Shield"], [170])
 
     def test_each_press_counts_with_its_own_pulls_talents(self):
         # Fade: 30s, 20s with two ranks of Improved Fade. Pull 3 (from 0) without it, this pull (from 100s)

@@ -129,6 +129,11 @@ def report_casts(run, rid, fid, pid):
     return [e for e in run.casts(rid, pid, *report_span(run, rid, fid)) if e.get("type", "cast") == "cast"]
 
 
+def report_encounters(run, rid):
+    """[(start, end)] of every boss encounter in the report, kept or not (each resets long cooldowns)."""
+    return [(f["start_time"], f["end_time"]) for f in run.meta_for(rid)["fights"] if f.get("boss")]
+
+
 def pull_loadouts(run, rid, fid, pid):
     """[(pull start, talents, spec name or None)] for each kept pull of the report the player has a
     loadout in, oldest first (WCL records a loadout only at pull start)."""
@@ -141,44 +146,52 @@ def pull_loadouts(run, rid, fid, pid):
     return sorted(out, key=lambda x: x[0])
 
 
-def ability_state(entry, sid, casts, loadouts, this_pull, fight_start, at):
+def ability_state(entry, sid, casts, loadouts, this_pull, fight_start, at, encounters=()):
     """(charges left at `at`, when a charge last came back after none were left; None if it never ran
     out) for one catalog ability, from the player's WCL casts.
 
     - A long cooldown (base ENCOUNTER_RESET_MS or more) resets when the encounter starts: only presses
       since the pull started count, with this pull's talents (`this_pull` = (talents, spec)).
-    - A shorter one counts every press of the report. Each press uses the loadout of the latest pull
-      that had started by then, else the first pull's (talents change only out of combat).
+    - A shorter one counts every press of the report. Each press uses the loadout of the latest KEPT
+      pull that had started by then (a press in an unkept pull or between pulls: the previous kept
+      pull's), else the first kept pull's (talents change only out of combat).
     - Each press spends a charge; charges return one at a time, one cooldown after the previous one
       returned or after the spend that started the recharge.
     - A cast of a spell in the entry's reset_by gives back every charge ("all") or one ("one").
-    - A one-charge press repeated sooner than its cooldown, with no reset cast in between: the shortest
-      such gap is taken as the cooldown (reduction the catalog can't see).
+    - A one-charge press repeated sooner than its cooldown (that press's own loadout), with no reset
+      cast in between and, for a long cooldown, no boss encounter start or end in between
+      (`encounters`: [(start, end)] of every boss encounter in the report): the shortest such gap is
+      taken as the cooldown (reduction the catalog can't see).
     """
     long = entry["cooldown_ms"] >= ENCOUNTER_RESET_MS
 
-    def talents_at(t):
-        if long or not loadouts:
+    def talents_at(t, own_pull=None):
+        if (long if own_pull is None else not own_pull) or not loadouts:
             return this_pull
         started = [lo for lo in loadouts if lo[0] <= t]
         start, talents, spec = started[-1] if started else loadouts[0]
         return talents, spec or this_pull[1]
 
-    def cooldown(t):
-        talents, spec = talents_at(t)
+    def cooldown(t, own_pull=None):
+        talents, spec = talents_at(t, own_pull)
         return defensives._talented_cooldown(entry, talents, spec)
 
-    def most(t):
-        talents, spec = talents_at(t)
+    def most(t, own_pull=None):
+        talents, spec = talents_at(t, own_pull)
         return defensives._talented_charges(entry, talents, spec)
 
     gives = {r["spell"]: r["restores"] for r in entry.get("reset_by") or ()}
     presses = sorted(e["timestamp"] for e in casts if e.get("abilityGameID") == sid)
     reset_casts = sorted((e["timestamp"], gives[e.get("abilityGameID")]) for e in casts
                          if e.get("abilityGameID") in gives)
+    walls = [r for r, _ in reset_casts]
+    if long:
+        walls += [t for start, end in encounters for t in (start, end)] + [fight_start]
     shortest = None
     for a, b in zip(presses, presses[1:]):
-        if most(a) == 1 and not any(a < r <= b for r, _ in reset_casts) and b - a < cooldown(a) - CDR_TOLERANCE_MS:
+        if any(a < w <= b for w in walls) or most(a, True) != 1:
+            continue
+        if b - a < cooldown(a, True) - CDR_TOLERANCE_MS:
             shortest = b - a if shortest is None else min(shortest, b - a)
 
     def recharge(t):
@@ -225,7 +238,8 @@ def _ready_items(run, rid, fid, pid, who, ev, fight_start, death_ts):
     casts = report_casts(run, rid, fid, pid)
     items = []
     for name, sid, entry in judged:
-        wcl_ready = ability_state(entry, sid, casts, loadouts, this_pull, fight_start, death_ts)[0] > 0
+        wcl_ready = ability_state(entry, sid, casts, loadouts, this_pull, fight_start, death_ts,
+                                  report_encounters(run, rid))[0] > 0
         if (name in site_ready) and not wcl_ready:
             items.append(f"{who} pull {fid} {name}: site ready, wcl casts say on cooldown")
         elif wcl_ready and name not in site_ready:
