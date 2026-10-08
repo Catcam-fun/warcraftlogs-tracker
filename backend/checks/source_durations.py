@@ -80,6 +80,8 @@ def check(run):
                 r["extended"] += 1
             else:
                 r["longer"].append((round(got / 1000, 1), round((want + carried) / 1000, 1)))
+    if not any(r["n"] for r in res.values()):
+        return skip("no duration-talent defensive uses measured")
     items = []
     for name, r in sorted(res.items()):
         if len(r["longer"]) > r["n"] // 10:
