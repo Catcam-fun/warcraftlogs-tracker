@@ -20,8 +20,8 @@ anchors:
   deaths_bulk: backend/analysis.py:357
   combatants: backend/defensives.py:221
   defensive_raw: backend/defensives.py:232
-  death_windows: backend/defensives.py:888
-  instakills: backend/defensives.py:934
+  death_windows: backend/defensives.py:890
+  instakills: backend/defensives.py:936
   analyze_credentials: backend/app.py:125
   analyze_token: backend/app.py:158
   report_fetch: backend/app.py:338
@@ -42,7 +42,7 @@ invariants:
   - "NEVER: a guild-reports query filters by zoneID; mixed raid and dungeon reports would be dropped."
 flows:
   - request-path
-content_hash: sha256:bf637e2be92c312fa3f84e737b28f0011e23a2794f2b35e4de6e616304aaacfd
+content_hash: sha256:f83de9c3580291f3688328aec0bc389df2c899440a8b6e3b1bd5dde324941a98
 ---
 ## Summary
 
@@ -77,7 +77,7 @@ One Analyze request walks through the WCL reads below, in the order `generate()`
 - title: Defensive data | short: Defensives | sub: three queries, one at a time
   body: Only when at least one death in the report can count (backend/app.py:387-390). fetch_defensive_raw then runs Casts, Buffs and Healing one after another, reusing the loadouts already read (backend/defensives.py:268-282). Casts cover the time range from cast_lookback (3 minutes before the first pull, or back to the last boss encounter's end for long cooldowns, at most the longest tracked cooldown), buffs from 3 minutes before it; heals are scoped to the boss pulls.
 - title: Hits before deaths | short: Death windows | sub: DamageTaken by name
-  body: For the deaths that can count, fetch_death_windows asks for DamageTaken events filtered by target.name, one block per group of pulls within 15 minutes, many blocks per request (backend/defensives.py:888-931). fetch_instakills adds instant-kill events from the All stream (backend/defensives.py:934-939).
+  body: For the deaths that can count, fetch_death_windows asks for DamageTaken events filtered by target.name, one block per group of pulls within 15 minutes, many blocks per request (backend/defensives.py:890-933). fetch_instakills adds instant-kill events from the All stream (backend/defensives.py:936-941).
 ```
 
 ## Diagram
@@ -122,8 +122,8 @@ What is read from WCL, and where.
 | Deaths and cheat deaths {events} | `report.events` (Deaths, Debuffs, Healing) | `get_report_deaths_bulk` (`backend/analysis.py:357`) |
 | Talent loadouts {events} | `report.events` (CombatantInfo) | `fetch_combatants` (`backend/defensives.py:221`) |
 | Defensive casts, buffs, heals {events} | `report.events` (Casts, Buffs, Healing) | `fetch_defensive_raw` (`backend/defensives.py:232`) |
-| Hits before deaths {events} | `report.events` (DamageTaken) | `fetch_death_windows` (`backend/defensives.py:888`) |
-| Instant kills {events} | `report.events` (All, `type = 'instakill'`) | `fetch_instakills` (`backend/defensives.py:934`) |
+| Hits before deaths {events} | `report.events` (DamageTaken) | `fetch_death_windows` (`backend/defensives.py:890`) |
+| Instant kills {events} | `report.events` (All, `type = 'instakill'`) | `fetch_instakills` (`backend/defensives.py:936`) |
 | Top kills per boss {scripts} | `worldData.encounter.fightRankings` | `build_armor_constants.py:118`, `build_raid_wide.py:33` |
 
 ## Standing it up

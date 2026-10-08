@@ -46,7 +46,7 @@ links:
   - feat-analyze
   - feat-share
   - feat-saved
-content_hash: sha256:ce571e3f722f467e5d7dcc1d7fd3bed2adbf32de9526ca30d50f68f620c1ea98
+content_hash: sha256:b3f1bf5f69dabb8593fd4fffa396d63bb43777685fea6f5d148113dff080fed0
 ---
 ## Summary
 
@@ -174,7 +174,7 @@ relied-on-by: [[feat-saved]] — an opened saved report renders through this sam
 
 - **MUST** count through `isCounted` / `countedDeaths` everywhere: the matrix (`frontend/src/App.js:1195`, `frontend/src/App.js:1228`), the player list (`frontend/src/App.js:1048`) and `killCounts` (`frontend/src/App.js:1279`). A second rule anywhere would make the tables disagree.
 - **NEVER** count a death with `inWipe`, whatever X is (`frontend/src/deathCounting.js:24`). Mass deaths at a wipe say nothing about who failed first.
-- **NEVER** recompute `slot`, `inWipe`, `deathType` or `wouldSave` in the browser. They come from the backend (`backend/analysis.py:188`, `backend/app.py:540-541`, `backend/defensives.py:1779`, `backend/defensives.py:1815`, `backend/defensives.py:1825`); the view only reads them.
+- **NEVER** recompute `slot`, `inWipe`, `deathType` or `wouldSave` in the browser. They come from the backend (`backend/analysis.py:188`, `backend/app.py:540-541`, `backend/defensives.py:1857`, `backend/defensives.py:1893`, `backend/defensives.py:1903`); the view only reads them.
 - **MUST** skip defensive data without the current shape (`active` and `available` arrays) so saves and shares from older versions still render (`frontend/src/DeathRow.js:23`, `frontend/src/DefensivePanel.js:17`).
 
 ## Gotchas

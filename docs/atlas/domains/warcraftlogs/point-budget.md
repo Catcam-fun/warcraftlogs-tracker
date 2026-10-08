@@ -30,11 +30,11 @@ anchors:
   fetch_combatants: backend/defensives.py:221
   defensive_raw: backend/defensives.py:232
   paged: backend/defensives.py:183
-  fetch_blocks: backend/defensives.py:857
-  death_windows: backend/defensives.py:888
-  instakills: backend/defensives.py:934
-  block_span: backend/defensives.py:836
-  blocks_per_request: backend/defensives.py:838
+  fetch_blocks: backend/defensives.py:859
+  death_windows: backend/defensives.py:890
+  instakills: backend/defensives.py:936
+  block_span: backend/defensives.py:838
+  blocks_per_request: backend/defensives.py:840
   catalog_fingerprint: backend/defensives.py:167
   shared_cache: backend/cache.py:42
   cache_version: backend/cache.py:88
@@ -60,11 +60,11 @@ invariants:
   - "NEVER: serve a cached defensive entry built with a different catalog; the key carries the catalog fingerprint."
 flows:
   - request-path
-content_hash: sha256:525d0f3bf81151f4d87597f104eb0c07a1064bb81398edcbfd8933f6b246a10e
+content_hash: sha256:966dc1121021f030734222989b4e9907a0259260c57a09effd9e402ed231f869
 ---
 ## Summary
 
-- WarcraftLogs (WCL) charges each API key **points**. The code's own comment states the rule it is built around: about one point per page of events, and at least one per event block (`backend/defensives.py:892-893`). Fewer pages and fewer blocks mean a cheaper analysis.
+- WarcraftLogs (WCL) charges each API key **points**. The code's own comment states the rule it is built around: about one point per page of events, and at least one per event block (`backend/defensives.py:894-895`). Fewer pages and fewer blocks mean a cheaper analysis.
 - Every Analyze run spends the **officer's own key** (see [[warcraftlogs]]), so cost is a user-facing concern, not only a server one.
 - The backend keeps cost down five ways: a **cheap fight list before the full read**, **query order per report**, **narrow filters**, **tight time and pull scopes**, and a **cache of finished reports**.
 - There is no runtime cost meter. `rateLimitData` is not queried anywhere in `backend/` or `frontend/src/`; cost is controlled by how queries are shaped and ordered.
@@ -91,9 +91,9 @@ One analysis reads guild-level data once, then each report's fight list, then a 
   body: fetch_defensive_raw runs Casts, Buffs and Healing one after another, and reuses the loadouts already read, passed in as combatants= (backend/defensives.py:268-282; call at backend/app.py:400-401). Casts are filtered to the catalog's cast IDs, Buffs to the catalog's buff names, Healing to consumable ability IDs (backend/defensives.py:265-267). Healing is scoped to the boss pulls by fightIDs, which costs least (docstring, backend/defensives.py:257-259).
   gotcha: Casts and Buffs are not filtered by player in the query. WCL returns nothing for source.id in (...) on those data types, and the unfiltered query costs fewer points anyway; players are filtered afterwards in filter_defensive_raw (backend/defensives.py:249-254, 270).
 - title: Instant kills | short: Instakills | sub: All stream, filtered
-  body: Instant kills deal no damage, so they are only in the All stream. fetch_instakills reads it with the filter type = 'instakill', scoped to the kept pulls with an endTime: about 1 point per report (backend/defensives.py:934-939, 731).
+  body: Instant kills deal no damage, so they are only in the All stream. fetch_instakills reads it with the filter type = 'instakill', scoped to the kept pulls with an endTime: about 1 point per report (backend/defensives.py:936-941, 731).
 - title: Hits before deaths | short: Death windows | sub: counted deaths only
-  body: fetch_death_windows groups pulls whose windows fall within WINDOW_BLOCK_SPAN_MS (15 minutes) into one block, filters each block by target.name, and sends up to WINDOW_BLOCKS_PER_REQUEST = 20 blocks in one request (backend/defensives.py:836-838, 817-833, 790-791). Each page is filtered as it arrives, keeping a damage event only if it falls inside a counted death's window (backend/defensives.py:922-930). Its docstring records the measured effect, 19 to 8 and 11 to 5 points for a night's reports (backend/defensives.py:896-897).
+  body: fetch_death_windows groups pulls whose windows fall within WINDOW_BLOCK_SPAN_MS (15 minutes) into one block, filters each block by target.name, and sends up to WINDOW_BLOCKS_PER_REQUEST = 20 blocks in one request (backend/defensives.py:838-840, 817-833, 790-791). Each page is filtered as it arrives, keeping a damage event only if it falls inside a counted death's window (backend/defensives.py:924-932). Its docstring records the measured effect, 19 to 8 and 11 to 5 points for a night's reports (backend/defensives.py:898-899).
 ```
 
 #### Measured costs the code is built around
@@ -106,18 +106,18 @@ These were measured on fresh Mythic logs. The code does not read them at run tim
 | A report's first event query pays a "cold" price (Deaths 2-17 points, about 4 per hour of report span). For 10-30 seconds after a query the report is warm, and a query then costs about 1; after 2 minutes the price is back up. Separately, WCL answers an identical repeat query from its own cache for 45-60 minutes, for about 1 point | loadouts go first (`backend/app.py:374-376`) |
 | CombatantInfo over the kept pulls is the cheapest warm-up, 1.4-3 points; a one-pull query does not warm the report | `fetch_combatants` spans every kept pull (`backend/defensives.py:221-229`) |
 | After the warm-up, queries sent one at a time cost about a quarter less than sent together (3.5 vs 4.8 points per hour of raid) | `backend/app.py:395-396`, `backend/defensives.py:273-274` |
-| A death-window block costs exactly 1 point (+1 per extra page) whatever its size. Neither `includeResources` nor a type filter changes it. Per-pull or exact-window blocks cost 2-4x more; one block per report costs 1.3-2x more | 15-minute blocks (`backend/defensives.py:836`, `backend/defensives.py:903-916`) |
-| WCL computes each hit's `buffs` (aura list) from the query's own start and page boundaries | the death-window block shapes and the Healing query must stay as they are, or verdicts change (`backend/defensives.py:913-916`, `backend/defensives.py:271`) |
+| A death-window block costs exactly 1 point (+1 per extra page) whatever its size. Neither `includeResources` nor a type filter changes it. Per-pull or exact-window blocks cost 2-4x more; one block per report costs 1.3-2x more | 15-minute blocks (`backend/defensives.py:838`, `backend/defensives.py:905-918`) |
+| WCL computes each hit's `buffs` (aura list) from the query's own start and page boundaries | the death-window block shapes and the Healing query must stay as they are, or verdicts change (`backend/defensives.py:915-918`, `backend/defensives.py:271`) |
 
 On a cold run of a large guild (98 logs, 603 unique pulls), this design spent 884 points with an 807 MB memory peak, against 1199 points and 1773 MB for the earlier per-report fetch, with the same result.
 
 #### Paging
 
-Every event query asks for `limit: 10000` events per page (`backend/defensives.py:201`, `backend/defensives.py:853`, `backend/analysis.py:336`) and follows `nextPageTimestamp` only while WCL returns one, at most 50 times (`backend/defensives.py:188`, `backend/defensives.py:867`). `_fetch_blocks` follows up only the blocks that overflowed, not the whole request (`backend/defensives.py:882-883`).
+Every event query asks for `limit: 10000` events per page (`backend/defensives.py:201`, `backend/defensives.py:855`, `backend/analysis.py:336`) and follows `nextPageTimestamp` only while WCL returns one, at most 50 times (`backend/defensives.py:188`, `backend/defensives.py:869`). `_fetch_blocks` follows up only the blocks that overflowed, not the whole request (`backend/defensives.py:884-885`).
 
 #### The endTime rule
 
-`_fetch_blocks` always sends an `endTime`, because WCL returns an empty second page for a block scoped by `fightIDs` without one (docstring, `backend/defensives.py:862-863`). `fetch_combatants` and every `fetch_defensive_raw` query pass `end_time + 1` (`backend/defensives.py:229`, `backend/defensives.py:279`), and `fetch_instakills` passes `end_time + 1` too (`backend/defensives.py:938`).
+`_fetch_blocks` always sends an `endTime`, because WCL returns an empty second page for a block scoped by `fightIDs` without one (docstring, `backend/defensives.py:864-865`). `fetch_combatants` and every `fetch_defensive_raw` query pass `end_time + 1` (`backend/defensives.py:229`, `backend/defensives.py:279`), and `fetch_instakills` passes `end_time + 1` too (`backend/defensives.py:940`).
 
 #### Caching finished reports
 
@@ -179,22 +179,22 @@ band structural "Officer's WCL key"
 | One query at a time after the warm-up {order} | `backend/app.py:395-396`, `backend/defensives.py:273-280` | about a quarter cheaper than all at once |
 | Ability filters on defensive queries {filter} | `backend/defensives.py:265-267` | only catalog abilities come back |
 | `fightIDs` on Healing and CombatantInfo {scope} | `backend/defensives.py:229`, `backend/defensives.py:271` | boss pulls only |
-| `target.name` filter on death windows {filter} | `backend/defensives.py:911-912` | only the players who died |
-| `WINDOW_BLOCK_SPAN_MS` = 900,000 {batch} | `backend/defensives.py:836` | pulls 15 minutes apart share a block |
-| `WINDOW_BLOCKS_PER_REQUEST` = 20 {batch} | `backend/defensives.py:838` | many blocks in one request |
+| `target.name` filter on death windows {filter} | `backend/defensives.py:913-914` | only the players who died |
+| `WINDOW_BLOCK_SPAN_MS` = 900,000 {batch} | `backend/defensives.py:838` | pulls 15 minutes apart share a block |
+| `WINDOW_BLOCKS_PER_REQUEST` = 20 {batch} | `backend/defensives.py:840` | many blocks in one request |
 | `REPORT_CACHE_MIN_AGE_MS` = 2 h {cache} | `backend/app.py:46` | finished reports read once |
 | `REPORT_FETCH_WORKERS` = 6 {concurrency} | `backend/app.py:50` | fight-list and full-read concurrency |
 | Report pool = 8 {concurrency} | `backend/app.py:447` | reports whose events are read at once |
 
 ## Invariants
 
-- **MUST** send an `endTime` with any event query scoped by `fightIDs`; WCL returns an empty second page without one (`backend/defensives.py:862-863`).
+- **MUST** send an `endTime` with any event query scoped by `fightIDs`; WCL returns an empty second page without one (`backend/defensives.py:864-865`).
 - **MUST** read in full only the reports that pulls are kept from; every other report costs one light fight-list query (`backend/app.py:265-278`).
 - **MUST** send a report's talent loadouts as its first event query, alone, and its defensive, instant-kill and death-window queries one at a time after deaths (`backend/app.py:373-424`).
 - **MUST** fetch hits before deaths only for deaths that can count; a report with none reads no defensives, instant kills or hits (`backend/app.py:387-390`, `backend/app.py:420`).
 - **MUST** cache only reports whose last event is more than two hours old; a report still being logged is always refetched (`backend/app.py:44-46`).
-- **NEVER** change the death-window block shapes or the Healing query's scope: WCL computes each hit's aura list from the query's own start and page boundaries, so a different shape changes verdicts (`backend/defensives.py:913-916`, `backend/defensives.py:271`).
-- **NEVER** filter a WCL event query by `target.id` or by timestamp; filter by `target.name` with the raw log spelling (`backend/defensives.py:893-894`, `backend/defensives.py:911-912`).
+- **NEVER** change the death-window block shapes or the Healing query's scope: WCL computes each hit's aura list from the query's own start and page boundaries, so a different shape changes verdicts (`backend/defensives.py:915-918`, `backend/defensives.py:271`).
+- **NEVER** filter a WCL event query by `target.id` or by timestamp; filter by `target.name` with the raw log spelling (`backend/defensives.py:895-896`, `backend/defensives.py:913-914`).
 - **NEVER** serve a cached defensive entry built with a different catalog; the key carries `CATALOG_FINGERPRINT` (`backend/app.py:361-365`).
 
 ## Gotchas
@@ -204,7 +204,7 @@ band structural "Officer's WCL key"
 - **A failed loadout read skips defensives**: if `fetch_combatants` raises, the error is kept and the defensive query is not sent; deaths still count (`backend/app.py:377-380`, `backend/app.py:397`).
 - **Casts and Buffs cover more than the pulls**: buffs start 3 minutes (`ENCOUNTER_RESET_MS`) before the first pull and casts at `cast_lookback` (`backend/defensives.py:232`: as far back as the last boss encounter's end, at most the longest tracked cooldown, for presses that carry into a pull), and both run to the last pull's end, trash included (`backend/defensives.py:34`, `backend/defensives.py:263`). This costs more pages than a pull-scoped query but catches a defensive pressed just before a pull.
 - **Deaths are scoped by time, not by pull**: `get_report_deaths_bulk` sends `startTime` and `endTime` but no `fightIDs` (`backend/analysis.py:395-468`), so trash deaths between kept pulls come back too and are dropped in code.
-- **Build scripts follow the endTime rule too**: `_events` in `backend/scripts/build_armor_constants.py:46-61` costs one extra small query per fight to fetch its `endTime`, because a `fightIDs`-scoped events query without one gets an empty second page (`backend/defensives.py:862-863`).
+- **Build scripts follow the endTime rule too**: `_events` in `backend/scripts/build_armor_constants.py:46-61` costs one extra small query per fight to fetch its `endTime`, because a `fightIDs`-scoped events query without one gets an empty second page (`backend/defensives.py:864-865`).
 - **No live cost reading**: nothing reads `rateLimitData`, so the site cannot tell an officer how many points an analysis used or how many are left.
 
 ## Context map
