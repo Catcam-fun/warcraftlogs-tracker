@@ -1,11 +1,12 @@
 """The list of checks, in run order. Each entry is (name, family, check function)."""
 
-from checks import rules_counting, rules_defensives, rules_labels, rules_slots, rules_verdicts, source_deaths, source_durations, source_mitigation
+from checks import rules_counting, rules_defensives, rules_labels, rules_slots, rules_verdicts, source_deaths, source_durations, source_mitigation, source_selection
 
 CHECKS = [
     ("deaths", "source", source_deaths.check),
     ("durations", "source", source_durations.check),
     ("mitigation", "source", source_mitigation.check),
+    ("selection", "source", source_selection.check),
     ("defensives", "rules", rules_defensives.check),
     ("slots", "rules", rules_slots.check),
     ("counting", "rules", rules_counting.check),
