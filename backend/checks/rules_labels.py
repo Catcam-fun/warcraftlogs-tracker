@@ -1,24 +1,26 @@
 """Death labels follow the rules: one-shot, burst, rot (raid-wide only) or set up by
 
 The owner's rule, from the hits since the player was last at 85%+ health:
-  one-shot: that was under a second before death and a single hit took 80%+ of max HP;
-  burst: under a second, but no single hit that big;
+  one-shot: that was at most 1.5 s before death and a single hit took 80%+ of max HP; when that hit
+    (the biggest since last high) is not the killing blow, it is named as the one-shot hit (oneShotHit);
+  burst: at most 1.5 s, but no single hit that big;
   worn down by (rot): only from a raid-wide ability in raid_wide_damage.py hitting them repeatedly
     (3+ hits of one RAID_WIDE ability, that ability 60%+ of the damage since last high, none of its
     hits 35%+ of max HP);
-  set up by: otherwise, the biggest hit (at least 10% of max HP) since they were last at high health.
+  set up by: otherwise (neither one-shot nor burst), the biggest hit (at least 10% of max HP) since they
+    were last at high health.
 "Last at high health" is the latest moment before the killing blow with health >= 0.85 * maxHitPoints: just
 after a hit (hitPoints) or just before one (hitPoints + amount; heals land between hits), the killing blow
 included. Only hits whose resources are the player's own (resourceActor 2) carry the player's health.
-"Under a second" is inclusive: the killing blow is at most REACTION_MS after that moment.
-The Results page shows "set up by" only when deathType is not burst, so biggestHit is not compared for bursts.
+The 1.5 s is inclusive: the killing blow is at most BURST_WINDOW_MS after that moment. It is the owner's
+description window (2026-10-08), not the 1 s press cutoff (REACTION_MS) of the defensive replay.
 """
 from collections import defaultdict
 
 from checks.verdict import PASS, fail, skip
 from raid_wide_damage import RAID_WIDE
 
-HIGH, ONE_SHOT, SETUP, REACTION_MS = 0.85, 0.80, 0.10, 1000
+HIGH, ONE_SHOT, SETUP, BURST_WINDOW_MS = 0.85, 0.80, 0.10, 1500
 ROT_MIN_HITS, ROT_SHARE, ROT_MAX_HIT = 3, 0.6, 0.35
 KILL_SLACK_MS = 50
 
@@ -40,7 +42,7 @@ def _max_hp(hits, kb_index):
 
 
 def label(hits, kb_index):
-    """{"deathType", "rot", "biggestHit"} for the killing blow at hits[kb_index] (hits: one player's, time order)."""
+    """{"deathType", "rot", "biggestHit", "oneShotHit"} for the killing blow at hits[kb_index] (hits: one player's, time order)."""
     kb = hits[kb_index]
     max_hp = _max_hp(hits, kb_index)
     since_i, since_ts = -1, None      # index of the latest high-health hit before the killing blow
@@ -54,7 +56,7 @@ def label(hits, kb_index):
         elif after + (h.get("amount") or 0) >= HIGH * h["maxHitPoints"]:
             since_i, since_ts = i - 1, h["timestamp"]             # high just before this hit
     run = hits[since_i + 1:kb_index + 1]
-    quick = since_ts is not None and kb["timestamp"] - since_ts <= REACTION_MS
+    quick = since_ts is not None and kb["timestamp"] - since_ts <= BURST_WINDOW_MS
     one_shot = quick and any(full_hit(h) >= ONE_SHOT * max_hp for h in run)
     death_type = "oneShot" if one_shot else "burst" if quick else "wasLow"
     rot = None
@@ -73,8 +75,13 @@ def label(hits, kb_index):
             cands = [h for h in run[:-1] if full_hit(h) >= SETUP * max_hp]
             biggest = max(cands, key=full_hit, default=None)
         return {"deathType": death_type, "rot": rot,
-                "biggestHit": biggest.get("abilityGameID") if biggest else None}
-    return {"deathType": death_type, "rot": None, "biggestHit": None}
+                "biggestHit": biggest.get("abilityGameID") if biggest else None, "oneShotHit": None}
+    shot = None
+    if one_shot:
+        top = max(run[:-1], key=full_hit, default=None)
+        if top is not None and full_hit(top) > full_hit(kb):
+            shot = top.get("abilityGameID")
+    return {"deathType": death_type, "rot": None, "biggestHit": None, "oneShotHit": shot}
 
 
 def death_hits(hits, death_ts):
@@ -112,12 +119,11 @@ def check(run):
             continue
         compared += 1
         rule = label(*got)
-        site = (s.get("deathType"), (s.get("rot") or {}).get("abilityId"), (s.get("biggestHit") or {}).get("abilityId"))
-        if rule["deathType"] == "burst" and site[0] == "burst":
-            site = site[:2] + (None,)      # the page hides biggestHit on bursts
-        if site != (rule["deathType"], rule["rot"], rule["biggestHit"]):
-            items.append(f"{name} pull {fid}: site {site[0]}/{site[1]}/{site[2]}, "
-                         f"rule {rule['deathType']}/{rule['rot']}/{rule['biggestHit']}")
+        site = (s.get("deathType"), (s.get("rot") or {}).get("abilityId"), (s.get("biggestHit") or {}).get("abilityId"),
+                (s.get("oneShotHit") or {}).get("abilityId"))
+        want = (rule["deathType"], rule["rot"], rule["biggestHit"], rule["oneShotHit"])
+        if site != want:
+            items.append(f"{name} pull {fid}: site {'/'.join(map(str, site))}, rule {'/'.join(map(str, want))}")
     if not seen:
         return skip("no counted deaths with a survival block")
     if not compared:

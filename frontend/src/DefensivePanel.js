@@ -8,9 +8,9 @@ import React from 'react';
      survival?: { deathType: 'oneShot'|'burst'|'wasLow'|'instakill', killingHit: {name, size, pctOfMax, school},
                   hpBeforePct, overkill, maxHp, ignoresReduction, ignoresImmunity,
                   wouldSave: {name: true|false|null}, allTogetherWouldSave,
-                  window: {hits, fromAgo}, biggestHit?, fromPct?, burstMs? } }
-   Verdicts replay the seconds before the death (a one-shot: high health less
-   than a second before it). Only deaths that can count carry this.
+                  window: {hits, fromAgo}, biggestHit?, oneShotHit?, fromPct?, burstMs? } }
+   Verdicts replay the seconds before the death (a one-shot: high health at
+   most 1.5s before it). Only deaths that can count carry this.
    Available entries may carry boostedBy: [talent names that strengthen it]. */
 
 // Saved reports and shares from before this feature carry an older shape; skip them.

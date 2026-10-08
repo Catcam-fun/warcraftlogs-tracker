@@ -722,13 +722,40 @@ class LethalWindowTests(unittest.TestCase):
         self.assertEqual((r["burst"]["hits"], r["burst"]["total"], r["burst"]["abilities"][0]["times"]),
                          (3, 1_040_000, 3))
         self.assertNotIn("rot", r)
-        # One 90% hit and a tick right after it: a one-shot.
+        self.assertNotIn("biggestHit", r)                          # "Set up by" is only for neither
+        # One 90% hit and a tick right after it: a one-shot by the 90% hit, not "set up by" it.
         r = self.assess([hit(99_200, 900_000, 100_000), hit(99_900, 100_000, 0, overkill=40_000)])
         self.assertEqual(r["deathType"], "oneShot")
-        self.assertEqual(r["biggestHit"]["pctOfMax"], 90)           # the 90% hit is named
-        # A small tick, then a 120% killing blow: a one-shot, nothing set it up.
+        self.assertNotIn("biggestHit", r)
+        self.assertEqual((r["oneShotHit"]["name"], r["oneShotHit"]["pctOfMax"], r["oneShotHit"]["ago"]),
+                         ("Frost Bolt", 90, 0.7))
+        # A small tick, then a 120% killing blow: a one-shot by the killing blow itself.
         r = self.assess([hit(99_600, 100_000, 900_000), hit(99_900, 900_000, 0, overkill=300_000)])
         self.assertEqual(r["deathType"], "oneShot")
+        self.assertNotIn("biggestHit", r)
+        self.assertNotIn("oneShotHit", r)
+        # Live (Chazh, Voidspire pull 66): Melee for 92% of max health, then a Judgment of 81% kills
+        # 0.4s later. The biggest 80%+ hit is named; the killing blow has its own row.
+        r = self.assess([hit(99_600, 920_000, 76_000, ability=1), hit(100_000, 76_000, 0, overkill=734_000)])
+        self.assertEqual(r["deathType"], "oneShot")
+        self.assertNotIn("biggestHit", r)
+        self.assertEqual((r["oneShotHit"]["name"], r["oneShotHit"]["pctOfMax"]), ("Melee", 92))
+        # Two 80%+ hits and the killing blow is the bigger one: nothing more to name.
+        r = self.assess([hit(99_600, 820_000, 176_000, ability=1), hit(100_000, 176_000, 0, overkill=724_000)])
+        self.assertEqual(r["deathType"], "oneShot")
+        self.assertNotIn("oneShotHit", r)
+
+    def test_one_shot_and_burst_need_high_health_within_a_second_and_a_half(self):
+        # Owner's rule (2026-10-08): high health no more than 1.5s before the killing blow.
+        # The press cutoff (REACTION_MS) stays at 1s.
+        self.assertEqual((defensives.BURST_WINDOW_MS, defensives.REACTION_MS), (1_500, 1_000))
+        def at(high_ts):
+            return self.assess([hit(high_ts, 10_000, 900_000), hit(99_500, 200_000, 600_000),
+                                hit(100_000, 600_000, 0, overkill=10_000)])
+        self.assertEqual(at(98_500)["deathType"], "burst")         # exactly 1.5s: inclusive
+        self.assertEqual(at(98_499)["deathType"], "wasLow")
+        r = at(98_800)                                             # 1.2s: a burst now, wasLow under 1s
+        self.assertEqual((r["deathType"], r["burstMs"]), ("burst", 1200))
         self.assertNotIn("biggestHit", r)
         # One big chunk among them: a set-up hit, not rot.
         r = self.assess([hit(96_000, 600_000, 400_000), hit(98_000, 150_000, 250_000),
