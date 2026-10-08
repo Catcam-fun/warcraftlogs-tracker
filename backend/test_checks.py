@@ -5,7 +5,7 @@ from unittest import mock
 from checks.registry import CHECKS, select
 from checks.verdict import PASS, Verdict, exit_code, fail, format_lines, skip
 from checks.__main__ import run_checks
-from checks import source_deaths
+from checks import rules_defensives, source_deaths
 from checks.common import AnalysisError, Run, TableCapped, parse_target, points, raid_week, run_analysis
 
 
@@ -114,6 +114,24 @@ class DeathsCheckTests(unittest.TestCase):
             self.assertEqual((o.status, o.total), ("fail", 2))
         run = self._run([]); run.pulls = []
         self.assertEqual(source_deaths.check(run).status, "skip")
+
+
+class MovedChecksTests(unittest.TestCase):
+    def test_registry_names(self):
+        names = [n for n, _, _ in CHECKS]
+        self.assertTrue({"deaths", "durations", "mitigation", "defensives"} <= set(names))
+
+    def test_defensives_check_reads_talent_entries(self):
+        run = mock.Mock(); run.code = "X"; run.pulls = [{"id": 1, "start_time": 0, "end_time": 9}]
+        run.cat.all = {1: {"talent_entries": [111]}}
+        run.combatants.return_value = [{"sourceID": 1, "fight": 1, "specID": 104, "talentTree": [{"id": 111, "rank": 1}]}]
+        self.assertEqual(rules_defensives.check(run).status, "pass")
+        run.combatants.return_value = [{"sourceID": 1, "fight": 1, "specID": 104, "talentTree": [{"id": 999, "rank": 1}]}]
+        self.assertEqual(rules_defensives.check(run).status, "fail")
+        run.combatants.return_value = []
+        self.assertEqual(rules_defensives.check(run).status, "skip")
+        run.pulls = []
+        self.assertEqual(rules_defensives.check(run).status, "skip")
 
 
 if __name__ == "__main__":
