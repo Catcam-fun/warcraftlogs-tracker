@@ -736,6 +736,10 @@ LETHAL_WINDOW_MS = 15_000
 # react to a hit faster, so a heal can't land between a big hit and a tick that
 # follows it within a second.
 REACTION_MS = 1_000
+# A death is a one-shot or a burst when they were at high health no more than
+# this long before the killing blow (owner's rule, 2026-10-08). Otherwise they
+# had been low for a while (set up, or worn down).
+BURST_WINDOW_MS = 1_500
 # A one-shot: a single hit of at least this share of max health, from high health.
 ONE_SHOT_SHARE = 0.80
 # A hit before the killing blow is named with the death (biggestHit) when it's
@@ -1681,31 +1685,38 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
         together = True if best_all > overkill else (None if unknown(all_comps) else False)
 
     # How they died, from the hits since they were last at high health:
-    #   - one-shot: that was less than a reaction time ago and a single hit took
+    #   - one-shot: that was BURST_WINDOW_MS ago or less and a single hit took
     #     ONE_SHOT_SHARE of their max health or more (Sever);
-    #   - burst: less than a reaction time ago, but no single hit that big
-    #     (several hits at once: no time to react, but not one hit);
+    #   - burst: BURST_WINDOW_MS or less, but no single hit that big
+    #     (several hits at once, not one hit);
     #   - wasLow: they had been below high health for longer.
     high = [p for p in points if p[0] < kb_ts - 0.5 and p[1] >= FULL_HEALTH * p[2]]
     since = high[-1][0] if high else float("-inf")
     if hp_before >= FULL_HEALTH * max_hp:
         since, high = kb_ts - 0.5, high + [(kb_ts - 0.5, hp_before, max_hp)]
     run = [h for h in window if h["timestamp"] > since]
-    quick = bool(high) and kb_ts - since <= REACTION_MS
+    quick = bool(high) and kb_ts - since <= BURST_WINDOW_MS
     one_shot = quick and any(_full_hit(h) >= ONE_SHOT_SHARE * max_hp for h in run)
     death_type = "oneShot" if one_shot else "burst" if quick else "wasLow"
     from_pct = round(100 * high[-1][1] / high[-1][2]) if quick else None
-    # The hit that set the death up: the biggest one since they were last at
-    # high health (before that, healers had already undone it).
-    biggest = max((h for h in window[:kb_index] if h["timestamp"] > since
-                   and _full_hit(h) >= SETUP_HIT_SHARE * max_hp), key=_full_hit, default=None)
-    if one_shot and (biggest is None or _full_hit(biggest) < ONE_SHOT_SHARE * max_hp):
-        biggest = None        # the killing blow was the one hit; nothing smaller set it up
+    # A one-shot's hit: the biggest since they were last at high health. Named
+    # (oneShotHit) only when it isn't the killing blow, which has its own row:
+    # a big hit, then a small one finishing them.
+    one_shot_hit = None
+    if one_shot:
+        top = max(range(len(window)), key=lambda i: (window[i]["timestamp"] > since, _full_hit(window[i])))
+        if top != kb_index and _full_hit(window[top]) > _full_hit(killing):
+            one_shot_hit = window[top]
+    # The hit that set the death up (only when it was neither a one-shot nor a
+    # burst): the biggest one since they were last at high health (before
+    # that, healers had already undone it).
+    biggest = None if quick else max((h for h in window[:kb_index] if h["timestamp"] > since
+                                      and _full_hit(h) >= SETUP_HIT_SHARE * max_hp), key=_full_hit, default=None)
     # Rot: worn down by one raid-wide ability's repeated damage (what the
     # healers have to keep up with; raid_wide_damage.py, measured from Mythic
     # kills), not set up by a single hit. Soaks and mechanics a player walks
     # into are never rot, and neither is a one-shot or a burst (high health
-    # under a second before).
+    # within BURST_WINDOW_MS before).
     by_ability = defaultdict(list)
     for h in run:
         by_ability[h.get("abilityGameID")].append(h)
@@ -1757,6 +1768,15 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
                                           "times": n} for a, (n, _) in sorted(parts.items(), key=lambda x: -x[1][1])]}
     if rot:
         result["rot"] = rot
+    if one_shot_hit is not None:
+        result["oneShotHit"] = {
+            "name": ability_names.get(one_shot_hit.get("abilityGameID"), "Unknown"),
+            "abilityId": one_shot_hit.get("abilityGameID"),
+            "size": _full_hit(one_shot_hit),
+            "pctOfMax": round(100 * _full_hit(one_shot_hit) / max_hp),
+            "school": ability_schools.get(one_shot_hit.get("abilityGameID")),
+            "ago": round((kb_ts - one_shot_hit["timestamp"]) / 1000, 1),
+        }
     if biggest is not None:
         result["biggestHit"] = {
             "name": ability_names.get(biggest.get("abilityGameID"), "Unknown"),

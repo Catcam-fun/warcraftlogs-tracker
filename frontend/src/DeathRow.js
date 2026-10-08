@@ -10,7 +10,9 @@ import { createPortal } from 'react-dom';
        blow, survival.details[name] = {amount, why?, school?, effect?, talents?,
        source?, typical?, pressAgo?} (defensives._explain, assess_survival):
        judged over the seconds before the death (survival.window), with the
-       biggest hit of those seconds in survival.biggestHit.
+       hit that set the death up in survival.biggestHit (only when it was neither
+       a one-shot nor a burst) and, on a one-shot finished by a smaller hit, the
+       hit that took 80%+ in survival.oneShotHit.
      icons:       {defensive name: icon file name} for render.worldofwarcraft.com.
      abilityIcons: {spell ID: icon file name} for killing blows (death.abilityId).
      abilityInfo: {name: {kind, cooldownMs, auraMs, charges, effect, typicalHeal?, description?}}.
@@ -251,7 +253,7 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
     : !s ? (current ? 'no killing blow recorded' : '')
     : instakill ? 'instant kill, with no damage to stop'
     : s.deathType === 'oneShot'
-      ? `one-shot from ${s.fromPct ?? s.hpBeforePct}% · died by ${fmt(s.overkill)}`
+      ? `one-shot${s.oneShotHit ? ` by ${s.oneShotHit.name} (${s.oneShotHit.pctOfMax}%)` : ''} from ${s.fromPct ?? s.hpBeforePct}% · died by ${fmt(s.overkill)}`
     : s.deathType === 'burst' && s.burst
       ? `burst from ${s.fromPct ?? s.hpBeforePct}%: ${s.burst.hits} hits ${s.burst.ms < 50 ? 'at once' : `in ${secsFine(s.burst.ms)}`} · died by ${fmt(s.overkill)}`
       : s.rot
@@ -280,7 +282,12 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
               ))}{s.burst.abilities.length > 3 && ', …'}</span>
               <small>{s.burst.hits} hits, {fmt(s.burst.total)} {s.burst.ms < 50 ? 'at once' : `in ${secsFine(s.burst.ms)}`}</small></span>} />
           )}
-          {s.biggestHit && s.deathType !== 'burst' && (
+          {s.oneShotHit && s.deathType === 'oneShot' && (
+            <Row a="One-shot by" b={<span className="stack">
+              <span><School mask={s.oneShotHit.school}>{s.oneShotHit.name}</School> {fmt(s.oneShotHit.size)} <i>· {s.oneShotHit.pctOfMax}%</i></span>
+              <small>{s.oneShotHit.ago >= 0.1 ? `${s.oneShotHit.ago}s before` : 'same moment'}</small></span>} />
+          )}
+          {s.biggestHit && s.deathType === 'wasLow' && (
             <Row a="Set up by" b={<span className="stack">
               <span><School mask={s.biggestHit.school}>{s.biggestHit.name}</School> {fmt(s.biggestHit.size)} <i>· {s.biggestHit.pctOfMax}%</i></span>
               <small>{s.biggestHit.times > 1
