@@ -6,8 +6,9 @@ from checks.registry import CHECKS, select
 from checks.verdict import PASS, Verdict, exit_code, fail, format_lines, skip
 from checks.rules_counting import counts
 from checks.rules_slots import rank
+from checks.rules_verdicts import violations
 from checks.__main__ import run_checks
-from checks import rules_counting, rules_defensives, rules_slots, source_deaths
+from checks import rules_verdicts, rules_counting, rules_defensives, rules_slots, source_deaths
 from checks.common import AnalysisError, Run, TableCapped, parse_target, points, raid_week, run_analysis
 
 
@@ -198,6 +199,49 @@ class CountingRuleTests(unittest.TestCase):
         result["events"]["Bob"][0].pop("defensives")
         self.assertEqual(rules_counting.check(run).items, ["Bob pull 1 1: death can count but has no defensives"])
         self.assertEqual(rules_counting.check(mock.Mock(result={"meta": {"maxCutoff": 2}, "events": {}})).status, "skip")
+
+
+class VerdictRuleTests(unittest.TestCase):
+    def base(self):
+        return {"available": [{"name": "Barkskin"}], "cooldown": [{"name": "Survival Instincts"}],
+                "healthstone": {"usedAgo": None}, "potion": {"usedAgo": None},
+                "survival": {"deathType": "wasLow", "overkill": 100, "maxHp": 1000, "ignoresImmunity": False,
+                             "wouldSave": {"Barkskin": True}, "details": {"Barkskin": {"amount": 150, "pressAgo": 1.2}}}}
+
+    def test_each_property(self):
+        cat = mock.Mock(); cat.name_to_id = {"Barkskin": 1}; cat.all = {1: {"mitigation": [{"dr": 0.2}]}}
+        self.assertEqual(violations(self.base(), cat), [])
+        d = self.base(); d["survival"]["details"]["Barkskin"]["pressAgo"] = 0.4
+        self.assertEqual(len(violations(d, cat)), 1)
+        d = self.base(); d["survival"]["wouldSave"]["Survival Instincts"] = False
+        self.assertEqual(len(violations(d, cat)), 1)
+        d = self.base(); d["survival"]["details"]["Barkskin"]["amount"] = 50
+        self.assertEqual(len(violations(d, cat)), 1)
+        d = self.base(); d["survival"]["details"]["Barkskin"]["amount"] = 5000
+        self.assertEqual(len(violations(d, cat)), 1)
+        d = self.base(); d["survival"]["deathType"] = "instakill"
+        self.assertEqual(len(violations(d, cat)), 1)
+        d = self.base(); d["survival"]["ignoresImmunity"] = True; cat.all[1]["mitigation"] = [{"immune": True}]
+        self.assertEqual(len(violations(d, cat)), 1)
+
+    def test_check_over_counted_deaths(self):
+        cat = mock.Mock(); cat.name_to_id = {}; cat.all = {}
+        ev = lambda slot, d, wipe=False: {"slot": slot, "inWipe": wipe, "isCheatDeath": False, "fightId": 2,
+                                          "timestamp": slot, "defensives": d}
+        run = mock.Mock(); run.cat = cat
+        run.result = {"meta": {"maxCutoff": 2}, "events": {"Bob": [ev(1, {"available": []}), ev(5, self.bad()),
+                                                                   ev(2, self.bad(), wipe=True)]}}
+        self.assertEqual(rules_verdicts.check(run).status, "skip")
+        run.result["events"]["Bob"][0]["defensives"] = self.base()
+        self.assertEqual(rules_verdicts.check(run).status, "pass")
+        run.result["events"]["Bob"][0]["defensives"] = self.bad()
+        o = rules_verdicts.check(run)
+        self.assertEqual(o.status, "fail")
+        self.assertEqual(o.items, ["Bob pull 2 1: Barkskin: pressed 0.4s before the killing blow (rule: at least 1s)"])
+
+    def bad(self):
+        d = self.base(); d["survival"]["details"]["Barkskin"]["pressAgo"] = 0.4
+        return d
 
 
 if __name__ == "__main__":
