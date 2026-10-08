@@ -38,9 +38,10 @@ def check(run):
     # (Protective Light, Shifting Sands), which alone read as several points of extra reduction.
     # (player, ability, talents, other auras) -> [share of damage that got through, no defensive up]
     base = defaultdict(list)
-    # (player, ability, talents) -> {defensive name: [(share that got through, other auras)]}
+    # (player, ability, talents) -> {defensive name: [(share that got through, other auras, the hit)]}
     shares = defaultdict(lambda: defaultdict(list))
-    sample = {}                            # (player, ability) -> one hit (for school / AoE checks)
+    # Logs from before Midnight never mark AoE hits: there an AoE-only reduction can't be predicted.
+    aoe_known = any(e.get("isAoE") for e in hits)
     for e in hits:
         if e.get("type") != "damage" or e.get("targetID") not in players or not e.get("unmitigatedAmount"):
             continue
@@ -57,7 +58,8 @@ def check(run):
             continue
         # A personal defensive shared onto another class (an Evoker's Obsidian Scales on an ally)
         # is not the catalog's button, and the site never reads it for that player.
-        if which is not None and dr_names[which]["kind"] == "personal"                 and dr_names[which].get("class") != players[e["targetID"]].get("type"):
+        if which is not None and dr_names[which]["kind"] == "personal" \
+                and dr_names[which].get("class") != players[e["targetID"]].get("type"):
             continue
         through = defensives._full_hit(e) / e["unmitigatedAmount"]
         talents = loadout.get((e.get("fight"), e["targetID"]))
@@ -66,27 +68,33 @@ def check(run):
         if which is None:
             base[key + (others,)].append(through)
         else:
-            shares[key][which].append((through, others))
-        sample[key] = e
+            shares[key][which].append((through, others, e))
 
     schools = meta.get("ability_schools", {})
     # (player, defensive) -> [(hits with it, measured, predicted)] per boss ability
     rows = defaultdict(list)
     for (pid, ability, talents), groups in shares.items():
         for name, with_up in groups.items():
-            got = []
-            for through, others in with_up:
-                same = base.get((pid, ability, talents, others), [])
-                if len(same) >= MIN_HITS:
-                    got.append(1 - through / statistics.median(same))
-            if len(got) < MIN_HITS:
-                continue
             comps, _ = defensives._resolve(dr_names[name], dict(talents), {}, spec.get(pid))
-            keep = 1.0
-            for c in comps or []:
-                if c.get("dr") and defensives._school_applies(c.get("school"), sample[(pid, ability, talents)], schools):
-                    keep *= 1 - c["dr"]
-            rows[(pid, name)].append((len(got), statistics.median(got), 1 - keep))
+            # Each hit's own prediction: one ability's hits are not all marked AoE alike.
+            by_predicted = defaultdict(list)
+            for through, others, e in with_up:
+                same = base.get((pid, ability, talents, others), [])
+                if len(same) < MIN_HITS:
+                    continue
+                keep = 1.0
+                for c in comps or []:
+                    applies = defensives._school_applies(c.get("school"), dict(e, aoeKnown=aoe_known), schools)
+                    if c.get("dr") and applies is None:
+                        keep = None
+                        break
+                    if c.get("dr") and applies:
+                        keep *= 1 - c["dr"]
+                if keep is not None:
+                    by_predicted[round(1 - keep, 4)].append(1 - through / statistics.median(same))
+            for predicted, got in by_predicted.items():
+                if len(got) >= MIN_HITS:
+                    rows[(pid, name)].append((len(got), statistics.median(got), predicted))
 
     # Each ability's gap between measured and predicted, weighted by hits:
     # a handful of hits is noisy, a few hundred is not.
