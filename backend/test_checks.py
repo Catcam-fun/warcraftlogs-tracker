@@ -1072,6 +1072,19 @@ class StateTests(unittest.TestCase):
         # The same presses inside one encounter do prove a 120s cooldown.
         self.assertEqual(ability_state(entry, 1, casts, [], ({}, None), 100_000, 740_000, [(100_000, 800_000)])[0], 1)
 
+    def test_a_press_after_a_wipe_carries_into_the_next_pull(self):
+        # Long cooldowns reset when the encounter ends. Divine Shield (300s) pressed at 260s, after pull 3
+        # (150s to 250s) ended and before this pull (from 300s): back at 560s.
+        entry = {"cooldown_ms": 300_000, "charges": 1}
+        encounters = [(150_000, 250_000), (300_000, 500_000)]
+        after_wipe = [{"abilityGameID": 1, "timestamp": 260_000}]
+        self.assertEqual(ability_state(entry, 1, after_wipe, [], ({}, None), 300_000, 400_000, encounters), (0, None))
+        self.assertEqual(ability_state(entry, 1, after_wipe, [], ({}, None), 300_000, 561_000, encounters),
+                         (1, 560_000))
+        # Pressed during pull 3: the wipe at 250s reset it.
+        during = [{"abilityGameID": 1, "timestamp": 200_000}]
+        self.assertEqual(ability_state(entry, 1, during, [], ({}, None), 300_000, 400_000, encounters), (1, None))
+
     def test_each_press_counts_with_its_own_pulls_talents(self):
         # 60s, or 40s with talent entry 7. Pull 1 (from 0) without it, pull 2 (from 100s) with it. A
         # press at 50s in pull 1 is back at 110s, not 90s, even though this pull has the talent.
