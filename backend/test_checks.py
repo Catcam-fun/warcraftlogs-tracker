@@ -7,8 +7,10 @@ from checks.verdict import PASS, Verdict, exit_code, fail, format_lines, skip
 from checks.rules_counting import counts
 from checks.rules_slots import rank
 from checks.rules_verdicts import violations
+from checks.rules_labels import label, death_hits
+from raid_wide_damage import RAID_WIDE
 from checks.__main__ import run_checks
-from checks import rules_verdicts, rules_counting, rules_defensives, rules_slots, source_deaths
+from checks import rules_verdicts, rules_counting, rules_defensives, rules_labels, rules_slots, source_deaths
 from checks.common import AnalysisError, Run, TableCapped, parse_target, points, raid_week, run_analysis
 
 
@@ -257,6 +259,73 @@ class VerdictRuleTests(unittest.TestCase):
     def bad(self):
         d = self.base(); d["survival"]["details"]["Barkskin"]["pressAgo"] = 0.4
         return d
+
+
+class LabelRuleTests(unittest.TestCase):
+    def hit(self, ts, amount, hp_after, aid=1, overkill=0):
+        return {"timestamp": ts, "amount": amount, "overkill": overkill, "absorbed": 0,
+                "hitPoints": hp_after, "maxHitPoints": 1000, "abilityGameID": aid}
+
+    def test_one_shot_burst_and_was_low(self):
+        kb = self.hit(1000, 900, 0, overkill=50)                       # 950 of 1000 from full
+        self.assertEqual(label([self.hit(0, 10, 990), kb], 1)["deathType"], "oneShot")
+        burst = [self.hit(0, 10, 990), self.hit(500, 400, 590), self.hit(990, 590, 0, overkill=10)]
+        self.assertEqual(label(burst, 2)["deathType"], "burst")
+        slow = [self.hit(0, 10, 990), self.hit(500, 400, 590), self.hit(2000, 590, 0, overkill=10)]
+        self.assertEqual(label(slow, 2), {"deathType": "wasLow", "rot": None, "biggestHit": 1})
+
+    def test_rot_needs_a_raid_wide_ability(self):
+        aid = next(iter(RAID_WIDE))
+        hits = [self.hit(0, 10, 990)] + [self.hit(1000 * i, 200, 990 - 200 * i, aid=aid) for i in range(1, 5)] \
+             + [self.hit(6000, 190, 0, aid=aid, overkill=10)]
+        self.assertEqual(label(hits, 5)["rot"], aid)
+        not_wide = [dict(h, abilityGameID=999_999) for h in hits]
+        self.assertEqual(label(not_wide, 5)["rot"], None)
+
+    def test_threshold_edges(self):
+        # "quick" is measured from the last moment at high health (t=0 here) to the killing blow.
+        self.assertEqual(label([self.hit(0, 10, 990), self.hit(600, 790, 200), self.hit(1001, 200, 0, overkill=5)], 2)["deathType"], "wasLow")
+        self.assertEqual(label([self.hit(0, 10, 990), self.hit(600, 790, 200), self.hit(999, 200, 0, overkill=5)], 2)["deathType"], "burst")
+        # One-shot needs a single hit of 80 % of max HP or more (800 of 1000); 799 is burst.
+        self.assertEqual(label([self.hit(0, 10, 990), self.hit(100, 190, 800), self.hit(500, 800, 0)], 2)["deathType"], "oneShot")
+        self.assertEqual(label([self.hit(0, 10, 990), self.hit(100, 191, 799), self.hit(500, 799, 0)], 2)["deathType"], "burst")
+
+    def test_set_up_hit_needs_ten_percent_and_a_burst_has_none(self):
+        small = [self.hit(0, 10, 990), self.hit(2000, 99, 500), self.hit(3000, 500, 0, overkill=1)]
+        self.assertEqual(label(small, 2)["biggestHit"], None)
+        pick = [self.hit(0, 10, 990), self.hit(1500, 100, 700, aid=7), self.hit(2000, 200, 500, aid=8),
+                self.hit(3000, 500, 0, aid=9, overkill=1)]
+        self.assertEqual(label(pick, 3), {"deathType": "wasLow", "rot": None, "biggestHit": 8})
+
+    def test_two_deaths_in_one_pull_use_their_own_hits(self):
+        h = self.hit
+        hits = [h(0, 10, 990), h(100, 500, 0, aid=5, overkill=20),        # first death
+                h(9000, 10, 990), h(9500, 400, 590), h(9900, 590, 0, aid=6, overkill=5)]   # second death
+        got = death_hits(hits, 9900)
+        self.assertEqual([x["timestamp"] for x in got[0]], [9000, 9500, 9900])
+        self.assertEqual(got[1], 2)
+        self.assertEqual(label(*got)["deathType"], "burst")
+        first = death_hits(hits, 100)
+        self.assertEqual([x["timestamp"] for x in first[0]], [0, 100])
+        self.assertIsNone(death_hits([h(0, 10, 990)], 100))
+
+    def test_check_compares_with_the_site(self):
+        h = self.hit
+        hits = [h(0, 10, 990), h(500, 400, 590), h(990, 590, 0, overkill=10)]
+        ev = {"slot": 1, "inWipe": False, "isCheatDeath": False, "fightId": 2, "reportId": "R", "timestamp": 1000,
+              "originalCharacter": "Bob", "defensives": {"survival": {"deathType": "burst"}}}
+        run = mock.Mock()
+        run.counted_deaths.return_value = [ev]
+        run.actor_id.return_value = 7
+        run.fight.return_value = {"start_time": 100000}
+        run.hits_before.return_value = hits
+        self.assertEqual(rules_labels.check(run).status, "pass")
+        run.hits_before.assert_called_with("R", 2, 7, 101000)
+        ev["defensives"]["survival"]["deathType"] = "wasLow"
+        o = rules_labels.check(run)
+        self.assertEqual((o.status, o.items), ("fail", ["Bob pull 2: site wasLow/None/None, rule burst/None/None"]))
+        ev["defensives"]["survival"]["deathType"] = "instakill"
+        self.assertEqual(rules_labels.check(run).status, "skip")
 
 
 if __name__ == "__main__":
