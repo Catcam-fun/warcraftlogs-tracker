@@ -3,6 +3,7 @@ from checks.rules_counting import is_counted
 from checks.verdict import PASS, fail, skip
 
 REACTION_S = 1.0
+HP_TOLERANCE = 0.01      # hpBeforePct is a whole percent
 
 
 def _immune(cat, name):
@@ -40,9 +41,17 @@ def violations(defensives, cat):
             out.append(f"{name}: amount {amount} vs overkill {overkill} but marked saves")
         elif verdict is False and amount > overkill and "why" not in det:
             out.append(f"{name}: amount {amount} vs overkill {overkill} but marked not saves")
-    for name, det in details.items():
-        if (det.get("amount") or 0) > max_hp:
-            out.append(f"{name}: amount above max HP")
+    # Extra health only counts up to what was missing before the killing blow, and the killing
+    # blow itself can be cut by at most its whole size: a reduction on a 30M one-shot saves 9M,
+    # well above max HP, and that is right.
+    kb = (s.get("killingHit") or {}).get("size")
+    if kb is not None and s.get("hpBeforePct") is not None:
+        missing = max_hp * (100 - s["hpBeforePct"]) / 100
+        for name, det in details.items():
+            amount = det.get("amount") or 0
+            if amount > missing + kb + HP_TOLERANCE * max_hp:
+                out.append(f"{name}: amount {amount} above missing health {round(missing)} "
+                           f"plus the killing hit {kb}")
     if s.get("deathType") == "instakill":
         out += [f"{name}: instant kill but marked saves" for name, v in would.items() if v is not False]
     if s.get("ignoresImmunity"):
