@@ -62,17 +62,27 @@ def _killing_event(entry):
 
 
 def health_mismatch(survival, entry):
-    """What differs between the site's health before the killing blow / overkill and WCL's, or None."""
+    """What differs between the site's health before the killing blow / overkill and WCL's, or None.
+
+    The site's "Died by" is the killing blow's overkill, so it is compared with WCL's killing event,
+    not with the entry's own `overkill`: WCL sums every overkill in the death window there, non-fatal
+    ones included (live 2026-10-08, Weavi, Brewmaster: two Stagger ticks overkilled for 662478 and
+    299233 without killing him, and the entry read 3614972 against the killing hit's 2653261).
+    Health before the killing blow can never be above max HP; the site showing more is a mismatch.
+    """
     max_hp = survival["maxHp"]
     site_hp = survival["hpBeforePct"] * max_hp / 100
     out = []
+    if survival["hpBeforePct"] > 100:
+        out.append(f"health before {survival['hpBeforePct']}% of max HP {max_hp} (above 100%)")
     kill = _killing_event(entry)
     if kill is None:
         out.append(f"health before {round(site_hp)} vs wcl none (no killing hit, max {max_hp})")
-    elif abs(kill["amount"] - site_hp) > HP_TOLERANCE * max_hp:
-        out.append(f"health before {round(site_hp)} vs wcl {kill['amount']} (max {max_hp})")
-    if entry.get("overkill") != survival.get("overkill"):
-        out.append(f"overkill site {survival.get('overkill')} vs wcl {entry.get('overkill')}")
+    else:
+        if abs(kill["amount"] - site_hp) > HP_TOLERANCE * max_hp:
+            out.append(f"health before {round(site_hp)} vs wcl {kill['amount']} (max {max_hp})")
+        if (kill.get("overkill") or 0) != (survival.get("overkill") or 0):
+            out.append(f"overkill site {survival.get('overkill')} vs wcl {kill.get('overkill')}")
     return "; ".join(out) if out else None
 
 

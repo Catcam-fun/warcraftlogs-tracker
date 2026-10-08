@@ -46,7 +46,9 @@ def violations(defensives, cat):
     # well above max HP, and that is right.
     kb = (s.get("killingHit") or {}).get("size")
     if kb is not None and s.get("hpBeforePct") is not None:
-        missing = max_hp * (100 - s["hpBeforePct"]) / 100
+        # Never below 0: a site hpBeforePct above 100 (max HP read after the killing blow, Strikepal
+        # live 2026-10-08) is a health mismatch the state check reports, not negative missing health.
+        missing = max(max_hp * (100 - s["hpBeforePct"]) / 100, 0)
         for name, det in details.items():
             amount = det.get("amount") or 0
             if amount > missing + kb + HP_TOLERANCE * max_hp:

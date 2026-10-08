@@ -1,4 +1,20 @@
-"""Source check: the catalog's damage reductions against real hits."""
+"""Source check: the catalog's damage reductions against real hits.
+
+What it can't measure, and leaves out (each verified on live logs, 2026-10-08):
+  - Reductions that sit on the enemy (Fiery Brand cuts the branded enemy's damage done). WCL's
+    unmitigatedAmount already has that cut in it, so the share of a hit that got through shows nothing
+    (Lazelele, Nerub-ar: 0.02 "measured" on 115 hits, all from the branded unit, while the raw size of
+    the same abilities from the branded unit was 30-47% smaller than unbranded).
+  - Reductions that grow with the size of the hit (Dampen Harm: 20% to 50%, "larger attacks being
+    reduced by more" in the game data): the catalog's single value can't be compared with a hit mix.
+  - Stagger ticks (a Brewmaster's own delayed damage): they were reduced when the hit was staggered;
+    defensives up at tick time never change them (Weavi: 246 ticks, through share 0.600 with or without).
+  - A defensive on a spec the catalog doesn't give it to (Bear Form on a Guardian): the site never
+    judges it there.
+Each (player, defensive) is judged by the median of its hits' gaps (measured minus predicted), not the
+mean: a wrong catalog value is off on every ability, while one boss ability with an untracked modifier
+(Sonic Ba-Boom's amplifiers, Entropic Barrage ticks) can pull a mean far off by itself.
+"""
 import statistics
 from collections import defaultdict
 
@@ -8,6 +24,9 @@ from checks.verdict import PASS, fail, skip
 MIN_HITS = 3
 FLAG_AT = 0.03
 MIN_FLAG_HITS = 20            # fewer hits than this are too noisy to flag
+ON_THE_ENEMY = {"Fiery Brand"}        # cuts the enemy's damage done: already inside unmitigatedAmount
+SCALES_WITH_HIT = {"Dampen Harm"}     # 20% to 50% by hit size; the catalog keeps one value
+STAGGER = 124255                      # a Brewmaster's Stagger ticks
 
 
 def check(run):
@@ -29,9 +48,12 @@ def check(run):
     loadout = {(e["fight"], e["sourceID"]): {t["id"]: t.get("rank") or 1 for t in e.get("talentTree") or []
                                              if t["id"] in cat.relevant_talent_entries} for e in combatants}
     spec = {pid: (meta["player_details"].get(pid) or {}).get("spec") for pid in players}
+    # Players swap specs between pulls: each pull's own spec where the log has it.
+    pull_spec = {(e["fight"], e["sourceID"]): defensives.SPEC_NAMES.get(e.get("specID")) for e in combatants}
 
     dr_names = {d["name"]: d for d in cat.all.values()
-                if d["kind"] in ("personal", "external") and any("dr" in c for c in d.get("mitigation") or [])}
+                if d["kind"] in ("personal", "external") and any("dr" in c for c in d.get("mitigation") or [])
+                and d["name"] not in ON_THE_ENEMY | SCALES_WITH_HIT}
     tracked = set(cat.name_to_id)
     # A hit with the defensive up is compared only with hits carrying the same other auras:
     # players press defensives together with untracked reductions and versatility buffs
@@ -47,6 +69,8 @@ def check(run):
             continue
         if not e.get("mitigated"):
             continue                       # ignored reductions entirely
+        if e.get("abilityGameID") == STAGGER:
+            continue                       # reduced when the hit was staggered, never at tick time
         if e.get("blocked"):
             continue                       # a block takes a random cut that _full_hit doesn't add back
         auras = {names.get(a) for a in defensives._auras(e)}
@@ -61,6 +85,12 @@ def check(run):
         if which is not None and dr_names[which]["kind"] == "personal" \
                 and dr_names[which].get("class") != players[e["targetID"]].get("type"):
             continue
+        # A defensive the catalog gives only to other specs (Bear Form on a Guardian, whose form it is):
+        # the site never judges it for this player.
+        who_spec = pull_spec.get((e.get("fight"), e["targetID"])) or spec.get(e["targetID"])
+        if which is not None and dr_names[which].get("specs") and who_spec \
+                and who_spec not in dr_names[which]["specs"]:
+            continue
         through = defensives._full_hit(e) / e["unmitigatedAmount"]
         talents = loadout.get((e.get("fight"), e["targetID"]))
         key = (e["targetID"], e.get("abilityGameID"), tuple(sorted((talents or {}).items())))
@@ -71,7 +101,7 @@ def check(run):
             shares[key][which].append((through, others, e))
 
     schools = meta.get("ability_schools", {})
-    # (player, defensive) -> [(hits with it, measured, predicted)] per boss ability
+    # (player, defensive) -> [(measured, predicted)] per hit, from boss abilities with MIN_HITS or more
     rows = defaultdict(list)
     for (pid, ability, talents), groups in shares.items():
         for name, with_up in groups.items():
@@ -94,18 +124,18 @@ def check(run):
                     by_predicted[round(1 - keep, 4)].append(1 - through / statistics.median(same))
             for predicted, got in by_predicted.items():
                 if len(got) >= MIN_HITS:
-                    rows[(pid, name)].append((len(got), statistics.median(got), predicted))
+                    rows[(pid, name)] += [(m, predicted) for m in got]
 
-    # Each ability's gap between measured and predicted, weighted by hits:
-    # a handful of hits is noisy, a few hundred is not.
+    # The median gap between measured and predicted over every hit: a wrong catalog value shows on
+    # every ability, while one boss ability with an untracked modifier doesn't move the median.
     items, measured = [], 0
     for (pid, name), per in sorted(rows.items(), key=lambda kv: (kv[0][1], players[kv[0][0]]["name"])):
-        n = sum(h for h, _, _ in per)
+        n = len(per)
         if n < MIN_FLAG_HITS:
             continue
         measured += 1
-        real = sum(h * m for h, m, _ in per) / n
-        predicted = sum(h * p for h, _, p in per) / n
+        predicted = sum(p for _, p in per) / n
+        real = predicted + statistics.median(m - p for m, p in per)
         if abs(real - predicted) > FLAG_AT:
             items.append(f"{players[pid]['name']} {name}: measured {real:.2f}, catalog {predicted:.2f} over {n} hits")
     if not measured:
