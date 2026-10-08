@@ -12,6 +12,9 @@ NOT_THE_BUTTON = {374349}
 # Presses that add time to a running aura without logging a refresh: with Smoke
 # Screen, Exhilaration adds 3s to an active Survival of the Fittest.
 EXTENDED_BY = {"Survival of the Fittest": "Exhilaration"}
+# Auras the spec extends mid-fight by playing (the owner's rule: Dancing Rune Weapon and
+# Metamorphosis can read longer without affecting verdicts), so a longer use is not a missing talent.
+EXTENDED_MID_FIGHT = {"Dancing Rune Weapon", "Metamorphosis"}
 
 
 def carried_over(presses, want):
@@ -71,7 +74,7 @@ def check(run):
                 r["exact"] += 1
             elif got < want:
                 r["early"] += 1
-            elif any(m.get("mastery") and defensives._mod_rank(m, talents, spec)
+            elif name in EXTENDED_MID_FIGHT or any(m.get("mastery") and defensives._mod_rank(m, talents, spec)
                      for m in entry["duration_mods"]) or \
                     any(presses[-1] < t < e["timestamp"] for t in casts[(pid, EXTENDED_BY.get(name))]):
                 r["extended"] += 1

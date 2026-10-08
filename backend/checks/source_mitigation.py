@@ -33,7 +33,12 @@ def check(run):
     dr_names = {d["name"]: d for d in cat.all.values()
                 if d["kind"] in ("personal", "external") and any("dr" in c for c in d.get("mitigation") or [])}
     tracked = set(cat.name_to_id)
-    # (player, ability) -> {defensive name or None: [share of damage that got through]}
+    # A hit with the defensive up is compared only with hits carrying the same other auras:
+    # players press defensives together with untracked reductions and versatility buffs
+    # (Protective Light, Shifting Sands), which alone read as several points of extra reduction.
+    # (player, ability, talents, other auras) -> [share of damage that got through, no defensive up]
+    base = defaultdict(list)
+    # (player, ability, talents) -> {defensive name: [(share that got through, other auras)]}
     shares = defaultdict(lambda: defaultdict(list))
     sample = {}                            # (player, ability) -> one hit (for school / AoE checks)
     for e in hits:
@@ -41,34 +46,47 @@ def check(run):
             continue
         if not e.get("mitigated"):
             continue                       # ignored reductions entirely
-        up = {names.get(a) for a in defensives._auras(e)} & tracked
+        if e.get("blocked"):
+            continue                       # a block takes a random cut that _full_hit doesn't add back
+        auras = {names.get(a) for a in defensives._auras(e)}
+        up = auras & tracked
         if len(up) > 1:
             continue
         which = next(iter(up), None)
         if which is not None and which not in dr_names:
             continue
+        # A personal defensive shared onto another class (an Evoker's Obsidian Scales on an ally)
+        # is not the catalog's button, and the site never reads it for that player.
+        if which is not None and dr_names[which]["kind"] == "personal"                 and dr_names[which].get("class") != players[e["targetID"]].get("type"):
+            continue
         through = defensives._full_hit(e) / e["unmitigatedAmount"]
         talents = loadout.get((e.get("fight"), e["targetID"]))
         key = (e["targetID"], e.get("abilityGameID"), tuple(sorted((talents or {}).items())))
-        shares[key][which].append(through)
+        others = frozenset(auras - {which})
+        if which is None:
+            base[key + (others,)].append(through)
+        else:
+            shares[key][which].append((through, others))
         sample[key] = e
 
     schools = meta.get("ability_schools", {})
     # (player, defensive) -> [(hits with it, measured, predicted)] per boss ability
     rows = defaultdict(list)
     for (pid, ability, talents), groups in shares.items():
-        base = groups.get(None, [])
-        if len(base) < MIN_HITS:
-            continue
-        for name, got in groups.items():
-            if not name or len(got) < MIN_HITS:
+        for name, with_up in groups.items():
+            got = []
+            for through, others in with_up:
+                same = base.get((pid, ability, talents, others), [])
+                if len(same) >= MIN_HITS:
+                    got.append(1 - through / statistics.median(same))
+            if len(got) < MIN_HITS:
                 continue
             comps, _ = defensives._resolve(dr_names[name], dict(talents), {}, spec.get(pid))
             keep = 1.0
             for c in comps or []:
                 if c.get("dr") and defensives._school_applies(c.get("school"), sample[(pid, ability, talents)], schools):
                     keep *= 1 - c["dr"]
-            rows[(pid, name)].append((len(got), 1 - statistics.median(got) / statistics.median(base), 1 - keep))
+            rows[(pid, name)].append((len(got), statistics.median(got), 1 - keep))
 
     # Each ability's gap between measured and predicted, weighted by hits:
     # a handful of hits is noisy, a few hundred is not.

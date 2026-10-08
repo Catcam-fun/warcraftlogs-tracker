@@ -158,8 +158,10 @@ class Run:
         raise KeyError(f"fight {fid} not in report {rid}")
 
     def _table(self, rid, fid, data_type, pid=None):
+        # For a Buffs table, sourceID is the unit that has the auras; targetID would give the
+        # auras that unit cast (verified live: targetID drops Rallying Cry and Bloodlust on the player).
         decl = "$c: String!, $f: [Int]" + (", $p: Int" if pid is not None else "")
-        extra = ", targetID: $p" if pid is not None else ""
+        extra = ", sourceID: $p" if pid is not None else ""
         q = (f"query({decl}) {{ reportData {{ report(code: $c) {{ "
              f"t: table(dataType: {data_type}, fightIDs: $f{extra}) }} }} }}")
         variables = {"c": rid, "f": [fid]}
