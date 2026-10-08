@@ -60,7 +60,7 @@ export function DefensiveSummaryChip({ s }) {
         {s.preventable}/{s.assessed} preventable
       </span>
       {s.oneShots > 0 && (
-        <span className="fpx-pdef neutral" title="Killed by a single hit from 85%+ health, or instantly by a mechanic">
+        <span className="fpx-pdef neutral" title="A single hit of 80%+ of max health from high health, within 1.5 seconds of death, or an instant kill by a mechanic">
           {s.oneShots} one-shot{s.oneShots !== 1 ? 's' : ''}
         </span>
       )}
