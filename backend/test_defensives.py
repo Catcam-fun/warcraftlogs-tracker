@@ -753,7 +753,8 @@ class LethalWindowTests(unittest.TestCase):
             return self.assess([hit(high_ts, 10_000, 900_000), hit(99_500, 200_000, 600_000),
                                 hit(100_000, 600_000, 0, overkill=10_000)])
         self.assertEqual(at(98_500)["deathType"], "burst")         # exactly 1.5s: inclusive
-        self.assertEqual(at(98_499)["deathType"], "wasLow")
+        self.assertEqual(at(98_501)["deathType"], "burst")         # 1.499s
+        self.assertEqual(at(98_499)["deathType"], "wasLow")        # 1.501s
         r = at(98_800)                                             # 1.2s: a burst now, wasLow under 1s
         self.assertEqual((r["deathType"], r["burstMs"]), ("burst", 1200))
         self.assertNotIn("biggestHit", r)
