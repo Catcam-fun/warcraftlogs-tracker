@@ -150,34 +150,37 @@ def ability_state(entry, sid, casts, loadouts, this_pull, fight_start, at, encou
     """(charges left at `at`, when a charge last came back after none were left; None if it never ran
     out) for one catalog ability, from the player's WCL casts.
 
-    - A long cooldown (base ENCOUNTER_RESET_MS or more) resets when the encounter starts: only presses
-      since the pull started count, with this pull's talents (`this_pull` = (talents, spec)).
-    - A shorter one counts every press of the report. Each press uses the loadout of the latest KEPT
-      pull that had started by then (a press in an unkept pull or between pulls: the previous kept
-      pull's), else the first kept pull's (talents change only out of combat).
+    - A long cooldown (base ENCOUNTER_RESET_MS or more) resets when a boss encounter ends, wipe or
+      kill (`encounters`: [(start, end)] of every boss encounter in the report, kept or not): only
+      presses since the last encounter that ended before this pull count, so a press between pulls
+      carries into this one. Without encounters: presses since this pull started.
+    - A shorter one counts every press of the report.
+    - Each press uses the loadout of the latest KEPT pull that had started by then (a press in an
+      unkept pull or between pulls: the previous kept pull's), else the first kept pull's (talents
+      change only out of combat); without any, this pull's (`this_pull` = (talents, spec)).
     - Each press spends a charge; charges return one at a time, one cooldown after the previous one
       returned or after the spend that started the recharge.
     - A cast of a spell in the entry's reset_by gives back every charge ("all") or one ("one").
     - A one-charge press repeated sooner than its cooldown (that press's own loadout), with no reset
-      cast in between and, for a long cooldown, no boss encounter start or end in between
-      (`encounters`: [(start, end)] of every boss encounter in the report): the shortest such gap is
+      cast in between and, for a long cooldown, no boss encounter end in between (without encounters:
+      no start of this pull): the shortest such gap is
       taken as the cooldown (reduction the catalog can't see).
     """
     long = entry["cooldown_ms"] >= ENCOUNTER_RESET_MS
 
-    def talents_at(t, own_pull=None):
-        if (long if own_pull is None else not own_pull) or not loadouts:
+    def talents_at(t):
+        if not loadouts:
             return this_pull
         started = [lo for lo in loadouts if lo[0] <= t]
         start, talents, spec = started[-1] if started else loadouts[0]
         return talents, spec or this_pull[1]
 
-    def cooldown(t, own_pull=None):
-        talents, spec = talents_at(t, own_pull)
+    def cooldown(t):
+        talents, spec = talents_at(t)
         return defensives._talented_cooldown(entry, talents, spec)
 
-    def most(t, own_pull=None):
-        talents, spec = talents_at(t, own_pull)
+    def most(t):
+        talents, spec = talents_at(t)
         return defensives._talented_charges(entry, talents, spec)
 
     gives = {r["spell"]: r["restores"] for r in entry.get("reset_by") or ()}
@@ -186,18 +189,23 @@ def ability_state(entry, sid, casts, loadouts, this_pull, fight_start, at, encou
                          if e.get("abilityGameID") in gives)
     walls = [r for r, _ in reset_casts]
     if long:
-        walls += [t for start, end in encounters for t in (start, end)] + [fight_start]
+        walls += [end for _, end in encounters] if encounters else [fight_start]
     shortest = None
     for a, b in zip(presses, presses[1:]):
-        if any(a < w <= b for w in walls) or most(a, True) != 1:
+        if any(a < w <= b for w in walls) or most(a) != 1:
             continue
-        if b - a < cooldown(a, True) - CDR_TOLERANCE_MS:
+        if b - a < cooldown(a) - CDR_TOLERANCE_MS:
             shortest = b - a if shortest is None else min(shortest, b - a)
 
     def recharge(t):
         return cooldown(t) if shortest is None else min(cooldown(t), shortest)
 
-    first = fight_start if long else 0
+    if not long:
+        first = 0
+    elif encounters:
+        first = max([end for _, end in encounters if end <= fight_start], default=0)
+    else:
+        first = fight_start
     timeline = [(t, "press") for t in presses if first <= t <= at] + \
                [(t, how) for t, how in reset_casts if first <= t <= at]
     timeline.sort(key=lambda x: (x[0], x[1] == "press"))   # a reset logged with a press came first
