@@ -184,11 +184,11 @@ class Run:
         return self._memo(("buffs", rid, fid, pid),
                           lambda: self._table(rid, fid, "Buffs", pid).get("auras") or [])
 
-    def _events(self, rid, data_type, who, pid, start, end, fight_ids=None):
+    def _events(self, rid, data_type, who, pid, start, end, fight_ids=None, resources=False):
         events, cursor = [], start
         for _ in range(50):
             decl = "$c: String!, $p: Int, $s: Float, $e: Float" + (", $f: [Int]" if fight_ids else "")
-            fargs = ", fightIDs: $f" if fight_ids else ""
+            fargs = (", fightIDs: $f" if fight_ids else "") + (", includeResources: true" if resources else "")
             q = (f"query({decl}) {{ reportData {{ report(code: $c) {{ events(dataType: {data_type}, "
                  f"{who}: $p, startTime: $s, endTime: $e{fargs}, limit: 10000) "
                  f"{{ data nextPageTimestamp }} }} }} }}")
@@ -207,8 +207,11 @@ class Run:
                           lambda: self._events(rid, "Casts", "sourceID", pid, start, end))
 
     def hits_before(self, rid, fid, pid, death_ts):
+        # For DamageTaken, sourceID is the unit that took the damage; targetID returns only the hits
+        # the player dealt to themselves (verified live: 13 self-hits instead of 41).
         return self._memo(("hits", rid, fid, pid, death_ts), lambda: self._events(
-            rid, "DamageTaken", "targetID", pid, death_ts - LETHAL_WINDOW_MS, death_ts + 50, fight_ids=[fid]))
+            rid, "DamageTaken", "sourceID", pid, death_ts - LETHAL_WINDOW_MS, death_ts + 50, fight_ids=[fid],
+            resources=True))         # hitPoints / maxHitPoints, which the labels read
 
     def combatants(self, rid, fid):
         def make():

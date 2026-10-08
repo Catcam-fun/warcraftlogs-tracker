@@ -60,14 +60,15 @@ def check(run):
         lookup = {}
         for x, r in zip(entries, ranked):
             lookup.setdefault((x["id"], x["timestamp"]), []).append(r)
-        for e in evs:
+        # A player WCL lists twice on one millisecond died twice: each site death takes the next one.
+        for e in sorted(evs, key=lambda e: (e["timestamp"], e.get("slot") or 0)):
             ts = e["timestamp"] + start
             who = e.get("originalCharacter")
             cands = lookup.get((run.actor_id(rid, who), ts))
             if not cands:
                 items.append(f"pull {fid} {who} {e['timestamp']}: not in WCL's Deaths table")
                 continue
-            slot, wipe = cands[0]
+            slot, wipe = cands.pop(0)
             if slot != e.get("slot") or bool(wipe) != bool(e.get("inWipe")):
                 items.append(f"pull {fid} {who} {e['timestamp']}: site slot {e.get('slot')} "
                              f"inWipe {bool(e.get('inWipe'))}, rule slot {slot} inWipe {wipe}")
