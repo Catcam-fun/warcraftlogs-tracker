@@ -2,8 +2,8 @@
 
 The ready / on-cooldown recompute mirrors the site's cooldown-reduction inference (a one-charge
 ability pressed again sooner than its cooldown takes the shortest gap as its cooldown) and its
-lookback rule (long cooldowns reset when the encounter starts). It therefore validates the casts
-data the site read, not those heuristics themselves.
+encounter reset (long cooldowns reset when the encounter starts; short ones keep the report's whole
+cast history). It therefore validates the casts data the site read, not those heuristics themselves.
 """
 import defensives
 from checks.common import TableCapped
@@ -154,11 +154,12 @@ def report_casts(run, rid, fid, pid):
     return [e for e in run.casts(rid, pid, *report_span(run, rid, fid)) if e.get("type", "cast") == "cast"]
 
 
-def cooldown_window(entry, sid, casts, talents, spec, fight_start, at, history=False):
+def cooldown_window(entry, sid, casts, talents, spec, fight_start, at):
     """(the cast times that decide readiness at `at`, cooldown, charges) for one catalog ability,
-    with the pull's talents and spec. With `history`, a short cooldown keeps every earlier cast of
-    the report instead of only the last cooldown x charges: enough to say whether it is ready, not
-    when it became ready (a press 65s before on a 60s cooldown made it ready only 5s before)."""
+    with the pull's talents and spec. A long cooldown resets when the encounter starts; a short one
+    keeps every earlier cast of the report: charges come back one at a time from the first spend,
+    and the cast that put a one-charge ability on cooldown is more than one cooldown back once it
+    is ready again (a press 65s before on a 60s cooldown made it ready only 5s before)."""
     cd = defensives._talented_cooldown(entry, talents, spec)
     charges = defensives._talented_charges(entry, talents, spec)
     times = sorted(e["timestamp"] for e in casts if e.get("abilityGameID") == sid)
@@ -168,9 +169,8 @@ def cooldown_window(entry, sid, casts, talents, spec, fight_start, at, history=F
         shortest = min(b - a for a, b in zip(times, times[1:]))
         if shortest < cd - CDR_TOLERANCE_MS:
             cd = shortest
-    # Long cooldowns reset when the encounter starts; short ones carry over from before the pull.
-    since = fight_start if entry["cooldown_ms"] >= ENCOUNTER_RESET_MS else 0 if history else at - cd * charges
-    return [t for t in times if max(since, 0) <= t <= at], cd, charges
+    since = fight_start if entry["cooldown_ms"] >= ENCOUNTER_RESET_MS else 0
+    return [t for t in times if since <= t <= at], cd, charges
 
 
 def _ready_items(run, rid, fid, pid, who, ev, fight_start, death_ts):

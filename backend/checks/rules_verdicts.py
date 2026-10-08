@@ -130,7 +130,7 @@ def ready_times(run, ev, rid, fid, pid, fight_start, kb_ts, names):
         if entry is None:
             continue
         times, cd, charges = source_state.cooldown_window(entry, sid, casts, talents, ev.get("spec"),
-                                                          fight_start, kb_ts, history=True)
+                                                          fight_start, kb_ts)
         ok, since = source_state.ready_since(times, kb_ts, cd, charges)
         if ok and since is not None:
             out[name] = since
