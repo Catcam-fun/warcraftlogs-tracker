@@ -1085,6 +1085,24 @@ class StateTests(unittest.TestCase):
         during = [{"abilityGameID": 1, "timestamp": 200_000}]
         self.assertEqual(ability_state(entry, 1, during, [], ({}, None), 300_000, 400_000, encounters), (1, None))
 
+    def test_casts_are_read_back_to_the_last_encounters_end(self):
+        from checks.source_state import report_span
+        run = mock.Mock()
+        run.result = {"pullParticipation": {"Oak": ["R_2"]}}
+        pulls = {1: {"start_time": 100_000, "end_time": 500_000, "boss": 9},
+                 2: {"start_time": 1_000_000, "end_time": 1_200_000, "boss": 9}}
+        run.fight.side_effect = lambda rid, f: pulls[f]
+        run.meta_for.return_value = {"fights": list(pulls.values()) + [{"start_time": 600_000, "end_time": 700_000}]}
+        run.cat.all = {1: {"kind": "personal", "cooldown_ms": 600_000}, 2: {"kind": "potion", "cooldown_ms": 900_000}}
+        # The last boss encounter ended at 500s (the trash fight to 700s doesn't reset anything).
+        self.assertEqual(report_span(run, "R", 2), (500_000, 1_200_000))
+        # Ended longer ago than the longest cooldown (10 min): no further back than that.
+        pulls[1]["end_time"] = 300_000
+        self.assertEqual(report_span(run, "R", 2), (400_000, 1_200_000))
+        # Ended within the last 3 minutes: still 3 minutes back, for short cooldowns.
+        pulls[1]["end_time"] = 900_000
+        self.assertEqual(report_span(run, "R", 2), (820_000, 1_200_000))
+
     def test_each_press_counts_with_its_own_pulls_talents(self):
         # 60s, or 40s with talent entry 7. Pull 1 (from 0) without it, pull 2 (from 100s) with it. A
         # press at 50s in pull 1 is back at 110s, not 90s, even though this pull has the talent.
