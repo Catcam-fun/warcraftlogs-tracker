@@ -389,6 +389,7 @@ AURA_ADD_MOD_LABEL, AURA_PCT_MOD_LABEL = "219", "220"
 AURA_MAX_CHARGES = "411"            # +N charges of a charge category
 AURA_CHARGE_RECOVERY_FLAT = "453"   # +ms to a charge category's recharge
 AURA_CHARGE_RECOVERY_PCT = "454"    # +% to a charge category's recharge
+AURA_CATEGORY_COOLDOWN = "341"      # +ms to a spell category's cooldown (Angel's Mercy on Desperate Prayer)
 AURA_HEALING_TAKEN_PCT = "118"      # healing taken +%
 ALL_SCHOOLS = "127"
 SPELL_ATTR0_PASSIVE = 0x40
@@ -465,8 +466,9 @@ class GameData:
                 self.triggers.setdefault(sid, set()).add(int(r["EffectTriggerSpell"]))
         self.cooldowns = {int(r["SpellID"]): max(int(r["RecoveryTime"]), int(r["CategoryRecoveryTime"]))
                           for r in table("SpellCooldowns", build) if r["DifficultyID"] == "0"}
-        self.charge_cat = {int(r["SpellID"]): int(r["ChargeCategory"])
-                           for r in table("SpellCategories", build) if r["DifficultyID"] == "0"}
+        categories = [r for r in table("SpellCategories", build) if r["DifficultyID"] == "0"]
+        self.charge_cat = {int(r["SpellID"]): int(r["ChargeCategory"]) for r in categories}
+        self.category = {int(r["SpellID"]): int(r["Category"]) for r in categories}
         self.charges = {int(r["ID"]): (int(r["MaxCharges"]), int(r["ChargeRecoveryTime"]))
                         for r in table("SpellCategory", build)}
         self.family = {int(r["SpellID"]): (int(r["SpellClassSet"]),
@@ -635,6 +637,12 @@ class Modifiers:
                     else:
                         mod["add_ms"] = int(value)
                     found.append(mod)
+        category = self.gd.category.get(spell, 0)
+        if category:
+            for r, who in self._source_rows(AURA_CATEGORY_COOLDOWN):
+                if int(r["EffectMiscValue_0"]) == category:
+                    found.append({"talent": self.gd.names.get(int(r["SpellID"])), **who,
+                                  "add_ms": int(float(r["EffectBasePointsF"]))})
         cat = self.gd.charge_cat.get(spell, 0)
         if cat:
             for aura, key in ((AURA_CHARGE_RECOVERY_FLAT, "add_ms"), (AURA_CHARGE_RECOVERY_PCT, "mult")):

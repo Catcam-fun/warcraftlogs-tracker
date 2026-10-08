@@ -993,3 +993,47 @@ class PotionRankTests(unittest.TestCase):
         r = defensives.potion_rank(sid, cat, [(1, sid, 4_500_000, 9_000_000, 1.0, 500)], {}, None)
         self.assertNotIn("rank", r)
         self.assertEqual(r["unknown"], 4.3)
+
+
+class ReadyTimeTests(unittest.TestCase):
+    """A press is credited only once the ability was really back: its ready time comes from every
+    earlier cast of the report, not only those within one cooldown of the death."""
+    BARKSKIN, FIERY_BRAND = 22812, 204021
+
+    def die(self, player_class, spec, casts, death, talents=frozenset(), fight_start=20_000, big_hit_at=None):
+        indexed = {"casts": {1: sorted(casts)}, "talents": {(7, 1): set(talents)}}
+        hits = [hit(big_hit_at or death - 13_000, 400_000, 600_000), hit(death, 600_000, 0, overkill=50_000)]
+        return defensives.analyze_death(1, player_class, spec, 7, fight_start, death, indexed,
+                                        {**NAMES, **{sid: d["name"] for sid, d in CATALOG.items()}}, {},
+                                        hits=hits, ability_schools=SCHOOLS)
+
+    def test_a_cast_older_than_one_cooldown_still_sets_the_ready_time(self):
+        # Barkskin (60s) pressed at 0: back at 60s, 3s before the killing blow at 63s. Pressing it
+        # before the big hit at 59s would have saved more, but it wasn't back yet.
+        r = self.die("Druid", "Balance", [(0, self.BARKSKIN)], 63_000, big_hit_at=59_000)
+        self.assertIn("Barkskin", names(r["available"]))
+        self.assertLessEqual(r["survival"]["details"]["Barkskin"]["pressAgo"], 3.0)
+
+    def test_back_less_than_a_second_before_the_killing_blow_is_too_late(self):
+        r = self.die("Druid", "Balance", [(0, self.BARKSKIN)], 60_500)
+        det = r["survival"]["details"]["Barkskin"]
+        self.assertEqual(det.get("why"), "readyTooLate")
+        self.assertNotIn("pressAgo", det)
+        self.assertFalse(r["survival"]["wouldSave"]["Barkskin"])
+
+    def test_charges_come_back_one_at_a_time_over_every_earlier_cast(self):
+        # Fiery Brand with Down in Flames: 2 charges, 48s each. Spent at 0 and 1s, the first charge is
+        # back at 48s (spent at 49s), the next at 96s (spent at 97s), the next only at 144s.
+        talents = entries(self.FIERY_BRAND) | {112876}
+        casts = [(t, self.FIERY_BRAND) for t in (0, 1_000, 49_000, 97_000)]
+        r = self.die("DemonHunter", "Vengeance", casts, 143_000, talents=talents)
+        self.assertNotIn("Fiery Brand", names(r["available"]))
+        self.assertEqual([(c["readyIn"], c["usedAgo"]) for c in r["cooldown"] if c["name"] == "Fiery Brand"],
+                         [(1, 46)])
+
+    def test_angels_mercy_shortens_desperate_prayer(self):
+        # Angel's Mercy (238100): aura 341, -20000 ms on spell category 671, Desperate Prayer's category.
+        import defensive_catalog
+        for patch, cat in defensive_catalog.CATALOGS.items():
+            mods = cat[19236].get("cooldown_mods") or []
+            self.assertIn(-20000, [m.get("add_ms") for m in mods if m["talent"] == "Angel's Mercy"], patch)

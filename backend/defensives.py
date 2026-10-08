@@ -600,8 +600,12 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
         all_casts = casts_by_spell.get(sid, [])
         charges = _talented_charges(entry, talent_entries, spec)
         recharge = _effective_cooldown(entry, all_casts, _talented_cooldown(entry, talent_entries, spec), charges)
-        lookback = fight_start if entry["cooldown_ms"] >= ENCOUNTER_RESET_MS else death_ts - recharge * charges
-        window = [t for t in all_casts if max(lookback, 0) <= t <= death_ts]
+        # Long cooldowns reset when the encounter starts. Short ones carry over, and charges come
+        # back one at a time from the first spend, so every earlier cast in the report counts:
+        # the cast that put a one-charge ability on cooldown is always more than one cooldown back
+        # when it is ready again, and it decides when it came back.
+        lookback = fight_start if entry["cooldown_ms"] >= ENCOUNTER_RESET_MS else 0
+        window = [t for t in all_casts if lookback <= t <= death_ts]
         left, ready_in = _charges_at(death_ts, window, charges, recharge)
         if left > 0:
             result["available"].append({"name": name, "major": entry["major"]})

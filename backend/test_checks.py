@@ -1025,6 +1025,19 @@ class StateTests(unittest.TestCase):
         self.assertEqual(ready_since([10], 100, 60, 2), (True, None))
         self.assertEqual(ready_since([10, 20], 100, 60, 2), (True, 70))
 
+    def test_short_cooldowns_keep_every_earlier_cast(self):
+        # Fiery Brand with Down in Flames (2 charges, 48s): spent at 0 and 1s, back at 48s and spent at
+        # 49s, back at 96s and spent at 97s; at 143s none is left (next back at 144s). A lookback of
+        # cooldown x charges (from 47s) would drop the first two casts and call it ready.
+        from checks.source_state import cooldown_window, ready_at
+        from defensive_catalog import CATALOG
+        entry = CATALOG[204021]
+        talents = {e: 1 for e in entry["talent_entries"]} | {112876: 1}
+        casts = [{"abilityGameID": 204021, "timestamp": t} for t in (0, 1_000, 49_000, 97_000)]
+        times, cd, charges = cooldown_window(entry, 204021, casts, talents, "Vengeance", 20_000, 143_000)
+        self.assertEqual((times, cd, charges), ([0, 1_000, 49_000, 97_000], 48_000, 2))
+        self.assertFalse(ready_at(times, 143_000, cd, charges))
+
     def test_health_mismatch_uses_the_killing_event(self):
         s = {"hpBeforePct": 40, "maxHp": 1000, "overkill": 55}
         entry = {"overkill": 55, "events": [{"type": "damage", "amount": 300, "overkill": 0}, {"type": "damage", "amount": 405, "overkill": 55}]}
