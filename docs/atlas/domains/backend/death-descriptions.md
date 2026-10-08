@@ -31,7 +31,7 @@ anchors:
   raid_wide_share: "backend/scripts/build_raid_wide.py:29"
   text_for: "backend/boss_spell_text.py:7853"
   ability_text: "backend/app.py:658"
-  death_row_ctx: "frontend/src/DeathRow.js:251"
+  death_row_ctx: "frontend/src/DeathRow.js:253"
 links:
   - backend-defensive-analysis
   - backend-death-counting
@@ -39,7 +39,7 @@ links:
   - warcraftlogs
   - frontend-results-view
   - feat-results
-content_hash: sha256:20729097e36f7da520cad43c76540df680939b0dd661e50bd97956ea0b078f17
+content_hash: sha256:9e300c3d09ff58954197c4b25d92554e207b0e4eb5283426eb70e28a637da1c6
 ---
 ## Summary
 
@@ -59,7 +59,7 @@ The classification reads the health line built from the hits in the lethal windo
 - title: Was it quick? | short: Quick? | sub: within 1.5 seconds
   body: quick is true when a high point exists and the killing blow came no more than BURST_WINDOW_MS (1500 ms) after it, inclusive (backend/defensives.py:1698). The owner set this description window to 1.5 s on 2026-10-08. It is separate from REACTION_MS (1000 ms), which stays the press cutoff in the replay.
 - title: One-shot or burst | short: One-shot / burst | sub: one hit of 80% or not
-  body: If quick and any single hit in run was at least ONE_SHOT_SHARE (0.80) of max health, deathType is oneShot; if quick without such a hit, burst; otherwise wasLow (backend/defensives.py:1699). Hit size is the whole hit, amount plus overkill plus absorbed (_full_hit, backend/defensives.py:1200). For quick deaths fromPct and burstMs record where they fell from and how fast (backend/defensives.py:1757).
+  body: If quick and any single hit in run was at least ONE_SHOT_SHARE (0.80) of max health, deathType is oneShot; if quick without such a hit, burst; otherwise wasLow (backend/defensives.py:1700). Hit size is the whole hit, amount plus overkill plus absorbed (_full_hit, backend/defensives.py:1200). For quick deaths fromPct and burstMs record where they fell from and how fast (backend/defensives.py:1757).
 - title: Name the one-shot hit | short: One-shot hit | sub: when a smaller hit finished them
   body: On a one-shot, oneShotHit is the biggest hit since they were last high, sent only when it is not the killing blow and is bigger than it (backend/defensives.py:1705, backend/defensives.py:1772). Live examples, 2026-10-08: Ravenous Feast for 104% of max health left Fisor at 3,468 health and Toxic Fumes finished him 0.7 s later (Midnight S2); Voidwarding for 92% then a 10% Gamma Burst (Blueprint, Manaforge); boss Melee for 92% then an 81% Judgment (Chazh, Voidspire), where both hits were 80%+ and the bigger one is named.
   gotcha: This is not the set-up hit. "Set up by" is only for deaths that were neither a one-shot nor a burst.
@@ -74,7 +74,7 @@ The classification reads the health line built from the hits in the lethal windo
 
 #### How the page phrases it
 
-The backend sends data, not sentences. `frontend/src/DeathRow.js:251` turns it into the one-line context, checked in this order:
+The backend sends data, not sentences. `frontend/src/DeathRow.js:253` turns it into the one-line context, checked in this order:
 
 - `instakill`: "instant kill, with no damage to stop".
 - `oneShot`: "one-shot from N%", or "one-shot by <ability> (P%) from N%" when `oneShotHit` is present.
@@ -83,7 +83,7 @@ The backend sends data, not sentences. `frontend/src/DeathRow.js:251` turns it i
 - `biggestHit` present: "at N% after <ability> ×K" or "(P%, Ts before)".
 - otherwise: "at N%, hit for P%".
 
-The killing-blow tooltip (`frontend/src/DeathRow.js:265`) shows rows for Killing blow, Worn down by, Burst, One-shot by (`frontend/src/DeathRow.js:285`) and Set up by. Set up by shows only on `wasLow` deaths (`frontend/src/DeathRow.js:290`), so older saved results that still carry a biggestHit on a one-shot or burst never show it.
+The killing-blow tooltip (`frontend/src/DeathRow.js:267`) shows rows for Killing blow, Worn down by, Burst, One-shot by (`frontend/src/DeathRow.js:287`) and Set up by. Set up by shows only on `wasLow` deaths (`frontend/src/DeathRow.js:292`), so a biggestHit that older saved results still carry on a burst never shows; on a one-shot it is shown as "One-shot by" when there is no oneShotHit (`frontend/src/DeathRow.js:252`).
 
 #### Killing-blow tooltip text
 
@@ -143,7 +143,7 @@ relied-on-by: [[feat-results]] — the death breakdown officers read
 
 ## Gotchas
 
-- **wasLow is not shown as a word**: the backend's third type is `wasLow`; the page says "worn down by", "at N% after" or "at N%, hit for" depending on which of `rot` and `biggestHit` is present (`frontend/src/DeathRow.js:259`).
+- **wasLow is not shown as a word**: the backend's third type is `wasLow`; the page says "worn down by", "at N% after" or "at N%, hit for" depending on which of `rot` and `biggestHit` is present (`frontend/src/DeathRow.js:261`).
 - **Instant kills skip classification**: an `instakill` killing blow returns early with no health data and every button marked as not saving (`backend/defensives.py:1591`).
 - **No survival block, no description**: if the killing blow is missing or has no health of the player's own, `assess_survival` returns `None` and only the killing blow's name is shown (`backend/defensives.py:1608`).
 - **Battle resses cut the window**: `_lethal_hits` drops everything before an earlier death of the same player, so a second death is judged only on the hits after the res (`backend/defensives.py:1528`).

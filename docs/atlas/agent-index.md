@@ -228,7 +228,7 @@
   - raid_wide_share: backend/scripts/build_raid_wide.py:29
   - text_for: backend/boss_spell_text.py:7853
   - ability_text: backend/app.py:658
-  - death_row_ctx: frontend/src/DeathRow.js:251
+  - death_row_ctx: frontend/src/DeathRow.js:253
 - links: backend-defensive-analysis, backend-death-counting, game-data, warcraftlogs, frontend-results-view, feat-results
 
 ## Defensive Analysis
@@ -700,8 +700,8 @@
   - cutoff_select: frontend/src/App.js:1696
   - player_list: frontend/src/App.js:2102
   - death_row: frontend/src/DeathRow.js:237
-  - death_context: frontend/src/DeathRow.js:251
-  - ready_tip: frontend/src/DeathRow.js:316
+  - death_context: frontend/src/DeathRow.js:253
+  - ready_tip: frontend/src/DeathRow.js:318
   - tip: frontend/src/DeathRow.js:200
   - summarize_defensives: frontend/src/DefensivePanel.js:20
   - summary_chip: frontend/src/DefensivePanel.js:43

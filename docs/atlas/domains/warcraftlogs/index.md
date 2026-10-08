@@ -42,7 +42,7 @@ invariants:
   - "NEVER: a guild-reports query filters by zoneID; mixed raid and dungeon reports would be dropped."
 flows:
   - request-path
-content_hash: sha256:bafbdef8dbfd8c84fe05223eef372d2671c40dfdaa87013960f8dad2e0c48a1f
+content_hash: sha256:d0c492d3c6a17ad1923f5fd49dc0fdaa4128e46f45606a391df35bcde68b166e
 ---
 ## Summary
 
@@ -77,7 +77,7 @@ One Analyze request walks through the WCL reads below, in the order `generate()`
 - title: Defensive data | short: Defensives | sub: three queries, one at a time
   body: Only when at least one death in the report can count (backend/app.py:382-385). fetch_defensive_raw then runs Casts, Buffs and Healing one after another, reusing the loadouts already read (backend/defensives.py:252-266). Casts and buffs cover the time range from 3 minutes before the first pull; heals are scoped to the boss pulls.
 - title: Hits before deaths | short: Death windows | sub: DamageTaken by name
-  body: For the deaths that can count, fetch_death_windows asks for DamageTaken events filtered by target.name, one block per group of pulls within 15 minutes, many blocks per request (backend/defensives.py:809-848). fetch_instakills adds instant-kill events from the All stream (backend/defensives.py:855-856).
+  body: For the deaths that can count, fetch_death_windows asks for DamageTaken events filtered by target.name, one block per group of pulls within 15 minutes, many blocks per request (backend/defensives.py:809-852). fetch_instakills adds instant-kill events from the All stream (backend/defensives.py:855-860).
 ```
 
 ## Diagram
