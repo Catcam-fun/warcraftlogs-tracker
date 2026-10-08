@@ -376,8 +376,10 @@ class MitigationCheckTests(unittest.TestCase):
         hits = []
         for k in range(25):
             t = k * 20_000
-            # Branded, then the ability ramps: the next tick is unbranded, later ones bigger still.
-            hits += [hit(t, 1000, "207771."), hit(t + 1000, 1700, ""), hit(t + 2000, 1800, ""),
+            # Branded, then the ability ramps: the next tick is unbranded, later ones bigger still. Only the
+            # back-to-back pair (1000 -> 1700) reads 0.41; pairing the branded hit with every unbranded one
+            # within 3 s would add 1000 -> 4000 (0.75) and read a median of 0.58, which fails.
+            hits += [hit(t, 1000, "207771."), hit(t + 1000, 1700, ""), hit(t + 2000, 4000, ""),
                      hit(t + 9000, 3000, "")]
             hits += [hit(t + 500, 1000, "", unit=51), hit(t + 1500, 1000, "", unit=51)]   # another unit
         run = self._wave1_run(entries, friendlies, {207771: "Fiery Brand"}, combatants)
@@ -388,7 +390,7 @@ class MitigationCheckTests(unittest.TestCase):
         run = self._wave1_run(wrong, friendlies, {207771: "Fiery Brand"}, combatants)
         with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
             o = source_mitigation.check(run)
-        self.assertEqual(o.items, ["Laz Fiery Brand: measured 0.41, catalog 0.30 over 25 hits"])
+        self.assertEqual(o.items, ["Laz Fiery Brand: measured 0.41, catalog 0.30 over 25 pairs"])
         # A branded and an unbranded hit more than PAIR_MS apart are not compared: nothing measured.
         apart = [dict(h, timestamp=h["timestamp"] + 5000) if h["buffs"] == "" else h for h in hits]
         with mock.patch.object(source_mitigation.defensives, "_paged", return_value=apart):
@@ -424,12 +426,40 @@ class MitigationCheckTests(unittest.TestCase):
         run = self._wave1_run(wrong, friendlies, {122278: "Dampen Harm"})
         with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
             o = source_mitigation.check(run)
-        self.assertEqual(o.items, ["Weavi Dampen Harm: measured 0.29, catalog 0.36 over 24 hits"])
+        self.assertEqual(o.items, ["Weavi Dampen Harm: measured 0.29, predicted 0.36 (catalog 0.30) over 24 hits"])
         # Without the player's health on the hits, their size can't be put against max health: left out.
         bare = [hit(h["abilityGameID"], h["unmitigatedAmount"], h["amount"], h["buffs"], health=False) for h in hits]
         run = self._wave1_run(entries, friendlies, {122278: "Dampen Harm"})
         with mock.patch.object(source_mitigation.defensives, "_paged", return_value=bare):
             self.assertEqual(source_mitigation.check(run).status, "skip")
+
+    def test_dampen_harm_size_is_after_other_reductions_and_capped_at_half(self):
+        from checks import source_mitigation
+        entries = {122278: {"name": "Dampen Harm", "kind": "personal", "class": "Monk", "mitigation": [{"dr": 0.2}]}}
+        friendlies = [{"id": 2, "name": "Weavi", "type": "Monk"}]
+
+        def hit(ability, raw, through, buffs):
+            return {"type": "damage", "targetID": 2, "abilityGameID": ability, "fight": 1, "unmitigatedAmount": raw,
+                    "mitigated": raw - through, "amount": through, "buffs": buffs,
+                    "resourceActor": 2, "hitPoints": 9_000_000, "maxHitPoints": 10_000_000}
+
+        def status(hits):
+            run = self._wave1_run(entries, friendlies, {122278: "Dampen Harm"})
+            with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
+                return source_mitigation.check(run).status
+        # Heavy other reductions: only 0.5 of the raw 8M gets through, so x = 4M / 10M = 0.4 and the cut is
+        # 0.20 + 0.30 x 0.4 = 0.32. Measuring x on the raw hit (0.8) would predict 0.44 and flag it.
+        raw, usual = 8_000_000, 0.5
+        hits = [hit(3, raw, round(raw * usual), "")] * 5
+        hits += [hit(3, raw, round(raw * usual * (1 - 0.32)), "122278.")] * 25
+        self.assertEqual(status(hits), "pass")
+        # A hit of more than max health (x = 1.14) is capped at the 0.50 reduction, not 0.2 + 0.3 x 1.14 = 0.54.
+        raw, usual = 12_000_000, 0.95
+        hits = [hit(4, raw, round(raw * usual), "")] * 5
+        hits += [hit(4, raw, round(raw * usual * (1 - 0.50)), "122278.")] * 25
+        self.assertEqual(status(hits), "pass")
+        hits = hits[:5] + [hit(4, raw, round(raw * usual * (1 - 0.54)), "122278.")] * 25
+        self.assertEqual(status(hits), "fail")
 
     def test_one_odd_boss_ability_does_not_decide(self):
         # Live 2026-10-08 (Pumps, Undermine): Barkskin read 0.29-0.32 on every ability but Sonic Ba-Boom,
@@ -485,7 +515,7 @@ class MitigationCheckTests(unittest.TestCase):
         run.cat.relevant_talent_entries = {117891}
         with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
             o = source_mitigation.check(run)
-        self.assertEqual(o.items, ["Sunny Icebound Fortitude: measured 0.34, catalog 0.25 over 25 hits"])
+        self.assertEqual(o.items, ["Sunny Icebound Fortitude: measured 0.34, predicted 0.25 (catalog 0.20) over 25 hits"])
         # With the talent but no health on the hits, the reduction can't be predicted: left out.
         run = self._wave1_run(entries, friendlies, {48792: "Icebound Fortitude"}, combatants)
         run.cat.relevant_talent_entries = {117891}
