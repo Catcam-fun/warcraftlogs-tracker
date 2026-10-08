@@ -9,6 +9,7 @@ cooldown). It therefore validates the casts data the site read, not the inferenc
 """
 import defensives
 from checks.common import TableCapped
+from checks.rules_labels import death_hits, run_max_hp_before
 from checks.verdict import PASS, fail, skip
 from defensives import CDR_TOLERANCE_MS, ENCOUNTER_RESET_MS
 
@@ -100,6 +101,19 @@ def health_mismatch(survival, entry):
         if (kill.get("overkill") or 0) != (survival.get("overkill") or 0):
             out.append(f"overkill site {survival.get('overkill')} vs wcl {kill.get('overkill')}")
     return "; ".join(out) if out else None
+
+
+def max_hp_mismatch(survival, wcl_max):
+    """The site's max HP against WCL's just before the killing hit (rules_labels.max_hp_before: the
+    player's last own-health hit before it, with max-health auras that changed in between; never the
+    killing hit's own max, logged after the death stripped their auras), or None when they agree.
+    Compared on its own, so a wrong max shows even when health before stays under 100%."""
+    site = survival.get("maxHp") or 0
+    if not wcl_max:
+        return f"max HP site {site} vs wcl none (no killing hit with the player's health)"
+    if abs(site - wcl_max) > HP_TOLERANCE * wcl_max:
+        return f"max HP site {site} vs wcl {wcl_max} (just before the killing hit)"
+    return None
 
 
 def _talents(run, rid, fid, pid):
@@ -308,4 +322,9 @@ def check(run):
         diff = health_mismatch(survival, entry)
         if diff:
             items += [f"{who} pull {fid}: {part}" for part in diff.split("; ")]
+        got = death_hits(run.hits_before(rid, fid, pid, death_ts), death_ts)
+        wcl_max = run_max_hp_before(run, ev, rid, fid, pid, *got) if got else 0
+        diff = max_hp_mismatch(survival, wcl_max)
+        if diff:
+            items.append(f"{who} pull {fid}: {diff}")
     return fail(items) if items else PASS

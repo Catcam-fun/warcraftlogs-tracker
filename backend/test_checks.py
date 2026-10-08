@@ -11,7 +11,7 @@ from checks.rules_labels import label, death_hits
 from raid_wide_damage import RAID_WIDE
 from checks.__main__ import run_checks
 from checks import rules_verdicts, rules_counting, rules_defensives, rules_labels, rules_slots, source_deaths, source_participation, source_selection, source_state
-from checks.source_state import ability_state, active_mismatches, death_strip, entry_for, health_mismatch
+from checks.source_state import ability_state, active_mismatches, death_strip, entry_for, health_mismatch, max_hp_mismatch
 from checks.source_selection import cluster, walk
 from checks.find_logs import good_log
 from checks.common import AnalysisError, Run, TableCapped, parse_target, points, raid_week, run_analysis
@@ -842,6 +842,14 @@ class LabelRuleTests(unittest.TestCase):
         kb_big = [h(0, 10, 990), h(600, 100, 890, aid=1), h(1000, 890, 0, aid=2, overkill=100)]
         self.assertEqual(label(kb_big, 2)["oneShotHit"], None)
 
+    def test_killing_hits_own_max_is_not_used(self):
+        # WCL logs the killing hit after the death stripped the player's auras: its max is lower than
+        # the max they had (Strikepal live 2026-10-08: 10061382 against 11198315). 800 of a 1000 max is
+        # not high health, though it is 89% of the killing hit's 900.
+        kb = dict(self.hit(3000, 800, 0, overkill=500), maxHitPoints=900)
+        self.assertEqual(rules_labels.max_hp_before([self.hit(0, 200, 800), kb], 1), 1000)
+        self.assertEqual(label([self.hit(0, 200, 800), kb], 1)["deathType"], "wasLow")
+
     def test_check_biggest_hit_only_where_the_page_shows_it(self):
         h = self.hit
         run = mock.Mock()
@@ -1143,6 +1151,52 @@ class StateTests(unittest.TestCase):
         self.assertIsNone(health_mismatch(dict(s, hpBeforePct=100), dict(entry, events=[
             {"type": "damage", "amount": 10061382, "overkill": 4552041}])))
 
+    @staticmethod
+    def own(ts, amount, hp_after, max_hp, overkill=0):
+        return {"type": "damage", "timestamp": ts, "amount": amount, "overkill": overkill, "hitPoints": hp_after,
+                "maxHitPoints": max_hp, "resourceActor": 2}
+
+    def test_max_hp_is_the_last_hit_before_the_killing_blow(self):
+        # Live 2026-10-08 (Strikepal, Nerub-ar pull 16): the death stripped his auras at 1910329-1910332
+        # and the killing hit (1910349) was logged with max 10061382; every hit before had 11198315.
+        hits = [self.own(1908720, 60714, 6243724, 11198315),
+                self.own(1910349, 10531185, 0, 10061382, overkill=4552041)]
+        wcl = rules_labels.max_hp_before(hits, 1)
+        self.assertEqual(wcl, 11198315)
+        self.assertEqual(max_hp_mismatch({"maxHp": 10061382}, wcl),
+                         "max HP site 10061382 vs wcl 11198315 (just before the killing hit)")
+        self.assertIsNone(max_hp_mismatch({"maxHp": 11198315}, wcl))
+        # The same wrong max is caught when health before stays under 100% (Strikepal's earlier death,
+        # 966332: 5285204 health, 47% of 11198315, 53% of the killing hit's 10061382).
+        hits = [self.own(964227, 4669158, 5285204, 11198315), self.own(966332, 5285204, 0, 10061382, overkill=2380362)]
+        self.assertIsNotNone(max_hp_mismatch({"maxHp": 10061382, "hpBeforePct": 53}, rules_labels.max_hp_before(hits, 1)))
+
+    def test_self_damage_carries_the_players_own_health(self):
+        # Live 2026-10-08: on self-damage WCL attaches the source's resources (resourceActor 1), and the
+        # source is the player. Mukod (Nerub-ar p37) died to his own Touch of Death; Lazelator (p18) lost
+        # 2% max health before Betrayal, seen only on his own Set Fire to the Pain at 4970960.
+        own = lambda ts, mx, ra=2, src=157: dict(self.own(ts, 10, 5000, mx), resourceActor=ra, sourceID=src, targetID=15)
+        kb = dict(own(4971815, 7238847, src=-1), amount=7238847, overkill=5933291)
+        hits = [own(4970143, 7383624), own(4970960, 7238847, ra=1, src=15), kb]
+        self.assertEqual(rules_labels.max_hp_before(hits, 2), 7238847)
+        # A hit from someone else with resourceActor 1 carries the attacker's health: not the player's.
+        hits = [own(4970143, 7383624), own(4970960, 7238847, ra=1, src=157), kb]
+        self.assertEqual(rules_labels.max_hp_before(hits, 2), 7383624)
+        tod = dict(own(5270312, 6846180, ra=1, src=15), amount=2821803, overkill=16590365)
+        self.assertEqual(rules_labels.max_hp_before([own(5270275, 6846180), tod], 1), 6846180)
+
+    def test_max_hp_follows_max_health_auras_between_the_last_hit_and_the_killing_hit(self):
+        # Live 2026-10-08 (Soulcleavi, Manaforge pull 54): Last Resort's Metamorphosis (+40%) came up at
+        # 8002680, the death removed it at 8002683, Oblivion was logged at 8002696 with the base max.
+        hits = [self.own(8000138, 900304, 15378866, 29370419),
+                self.own(8002696, 30743644, 0, 29370419, overkill=39340044)]
+        self.assertEqual(rules_labels.max_hp_before(hits, 1, [(8002680, 8002683, 0.4)]), 41118587)
+        # Without the aura, the health it took still bounds max HP from below.
+        self.assertEqual(rules_labels.max_hp_before(hits, 1), 30743644)
+        # A max-health aura that ran out 2 s before the killing hit is gone.
+        hits = [self.own(95_000, 100_000, 900_000, 1_300_000), self.own(100_000, 500_000, 0, 1_000_000, overkill=1)]
+        self.assertEqual(rules_labels.max_hp_before(hits, 1, [(90_000, 98_000, 0.3)]), 1_000_000)
+
     def test_killing_event_is_the_newest_overkill_hit(self):
         s = {"hpBeforePct": 40, "maxHp": 1000, "overkill": 55}
         entry = {"overkill": 55, "events": [{"type": "damage", "amount": 400, "overkill": 55, "timestamp": 900},
@@ -1179,7 +1233,9 @@ class StateTests(unittest.TestCase):
                              "survival": {"hpBeforePct": 40, "maxHp": 1000, "overkill": 55, "deathType": "damage"}}}
         run.counted_deaths.return_value = [ev]
         run.meta_for.return_value = {"abilities": {207771: "Fiery Brand"}, "fights": []}
-        run.hits_before.return_value = []
+        own = {"type": "damage", "resourceActor": 2, "maxHitPoints": 1000}
+        run.hits_before.return_value = [dict(own, timestamp=start + 40_000, amount=10, overkill=0, hitPoints=405),
+                                        dict(own, timestamp=start + 50_000, amount=405, overkill=55, hitPoints=0)]
         run.deaths_table.return_value = [{"id": 7, "timestamp": start + 50_000, "overkill": 55,
                                           "events": [{"type": "damage", "amount": 405, "overkill": 55, "timestamp": start + 50_000}]}]
         return run, ev
@@ -1232,12 +1288,33 @@ class StateTests(unittest.TestCase):
         run, ev = self._run()
         start = 100_000
         ev["defensives"]["active"] = [{"name": "Fiery Brand", "kind": "personal"}]
-        kb = {"type": "damage", "timestamp": start + 50_000, "overkill": 55, "buffs": "207771.1022."}
+        kb = {"type": "damage", "timestamp": start + 50_000, "amount": 405, "overkill": 55, "buffs": "207771.1022.",
+              "hitPoints": 0, "maxHitPoints": 1000, "resourceActor": 2}
         run.hits_before.return_value = [dict(kb, overkill=0, timestamp=start + 40_000, buffs=""), kb]
         self.assertEqual(source_state.check(run).status, "pass")
         run.hits_before.assert_called_with("R", 1, 7, start + 50_000)
         run.hits_before.return_value = [dict(kb, buffs="1022.")]
         self.assertEqual(source_state.check(run).items, ["Oak pull 1: active Fiery Brand has no aura band at death"])
+
+    def test_check_max_hp_against_wcl(self):
+        run, ev = self._run()
+        start = 100_000
+        survival = ev["defensives"]["survival"]
+        # The site took the killing hit's own max (logged after the death): a mismatch.
+        run.hits_before.return_value[-1]["maxHitPoints"] = 900
+        survival.update(maxHp=900, hpBeforePct=45)
+        self.assertIn("Oak pull 1: max HP site 900 vs wcl 1000 (just before the killing hit)", source_state.check(run).items)
+        # A max-health aura (Metamorphosis, +40%) that came up after the last hit: read from the Buffs table.
+        run.cat.all[5] = {"name": "Metamorphosis", "kind": "personal", "cooldown_ms": 180_000, "charges": 1,
+                          "mitigation": [{"hp": 0.4}]}
+        run.buffs.return_value.append({"name": "Metamorphosis", "bands": [{"startTime": start + 49_990,
+                                                                           "endTime": start + 49_995}]})
+        survival.update(maxHp=1400, hpBeforePct=29)
+        self.assertEqual(source_state.check(run).status, "pass")
+        # No killing hit with the player's health in WCL's damage taken.
+        run.hits_before.return_value = []
+        self.assertIn("Oak pull 1: max HP site 1400 vs wcl none (no killing hit with the player's health)",
+                      source_state.check(run).items)
 
     def test_report_with_no_kept_pull_listed_uses_the_deaths_own_pull(self):
         run, _ = self._run()
