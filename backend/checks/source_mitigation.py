@@ -1,16 +1,26 @@
 """Source check: the catalog's damage reductions against real hits.
 
 What it can't measure, and leaves out (each verified on live logs, 2026-10-08):
-  - Reductions that sit on the enemy (Fiery Brand cuts the branded enemy's damage done). WCL's
-    unmitigatedAmount already has that cut in it, so the share of a hit that got through shows nothing
-    (Lazelele, Nerub-ar: 0.02 "measured" on 115 hits, all from the branded unit, while the raw size of
-    the same abilities from the branded unit was 30-47% smaller than unbranded).
-  - Reductions that grow with the size of the hit (Dampen Harm: 20% to 50%, "larger attacks being
-    reduced by more" in the game data): the catalog's single value can't be compared with a hit mix.
   - Stagger ticks (a Brewmaster's own delayed damage): they were reduced when the hit was staggered;
     defensives up at tick time never change them (Weavi: 246 ticks, through share 0.600 with or without).
   - A defensive on a spec the catalog doesn't give it to (Bear Form on a Guardian): the site never
     judges it there.
+A reduction that sits on the enemy (Fiery Brand cuts the branded enemy's damage done) is already inside
+WCL's unmitigatedAmount, so the share of a hit that got through shows nothing (Lazelele, Nerub-ar: 0.02
+on 115 hits). It is measured on the raw size instead: the same enemy unit's same ability, one hit
+branded and the next not (or the other way round), at most PAIR_MS apart, so a boss ability that
+ramps over its cast can't pass for the brand (Liquefy's ticks grow, and players brand at its start: on
+Lazelele, every branded hit against every unbranded one within 30 s read 0.374). Adjacent pairs read 0.400 median on
+both logs tried, deciles 0.35-0.45 (Lazelele, Nerub-ar, 11.0.7: 123 pairs; Lunchay, Undermine, 11.1:
+288 pairs), and hits from other units while a brand was up were not cut (0.00 median, 77 pairs).
+A reduction that grows with the size of the hit (Dampen Harm: "20% to 50% ... larger attacks being
+reduced by more"; game data 122278 has the two numbers as dummy effects and no curve) is predicted hit by
+hit: the catalog's value at no damage, rising in a straight line to SCALES_WITH_HIT's value at a hit of
+the player's whole max health, where x is the hit after the player's other reductions (unmitigated size x
+the matched hits' median share through) over max health, and capped there. Fitted 2026-10-08: Atlai
+(Brewmaster, Undermine) read 0.243/0.245, 0.285/0.285, 0.350/0.350, 0.355/0.355 (measured/rule) up to
+x = 0.57, 81 hits, median residual -0.004; Weavi's Goblin Gun hits at x = 0.61-0.62 read 0.383/0.383 and
+0.387/0.387. A hit without the player's health on it is left out.
 A reduction that grows with missing health (Icebound Fortitude with Bloody Fortitude: up to 20% more
 at no health) is predicted hit by hit from the player's own health on that hit, as the site does; a hit
 without it is left out (Sunnyvi, Quel'Danas, 2026-10-08: Icebound Fortitude read 0.323 at 90%+ health and
@@ -29,7 +39,10 @@ MIN_HITS = 3
 FLAG_AT = 0.03
 MIN_FLAG_HITS = 20            # fewer hits than this are too noisy to flag
 ON_THE_ENEMY = {"Fiery Brand"}        # cuts the enemy's damage done: already inside unmitigatedAmount
-SCALES_WITH_HIT = {"Dampen Harm"}     # 20% to 50% by hit size; the catalog keeps one value
+PAIR_MS = 3000                        # a branded and an unbranded hit this close are compared
+# Reduction at a hit of the player's whole max health (game data 122278 effect 2: 50); the catalog's
+# value is the reduction at no damage (effect 1: 20).
+SCALES_WITH_HIT = {"Dampen Harm": 0.50}
 STAGGER = 124255                      # a Brewmaster's Stagger ticks
 
 
@@ -40,6 +53,75 @@ def missing_share(hit):
         return None
     before = (hit.get("hitPoints") or 0) + (hit.get("amount") or 0)
     return min(max(1 - before / hit["maxHitPoints"], 0.0), 1.0)
+
+
+def predicted_keep(comps, e, aoe_known, schools, top=None, size=None):
+    """Share of hit `e` the components let through, and the group its prediction is judged in:
+    (None, None) when it can't be predicted. `top`, `size`: a reduction that grows with the hit
+    (SCALES_WITH_HIT), from the component's value at no damage to `top` at a hit of max health, at a
+    hit of `size` x max health."""
+    keep, by_hit = 1.0, False
+    for c in comps or []:
+        if not (c.get("dr") or c.get("dr_missing")):
+            continue
+        applies = defensives._school_applies(c.get("school"), dict(e, aoeKnown=aoe_known), schools)
+        if applies is None:
+            return None, None
+        if not applies:
+            continue
+        dr = c.get("dr") or 0
+        if top is not None and c.get("dr"):
+            dr += (top - dr) * min(size, 1.0)
+            by_hit = True
+        if c.get("dr_missing"):
+            missing = missing_share(e)
+            if missing is None:
+                return None, None        # no health on this hit: its reduction can't be predicted
+            dr += c["dr_missing"] * missing
+            by_hit = True
+        keep *= 1 - min(dr, 1.0)
+    # Hits judged by their own health or size each predict a different value: one group.
+    return keep, ("by hit" if by_hit else round(1 - keep, 4))
+
+
+def enemy_side(hits, players, names, cat, loadout, spec, pull_spec, aoe_known, schools):
+    """(player, defensive) -> [(measured, predicted)] for reductions on the enemy (ON_THE_ENEMY).
+
+    WCL lists the brand on a hit only when the hit came from the branded unit. Each pair is two
+    consecutive hits on the player from the same unit (same instance) with the same ability, one listing
+    the defensive and one not, at most PAIR_MS apart; measured = 1 - branded raw / unbranded raw."""
+    entries = {d["name"]: d for d in cat.all.values() if d["name"] in ON_THE_ENEMY}
+    by_unit = defaultdict(list)
+    for e in hits:
+        if e.get("type") != "damage" or e.get("targetID") not in players or not e.get("unmitigatedAmount"):
+            continue
+        if e.get("sourceID") == e.get("targetID"):
+            continue                     # the player's own damage (Stagger ticks) never carries it
+        by_unit[(e["targetID"], e.get("fight"), e.get("sourceID"), e.get("sourceInstance"),
+                 e.get("abilityGameID"))].append(e)
+    out = defaultdict(list)
+    for (pid, fight, _, _, _), seq in by_unit.items():
+        seq.sort(key=lambda e: e.get("timestamp") or 0)
+        on = [entries.keys() & {names.get(a) for a in defensives._auras(e)} for e in seq]
+        for i in range(len(seq) - 1):
+            a, b = seq[i], seq[i + 1]
+            if on[i] == on[i + 1] or len(on[i] | on[i + 1]) != 1:
+                continue
+            if (b.get("timestamp") or 0) - (a.get("timestamp") or 0) > PAIR_MS:
+                continue
+            name = next(iter(on[i] | on[i + 1]))
+            d = entries[name]
+            if d.get("class") != players[pid].get("type"):
+                continue
+            who_spec = pull_spec.get((fight, pid)) or spec.get(pid)
+            if d.get("specs") and who_spec and who_spec not in d["specs"]:
+                continue
+            branded, other = (a, b) if on[i] else (b, a)
+            comps, _ = defensives._resolve(d, dict(loadout.get((fight, pid)) or {}), {}, spec.get(pid))
+            keep, _ = predicted_keep(comps, branded, aoe_known, schools)
+            if keep is not None:
+                out[(pid, name)].append((1 - branded["unmitigatedAmount"] / other["unmitigatedAmount"], 1 - keep))
+    return out
 
 
 def check(run):
@@ -67,7 +149,7 @@ def check(run):
 
     dr_names = {d["name"]: d for d in cat.all.values()
                 if d["kind"] in ("personal", "external") and any("dr" in c for c in d.get("mitigation") or [])
-                and d["name"] not in ON_THE_ENEMY | SCALES_WITH_HIT}
+                and d["name"] not in ON_THE_ENEMY}
     tracked = set(cat.name_to_id)
     # A hit with the defensive up is compared only with hits carrying the same other auras:
     # players press defensives together with untracked reductions and versatility buffs
@@ -126,32 +208,24 @@ def check(run):
                 same = base.get((pid, ability, talents, others), [])
                 if len(same) < MIN_HITS:
                     continue
-                keep, by_health = 1.0, False
-                for c in comps or []:
-                    if not (c.get("dr") or c.get("dr_missing")):
-                        continue
-                    applies = defensives._school_applies(c.get("school"), dict(e, aoeKnown=aoe_known), schools)
-                    if applies is None:
-                        keep = None
-                        break
-                    if not applies:
-                        continue
-                    dr = c.get("dr") or 0
-                    if c.get("dr_missing"):
-                        missing = missing_share(e)
-                        if missing is None:
-                            keep = None      # no health on this hit: its reduction can't be predicted
-                            break
-                        dr += c["dr_missing"] * missing
-                        by_health = True
-                    keep *= 1 - min(dr, 1.0)
+                usual = statistics.median(same)
+                size = None
+                if name in SCALES_WITH_HIT:
+                    if e.get("resourceActor") != 2 or not e.get("maxHitPoints"):
+                        continue             # no max health on this hit: its reduction can't be predicted
+                    # The hit after the player's other reductions, as a share of max health.
+                    size = e["unmitigatedAmount"] * usual / e["maxHitPoints"]
+                keep, group = predicted_keep(comps, e, aoe_known, schools, SCALES_WITH_HIT.get(name), size)
                 if keep is not None:
-                    # Hits judged by their own health each predict a different value: one group.
-                    group = "by health" if by_health else round(1 - keep, 4)
-                    by_predicted[group].append((1 - through / statistics.median(same), 1 - keep))
+                    by_predicted[group].append((1 - through / usual, 1 - keep))
             for got in by_predicted.values():
                 if len(got) >= MIN_HITS:
                     rows[(pid, name)] += got
+
+    # A reduction on the enemy: raw sizes of the same unit's same ability, branded next to unbranded.
+    for (pid, name), got in enemy_side(hits, players, names, cat, loadout, spec, pull_spec,
+                                       aoe_known, schools).items():
+        rows[(pid, name)] += got
 
     # The median gap between measured and predicted over every hit: a wrong catalog value shows on
     # every ability, while one boss ability with an untracked modifier doesn't move the median.

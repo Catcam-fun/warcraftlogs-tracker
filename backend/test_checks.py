@@ -333,27 +333,19 @@ class MitigationCheckTests(unittest.TestCase):
 
     def test_effects_it_cannot_measure_are_left_out(self):
         # Live 2026-10-08 sweep, wave 1: each of these read far from the catalog for a reason that
-        # isn't the catalog's value. Fiery Brand (Lazelele 0.02 vs 0.40) cuts the branded enemy's damage
-        # done, which is already inside unmitigatedAmount; Dampen Harm (Weavi) grows with hit size;
-        # Stagger ticks (Weavi Fortifying Brew 0.15 vs 0.30) are never reduced at tick time; Bear Form
-        # (Zeforus -0.01 vs 0.06) is a Guardian's own form, which the site never judges.
+        # isn't the catalog's value. Stagger ticks (Weavi Fortifying Brew 0.15 vs 0.30) are never reduced
+        # at tick time; Bear Form (Zeforus -0.01 vs 0.06) is a Guardian's own form, which the site never judges.
         from checks import source_mitigation
-        entries = {204021: {"name": "Fiery Brand", "kind": "personal", "class": "DemonHunter",
-                            "mitigation": [{"dr": 0.4}]},
-                   122278: {"name": "Dampen Harm", "kind": "personal", "class": "Monk", "mitigation": [{"dr": 0.2}]},
-                   115203: {"name": "Fortifying Brew", "kind": "personal", "class": "Monk",
+        entries = {115203: {"name": "Fortifying Brew", "kind": "personal", "class": "Monk",
                             "mitigation": [{"dr": 0.3}]},
                    5487: {"name": "Bear Form", "kind": "personal", "class": "Druid",
                           "specs": ["Balance", "Feral", "Restoration"], "mitigation": [{"dr": 0.06}]}}
-        abilities = {204021: "Fiery Brand", 122278: "Dampen Harm", 115203: "Fortifying Brew", 5487: "Bear Form"}
-        friendlies = [{"id": 1, "name": "Laz", "type": "DemonHunter"}, {"id": 2, "name": "Weavi", "type": "Monk"},
-                      {"id": 3, "name": "Zef", "type": "Druid"}]
+        abilities = {115203: "Fortifying Brew", 5487: "Bear Form"}
+        friendlies = [{"id": 2, "name": "Weavi", "type": "Monk"}, {"id": 3, "name": "Zef", "type": "Druid"}]
         hit = lambda who, ability, through, buffs: {"type": "damage", "targetID": who, "abilityGameID": ability,
                                                     "fight": 1, "unmitigatedAmount": 1000, "mitigated": 1000 - through,
                                                     "amount": through, "buffs": buffs}
-        hits = [hit(1, 9, 900, "")] * 10 + [hit(1, 9, 900, "204021.")] * 25        # the cut sits in unmitigated
-        hits += [hit(2, 9, 900, "")] * 10 + [hit(2, 9, 900, "122278.")] * 25        # small hits: little cut
-        hits += [hit(2, 124255, 600, "")] * 10 + [hit(2, 124255, 600, "115203.")] * 25   # Stagger ticks
+        hits = [hit(2, 124255, 600, "")] * 10 + [hit(2, 124255, 600, "115203.")] * 25   # Stagger ticks
         hits += [hit(3, 9, 900, "")] * 10 + [hit(3, 9, 900, "5487.")] * 25
         combatants = [{"fight": 1, "sourceID": 3, "specID": 104, "talentTree": []}]    # 104: Guardian
         run = self._wave1_run(entries, friendlies, abilities, combatants)
@@ -366,6 +358,78 @@ class MitigationCheckTests(unittest.TestCase):
         with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
             o = source_mitigation.check(run)
         self.assertEqual(o.items, ["Zef Bear Form: measured 0.00, catalog 0.06 over 25 hits"])
+
+    def test_fiery_brand_is_measured_on_the_branded_units_raw_hits(self):
+        # Live 2026-10-08 (Lazelele, Nerub-ar): Fiery Brand cuts the branded enemy's damage done, which WCL
+        # already counts in unmitigatedAmount, so the share through read 0.02 against 0.40. The same unit's
+        # same ability, a branded hit next to an unbranded one, read 0.400 (123 pairs; Lunchay, Undermine:
+        # 288 pairs). All branded hits against all unbranded ones within 30 s read 0.374: Liquefy's ticks
+        # grow over its cast and players brand at its start.
+        from checks import source_mitigation
+        entries = {204021: {"name": "Fiery Brand", "kind": "personal", "class": "DemonHunter",
+                            "specs": ["Vengeance"], "mitigation": [{"dr": 0.4}]}}
+        friendlies = [{"id": 1, "name": "Laz", "type": "DemonHunter"}]
+        combatants = [{"fight": 1, "sourceID": 1, "specID": 581, "talentTree": []}]      # 581: Vengeance
+        hit = lambda t, raw, buffs, unit=50: {"type": "damage", "targetID": 1, "sourceID": unit, "abilityGameID": 9,
+                                              "fight": 1, "timestamp": t, "unmitigatedAmount": raw,
+                                              "mitigated": raw // 2, "amount": raw - raw // 2, "buffs": buffs}
+        hits = []
+        for k in range(25):
+            t = k * 20_000
+            # Branded, then the ability ramps: the next tick is unbranded, later ones bigger still.
+            hits += [hit(t, 1000, "207771."), hit(t + 1000, 1700, ""), hit(t + 2000, 1800, ""),
+                     hit(t + 9000, 3000, "")]
+            hits += [hit(t + 500, 1000, "", unit=51), hit(t + 1500, 1000, "", unit=51)]   # another unit
+        run = self._wave1_run(entries, friendlies, {207771: "Fiery Brand"}, combatants)
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
+            self.assertEqual(source_mitigation.check(run).status, "pass")
+        # Pairs that read 0.41 against a catalog value of 0.30: flagged.
+        wrong = {204021: dict(entries[204021], mitigation=[{"dr": 0.3}])}
+        run = self._wave1_run(wrong, friendlies, {207771: "Fiery Brand"}, combatants)
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
+            o = source_mitigation.check(run)
+        self.assertEqual(o.items, ["Laz Fiery Brand: measured 0.41, catalog 0.30 over 25 hits"])
+        # A branded and an unbranded hit more than PAIR_MS apart are not compared: nothing measured.
+        apart = [dict(h, timestamp=h["timestamp"] + 5000) if h["buffs"] == "" else h for h in hits]
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=apart):
+            self.assertEqual(source_mitigation.check(run).status, "skip")
+        # On a Havoc (577) the catalog doesn't give it: never judged.
+        run = self._wave1_run(wrong, friendlies, {207771: "Fiery Brand"}, [dict(combatants[0], specID=577)])
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
+            self.assertEqual(source_mitigation.check(run).status, "skip")
+
+    def test_dampen_harm_grows_with_the_hit(self):
+        # Live 2026-10-08: Dampen Harm ("20% to 50%, larger attacks reduced by more") took 0.20 off small
+        # hits and 0.20 + 0.30 x off a hit of x max health after the player's other reductions (Atlai,
+        # Undermine: 0.285 at x = 0.285, 0.350 at 0.500; Weavi: 0.383 at 0.610).
+        from checks import source_mitigation
+        entries = {122278: {"name": "Dampen Harm", "kind": "personal", "class": "Monk", "mitigation": [{"dr": 0.2}]}}
+        friendlies = [{"id": 2, "name": "Weavi", "type": "Monk"}]
+
+        def hit(ability, raw, through, buffs, health=True):
+            e = {"type": "damage", "targetID": 2, "abilityGameID": ability, "fight": 1, "unmitigatedAmount": raw,
+                 "mitigated": raw - through, "amount": through, "buffs": buffs}
+            if health:
+                e.update(resourceActor=2, hitPoints=9_000_000 - through, maxHitPoints=10_000_000)
+            return e
+        small, big = 1_000_000, 6_000_000          # 0.9 through without it: x = 0.09 and 0.54
+        hits = [hit(1, small, 900_000, "")] * 5 + [hit(2, big, 5_400_000, "")] * 5
+        hits += [hit(1, small, round(900_000 * (1 - 0.2 - 0.3 * 0.09)), "122278.")] * 12
+        hits += [hit(2, big, round(5_400_000 * (1 - 0.2 - 0.3 * 0.54)), "122278.")] * 12
+        run = self._wave1_run(entries, friendlies, {122278: "Dampen Harm"})
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
+            self.assertEqual(source_mitigation.check(run).status, "pass")
+        # The same hits against a catalog value of 0.30 at no damage: flagged.
+        wrong = {122278: dict(entries[122278], mitigation=[{"dr": 0.3}])}
+        run = self._wave1_run(wrong, friendlies, {122278: "Dampen Harm"})
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
+            o = source_mitigation.check(run)
+        self.assertEqual(o.items, ["Weavi Dampen Harm: measured 0.29, catalog 0.36 over 24 hits"])
+        # Without the player's health on the hits, their size can't be put against max health: left out.
+        bare = [hit(h["abilityGameID"], h["unmitigatedAmount"], h["amount"], h["buffs"], health=False) for h in hits]
+        run = self._wave1_run(entries, friendlies, {122278: "Dampen Harm"})
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=bare):
+            self.assertEqual(source_mitigation.check(run).status, "skip")
 
     def test_one_odd_boss_ability_does_not_decide(self):
         # Live 2026-10-08 (Pumps, Undermine): Barkskin read 0.29-0.32 on every ability but Sonic Ba-Boom,
