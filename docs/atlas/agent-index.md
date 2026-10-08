@@ -40,10 +40,10 @@
   - NEVER: store raw tokens in the verification cache; keys are SHA-256 hashes.
   - NEVER: honor enableCheatDeath without a verified session.
 - anchors:
-  - supabase_client: frontend/src/supabaseClient.js:6
-  - session_only: frontend/src/supabaseClient.js:15
-  - sign_in: frontend/src/Auth.js:139
-  - captcha: frontend/src/Auth.js:72
+  - supabase_client: frontend/src/supabaseClient.js:10
+  - session_only: frontend/src/supabaseClient.js:19
+  - sign_in: frontend/src/Auth.js:127
+  - captcha: frontend/src/Auth.js:123
   - api_fetch: frontend/src/api.js:55
   - analyze_header: frontend/src/App.js:720
   - session_restore: frontend/src/App.js:277
@@ -85,7 +85,7 @@
   - dedup_loop: backend/app.py:263
   - fetch_report_deaths: backend/app.py:335
   - no_counted_death: backend/app.py:383
-  - get_report_fights: backend/warcraftlogs.py:333
+  - get_report_fights: backend/warcraftlogs.py:347
   - processing_loop: backend/app.py:473
   - result: backend/app.py:631
   - raid_encounters: backend/analysis.py:234
@@ -398,10 +398,10 @@
   - MUST: cheat-death detection run only for a request with a valid session (backend/app.py:143).
 - anchors:
   - auth_modal: frontend/src/Auth.js:8
-  - handle_auth: frontend/src/Auth.js:107
-  - turnstile_verify: frontend/src/Auth.js:72
-  - password_reset: frontend/src/Auth.js:84
-  - session_only: frontend/src/supabaseClient.js:15
+  - handle_auth: frontend/src/Auth.js:97
+  - turnstile_verify: frontend/src/Auth.js:123
+  - password_reset: frontend/src/Auth.js:72
+  - session_only: frontend/src/supabaseClient.js:19
   - session_restore: frontend/src/App.js:269
   - auth_listener: frontend/src/App.js:292
   - local_credentials: frontend/src/api.js:21
@@ -585,8 +585,8 @@
   - api_fetch: frontend/src/api.js:55
   - strip_secrets: frontend/src/api.js:43
   - local_creds: frontend/src/api.js:21
-  - supabase_client: frontend/src/supabaseClient.js:6
-  - session_only: frontend/src/supabaseClient.js:12
+  - supabase_client: frontend/src/supabaseClient.js:10
+  - session_only: frontend/src/supabaseClient.js:16
   - warmup: frontend/src/App.js:262
   - indexeddb: frontend/src/App.js:380
   - design_tokens: frontend/src/fp-design.css:6
@@ -831,8 +831,8 @@
   - report_cache_backoff: backend/supabase_client.py:315
   - memory_caches: backend/cache.py:111
   - cache_version: backend/cache.py:88
-  - wcl_retry: backend/warcraftlogs.py:30
-  - wcl_endpoints: backend/warcraftlogs.py:15
+  - wcl_retry: backend/warcraftlogs.py:44
+  - wcl_endpoints: backend/warcraftlogs.py:25
   - report_failure: backend/app.py:428
   - analyze_error_event: backend/app.py:667
   - catalog_build: backend/scripts/build_defensive_catalog.py:1041
@@ -917,8 +917,8 @@
   - report_cache_rls: backend/migrations/002_report_cache.sql:23
   - strip_secrets_js: frontend/src/api.js:43
   - local_creds: frontend/src/api.js:21
-  - wcl_token_cache: backend/warcraftlogs.py:93
-  - wcl_proxy: backend/warcraftlogs.py:16
+  - wcl_token_cache: backend/warcraftlogs.py:107
+  - wcl_proxy: backend/warcraftlogs.py:29
 - links: auth, data-model, backend, frontend, deployment, feat-share, feat-saved, operations
 
 ## Testing & Checks
@@ -975,18 +975,18 @@
   - MUST: every event fetch follows nextPageTimestamp so long reports don't lose events past the first page.
   - NEVER: use an accent-stripped name in a WCL filter expression; it matches nobody.
 - anchors:
-  - retry: backend/warcraftlogs.py:30
-  - client_error_break: backend/warcraftlogs.py:48
-  - retry_after: backend/warcraftlogs.py:51
-  - normalize: backend/warcraftlogs.py:65
-  - token: backend/warcraftlogs.py:91
-  - token_expiry: backend/warcraftlogs.py:130
-  - graphql: backend/warcraftlogs.py:140
-  - graphql_errors: backend/warcraftlogs.py:169
-  - reports: backend/warcraftlogs.py:176
-  - roster: backend/warcraftlogs.py:252
-  - light_fights: backend/warcraftlogs.py:333
-  - fights: backend/warcraftlogs.py:382
+  - retry: backend/warcraftlogs.py:44
+  - client_error_break: backend/warcraftlogs.py:62
+  - retry_after: backend/warcraftlogs.py:65
+  - normalize: backend/warcraftlogs.py:79
+  - token: backend/warcraftlogs.py:105
+  - token_expiry: backend/warcraftlogs.py:144
+  - graphql: backend/warcraftlogs.py:154
+  - graphql_errors: backend/warcraftlogs.py:183
+  - reports: backend/warcraftlogs.py:190
+  - roster: backend/warcraftlogs.py:266
+  - light_fights: backend/warcraftlogs.py:347
+  - fights: backend/warcraftlogs.py:396
   - remaining_events: backend/analysis.py:329
   - deaths_bulk: backend/analysis.py:357
   - paged: backend/defensives.py:180
@@ -1008,13 +1008,13 @@
   - MUST: fight-level raid membership comes from the encounter-ID allowlist, not WCL's report zone.
   - NEVER: a guild-reports query filters by zoneID; mixed raid and dungeon reports would be dropped.
 - anchors:
-  - endpoints: backend/warcraftlogs.py:15
-  - token: backend/warcraftlogs.py:91
-  - graphql: backend/warcraftlogs.py:140
-  - guild_reports: backend/warcraftlogs.py:176
-  - guild_roster: backend/warcraftlogs.py:252
-  - light_fights: backend/warcraftlogs.py:333
-  - fights: backend/warcraftlogs.py:382
+  - endpoints: backend/warcraftlogs.py:25
+  - token: backend/warcraftlogs.py:105
+  - graphql: backend/warcraftlogs.py:154
+  - guild_reports: backend/warcraftlogs.py:190
+  - guild_roster: backend/warcraftlogs.py:266
+  - light_fights: backend/warcraftlogs.py:347
+  - fights: backend/warcraftlogs.py:396
   - deaths_bulk: backend/analysis.py:357
   - combatants: backend/defensives.py:218
   - defensive_raw: backend/defensives.py:229
@@ -1059,7 +1059,7 @@
   - window_cache_key: backend/app.py:387
   - one_at_a_time: backend/app.py:390
   - deaths_pool: backend/app.py:440
-  - get_report_fights: backend/warcraftlogs.py:333
+  - get_report_fights: backend/warcraftlogs.py:347
   - deaths_bulk: backend/analysis.py:357
   - remaining_events: backend/analysis.py:329
   - fetch_combatants: backend/defensives.py:218

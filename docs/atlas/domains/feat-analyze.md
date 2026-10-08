@@ -51,7 +51,7 @@ invariants:
   - "NEVER: run cheat-death detection for a caller without a valid Supabase session, whatever the request body says (backend/app.py:143)."
   - "MUST: fights be kept only when their encounter ID is in the selected raid's RAID_ENCOUNTERS set (backend/analysis.py:315)."
   - "NEVER: store the Client ID or Secret in the browser's analysis history; stripSecrets removes them before IndexedDB writes (frontend/src/App.js:552)."
-content_hash: sha256:be18846b1317339f687f0ecca2447ed0a33c384d4eb6f5593da1bfa940294ad9
+content_hash: sha256:ad6080afe2ec0f31c7f3ffa5c7815e44d8bace9d763a2cd10b5753c437946ab9
 ---
 ## Summary
 
@@ -168,7 +168,7 @@ relied-on-by: [[feat-share]] — shares the result and its config
 - **The request body carries the WarcraftLogs secret**: `/api/analyze` receives `clientId` and `clientSecret` in the JSON body (`backend/app.py:125`) and uses them to get a token (`backend/app.py:158`). They are not stored by this route.
 - **Old configs still work**: `rosterOnly` treats a missing value as on (`backend/app.py:145`), so saved or shared configs from before the toggle keep their behavior.
 - **A partial result is still a result**: reports that fail to load are listed in `meta.failedReports` and announced in the stream (`backend/app.py:458`); reports missing defensive data are announced separately (`backend/app.py:462`). A report whose full read fails is dropped before deaths are read: its pulls come from another log of the same pull if there is one (`backend/app.py:263-275`), and it is not listed in `failedReports`.
-- **No zone filter on report fetch**: reports are fetched by date only, because a mixed raid and dungeon night can carry a dungeon zone (`backend/warcraftlogs.py:176`). The encounter allowlist does the separation.
+- **No zone filter on report fetch**: reports are fetched by date only, because a mixed raid and dungeon night can carry a dungeon zone (`backend/warcraftlogs.py:190`). The encounter allowlist does the separation.
 
 ## Related
 

@@ -11,10 +11,10 @@ summary:
   - "Deleting an account removes saves, stored credentials, shares and the auth user, then signs the browser out."
 tagline: How a Supabase session is created in the browser and verified on every protected backend call.
 anchors:
-  supabase_client: frontend/src/supabaseClient.js:6
-  session_only: frontend/src/supabaseClient.js:15
-  sign_in: frontend/src/Auth.js:139
-  captcha: frontend/src/Auth.js:72
+  supabase_client: frontend/src/supabaseClient.js:10
+  session_only: frontend/src/supabaseClient.js:19
+  sign_in: frontend/src/Auth.js:127
+  captcha: frontend/src/Auth.js:123
   api_fetch: frontend/src/api.js:55
   analyze_header: frontend/src/App.js:720
   session_restore: frontend/src/App.js:277
@@ -41,13 +41,13 @@ invariants:
   - "MUST: verify_token return None on any non-200 or network failure, so the route answers 401."
   - "NEVER: store raw tokens in the verification cache; keys are SHA-256 hashes."
   - "NEVER: honor enableCheatDeath without a verified session."
-content_hash: sha256:4965a8c49fe84978a9fadd07b5cf46e82eaa5c2e40943cce3b027b818bcd320d
+content_hash: sha256:0d16de36d49d0cc239828114d4b79aee8b785709bda2e16d458c9b27a811d64d
 ---
 # Accounts & Auth
 
 ## Summary
 
-- Sign-up, sign-in, password reset, email change and password change all run in the browser against Supabase Auth with the public anon key (`frontend/src/Auth.js:135`, `:139`, `:94`; `frontend/src/Settings.js:136`, `:168`).
+- Sign-up, sign-in, password reset, email change and password change all run in the browser against Supabase Auth with the public anon key (`frontend/src/Auth.js:123`, `:127`, `:83`; `frontend/src/Settings.js:136`, `:168`).
 - When the browser calls the backend it attaches `Authorization: Bearer <access token>` (`frontend/src/api.js:92`). The backend turns that into a user id by asking Supabase (`backend/auth.py:49`), never by reading an id from the URL or body.
 - The `@require_user` decorator (`backend/auth.py:79`) guards every saved-analysis route and account deletion. Analyze and share check the token without requiring it.
 
@@ -78,10 +78,10 @@ edge req -> apifetch color=never "401"
 
 ```steps
 - title: Sign in or sign up | short: Sign in | sub: browser to Supabase
-  body: The modal requires a Cloudflare Turnstile token, posts it to a verify-turnstile worker (frontend/src/Auth.js:73), then calls supabase.auth.signUp or signInWithPassword directly (frontend/src/Auth.js:135, :139). Sign-up also requires the age and terms checkboxes (frontend/src/Auth.js:111).
-  gotcha: The CAPTCHA check happens in the browser before the Supabase call. Nothing in this repo makes Supabase itself demand the CAPTCHA, so a script calling Supabase directly skips it unless the Supabase project enforces one.
+  body: The modal requires a Cloudflare Turnstile token and passes it to supabase.auth.signUp, signInWithPassword or resetPasswordForEmail as captchaToken (frontend/src/Auth.js:123, :127, :83). Sign-up also requires the age and terms checkboxes (frontend/src/Auth.js:101).
+  gotcha: Supabase checks the token only while CAPTCHA protection (Turnstile) is on in the Supabase project's Attack Protection settings; with it off the token is ignored and direct Supabase Auth calls need no CAPTCHA. Sign-up and email rate limits are set on the same page, not in this repo.
 - title: Stay logged in | short: Session length | sub: localStorage flag + cookie
-  body: Supabase always persists the session. Unchecking "Stay logged in" sets a localStorage flag and a session cookie (frontend/src/supabaseClient.js:15). On the next load, flag set and cookie gone means the browser was closed, and App.js signs out locally (frontend/src/App.js:277).
+  body: Supabase always persists the session. Unchecking "Stay logged in" sets a localStorage flag and a session cookie (frontend/src/supabaseClient.js:19). On the next load, flag set and cookie gone means the browser was closed, and App.js signs out locally (frontend/src/App.js:277).
 - title: Call the backend | short: Send token | sub: apiFetch
   body: apiFetch with auth true reads the current session and adds the Bearer header; with no session it returns a local 401 without a network call. auth 'optional' attaches a token only if there is one (frontend/src/api.js:55). The analyze stream uses fetch directly and adds the same header when signed in (frontend/src/App.js:720).
 - title: Verify the token | short: Verify | sub: GET /auth/v1/user
@@ -126,12 +126,12 @@ The browser also reads and writes its own `api_credentials` row directly with th
 - **auth.py does not load .env itself**: it reads `os.environ` at import (`backend/auth.py:20`); it works because `backend/app.py:20` calls `load_dotenv()` before importing it.
 - **Account deletion needs the service-role key**: without `SUPABASE_SERVICE_ROLE_KEY` the backend refuses with "Account deletion isn't configured on the server." (`backend/supabase_client.py:422`).
 - **Partial deletion reports an error**: if any table or the auth delete fails, the response is an error asking to retry (`backend/supabase_client.py:442`); share cleanup failures are only logged.
-- **Password reset lands back on the site**: the reset link redirects to `window.location.origin` (`frontend/src/Auth.js:95`), and the `PASSWORD_RECOVERY` event opens Settings (`frontend/src/App.js:295`).
+- **Password reset lands back on the site**: the reset link redirects to `window.location.origin` (`frontend/src/Auth.js:84`), and the `PASSWORD_RECOVERY` event opens Settings (`frontend/src/App.js:295`).
 
 ## Glossary
 
 - **Access token**: the short-lived Supabase JWT in the browser session, sent as the Bearer token.
-- **Anon key**: Supabase's public key, shipped in the frontend bundle (`frontend/src/supabaseClient.js:4`); RLS decides what it can reach.
+- **Anon key**: Supabase's public key, shipped in the frontend bundle (`frontend/src/supabaseClient.js:8`, set at build time from the `REACT_APP_SUPABASE_ANON_KEY` secret); RLS decides what it can reach.
 - **require_user**: the Flask decorator that turns a valid Bearer token into `g.user_id` or returns 401.
 
 ## Related

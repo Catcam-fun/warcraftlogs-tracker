@@ -31,8 +31,8 @@ anchors:
   report_cache_rls: backend/migrations/002_report_cache.sql:23
   strip_secrets_js: frontend/src/api.js:43
   local_creds: frontend/src/api.js:21
-  wcl_token_cache: backend/warcraftlogs.py:93
-  wcl_proxy: backend/warcraftlogs.py:16
+  wcl_token_cache: backend/warcraftlogs.py:107
+  wcl_proxy: backend/warcraftlogs.py:29
 links:
   - auth
   - data-model
@@ -51,14 +51,14 @@ invariants:
   - "MUST: share and save bodies pass _looks_like_analysis before anything is stored."
   - "NEVER: the browser reads saved_analyses, shared_results or report_cache; RLS is on and no policies grant it."
   - "NEVER: a WarcraftLogs secret is used as a cache key in plain form; the token cache keys on a SHA-256 of id and secret."
-content_hash: sha256:93c56f7200fafec3eb7ee3ab7500666796c5cb724d943e41e9fc557312ee02a2
+content_hash: sha256:66ec76129d0d480813e7220b5dddd420a7a0c54cbdf840aa7fa1dc129ab0b80f
 ---
 # Security & Trust Boundaries
 
 ## Summary
 
 - There is no shared server-side WarcraftLogs key. Each officer brings their own WarcraftLogs API client ID and secret; the browser keeps them in `localStorage` under `fpx.wclCredentials` (`frontend/src/api.js:21`) and sends them in the body of every `POST /api/analyze` (`frontend/src/App.js:712`). Signed-in users can also store them in Supabase `api_credentials` (`frontend/src/App.js:603`).
-- The backend uses those credentials only for the length of one analysis. It exchanges them for a WarcraftLogs token through a Cloudflare Worker proxy (`backend/warcraftlogs.py:16`) and caches the token keyed by a SHA-256 of `id:secret` (`backend/warcraftlogs.py:93`).
+- The backend uses those credentials only for the length of one analysis. It exchanges them for a WarcraftLogs token through a Cloudflare Worker proxy (`backend/warcraftlogs.py:29`) and caches the token keyed by a SHA-256 of `id:secret` (`backend/warcraftlogs.py:107`).
 - Everything that persists an analysis (saves, shares, local recent runs) removes `clientId` and `clientSecret` first, in the browser (`frontend/src/api.js:43`) and again on the server (`backend/supabase_client.py:61`).
 - Supabase is the data and identity store. The browser holds only the public anon key; the backend holds the service-role key and the anon key. Row-level security keeps the anon key away from every table except the user's own credentials row (`backend/migrations/001_shares_and_rls.sql:23`, `:36`).
 
@@ -112,7 +112,7 @@ A request crosses the same gates in the same order. The steps follow one analysi
 - title: Identify the caller | short: Auth | sub: Supabase decides
   body: require_user (backend/auth.py:79) verifies the bearer token with Supabase and exposes the id as g.user_id. Analyze and share check the token optionally. Cheat-death detection is ANDed with a verified session on the server (backend/app.py:143), so a crafted config cannot turn it on. Details are on the [[auth]] page.
 - title: Use WCL credentials | short: WCL token | sub: through the proxy
-  body: get_access_token sends the id and secret as HTTP Basic auth to the proxy's /oauth/token (backend/warcraftlogs.py:101) and caches the token per credential pair until 60 seconds before it expires (backend/warcraftlogs.py:130). The credentials are not written anywhere by the backend.
+  body: get_access_token sends the id and secret as HTTP Basic auth to the proxy's /oauth/token (backend/warcraftlogs.py:115) and caches the token per credential pair until 60 seconds before it expires (backend/warcraftlogs.py:144). The credentials are not written anywhere by the backend.
 - title: Store without secrets | short: Strip + store | sub: both sides, then RLS
   body: The browser strips clientId and clientSecret before a share, a save and a recent-run write (frontend/src/App.js:635, frontend/src/SaveReportDialog.js:28, frontend/src/App.js:481). The server strips a wider key set (client ids, secrets, password, token, access tokens) before packing and again when returning (backend/supabase_client.py:57, :101, :214, :250). Rows go in with the service-role key into tables that have RLS on and no policies.
 ```
@@ -136,10 +136,10 @@ Who holds which secret.
 | Secret {secret} | Held by | Where it comes from |
 |---|---|---|
 | WarcraftLogs client ID and secret {secret} | browser localStorage; `api_credentials` row; backend memory during an analysis | typed by the officer (`frontend/src/AnalyzeConfig.js:152`) |
-| Supabase anon key {secret} | frontend bundle (public by design) and backend env `SUPABASE_KEY` | `frontend/src/supabaseClient.js:4`; `backend/auth.py:21` |
+| Supabase anon key {secret} | frontend bundle (public by design) and backend env `SUPABASE_KEY` | `frontend/src/supabaseClient.js:8`; `backend/auth.py:21` |
 | Supabase service-role key {secret} | backend env only | `SUPABASE_SERVICE_ROLE_KEY` (`backend/supabase_client.py:29`) |
 | Supabase access token (JWT) {secret} | browser session; backend cache as a SHA-256 key only | `backend/auth.py:41` |
-| WarcraftLogs access token {secret} | backend memory | `backend/warcraftlogs.py:125` |
+| WarcraftLogs access token {secret} | backend memory | `backend/warcraftlogs.py:139` |
 
 ## Invariants
 
@@ -147,7 +147,7 @@ Who holds which secret.
 - **MUST** saved-analysis and account routes take the user id only from `require_user` (`backend/auth.py:91`); the service-role key bypasses RLS, so this is the only thing separating users' saves.
 - **MUST** share and save bodies pass `_looks_like_analysis` before anything is stored (`backend/app.py:697`, `:749`).
 - **NEVER** the browser reads `saved_analyses`, `shared_results` or `report_cache`: RLS is on and no policy grants the anon or authenticated role (`backend/migrations/001_shares_and_rls.sql:27`, `backend/migrations/002_report_cache.sql:21`).
-- **NEVER** a WarcraftLogs secret is used as a cache key in plain form; the token cache keys on a SHA-256 of `id:secret` (`backend/warcraftlogs.py:93`).
+- **NEVER** a WarcraftLogs secret is used as a cache key in plain form; the token cache keys on a SHA-256 of `id:secret` (`backend/warcraftlogs.py:107`).
 
 ## Gotchas
 
@@ -156,7 +156,7 @@ Who holds which secret.
 - **On AWS the Lambda URL is public but locked**: CloudFront adds `X-Origin-Verify` with the `ORIGIN_VERIFY_SECRET` value (`infra/template.yaml`), and the app refuses every request without it (`backend/origin.py`, `backend/app.py:80`), except the adapter's own `GET /api/health` and `POST /events`. Anyone calling the function URL directly gets 403, which the deploy workflow's smoke test checks.
 - **Reads and failed sign-ins are not rate-limited**: `GET /api/shared/<id>` and the `require_user` routes have no limiter, and `POST /api/saved` checks the session before the limiter (`backend/app.py:740`). Only successful token checks are cached (`backend/auth.py:68`), so each request with a bad bearer token costs one call to Supabase.
 - **CORS defaults to any origin**: `ALLOWED_ORIGINS` falls back to `'*'` (`backend/app.py:67`). This is safe for session theft because auth is a bearer header, but any site can call the API from a visitor's browser and spend that visitor's IP's rate-limit budget.
-- **WarcraftLogs traffic goes through a Cloudflare Worker outside this repo**: both the OAuth exchange and every GraphQL query use `wcl-proxy.catcam-fun.workers.dev` (`backend/warcraftlogs.py:15`, `:16`), and the sign-in CAPTCHA check uses the same host (`frontend/src/Auth.js:73`). The Worker's code is not in this repo, so its behavior can't be reviewed here, and it sees every officer's client ID and secret.
+- **WarcraftLogs traffic goes through a Cloudflare Worker outside this repo**: both the OAuth exchange and every GraphQL query use the proxy named by the `WCL_PROXY_URL` setting (`backend/warcraftlogs.py:21`), or WarcraftLogs directly when it is unset. The Worker's code is not in this repo, so its behavior can't be reviewed here, and it sees every officer's client ID and secret.
 - **The server strips more keys than the browser**: the browser removes only `clientId` and `clientSecret` (`frontend/src/api.js:15`); the server also removes `password`, `token` and access-token keys (`backend/supabase_client.py:57`). Both strip only top-level keys of the config, not nested objects.
 - **Analysis errors are echoed to the client**: an unexpected exception in `/api/analyze` is sent as `str(e)` in the event stream (`backend/app.py:671`), and a failed WarcraftLogs login includes the request error text (`backend/app.py:160`).
 - **The shared report cache is not scoped per API key**: finished reports' fight lists, fights and deaths are cached by report code for every caller (`backend/app.py:216`, `backend/app.py:226`). A caller only reaches a report that their own key listed through `get_guild_reports` (`backend/app.py:191`), which is what keeps one guild's private reports away from another key.

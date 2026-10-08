@@ -17,8 +17,8 @@ anchors:
   api_fetch: frontend/src/api.js:55
   strip_secrets: frontend/src/api.js:43
   local_creds: frontend/src/api.js:21
-  supabase_client: frontend/src/supabaseClient.js:6
-  session_only: frontend/src/supabaseClient.js:12
+  supabase_client: frontend/src/supabaseClient.js:10
+  session_only: frontend/src/supabaseClient.js:16
   warmup: frontend/src/App.js:262
   indexeddb: frontend/src/App.js:380
   design_tokens: frontend/src/fp-design.css:6
@@ -43,7 +43,7 @@ links:
   - feat-saved
   - feat-share
   - feat-account
-content_hash: sha256:9228a618b4a338db451fa6028fcdb03dedda38e1553498d35457c32f15dd86b1
+content_hash: sha256:97610ec21fae5cc4e2934b8775b1e7e78742505f2fdf87914f9147dad61bc977
 ---
 ## Summary
 
@@ -51,7 +51,7 @@ The **frontend** is the React (Create React App) site at the top of Floor Pov. I
 
 - The app mounts in `frontend/src/index.js:9` inside a `BrowserRouter`, and loads two style sheets: the older `index.css` and the `fpx-` design system in `fp-design.css` (`frontend/src/index.js:4`).
 - Almost all state lives in one component, `WarcraftLogsApp` in `frontend/src/App.js:187`. Child surfaces receive props and callbacks; there is no global store.
-- Two network partners: the Flask API through `apiFetch` (`frontend/src/api.js:55`) and Supabase through the shared client (`frontend/src/supabaseClient.js:6`).
+- Two network partners: the Flask API through `apiFetch` (`frontend/src/api.js:55`) and Supabase through the shared client (`frontend/src/supabaseClient.js:10`).
 - What it deliberately does not do: it never computes deaths, slots or defensive verdicts itself. Those arrive pre-computed from the backend; the browser only counts, filters and displays them.
 
 ## How it works
@@ -134,7 +134,7 @@ The main modules. Filter by role.
 | `SaveReportDialog.js` {account} | Names and saves the current analysis (7, 14 or 30 days) | `frontend/src/SaveReportDialog.js:7` |
 | `InfoModal.js` {account} | The "How it works" modal on the Analyze page | `frontend/src/InfoModal.js:66` |
 | `api.js` {plumbing} | `API_URL`, `apiFetch`, `stripSecrets`, browser credential memory | `frontend/src/api.js:9` |
-| `supabaseClient.js` {plumbing} | The Supabase client and the "stay logged in" session-only logic | `frontend/src/supabaseClient.js:6` |
+| `supabaseClient.js` {plumbing} | The Supabase client and the "stay logged in" session-only logic | `frontend/src/supabaseClient.js:10` |
 | `mockResults.js` {plumbing} | A seeded fixture for `?mock=1` on localhost | `frontend/src/mockResults.js:237` |
 | `fp-design.css` {style} | The `fpx-` design system: color tokens on `:root`, layout, loader, boss tiles | `frontend/src/fp-design.css:6` |
 | `index.css` {style} | Older global styles, still used by the share modal and `.analysis-shell` | `frontend/src/index.css:112` |
@@ -147,8 +147,8 @@ The main modules. Filter by role.
 | Local dev | `npm start` (CRA dev server); talks to a local Flask API on port 5000 | `frontend/src/api.js:9` |
 | API base URL | `REACT_APP_API_URL` if set at build time; else `http://localhost:5000` when the host is `localhost` or `127.0.0.1`; else `''`, the page's own host, where CloudFront serves the API under `/api` | `frontend/src/api.js:8` |
 | Asset prefix | `PUBLIC_URL` (CRA built-in) prefixes art paths: backgrounds, boss tiles, loader video | `frontend/src/LandingPage.js:127`, `frontend/src/App.js:1550` |
-| Supabase | Project URL and the public anon key are constants in code, not env vars | `frontend/src/supabaseClient.js:3` |
-| CAPTCHA | Turnstile site key is a constant; tokens are checked by an external Cloudflare Worker before calling Supabase auth | `frontend/src/Auth.js:6`, `frontend/src/Auth.js:72` |
+| Supabase | Project URL and the public anon key are `REACT_APP_*` build variables | `frontend/src/supabaseClient.js:7` |
+| CAPTCHA | Turnstile site key is a build variable; tokens go to Supabase Auth as `captchaToken`, and Supabase verifies them | `frontend/src/Auth.js:6`, `frontend/src/Auth.js:123` |
 | Secrets | None in the bundle. WarcraftLogs credentials are typed by the user and kept in their own browser or their Supabase row | `frontend/src/api.js:21` |
 | SPA fallback | `public/_redirects.txt` holds a `/* /index.html 200` rewrite | `frontend/public/_redirects.txt:1` |
 
@@ -157,7 +157,7 @@ The main modules. Filter by role.
 | Aspect | Local | Production |
 |---|---|---|
 | API base | `http://localhost:5000` (unless `REACT_APP_API_URL` is set) | `/api` on floorpov.gg itself (unless `REACT_APP_API_URL` is set) |
-| Supabase | Same hard-coded project as production | Same |
+| Supabase | Same project as production, from `frontend/.env.local` | Same |
 | `?mock=1` fixture results | Works: seeds Results with `MOCK_RESULTS` (`frontend/src/App.js:362`) | Ignored: gated to localhost |
 | `?loader=1` loader preview | Works: shows the analysis loader overlay (`frontend/src/App.js:373`) | Ignored |
 | Backend warm-up ping | Fires against the local API | Fires against the Lambda API on every page load (`frontend/src/App.js:262`) |
@@ -167,13 +167,13 @@ The main modules. Filter by role.
 - **MUST** every request to the Flask API resolve its base URL through `API_URL` in `frontend/src/api.js:9`; the analyze call, the health ping and `apiFetch` all use it.
 - **NEVER** write `clientId` or `clientSecret` into a share, a saved report, the recent-runs list or the persisted last analysis. `stripSecrets` (`frontend/src/api.js:43`) runs on each path: `frontend/src/App.js:635`, `frontend/src/SaveReportDialog.js:31`, `frontend/src/App.js:481`, `frontend/src/App.js:552`.
 - **MUST** merge a config loaded from a share, a saved report or a recent run through `stripSecrets`, so it cannot overwrite the viewer's own credentials (`frontend/src/App.js:325`, `frontend/src/App.js:341`, `frontend/src/App.js:508`).
-- **MUST** wrap storage access in try/catch so blocked storage leaves an empty form instead of a crash (`frontend/src/api.js:24`, `frontend/src/supabaseClient.js:15`).
+- **MUST** wrap storage access in try/catch so blocked storage leaves an empty form instead of a crash (`frontend/src/api.js:24`, `frontend/src/supabaseClient.js:19`).
 
 ## Gotchas
 
 - **App.js is one 2,300-line component**: the Results page and the share modal are inline JSX in `frontend/src/App.js`. A change to results layout is a change to the shell.
-- **Supabase settings are not env-driven**: switching Supabase projects means editing `frontend/src/supabaseClient.js:3`, not setting a variable. The anon key there is the public key Supabase expects in browsers.
-- **The CAPTCHA check is client-side**: `Auth.js` verifies the Turnstile token with an external Worker and then calls Supabase directly (`frontend/src/Auth.js:72`, `frontend/src/Auth.js:139`). Anything enforcing CAPTCHA server-side has to live in Supabase or the Worker, not this code.
+- **Supabase settings come from the build**: `REACT_APP_SUPABASE_URL` and `REACT_APP_SUPABASE_ANON_KEY` (`frontend/src/supabaseClient.js:7`); unset, the client points at a local Supabase and auth calls fail. The anon key is the public key Supabase expects in browsers.
+- **Supabase enforces the CAPTCHA**: `Auth.js` passes the Turnstile token to Supabase Auth (`frontend/src/Auth.js:123`, `frontend/src/Auth.js:127`); it is only enforced while CAPTCHA protection is on in the Supabase project.
 - **Debug globals on window**: each completed analysis sets `window.deathTrackerData`, `window.exportDeathData` and `window.exportAndCopy` (`frontend/src/App.js:769`). `exportDeathData` hard-codes a cutoff of 2 (`frontend/src/App.js:773`), so its "included" flags can differ from what the page shows.
 - **SPA rewrite file name**: the rewrite rule lives in `_redirects.txt`. Hosts that read Netlify-style rules look for a file named exactly `_redirects`; check the host's behavior before relying on it for deep links like `/results?share=`.
 
