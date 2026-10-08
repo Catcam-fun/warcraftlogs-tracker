@@ -4,9 +4,10 @@ from unittest import mock
 
 from checks.registry import CHECKS, select
 from checks.verdict import PASS, Verdict, exit_code, fail, format_lines, skip
+from checks.rules_counting import counts
 from checks.rules_slots import rank
 from checks.__main__ import run_checks
-from checks import rules_defensives, rules_slots, source_deaths
+from checks import rules_counting, rules_defensives, rules_slots, source_deaths
 from checks.common import AnalysisError, Run, TableCapped, parse_target, points, raid_week, run_analysis
 
 
@@ -181,6 +182,22 @@ class SlotsCheckTests(unittest.TestCase):
         capped = self._run({"A": [self._ev(2, "A", 500, 1)]}, {2: TableCapped("r", 2)})
         self.assertEqual(rules_slots.check(capped).items, ["pull 2: 200+ deaths, table capped"])
         self.assertEqual(rules_slots.check(self._run({}, {})).status, "skip")
+
+
+class CountingRuleTests(unittest.TestCase):
+    def test_counts_and_defensive_presence(self):
+        ev = lambda slot, wipe=False, cheat=False, d=True: {"slot": slot, "inWipe": wipe, "isCheatDeath": cheat,
+                                                          "reportId": "R", "fightId": 1, "timestamp": slot, **({"defensives": {}} if d else {})}
+        result = {"meta": {"maxCutoff": 2}, "events": {"Bob": [ev(1), ev(3, d=False)], "Amy": [ev(2, wipe=True, d=False)]}}
+        self.assertEqual(counts(result, 2), {"Bob": (1, 0), "Amy": (0, 0)})
+        run = mock.Mock(); run.result = result
+        self.assertEqual(rules_counting.check(run).status, "pass")
+        result["events"]["Amy"][0]["defensives"] = {}
+        self.assertEqual(rules_counting.check(run).status, "fail")
+        result["events"]["Amy"][0].pop("defensives")
+        result["events"]["Bob"][0].pop("defensives")
+        self.assertEqual(rules_counting.check(run).items, ["Bob pull 1 1: death can count but has no defensives"])
+        self.assertEqual(rules_counting.check(mock.Mock(result={"meta": {"maxCutoff": 2}, "events": {}})).status, "skip")
 
 
 if __name__ == "__main__":
