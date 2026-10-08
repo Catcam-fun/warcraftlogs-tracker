@@ -1,6 +1,10 @@
 """The list of checks, in run order. Each entry is (name, family, check function)."""
 
-CHECKS = []
+from checks import source_deaths
+
+CHECKS = [
+    ("deaths", "source", source_deaths.check),
+]
 
 
 def rule_of(check):
