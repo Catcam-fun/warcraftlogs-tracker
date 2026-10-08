@@ -785,7 +785,9 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
                                              talent_entries=talent_entries, observed_absorbs=observed, spec=spec,
                                              aoe_known=aoe_known, ready_since=ready_since,
                                              aura_ms={e["name"]: _talented_duration(e, talent_entries, spec) for e in ready_entries},
-                                             forms=forms, armor_k=armor_k, form_armor=form_armor)
+                                             forms=forms, armor_k=armor_k, form_armor=form_armor,
+                                             max_health_auras=_max_health_bands(own_events, cat, ability_names,
+                                                                                talent_entries, spec))
 
     for key in ("active", "available", "cooldown"):
         result[key].sort(key=lambda d: (not d.get("major", True), d["name"]))
@@ -1654,9 +1656,80 @@ def _best_press(options, earliest, win, kb_index):
     return best
 
 
+# A max-health aura that ends this close before the killing blow was removed by the death
+# itself: the death strips every aura just before WCL logs the killing hit (live 2026-10-08:
+# 5-20 ms before it on all four deaths checked).
+DEATH_STRIP_MS = 100
+
+
+def _max_health_bands(own_events, cat, ability_names, talent_entries=None, spec=None):
+    """[(start, end or None, share)] of the player's auras that raise max health (catalog
+    "hp" components, with this player's talents: Metamorphosis +40%, Vampiric Blood +30%),
+    from their aura events (time order). Increases multiply; "current and maximum health"
+    ones (Fortifying Brew) add their share."""
+    shares = {}
+    for entry in cat.all.values():
+        if entry.get("kind") not in ("personal", "external"):
+            continue
+        comps, _ = _resolve(entry, talent_entries, {}, spec)
+        mult, flat = 1.0, 0.0
+        for c in comps or ():
+            if c.get("hp"):
+                if c.get("current"):
+                    flat += c["hp"]
+                else:
+                    mult *= 1 + c["hp"]
+        if mult + flat > 1:
+            shares[entry["name"]] = round(mult + flat - 1, 6)
+    bands, open_ = [], {}
+    for ts, typ, aid, *_ in own_events or ():
+        name = ability_names.get(aid)
+        if name not in shares:
+            continue
+        if typ == "applybuff":
+            open_.setdefault(name, ts)
+        elif typ == "removebuff":
+            bands.append((open_.pop(name, 0), ts, shares[name]))
+    bands += [(start, None, shares[name]) for name, start in open_.items()]
+    return sorted(bands)
+
+
+def _max_hp_before(window, kb_index, max_health_auras=None):
+    """Max health the player had just before the killing blow (window[kb_index]).
+
+    WCL logs the killing hit after the death removed the player's auras, so its maxHitPoints
+    has lost every max-health aura they had (live 2026-10-08: Strikepal, Nerub-ar p16, auras
+    removed at 1910329-1910332, the killing hit at 1910349 logged with max 10061382 against
+    11198315 on every hit and heal before it). So it is the max on their last hit before the
+    killing blow, with the max-health auras (`max_health_auras`, _max_health_bands) that came
+    up after that hit and were still up at the killing blow multiplied in, and those that ran
+    out in between divided out (Soulcleavi, Manaforge p54: Last Resort's Metamorphosis, +40%,
+    came up 16 ms before the killing blow and no hit recorded it). It is never below the
+    killing blow's own max (the death only removes auras, so a higher one there was gained
+    before the hit) nor below the health they had before it.
+    """
+    kb = window[kb_index]
+    kb_max, hp_before = kb.get("maxHitPoints") or 0, kb.get("amount") or 0
+    last = next((h for h in reversed(window[:kb_index])
+                 if h.get("resourceActor") == 2 and h.get("maxHitPoints") and h.get("type") == "damage"), None)
+    if last is None:
+        return max(kb_max, hp_before)
+    t0, t1 = last["timestamp"], kb["timestamp"]
+    best = float(last["maxHitPoints"])
+    for start, end, share in max_health_auras or ():
+        up_then = start <= t0 and (end is None or end > t0)
+        up_at_kb = start <= t1 and (end is None or end >= t1 - DEATH_STRIP_MS)
+        if up_at_kb and not up_then:
+            best *= 1 + share
+        elif up_then and not up_at_kb:
+            best /= 1 + share
+    return max(round(best), kb_max, hp_before)
+
+
 def assess_survival(hits, death_ts, available, consumables, ability_names, ability_schools,
                     talent_entries=None, observed_absorbs=None, spec=None, aoe_known=True,
-                    ready_since=None, aura_ms=None, forms=None, armor_k=None, form_armor=None):
+                    ready_since=None, aura_ms=None, forms=None, armor_k=None, form_armor=None,
+                    max_health_auras=None):
     """How they died, and whether the defensives they had ready would have saved them.
 
     `hits`: this player's hits (lethal windows, instant kills); the killing blow
@@ -1665,6 +1738,8 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     it was ready (`ready_since`, else the start of the window) and at least
     REACTION_MS before the killing blow. `available` / `consumables`: catalog
     entries ready at death (consumables only if carried and unused this pull).
+    `max_health_auras`: [(start, end or None, share)] of the player's max-health auras
+    (_max_health_bands), for their max health just before the killing blow (_max_hp_before).
     """
     killing = _killing_blow(hits, death_ts)
     if killing is not None and killing.get("type") == "instakill":
@@ -1685,8 +1760,7 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
         }
     if killing is None or killing.get("resourceActor") != 2:
         return None   # no recorded killing blow with health data
-    max_hp = killing.get("maxHitPoints") or 0
-    if not max_hp:
+    if not killing.get("maxHitPoints"):
         return None
     overkill = killing.get("overkill") or 0
     # Verified on live logs: the killing blow's `amount` equals the health the
@@ -1698,6 +1772,10 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     tag = {"armorK": armor_k, "formArmor": form_armor, **({} if aoe_known else {"aoeKnown": False})}
     window = [dict(h, **tag) for h in _lethal_hits(hits, killing)]
     kb_index = len(window) - 1
+    # The killing blow's own max health is logged after the death stripped their auras; every
+    # figure below (and the replay's health points) uses the max they had just before it.
+    max_hp = _max_hp_before(window, kb_index, max_health_auras)
+    window[kb_index]["maxHitPoints"] = max_hp
     killing = window[kb_index]
     win = _Window(window, ability_schools)
     points = win.points
