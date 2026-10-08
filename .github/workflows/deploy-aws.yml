@@ -7,8 +7,10 @@
 # ORIGIN_VERIFY_SECRET) stay as set in the AWS console.
 #
 # Setup, once (infra/README.md): the deploy role from
-# infra/github-deploy-role.yaml, and its RoleArn in the repository secret
-# AWS_DEPLOY_ROLE_ARN.
+# infra/github-deploy-role.yaml, its RoleArn in the repository secret
+# AWS_DEPLOY_ROLE_ARN, and the resource secrets listed in infra/README.md.
+# No resource ID lives in this file: this repo and its Actions logs are
+# public, and GitHub hides secret values in the logs.
 name: Deploy to AWS
 
 on:
@@ -26,10 +28,10 @@ concurrency:
 
 env:
   AWS_REGION: us-east-1
-  FUNCTION: REDACTED
-  BUCKET: REDACTED
-  DISTRIBUTION: REDACTED
-  SITE_URL: https://REDACTED
+  FUNCTION: ${{ secrets.LAMBDA_FUNCTION }}
+  BUCKET: ${{ secrets.SITE_BUCKET }}
+  DISTRIBUTION: ${{ secrets.CF_DISTRIBUTION_ID }}
+  SITE_URL: https://floorpov.gg
 
 jobs:
   deploy:
@@ -60,7 +62,14 @@ jobs:
           CI=true npx react-scripts test --watchAll=false
 
       - name: Build the API zip and the site
+        env:
+          REACT_APP_SUPABASE_URL: ${{ secrets.REACT_APP_SUPABASE_URL }}
+          REACT_APP_SUPABASE_ANON_KEY: ${{ secrets.REACT_APP_SUPABASE_ANON_KEY }}
+          REACT_APP_TURNSTILE_SITE_KEY: ${{ secrets.REACT_APP_TURNSTILE_SITE_KEY }}
         run: |
+          for v in FUNCTION BUCKET DISTRIBUTION REACT_APP_SUPABASE_URL               REACT_APP_SUPABASE_ANON_KEY REACT_APP_TURNSTILE_SITE_KEY; do
+            [ -n "${!v}" ] || { echo "Repository secret for $v is not set (infra/README.md)"; exit 1; }
+          done
           infra/build-api-zip.sh api.zip
           cd frontend && REACT_APP_API_URL=same-origin npm run build
 
@@ -68,6 +77,22 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Keep the API pointed at the WarcraftLogs proxy
+        env:
+          WCL_PROXY_URL: ${{ secrets.WCL_PROXY_URL }}
+        run: |
+          # Adds or updates only WCL_PROXY_URL; the function's other settings
+          # stay as set in the console. Nothing here is printed: the function's
+          # settings hold the Supabase keys.
+          echo "::add-mask::$(aws sts get-caller-identity --query Account --output text)"
+          aws lambda get-function-configuration --function-name "$FUNCTION"             --query Environment.Variables --output json > env.json
+          if [ "$(jq -r '.WCL_PROXY_URL // ""' env.json)" != "$WCL_PROXY_URL" ]; then
+            jq --arg u "$WCL_PROXY_URL" '{Variables: (. + {WCL_PROXY_URL: $u})}' env.json > env-new.json
+            aws lambda update-function-configuration --function-name "$FUNCTION"               --environment file://env-new.json --query LastUpdateStatus --output text
+            aws lambda wait function-updated-v2 --function-name "$FUNCTION"
+          fi
+          rm -f env.json env-new.json
 
       - name: Deploy the API
         run: |
@@ -99,7 +124,8 @@ jobs:
           curl -fsS -o /dev/null "$SITE_URL/" && echo "site OK"
           curl -fsS -o /dev/null "$SITE_URL/results" && echo "deep link OK"
           # The Lambda URL itself must refuse requests that skip CloudFront.
-          fn_url=$(aws lambda get-function-url-config --function-name "$FUNCTION" --query FunctionUrl --output text)
+          fn_url=$(aws lambda list-function-url-configs --function-name "$FUNCTION"             --query 'FunctionUrlConfigs[0].FunctionUrl' --output text)
+          echo "::add-mask::$fn_url"
           code=$(curl -s -o /dev/null -w '%{http_code}' "${fn_url}api/shared/abcdefghijkl")
           [ "$code" = 403 ] && echo "origin lock OK" || { echo "origin lock returned $code"; exit 1; }
           echo "### Deployed $(git rev-parse --short HEAD) to $SITE_URL" >> "$GITHUB_STEP_SUMMARY"
