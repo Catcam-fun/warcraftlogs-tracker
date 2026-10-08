@@ -775,8 +775,10 @@ class LabelRuleTests(unittest.TestCase):
         self.assertEqual(label([self.hit(0, 10, 990), kb], 1)["deathType"], "oneShot")
         burst = [self.hit(0, 10, 990), self.hit(500, 400, 590), self.hit(990, 590, 0, overkill=10)]
         self.assertEqual(label(burst, 2)["deathType"], "burst")
-        slow = [self.hit(0, 10, 990), self.hit(500, 400, 590), self.hit(2000, 590, 0, overkill=10)]
-        self.assertEqual(label(slow, 2), {"deathType": "wasLow", "rot": None, "biggestHit": 1})
+        # High just before the 400 hit (t=500): 1.5 s later is still a burst, 1.6 s is not.
+        self.assertEqual(label([self.hit(0, 10, 990), self.hit(500, 400, 590), self.hit(2000, 590, 0, overkill=10)], 2)["deathType"], "burst")
+        slow = [self.hit(0, 10, 990), self.hit(500, 400, 590), self.hit(2100, 590, 0, overkill=10)]
+        self.assertEqual(label(slow, 2), {"deathType": "wasLow", "rot": None, "biggestHit": 1, "oneShotHit": None})
 
     def test_rot_needs_a_raid_wide_ability(self):
         aid = next(iter(RAID_WIDE))
@@ -787,9 +789,11 @@ class LabelRuleTests(unittest.TestCase):
         self.assertEqual(label(not_wide, 5)["rot"], None)
 
     def test_threshold_edges(self):
-        # "quick" is measured from the last moment at high health (t=0 here) to the killing blow.
-        self.assertEqual(label([self.hit(0, 10, 990), self.hit(600, 100, 700), self.hit(1001, 700, 0, overkill=5)], 2)["deathType"], "wasLow")
-        self.assertEqual(label([self.hit(0, 10, 990), self.hit(600, 100, 700), self.hit(999, 700, 0, overkill=5)], 2)["deathType"], "burst")
+        # "quick" is measured from the last moment at high health (t=0 here) to the killing blow:
+        # at most 1.5 s (owner's rule, 2026-10-08), not the 1 s press cutoff.
+        self.assertEqual(label([self.hit(0, 10, 990), self.hit(600, 100, 700), self.hit(1501, 700, 0, overkill=5)], 2)["deathType"], "wasLow")
+        self.assertEqual(label([self.hit(0, 10, 990), self.hit(600, 100, 700), self.hit(1499, 700, 0, overkill=5)], 2)["deathType"], "burst")
+        self.assertEqual(label([self.hit(0, 10, 990), self.hit(600, 100, 700), self.hit(1200, 700, 0, overkill=5)], 2)["deathType"], "burst")
         # One-shot needs a single hit of 80 % of max HP or more (800 of 1000); 799 is burst.
         self.assertEqual(label([self.hit(0, 10, 990), self.hit(100, 190, 800), self.hit(500, 800, 0)], 2)["deathType"], "oneShot")
         self.assertEqual(label([self.hit(0, 10, 990), self.hit(100, 191, 799), self.hit(500, 799, 0)], 2)["deathType"], "burst")
@@ -810,7 +814,7 @@ class LabelRuleTests(unittest.TestCase):
         self.assertEqual(label(small, 2)["biggestHit"], None)
         pick = [self.hit(0, 10, 990), self.hit(1500, 100, 700, aid=7), self.hit(2000, 200, 500, aid=8),
                 self.hit(3000, 500, 0, aid=9, overkill=1)]
-        self.assertEqual(label(pick, 3), {"deathType": "wasLow", "rot": None, "biggestHit": 8})
+        self.assertEqual(label(pick, 3), {"deathType": "wasLow", "rot": None, "biggestHit": 8, "oneShotHit": None})
 
     def test_two_deaths_in_one_pull_use_their_own_hits(self):
         h = self.hit
@@ -824,8 +828,17 @@ class LabelRuleTests(unittest.TestCase):
         self.assertEqual([x["timestamp"] for x in first[0]], [0, 100])
         self.assertIsNone(death_hits([h(0, 10, 990)], 100))
 
-    def test_exactly_one_second_is_quick(self):
-        self.assertEqual(label([self.hit(0, 10, 990), self.hit(600, 790, 200), self.hit(1000, 200, 0, overkill=5)], 2)["deathType"], "burst")
+    def test_exactly_one_and_a_half_seconds_is_quick(self):
+        self.assertEqual(label([self.hit(0, 10, 990), self.hit(600, 790, 200), self.hit(1500, 200, 0, overkill=5)], 2)["deathType"], "burst")
+
+    def test_one_shot_names_its_hit_and_never_a_set_up_hit(self):
+        h = self.hit
+        # Live (Chazh, Voidspire pull 66): Melee 92%, then an 81% Judgment kills 0.4 s later.
+        chazh = [h(0, 10, 990), h(600, 920, 70, aid=1), h(1000, 70, 0, aid=2, overkill=740)]
+        self.assertEqual(label(chazh, 2), {"deathType": "oneShot", "rot": None, "biggestHit": None, "oneShotHit": 1})
+        # The killing blow is the biggest hit: nothing more to name.
+        kb_big = [h(0, 10, 990), h(600, 100, 890, aid=1), h(1000, 890, 0, aid=2, overkill=100)]
+        self.assertEqual(label(kb_big, 2)["oneShotHit"], None)
 
     def test_check_biggest_hit_only_where_the_page_shows_it(self):
         h = self.hit
@@ -839,11 +852,17 @@ class LabelRuleTests(unittest.TestCase):
             run.hits_before.return_value = hits
             return rules_labels.check(run)
         burst = [h(0, 10, 990), h(500, 400, 590), h(990, 590, 0, overkill=10)]
-        self.assertEqual(go(burst, {"deathType": "burst", "biggestHit": {"abilityId": 1}}).status, "pass")
+        self.assertEqual(go(burst, {"deathType": "burst"}).status, "pass")
+        # "Set up by" is only for deaths that are neither one-shot nor burst.
+        self.assertEqual(go(burst, {"deathType": "burst", "biggestHit": {"abilityId": 1}}).status, "fail")
         shot = [h(0, 10, 990), h(1000, 900, 0, overkill=50)]
         self.assertEqual(go(shot, {"deathType": "oneShot"}).status, "pass")
         o = go(shot, {"deathType": "oneShot", "biggestHit": {"abilityId": 1}})
         self.assertEqual((o.status, len(o.items)), ("fail", 1))
+        big_then_tick = [h(0, 10, 990), h(500, 900, 90, aid=4), h(990, 90, 0, aid=5, overkill=10)]
+        self.assertEqual(go(big_then_tick, {"deathType": "oneShot", "oneShotHit": {"abilityId": 4}}).status, "pass")
+        o = go(big_then_tick, {"deathType": "oneShot", "biggestHit": {"abilityId": 4}})
+        self.assertEqual(o.items, ["Bob pull 2: site oneShot/None/4/None, rule oneShot/None/None/4"])
 
 
     def test_check_compares_with_the_site(self):
@@ -860,7 +879,7 @@ class LabelRuleTests(unittest.TestCase):
         run.hits_before.assert_called_with("R", 2, 7, 101000)
         ev["defensives"]["survival"]["deathType"] = "wasLow"
         o = rules_labels.check(run)
-        self.assertEqual((o.status, o.items), ("fail", ["Bob pull 2: site wasLow/None/None, rule burst/None/None"]))
+        self.assertEqual((o.status, o.items), ("fail", ["Bob pull 2: site wasLow/None/None/None, rule burst/None/None/None"]))
         ev["defensives"]["survival"]["deathType"] = "instakill"
         self.assertEqual(rules_labels.check(run).status, "skip")
         # No killing hit in WCL's hits means nothing was compared: a skip, never a pass.
