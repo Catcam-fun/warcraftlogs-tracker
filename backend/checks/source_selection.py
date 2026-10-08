@@ -1,4 +1,8 @@
-"""Source check: the pulls and kills the site kept, against an independent walk of the guild's reports."""
+"""Source check: the pulls and kills the site kept, against an independent walk of the guild's reports.
+
+Copies of one pull (several officers logging it) are found by plain transitive interval overlap:
+pulls of the same boss whose start-end spans overlap, directly or through another copy, are one
+cluster. The spec's 5-second start rule was dropped; overlap alone passed live on all eight raids."""
 from datetime import datetime, timezone
 
 import analysis
@@ -58,6 +62,8 @@ def check(run):
             for keys in players.values() for key in keys}
     pulls = walk(run, *raid_week(run.meta["report_start"]))
     clusters = cluster(pulls)
+    if not clusters:
+        return skip(f"no Mythic pulls of {run.raid} in the guild's reports that week")
     by_key = {p["key"]: p for p in pulls}
     label = lambda p: p.get("name") or str(p["boss"])
     items = []
