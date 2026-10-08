@@ -6,20 +6,28 @@ from defensives import CDR_TOLERANCE_MS, ENCOUNTER_RESET_MS
 
 BAND_TOLERANCE_MS, HP_TOLERANCE = 100, 0.01
 ENTRY_TOLERANCE_MS = 50
-STRIP_LOOKBACK_MS = 1000
+STRIP_LOOKBACK_MS, STRIP_CLUSTER_MS, STRIP_MIN_BANDS = 1000, 150, 2
 CONSUMABLE_KINDS = ("healthstone", "potion")
 
 
 def death_strip(auras, death_ts, fight_start):
-    """When the death stripped the player's auras: the first end, in the STRIP_LOOKBACK_MS before the
-    death event, of an aura band up since the pull started (raid buffs, forms: only death ends those).
-    WCL's death event can come after the strip (live 2026-10-08, dreamrift pull 1: Chickenism's 19 auras,
-    Fortitude and Battle Shout among them, ended at 1244582-1244684, the death event at 1244690; the same
-    Rallying Cry stayed up on the living until 1247448). Without such a band, the death event itself."""
-    ends = [b["endTime"] for a in auras for b in a.get("bands") or []
-            if b["startTime"] <= fight_start + BAND_TOLERANCE_MS
-            and death_ts - STRIP_LOOKBACK_MS <= b["endTime"] <= death_ts]
-    return min(ends) if ends else death_ts
+    """When the death stripped the player's auras, or the death event itself when no strip shows.
+
+    Death removes every aura at once, and WCL's death event can come after that (live 2026-10-08,
+    dreamrift pull 1: Chickenism's 19 auras, Fortitude and Battle Shout among them, ended at
+    1244582-1244684, the death event at 1244690; the same Rallying Cry stayed up on the living until
+    1247448). The strip is a cluster: at least STRIP_MIN_BANDS bands up since the pull started (raid
+    buffs, forms) ending within STRIP_CLUSTER_MS of each other in the STRIP_LOOKBACK_MS before the death
+    event, and more than half of those that end there. One such band ending alone (a form dropped, an
+    aura cancelled) is not a strip. The strip is the cluster's earliest end."""
+    ends = sorted(b["endTime"] for a in auras for b in a.get("bands") or []
+                  if b["startTime"] <= fight_start + BAND_TOLERANCE_MS
+                  and death_ts - STRIP_LOOKBACK_MS <= b["endTime"] <= death_ts)
+    for first in ends:
+        together = sum(1 for e in ends if first <= e <= first + STRIP_CLUSTER_MS)
+        if together >= STRIP_MIN_BANDS and together * 2 > len(ends):
+            return first
+    return death_ts
 
 
 def active_mismatches(active_names, auras, death_ts, fight_start=None):
