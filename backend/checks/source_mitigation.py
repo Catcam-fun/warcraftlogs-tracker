@@ -199,6 +199,8 @@ def check(run):
     schools = meta.get("ability_schools", {})
     # (player, defensive) -> [(measured, predicted)] per hit, from boss abilities with MIN_HITS or more
     rows = defaultdict(list)
+    per_hit_base = defaultdict(list)       # (player, defensive) -> the catalog's flat value, where each hit is predicted
+    pairs = set()                          # (player, defensive) rows made of back-to-back hit pairs
     for (pid, ability, talents), groups in shares.items():
         for name, with_up in groups.items():
             comps, _ = defensives._resolve(dr_names[name], dict(talents), {}, spec.get(pid))
@@ -218,6 +220,11 @@ def check(run):
                 keep, group = predicted_keep(comps, e, aoe_known, schools, SCALES_WITH_HIT.get(name), size)
                 if keep is not None:
                     by_predicted[group].append((1 - through / usual, 1 - keep))
+                    if group == "by hit":
+                        flat = 1.0
+                        for c in comps or []:
+                            flat *= 1 - (c.get("dr") or 0)
+                        per_hit_base[(pid, name)].append(1 - flat)
             for got in by_predicted.values():
                 if len(got) >= MIN_HITS:
                     rows[(pid, name)] += got
@@ -226,6 +233,7 @@ def check(run):
     for (pid, name), got in enemy_side(hits, players, names, cat, loadout, spec, pull_spec,
                                        aoe_known, schools).items():
         rows[(pid, name)] += got
+        pairs.add((pid, name))
 
     # The median gap between measured and predicted over every hit: a wrong catalog value shows on
     # every ability, while one boss ability with an untracked modifier doesn't move the median.
@@ -238,7 +246,15 @@ def check(run):
         predicted = sum(p for _, p in per) / n
         real = predicted + statistics.median(m - p for m, p in per)
         if abs(real - predicted) > FLAG_AT:
-            items.append(f"{players[pid]['name']} {name}: measured {real:.2f}, catalog {predicted:.2f} over {n} hits")
+            who = f"{players[pid]['name']} {name}"
+            if (pid, name) in pairs:
+                items.append(f"{who}: measured {real:.2f}, catalog {predicted:.2f} over {n} pairs")
+            elif per_hit_base.get((pid, name)):
+                # Each hit has its own prediction (it grows with the hit or with missing health): say so.
+                base = statistics.mean(per_hit_base[(pid, name)])
+                items.append(f"{who}: measured {real:.2f}, predicted {predicted:.2f} (catalog {base:.2f}) over {n} hits")
+            else:
+                items.append(f"{who}: measured {real:.2f}, catalog {predicted:.2f} over {n} hits")
     if not measured:
         return skip(f"no defensive had enough matched hits to measure ({len(rows)} rows compared)")
     return fail(items) if items else PASS
