@@ -24,7 +24,7 @@ anchors:
   check_deaths: backend/checks/source_deaths.py:9
   check_selection: backend/checks/source_selection.py:57
   check_participation: backend/checks/source_participation.py:24
-  check_state: backend/checks/source_state.py:258
+  check_state: backend/checks/source_state.py:264
   check_durations: backend/checks/source_durations.py:30
   check_mitigation: backend/checks/source_mitigation.py:127
   check_slots: backend/checks/rules_slots.py:40
@@ -46,7 +46,7 @@ links:
   - game-data
   - warcraftlogs
   - operations
-content_hash: sha256:17cd25e515bfdca47fd246960f3df7984b7b45601b9529ae6edfe7fd3c19ccae
+content_hash: sha256:1036068687b294718d63794430923c46f869f532e8784ab3623e28e72ab3e512
 ---
 ## Summary
 
@@ -66,7 +66,7 @@ Every test file and check script. Filter by kind.
 | `backend/test_death_slots.py` {backend} | `rank_pull_deaths` and `drop_saves_that_died` (`backend/test_death_slots.py:14`) | cheat deaths never push real deaths out; simultaneous deaths take one slot each; a rezzed player takes two slots; wipe deaths never count and cheat deaths do not make a wipe; a save only counts if the player survived it |
 | `backend/test_dedup.py` {backend} | `dedup_pulls` (`backend/test_dedup.py:11`) | the earliest copy of a pull is kept; a pull only one log has is kept; another boss is never a copy; a copy cut short by more than 5 s gives way to the full one; clock jitter keeps the earliest; same-start ties go by report code |
 | `backend/test_cache.py` {backend} | `SharedReportCache` and the Supabase encoding (`backend/test_cache.py:18`) | int and tuple keys survive the round trip; memory first, then the shared store; keys carry namespace and `CACHE_VERSION`; a missing database is a cache miss |
-| `backend/test_defensives.py` {backend} | `defensives.py` against the committed catalog (`backend/test_defensives.py:38`) | talents decide which abilities a player has; cooldowns, charges and resets between pulls; would-it-have-saved replays (immunities, school-limited reductions, combined defensives, shields); consumable estimates; per-patch catalog choice (`backend/test_defensives.py:400`); per-pull spec; lethal-window hits, set-up hit and rot labels; armor and Bear Form |
+| `backend/test_defensives.py` {backend} | `defensives.py` against the committed catalog (`backend/test_defensives.py:38`) | talents decide which abilities a player has; cooldowns, charges and resets between pulls; would-it-have-saved replays (immunities, school-limited reductions, combined defensives, shields); consumable estimates; per-patch catalog choice (`backend/test_defensives.py:424`); per-pull spec; lethal-window hits, set-up hit and rot labels; armor and Bear Form |
 | `backend/test_boss_spell_text.py` {backend} | `render` in `scripts/build_boss_spell_text.py` and the generated `boss_spell_text.py` (`backend/test_boss_spell_text.py:24`) | description templates filled only where game data is exact; the generated file has Sever's text |
 | `backend/test_bodies.py` {backend} | `json_body`, the gzip-aware request reader (`backend/test_bodies.py:12`) | plain JSON still works; gzip bodies are read; bad bodies give `None`; a compressed body cannot expand past the size cap |
 | `backend/test_ratelimit.py` {backend} | `client_ip()`, the rate limiter's key (`backend/test_ratelimit.py:12`) | headers a client can set (`X-Forwarded-For`, `CF-Connecting-IP`, `X-Viewer-Ip` without the secret) do not change the key; `X-Viewer-Ip` is trusted only with the origin secret (`backend/test_ratelimit.py:24`) |
@@ -79,7 +79,7 @@ Every test file and check script. Filter by kind.
 | `backend/checks/source_deaths.py` {check} | `deaths` (source): Deaths the site reads match WCL's Deaths table (`backend/checks/source_deaths.py:9`) | run with `python -m checks deaths <target>` |
 | `backend/checks/source_selection.py` {check} | `selection` (source): The pulls and kills the site kept match the guild's reports on WCL (`backend/checks/source_selection.py:57`) | run with `python -m checks selection <target>` |
 | `backend/checks/source_participation.py` {check} | `participation` (source): Who was in each kept pull, and who counts as roster, match WCL (`backend/checks/source_participation.py:24`) | run with `python -m checks participation <target>` |
-| `backend/checks/source_state.py` {check} | `state` (source): Active, ready and health at death match WCL's auras, casts and Deaths table (`backend/checks/source_state.py:258`) | run with `python -m checks state <target>` |
+| `backend/checks/source_state.py` {check} | `state` (source): Active, ready and health at death match WCL's auras, casts and Deaths table (`backend/checks/source_state.py:264`) | run with `python -m checks state <target>` |
 | `backend/checks/source_durations.py` {check} | `durations` (source): Defensive durations (catalog + talents) match real aura uses (`backend/checks/source_durations.py:30`) | run with `python -m checks durations <target>` |
 | `backend/checks/source_mitigation.py` {check} | `mitigation` (source): Catalog damage reductions match real hits with and without the defensive (`backend/checks/source_mitigation.py:127`) | run with `python -m checks mitigation <target>` |
 | `backend/checks/rules_slots.py` {check} | `slots` (rules): Slots and wipes follow the owner's rules (`backend/checks/rules_slots.py:40`) | run with `python -m checks slots <target>` |
