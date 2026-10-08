@@ -149,5 +149,39 @@ class SlotsRuleTests(unittest.TestCase):
         self.assertTrue(rank(before)[0][1])      # a cheat death just before a wipe's first death is inside it
 
 
+class SlotsCheckTests(unittest.TestCase):
+    def _run(self, events, tables):
+        run = mock.Mock()
+        run.result = {"events": events}
+        run.fight.return_value = {"start_time": 1000}
+        run.actor_id.side_effect = lambda rid, name: {"A": 1, "B": 2}[name]
+        def table(rid, fid):
+            t = tables[fid]
+            if isinstance(t, Exception):
+                raise t
+            return t
+        run.deaths_table.side_effect = table
+        return run
+
+    def _ev(self, fid, who, ts, slot, wipe=False, cheat=False):
+        return {"reportId": "r", "fightId": fid, "timestamp": ts, "originalCharacter": who,
+                "slot": slot, "inWipe": wipe, "isCheatDeath": cheat}
+
+    def test_check(self):
+        table = [{"id": 2, "timestamp": 1900}, {"id": 1, "timestamp": 1500}, {"id": 1, "timestamp": 2500}]
+        good = [self._ev(1, "A", 500, 1), self._ev(1, "B", 900, 2), self._ev(1, "A", 1500, 3),
+                self._ev(1, "A", 700, 1, cheat=True)]   # cheat death: no item
+        self.assertEqual(rules_slots.check(self._run({"A": good}, {1: table})).status, "pass")
+        bad = [self._ev(1, "A", 500, 1), self._ev(1, "B", 900, 3)]
+        o = rules_slots.check(self._run({"A": bad}, {1: table}))
+        self.assertEqual(o.status, "fail")
+        self.assertEqual(o.items, ["pull 1 B 900: site slot 3 inWipe False, rule slot 2 inWipe False"])
+        o = rules_slots.check(self._run({"A": [self._ev(1, "A", 600, 1)]}, {1: table}))
+        self.assertEqual(o.items, ["pull 1 A 600: not in WCL's Deaths table"])
+        capped = self._run({"A": [self._ev(2, "A", 500, 1)]}, {2: TableCapped("r", 2)})
+        self.assertEqual(rules_slots.check(capped).items, ["pull 2: 200+ deaths, table capped"])
+        self.assertEqual(rules_slots.check(self._run({}, {})).status, "skip")
+
+
 if __name__ == "__main__":
     unittest.main()
