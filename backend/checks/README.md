@@ -85,6 +85,7 @@ Each run prints how many WCL points it spent. The budget is 3600 an hour, so a w
 - Mythic only (difficulty 5).
 - The end-to-end run sends no alt groups (`characterGroups`), so alt merging is not covered.
 - Cheat deaths are switched off in the run.
+- `mitigation` cannot measure, and leaves out: Fiery Brand (it cuts the branded enemy's damage, which WCL already counts in the hit's unmitigated size), Dampen Harm (20% to 50% by hit size), Brewmaster Stagger ticks (never reduced at tick time), and a defensive on a spec the catalog doesn't give it to (Bear Form on a Guardian). It judges each defensive by the median gap over its hits, so one boss ability with an untracked modifier can't decide it.
 
 ## Last known-good logs
 

@@ -279,6 +279,73 @@ class MitigationCheckTests(unittest.TestCase):
         with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits[:15]):
             self.assertEqual(source_mitigation.check(run).status, "skip")
 
+    def _wave1_run(self, entries, friendlies, abilities, combatants=()):
+        run = mock.Mock(); run.code = "X"
+        run.pulls = [{"id": 1, "start_time": 0, "end_time": 100_000}]
+        run.meta = {"abilities": abilities, "friendlies": friendlies, "player_details": {}, "ability_schools": {}}
+        run.cat.name_to_id = {e["name"]: sid for sid, e in entries.items()}
+        run.cat.all = entries
+        run.cat.relevant_talent_entries = set()
+        run.combatants.return_value = list(combatants)
+        return run
+
+    def test_effects_it_cannot_measure_are_left_out(self):
+        # Live 2026-10-08 sweep, wave 1: each of these read far from the catalog for a reason that
+        # isn't the catalog's value. Fiery Brand (Lazelele 0.02 vs 0.40) cuts the branded enemy's damage
+        # done, which is already inside unmitigatedAmount; Dampen Harm (Weavi) grows with hit size;
+        # Stagger ticks (Weavi Fortifying Brew 0.15 vs 0.30) are never reduced at tick time; Bear Form
+        # (Zeforus -0.01 vs 0.06) is a Guardian's own form, which the site never judges.
+        from checks import source_mitigation
+        entries = {204021: {"name": "Fiery Brand", "kind": "personal", "class": "DemonHunter",
+                            "mitigation": [{"dr": 0.4}]},
+                   122278: {"name": "Dampen Harm", "kind": "personal", "class": "Monk", "mitigation": [{"dr": 0.2}]},
+                   115203: {"name": "Fortifying Brew", "kind": "personal", "class": "Monk",
+                            "mitigation": [{"dr": 0.3}]},
+                   5487: {"name": "Bear Form", "kind": "personal", "class": "Druid",
+                          "specs": ["Balance", "Feral", "Restoration"], "mitigation": [{"dr": 0.06}]}}
+        abilities = {204021: "Fiery Brand", 122278: "Dampen Harm", 115203: "Fortifying Brew", 5487: "Bear Form"}
+        friendlies = [{"id": 1, "name": "Laz", "type": "DemonHunter"}, {"id": 2, "name": "Weavi", "type": "Monk"},
+                      {"id": 3, "name": "Zef", "type": "Druid"}]
+        hit = lambda who, ability, through, buffs: {"type": "damage", "targetID": who, "abilityGameID": ability,
+                                                    "fight": 1, "unmitigatedAmount": 1000, "mitigated": 1000 - through,
+                                                    "amount": through, "buffs": buffs}
+        hits = [hit(1, 9, 900, "")] * 10 + [hit(1, 9, 900, "204021.")] * 25        # the cut sits in unmitigated
+        hits += [hit(2, 9, 900, "")] * 10 + [hit(2, 9, 900, "122278.")] * 25        # small hits: little cut
+        hits += [hit(2, 124255, 600, "")] * 10 + [hit(2, 124255, 600, "115203.")] * 25   # Stagger ticks
+        hits += [hit(3, 9, 900, "")] * 10 + [hit(3, 9, 900, "5487.")] * 25
+        combatants = [{"fight": 1, "sourceID": 3, "specID": 104, "talentTree": []}]    # 104: Guardian
+        run = self._wave1_run(entries, friendlies, abilities, combatants)
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
+            o = source_mitigation.check(run)
+        self.assertEqual(o.status, "skip")
+        self.assertIn("(0 rows compared)", o.reason)
+        # The same Bear Form hits on a Feral (103) are measured and flagged: 0.00 against 0.06.
+        run = self._wave1_run(entries, friendlies, abilities, [dict(combatants[0], specID=103)])
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
+            o = source_mitigation.check(run)
+        self.assertEqual(o.items, ["Zef Bear Form: measured 0.00, catalog 0.06 over 25 hits"])
+
+    def test_one_odd_boss_ability_does_not_decide(self):
+        # Live 2026-10-08 (Pumps, Undermine): Barkskin read 0.29-0.32 on every ability but Sonic Ba-Boom,
+        # whose hits vary 0.3-0.95 through without any defensive (an untracked fight modifier); the hit-
+        # weighted mean gave 0.21 against 0.30. The median gap over hits judges the catalog value.
+        from checks import source_mitigation
+        entries = {22812: {"name": "Barkskin", "kind": "personal", "class": "Druid", "mitigation": [{"dr": 0.3}]}}
+        run = self._wave1_run(entries, [{"id": 3, "name": "Pumps", "type": "Druid"}], {22812: "Barkskin"})
+        hit = lambda ability, through, buffs: {"type": "damage", "targetID": 3, "abilityGameID": ability, "fight": 1,
+                                               "unmitigatedAmount": 1000, "mitigated": 1000 - through,
+                                               "amount": through, "buffs": buffs}
+        hits = [hit(1, 900, "")] * 5 + [hit(1, 630, "22812.")] * 12
+        hits += [hit(2, 800, "")] * 5 + [hit(2, 560, "22812.")] * 10
+        hits += [hit(3, 800, "")] * 5 + [hit(3, 800, "22812.")] * 9                # reads 0.00
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
+            self.assertEqual(source_mitigation.check(run).status, "pass")
+        # A catalog value that is wrong is off on every ability, and is still flagged.
+        hits = [h if h["buffs"] == "" else dict(h, amount=round(h["amount"] / 0.7 * 0.8)) for h in hits[:32]]
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
+            o = source_mitigation.check(run)
+        self.assertEqual(o.items, ["Pumps Barkskin: measured 0.20, catalog 0.30 over 22 hits"])
+
 
 class SlotsRuleTests(unittest.TestCase):
     def test_rank_clauses(self):
@@ -422,6 +489,20 @@ class VerdictRuleTests(unittest.TestCase):
         self.assertIn("Barkskin: amount above max HP", violations(d, cat))
         d["survival"]["details"]["Barkskin"]["amount"] = 1_000
         self.assertEqual(violations(d, cat), [])
+
+    def test_missing_health_is_never_negative(self):
+        # Live 2026-10-08 (Strikepal, Nerub-ar pull 16): the site showed 105% health before the killing
+        # blow (state reports that), and Divine Shield's amount was exactly the 15912627 killing hit.
+        # Missing health is 0 there, not -503069, so an immunity worth the whole hit is in bounds.
+        cat = mock.Mock(); cat.name_to_id = {}; cat.all = {}
+        d = self.base(); s = d["survival"]
+        s.update(hpBeforePct=105, maxHp=10_061_382, overkill=4_552_041, killingHit={"size": 15_912_627},
+                 wouldSave={"Divine Shield": True}, details={"Divine Shield": {"amount": 15_912_627, "pressAgo": 1.0}})
+        d["available"] = [{"name": "Divine Shield"}]
+        self.assertEqual(violations(d, cat), [])
+        s["details"]["Divine Shield"]["amount"] = 16_100_000          # above the hit plus 1% of max HP
+        self.assertEqual(violations(d, cat), ["Divine Shield: amount 16100000 above missing health 0 "
+                                              "plus the killing hit 15912627"])
 
     def bad(self):
         d = self.base(); d["survival"]["details"]["Barkskin"]["pressAgo"] = 0.4
@@ -620,8 +701,28 @@ class StateTests(unittest.TestCase):
         s = {"hpBeforePct": 40, "maxHp": 1000, "overkill": 55}
         entry = {"overkill": 55, "events": [{"type": "damage", "amount": 300, "overkill": 0}, {"type": "damage", "amount": 405, "overkill": 55}]}
         self.assertIsNone(health_mismatch(s, entry))
-        self.assertIsNotNone(health_mismatch(s, dict(entry, overkill=56)))
+        self.assertIsNotNone(health_mismatch(dict(s, overkill=56), entry))
         self.assertIsNotNone(health_mismatch(dict(s, hpBeforePct=43), entry))
+
+    def test_overkill_is_the_killing_hits_not_the_entrys_sum(self):
+        # Live 2026-10-08 (Weavi, Brewmaster, Undermine): two Stagger ticks overkilled for 662478 and
+        # 299233 without killing him; WCL's entry sums them with the killing hit's 2653261 (3614972).
+        # The site's "Died by" is the killing hit's overkill, which is what WCL's killing event says.
+        s = {"hpBeforePct": 0, "maxHp": 21247860, "overkill": 2653261}
+        entry = {"overkill": 3614972, "events": [
+            {"type": "damage", "amount": 1, "overkill": 2653261, "timestamp": 1358033},
+            {"type": "damage", "amount": 521767, "timestamp": 1357943}]}
+        self.assertIsNone(health_mismatch(s, entry))
+        self.assertEqual(health_mismatch(dict(s, overkill=3614972), entry), "overkill site 3614972 vs wcl 2653261")
+
+    def test_health_above_max_hp_is_a_mismatch(self):
+        # Live 2026-10-08 (Strikepal, Nerub-ar pull 16): the killing hit took 10531185 and WCL's max HP on
+        # it was 10061382, 11198315 on every hit before; the site showed 105% health before the blow.
+        s = {"hpBeforePct": 105, "maxHp": 10061382, "overkill": 4552041}
+        entry = {"overkill": 4552041, "events": [{"type": "damage", "amount": 10531185, "overkill": 4552041}]}
+        self.assertEqual(health_mismatch(s, entry), "health before 105% of max HP 10061382 (above 100%)")
+        self.assertIsNone(health_mismatch(dict(s, hpBeforePct=100), dict(entry, events=[
+            {"type": "damage", "amount": 10061382, "overkill": 4552041}])))
 
     def test_killing_event_is_the_newest_overkill_hit(self):
         s = {"hpBeforePct": 40, "maxHp": 1000, "overkill": 55}
