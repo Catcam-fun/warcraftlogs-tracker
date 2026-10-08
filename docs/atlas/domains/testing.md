@@ -22,18 +22,18 @@ anchors:
   api_test: frontend/src/api.test.js:14
   npm_test: frontend/package.json:22
   check_deaths: backend/checks/source_deaths.py:9
-  check_selection: backend/checks/source_selection.py:53
+  check_selection: backend/checks/source_selection.py:57
   check_participation: backend/checks/source_participation.py:24
-  check_state: backend/checks/source_state.py:169
+  check_state: backend/checks/source_state.py:201
   check_durations: backend/checks/source_durations.py:30
   check_mitigation: backend/checks/source_mitigation.py:45
   check_slots: backend/checks/rules_slots.py:40
-  check_counting: backend/checks/rules_counting.py:20
+  check_counting: backend/checks/rules_counting.py:27
   check_labels: backend/checks/rules_labels.py:97
-  check_verdicts: backend/checks/rules_verdicts.py:70
+  check_verdicts: backend/checks/rules_verdicts.py:166
   check_defensives: backend/checks/rules_defensives.py:5
   checks_registry: backend/checks/registry.py:6
-  checks_target: backend/checks/common.py:32
+  checks_target: backend/checks/common.py:36
   checks_unit_tests: backend/test_checks.py:1
   carried_over: backend/checks/source_durations.py:20
   only_workflow: .github/workflows/atlas-sync.yml:1
@@ -46,7 +46,7 @@ links:
   - game-data
   - warcraftlogs
   - operations
-content_hash: sha256:b57ae1c1cf748cf8521cfbb38f7b0fecfc0010812639e2c05cea683cba427499
+content_hash: sha256:6183563a8b5c8a2f3a3239c4ff026cc6deb869912d698069449d0b25a6919c4c
 ---
 ## Summary
 
@@ -77,15 +77,15 @@ Every test file and check script. Filter by kind.
 | `frontend/src/AnalyzeConfig.test.js` {frontend} | The raid picker (`frontend/src/AnalyzeConfig.test.js:22`) | five raid cards; Season 2 is one combined card; clicking sends `selectedRaid` and shows the right lineup (9, 9 and 8 bosses) |
 | `frontend/src/api.test.js` {frontend} | `api.js` helpers (`frontend/src/api.test.js:14`) | `stripSecrets`; bearer token on signed-in calls; fail fast without a session; network failure gives a readable error; credentials remembered in `localStorage` and cleared when emptied |
 | `backend/checks/source_deaths.py` {check} | `deaths` (source): Deaths the site reads match WCL's Deaths table (`backend/checks/source_deaths.py:9`) | run with `python -m checks deaths <target>` |
-| `backend/checks/source_selection.py` {check} | `selection` (source): The pulls and kills the site kept match the guild's reports on WCL (`backend/checks/source_selection.py:53`) | run with `python -m checks selection <target>` |
+| `backend/checks/source_selection.py` {check} | `selection` (source): The pulls and kills the site kept match the guild's reports on WCL (`backend/checks/source_selection.py:57`) | run with `python -m checks selection <target>` |
 | `backend/checks/source_participation.py` {check} | `participation` (source): Who was in each kept pull, and who counts as roster, match WCL (`backend/checks/source_participation.py:24`) | run with `python -m checks participation <target>` |
-| `backend/checks/source_state.py` {check} | `state` (source): Active, ready and health at death match WCL's auras, casts and Deaths table (`backend/checks/source_state.py:169`) | run with `python -m checks state <target>` |
+| `backend/checks/source_state.py` {check} | `state` (source): Active, ready and health at death match WCL's auras, casts and Deaths table (`backend/checks/source_state.py:201`) | run with `python -m checks state <target>` |
 | `backend/checks/source_durations.py` {check} | `durations` (source): Defensive durations (catalog + talents) match real aura uses (`backend/checks/source_durations.py:30`) | run with `python -m checks durations <target>` |
 | `backend/checks/source_mitigation.py` {check} | `mitigation` (source): Catalog damage reductions match real hits with and without the defensive (`backend/checks/source_mitigation.py:45`) | run with `python -m checks mitigation <target>` |
 | `backend/checks/rules_slots.py` {check} | `slots` (rules): Slots and wipes follow the owner's rules (`backend/checks/rules_slots.py:40`) | run with `python -m checks slots <target>` |
-| `backend/checks/rules_counting.py` {check} | `counting` (rules): A death counts when slot <= X and not in a wipe; defensives exist exactly on deaths that can count (`backend/checks/rules_counting.py:20`) | run with `python -m checks counting <target>` |
+| `backend/checks/rules_counting.py` {check} | `counting` (rules): A death counts when slot <= X and not in a wipe; defensives exist exactly on deaths that can count (`backend/checks/rules_counting.py:27`) | run with `python -m checks counting <target>` |
 | `backend/checks/rules_labels.py` {check} | `labels` (rules): Death labels follow the rules: one-shot, burst, rot (raid-wide only) or set up by (`backend/checks/rules_labels.py:97`) | run with `python -m checks labels <target>` |
-| `backend/checks/rules_verdicts.py` {check} | `verdicts` (rules): Would-save verdicts obey the press, overkill, immunity and instant-kill rules (`backend/checks/rules_verdicts.py:70`) | run with `python -m checks verdicts <target>` |
+| `backend/checks/rules_verdicts.py` {check} | `verdicts` (rules): Would-save verdicts obey the press, overkill, immunity and instant-kill rules (`backend/checks/rules_verdicts.py:166`) | run with `python -m checks verdicts <target>` |
 | `backend/checks/rules_defensives.py` {check} | `defensives` (rules): Talent entry IDs in the log match the catalog (`backend/checks/rules_defensives.py:5`) | run with `python -m checks defensives <target>` |
 | `backend/test_checks.py` {backend} | Unit tests of the checks package with WarcraftLogs mocked (`backend/test_checks.py:1`) | `test_defensives.py` imports `carried_over` from `checks.source_durations` (`backend/checks/source_durations.py:20`) |
 
@@ -93,7 +93,7 @@ What each check takes and what passing looks like:
 
 | Command {check} | Target | Passing looks like |
 |---|---|---|
-| `python -m checks all <target> ...` {check} | `<reportCode>:<raid key>` or `<reportCode>:<raid key>:<Guild>/<Server>/<REGION>` (`backend/checks/common.py:32`) | every check prints pass; exit code non-zero if any fails. Use `source`, `rules` or one check name (`deaths`, `state`, `mitigation`, ...) instead of `all` to run fewer (`backend/checks/registry.py:6`). `find-logs` prints one finished Mythic target per raid. `--json <file>` saves the results. |
+| `python -m checks all <target> ...` {check} | `<reportCode>:<raid key>` or `<reportCode>:<raid key>:<Guild>/<Server>/<REGION>` (`backend/checks/common.py:36`) | every check prints pass; exit code non-zero if any fails. Use `source`, `rules` or one check name (`deaths`, `state`, `mitigation`, ...) instead of `all` to run fewer (`backend/checks/registry.py:6`). `find-logs` prints one finished Mythic target per raid. `--json <file>` saves the results. |
 | A skip | none | the check could not run on this log and says why; a skip is not a pass |
 
 ## Standing it up
@@ -104,13 +104,13 @@ What each check takes and what passing looks like:
 | Backend dependencies | `pip install -r backend/requirements.txt` first: tests import `supabase_client`, which needs `brotli` and `supabase` | `backend/requirements.txt` |
 | pytest | not listed in `requirements.txt`; install it separately if you prefer it | `backend/requirements.txt` |
 | Frontend runner | `cd frontend && npm test` (`react-scripts test`, watch mode; `CI=true` runs once) | `frontend/package.json:22` |
-| Checks | `WCL_CLIENT_ID` and `WCL_CLIENT_SECRET` in the environment (`backend/checks/common.py:67`) | your own WarcraftLogs API client |
+| Checks | `WCL_CLIENT_ID` and `WCL_CLIENT_SECRET` in the environment (`backend/checks/common.py:95`) | your own WarcraftLogs API client |
 | Check cost | each run prints the WarcraftLogs points it spent; a whole `all` run costs about 200-500 | `backend/checks/README.md` |
 | CI | unit tests run only in the AWS deploy, on pushes to `main` or by hand (`.github/workflows/deploy-aws.yml:54`); `.github/workflows/atlas-sync.yml` only verifies the Atlas on pull requests | `.github/workflows/` |
 
 ## Invariants
 
-- **MUST** keep `python -m checks all` at zero fails on a Mythic log of every raid key after any change to fetching or to a rule; its exit code is the automated pass/fail (`backend/checks/registry.py:6`).
+- **MUST** aim for `python -m checks all` at zero fails on a Mythic log of every raid key after any change to fetching or to a rule; its exit code is the automated pass/fail (`backend/checks/verdict.py:70`). Today `all` exits 1 on every raid because of open findings against the site, so zero fails is the target, not the current state.
 - **NEVER** let the unit tests reach WarcraftLogs or Supabase: they patch `get_access_token`, `get_report_fights`, `get_fights`, `get_report_deaths_bulk` and the `defensives` fetchers (`backend/test_api.py:288`), and swap `supabase_client.db` for a fake (`backend/test_api.py:83`), so they run without keys.
 
 ## Gotchas
@@ -121,7 +121,8 @@ What each check takes and what passing looks like:
 - **Report-cache eviction is untested**: `evict_report_cache` (`backend/supabase_client.py:395`) and the five-minute back-off after an error have no test; `test_cache.py` covers only the retry of a reset connection (`backend/test_cache.py:60`).
 - **Date windows are tested for one raid**: `test_season_two_default_and_custom_date_windows` covers `midnight-s2-all` only. The other seven windows in `RAID_DATE_WINDOWS` are not asserted.
 - **Some tests read generated data**: `test_defensives.py` runs against the committed `defensive_catalog.py`, and `test_generated_file` expects Sever's text in `boss_spell_text.py` (`backend/test_boss_spell_text.py:34`). Rebuilding those modules can change what these tests see.
-- **The checks only look at Mythic**: the package passes difficulty 5 everywhere (`backend/checks/common.py:69`). The raid key must be a key of `RAID_ENCOUNTERS`.
+- **The checks only look at Mythic**: the package passes difficulty 5 everywhere (`backend/checks/common.py:97`). The raid key must be a key of `RAID_ENCOUNTERS`.
+- **The checks' analysis never touches the shared report cache**: they run `/api/analyze` in process, and `import app` loads `backend/.env` with the real Supabase key, so for that run the shared cache reads as empty and writes go nowhere, and the in-memory caches are cleared before and after (`backend/checks/common.py:71`).
 - **The end-to-end run needs the report's guild**: pass it in the target (`<code>:<raid>:<Guild>/<Server>/<REGION>`) when WarcraftLogs has none attached to the report.
 - **The Analyze form test is pinned to today's raid list**: it expects exactly five raid cards (`frontend/src/AnalyzeConfig.test.js:28`), so adding a tier means updating it.
 

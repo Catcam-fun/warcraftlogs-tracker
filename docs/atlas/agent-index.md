@@ -943,18 +943,18 @@
   - api_test: frontend/src/api.test.js:14
   - npm_test: frontend/package.json:22
   - check_deaths: backend/checks/source_deaths.py:9
-  - check_selection: backend/checks/source_selection.py:53
+  - check_selection: backend/checks/source_selection.py:57
   - check_participation: backend/checks/source_participation.py:24
-  - check_state: backend/checks/source_state.py:169
+  - check_state: backend/checks/source_state.py:201
   - check_durations: backend/checks/source_durations.py:30
   - check_mitigation: backend/checks/source_mitigation.py:45
   - check_slots: backend/checks/rules_slots.py:40
-  - check_counting: backend/checks/rules_counting.py:20
+  - check_counting: backend/checks/rules_counting.py:27
   - check_labels: backend/checks/rules_labels.py:97
-  - check_verdicts: backend/checks/rules_verdicts.py:70
+  - check_verdicts: backend/checks/rules_verdicts.py:166
   - check_defensives: backend/checks/rules_defensives.py:5
   - checks_registry: backend/checks/registry.py:6
-  - checks_target: backend/checks/common.py:32
+  - checks_target: backend/checks/common.py:36
   - checks_unit_tests: backend/test_checks.py:1
   - carried_over: backend/checks/source_durations.py:20
   - only_workflow: .github/workflows/atlas-sync.yml:1

@@ -42,7 +42,7 @@ invariants:
   - "NEVER: a guild-reports query filters by zoneID; mixed raid and dungeon reports would be dropped."
 flows:
   - request-path
-content_hash: sha256:ebaccc43e726b7d2cc9b06362ff9d5a68b28cb43890d22f0dd3dc97d7d24d578
+content_hash: sha256:ca2a90f3630fb7484bcad6f4c0e6e4cd187b3eb613a9b369b5daf17dec223f91
 ---
 ## Summary
 
@@ -133,7 +133,7 @@ What is read from WCL, and where.
 | Runs on | Inside the Flask backend process; no separate service | `backend/app.py` |
 | Depends on | The WCL proxy at `wcl-proxy.catcam-fun.workers.dev` for both GraphQL and OAuth | hard-coded constants, `backend/warcraftlogs.py:15-16` |
 | Credentials (site) | `clientId`, `clientSecret` in each Analyze request body | the officer's own WCL API client, `backend/app.py:125-126` |
-| Credentials (scripts) | `WCL_CLIENT_ID`, `WCL_CLIENT_SECRET` | shell environment, e.g. `backend/scripts/build_raid_wide.py:79`, `backend/checks/common.py:67` |
+| Credentials (scripts) | `WCL_CLIENT_ID`, `WCL_CLIENT_SECRET` | shell environment, e.g. `backend/scripts/build_raid_wide.py:79`, `backend/checks/common.py:95` |
 | Cache for finished reports | Supabase `report_cache` table behind an in-memory LRU | `backend/cache.py:42`; Supabase env vars in `backend/supabase_client.py:27-29` |
 
 ## Invariants
