@@ -132,7 +132,8 @@ def ready_times(run, ev, rid, fid, pid, fight_start, kb_ts, names):
             continue
         if loadouts is None:
             loadouts = source_state.pull_loadouts(run, rid, fid, pid)
-        left, since = source_state.ability_state(entry, sid, casts, loadouts, this_pull, fight_start, kb_ts)
+        left, since = source_state.ability_state(entry, sid, casts, loadouts, this_pull, fight_start, kb_ts,
+                                                 source_state.report_encounters(run, rid))
         if left > 0 and since is not None:
             out[name] = since
     return out

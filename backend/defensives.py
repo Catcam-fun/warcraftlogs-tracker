@@ -446,8 +446,10 @@ def _talented_charges(entry, talent_entries, spec):
 def _inferred_cooldown(own_casts_of_spell, reset_times, loadout):
     """The cooldown a player's presses prove they have when it is shorter than their talents allow
     (cooldown reduction the catalog can't see), or None: their shortest gap between two presses of a
-    one-charge ability, leaving out gaps a reset (Cold Snap, Black Ox Brew) falls in, since the
-    reset, not the cooldown, ended those. `loadout(t)` -> (cooldown, charges) at a press."""
+    one-charge ability, leaving out gaps a reset falls in, since the reset, not the cooldown, ended
+    those. `reset_times`: casts of a spell that resets it (Cold Snap, Black Ox Brew) and, for a long
+    cooldown, the start and end of every boss encounter (the encounter reset). `loadout(t)` ->
+    (cooldown, charges) at a press."""
     best = None
     for a, b in zip(own_casts_of_spell, own_casts_of_spell[1:]):
         cd, charges = loadout(a)
@@ -547,11 +549,15 @@ def _auras(hit):
 
 def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts,
                   indexed, ability_names, actor_names, hits=None, ability_schools=None, cat=None,
-                  aoe_known=True, armor_k=None, soulwell=False, pull_starts=None):
+                  aoe_known=True, armor_k=None, soulwell=False, pull_starts=None, encounters=None):
     """Defensive picture for one death. All timestamps are report-relative ms.
 
     `pull_starts`: {fight ID: start} of the report's kept pulls, so presses in other pulls are
-    replayed with the talents the player had in them.
+    replayed with the talents the player had in them: those of the latest KEPT pull that had
+    started by then (a press in a pull the site didn't keep, or between pulls, uses the previous
+    kept pull's talents; before the first kept pull, the first one's).
+    `encounters`: [(start, end)] of every boss encounter in the report, kept or not. Each one resets
+    long cooldowns, so a gap between presses that spans one is not cooldown reduction.
 
     With `hits` (the player's hits in the seconds before their deaths, and
     instant kills: fetch_death_windows, fetch_instakills) it also estimates
@@ -624,6 +630,10 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
         before = [lo for lo in loadouts if lo[0] <= t]
         _, talents, pull_spec_ = before[-1] if before else loadouts[0]
         return talents, pull_spec_
+    # Where long cooldowns reset: every boss encounter's start and end (whether the game resets them
+    # at ENCOUNTER_START or ENCOUNTER_END is not in the game data; a gap spanning either is dropped).
+    barriers = sorted({t for se in (encounters or [(s, s) for s in (pull_starts or {}).values()]) for t in se}
+                      | {fight_start})
     for sid, entry in cat.tracked.items():
         if not _has_ability(sid, entry, player_class, spec, talent_entries, casts_by_spell, pressed_this_pull):
             continue
@@ -640,14 +650,15 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
         lookback = fight_start if entry["cooldown_ms"] >= ENCOUNTER_RESET_MS else 0
         how = {r["spell"]: r["restores"] for r in entry.get("reset_by", ())}
         resets = [(t, how[s]) for t, s in own_casts if s in how and lookback <= t <= death_ts]
-        if lookback == fight_start:
-            def loadout(_t, entry=entry):
-                return _talented_cooldown(entry, talent_entries, spec), _talented_charges(entry, talent_entries, spec)
-        else:
-            def loadout(t, entry=entry):
-                talents, pull_spec_ = loadout_at(t)
-                return _talented_cooldown(entry, talents, pull_spec_), _talented_charges(entry, talents, pull_spec_)
-        inferred = _inferred_cooldown(all_casts, [t for t, s in own_casts if s in how], loadout)
+        def per_press(t, entry=entry):
+            talents, pull_spec_ = loadout_at(t)
+            return _talented_cooldown(entry, talents, pull_spec_), _talented_charges(entry, talents, pull_spec_)
+
+        def this_pull(_t, entry=entry):
+            return _talented_cooldown(entry, talent_entries, spec), _talented_charges(entry, talent_entries, spec)
+        loadout = this_pull if lookback == fight_start else per_press
+        ended = [t for t, s in own_casts if s in how] + (barriers if lookback == fight_start else [])
+        inferred = _inferred_cooldown(all_casts, ended, per_press)
         window = [t for t in all_casts if lookback <= t <= death_ts]
         left, ready_in, since = _replay(window, resets, death_ts, loadout, inferred)
         if left > 0:
