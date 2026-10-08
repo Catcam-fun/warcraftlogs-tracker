@@ -12,14 +12,14 @@ tagline: Every route, its auth, its limit, and the SSE protocol of /api/analyze.
 anchors:
   analyze: backend/app.py:109
   analyze_config_read: backend/app.py:115
-  sse_response: backend/app.py:673
-  result_payload: backend/app.py:631
+  sse_response: backend/app.py:676
+  result_payload: backend/app.py:634
   death_event: backend/app.py:547
-  share_create: backend/app.py:691
-  share_read: backend/app.py:711
-  share_id_re: backend/app.py:683
-  saved_id_re: backend/app.py:684
-  storage_response: backend/app.py:726
+  share_create: backend/app.py:694
+  share_read: backend/app.py:714
+  share_id_re: backend/app.py:686
+  saved_id_re: backend/app.py:687
+  storage_response: backend/app.py:729
   require_user: backend/auth.py:79
   limit_decorator: backend/ratelimit.py:54
   frontend_sse_reader: frontend/src/App.js:754
@@ -40,7 +40,7 @@ invariants:
   - "MUST: an /api/analyze stream ends with exactly one result event or one error event; the client treats the first error as final."
   - "MUST: cheat-death detection runs only for a request with a valid bearer token, whatever enableCheatDeath says."
   - "NEVER: return stored credentials; shares and saves pass config through strip_secrets on the way in and out."
-content_hash: sha256:80af57946527947229658654ce7f69f7fb400914e4c3e26a8223db076290ad52
+content_hash: sha256:e0f2acceaccf0bb6864bba22e2be8692c28019b579f1d97dc1b0f2f46749ec01
 ---
 ## Summary
 
@@ -53,18 +53,18 @@ content_hash: sha256:80af57946527947229658654ce7f69f7fb400914e4c3e26a8223db07629
 | Route {analysis} | Auth | Limit | Request | Success response | Errors |
 |---|---|---|---|---|---|
 | `POST /api/analyze` {analysis} | optional bearer | 60/h/IP | JSON config (below) | 200 `text/event-stream` | 400 `{"error": "Invalid request"}` if the body is not a JSON object (`backend/app.py:116`); 429; everything else as SSE `error` events |
-| `POST /api/share` {sharing} | optional bearer (sets `created_by`) | 20/h/IP | `{data, config}`; `data` must have an `events` object (`backend/app.py:687`) | `{success, shareId, expiresAt}` | 400 "Nothing to share"; 413 for any storage error, including too large (`backend/app.py:704`) |
-| `GET /api/shared/<share_id>` {sharing} | none | none | `share_id` matches `^[A-Za-z0-9_-]{6,32}$` (`backend/app.py:683`) | `{success, data, config, timestamp}` | 404 if malformed, missing or expired |
+| `POST /api/share` {sharing} | optional bearer (sets `created_by`) | 20/h/IP | `{data, config}`; `data` must have an `events` object (`backend/app.py:690`) | `{success, shareId, expiresAt}` | 400 "Nothing to share"; 413 for any storage error, including too large (`backend/app.py:707`) |
+| `GET /api/shared/<share_id>` {sharing} | none | none | `share_id` matches `^[A-Za-z0-9_-]{6,32}$` (`backend/app.py:686`) | `{success, data, config, timestamp}` | 404 if malformed, missing or expired |
 | `GET /api/saved` {saved} | required | none | none | `{success, analyses: [id, analysis_name, guild_name, created_at, expires_at, retention_days, size_bytes], limit: 5}` | 500 on storage failure |
 | `POST /api/saved` {saved} | required | 30/h/IP | `{name, data, config, retentionDays}`; retention clamped to 1-30 days (`backend/supabase_client.py:93`) | 201 `{success, id, size_bytes}` | 400 "Nothing to save"; 409 at the 5-save limit; 413 too large |
-| `GET /api/saved/<id>` {saved} | required | none | `id` is a 36-char UUID (`backend/app.py:684`) | `{success, analysis_name, guild_name, data, config, created_at, expires_at}` | 404 if malformed or not the user's |
+| `GET /api/saved/<id>` {saved} | required | none | `id` is a 36-char UUID (`backend/app.py:687`) | `{success, analysis_name, guild_name, data, config, created_at, expires_at}` | 404 if malformed or not the user's |
 | `DELETE /api/saved/<id>` {saved} | required | none | UUID | `{success: true}` | 404 if malformed |
 | `DELETE /api/saved` {saved} | required | none | none | `{success: true}` | 500 on storage failure |
-| `DELETE /api/account` {account} | required | none | none | `{success: true}`; the token is dropped from the verify cache (`backend/app.py:789`) | 500 if deletion is not configured or partly failed |
+| `DELETE /api/account` {account} | required | none | none | `{success: true}`; the token is dropped from the verify cache (`backend/app.py:792`) | 500 if deletion is not configured or partly failed |
 | `GET /api/health` {status} | none | none | none | `{status: "healthy", supabase: <bool>}` | none |
 | `GET /` {status} | none | none | none | `{service: "Floor Pov API", status: "running"}` | none |
 
-Storage routes share one mapper, `_storage_response` (`backend/app.py:726`): a result without `error` passes through; otherwise the `code` picks the status (`limit` 409, `too_large` 413, `not_found` 404, anything else 500) and the body is `{"success": false, "error", "code"?}`.
+Storage routes share one mapper, `_storage_response` (`backend/app.py:729`): a result without `error` passes through; otherwise the `code` picks the status (`limit` 409, `too_large` 413, `not_found` 404, anything else 500) and the body is `{"success": false, "error", "code"?}`.
 
 #### The analysis request body
 
@@ -86,21 +86,21 @@ Storage routes share one mapper, `_storage_response` (`backend/app.py:726`): a r
 
 #### The /api/analyze SSE protocol
 
-The route returns `Response(generate(), mimetype='text/event-stream')` with `Cache-Control: no-cache` and `X-Accel-Buffering: no` so proxies do not buffer the stream (`backend/app.py:673`). Each event is a single `data: <json>` line followed by a blank line. There are no `event:` names or ids; the JSON keys say what the event is. The frontend splits on blank lines and dispatches on `error`, then `message`, then `result` (`frontend/src/App.js:754`).
+The route returns `Response(generate(), mimetype='text/event-stream')` with `Cache-Control: no-cache` and `X-Accel-Buffering: no` so proxies do not buffer the stream (`backend/app.py:676`). Each event is a single `data: <json>` line followed by a blank line. There are no `event:` names or ids; the JSON keys say what the event is. The frontend splits on blank lines and dispatches on `error`, then `message`, then `result` (`frontend/src/App.js:754`).
 
 | Event {sse} | Shape | When |
 |---|---|---|
 | progress {sse} | `{"stage": <stage>, "message": <text>}` | many times; only for display |
-| error {sse} | `{"error": <text>}` | at most once, then the stream ends (`backend/app.py:671`) |
-| result {sse} | `{"result": <analysis>}` | once, last (`backend/app.py:663`) |
+| error {sse} | `{"error": <text>}` | at most once, then the stream ends (`backend/app.py:674`) |
+| result {sse} | `{"result": <analysis>}` | once, last (`backend/app.py:666`) |
 
 The stages, in order: `auth` (signing in, or the "needs a signed-in account" notice for cheat deaths, `backend/app.py:153`), `roster`, `reports`, `fights`, `dedup`, `deaths`, `processing`, `complete`. One exception: the "Collected N total fights" `fights` line comes after the first `dedup` line, since deduplication runs while the kept reports are read in full (`backend/app.py:261`, `backend/app.py:276`). Warnings about unreadable reports or missing defensive detail arrive as ordinary `deaths` progress events (`backend/app.py:459`, `backend/app.py:465`), not as errors.
 
-Errors that end the stream early: missing required fields, WarcraftLogs authentication failure, no reports after filtering, no fights at the chosen difficulty, or any unexpected exception (`backend/app.py:149`, `backend/app.py:160`, `backend/app.py:200`, `backend/app.py:281`, `backend/app.py:667`).
+Errors that end the stream early: missing required fields, WarcraftLogs authentication failure, no reports after filtering, no fights at the chosen difficulty, or any unexpected exception (`backend/app.py:149`, `backend/app.py:160`, `backend/app.py:200`, `backend/app.py:281`, `backend/app.py:670`).
 
 #### The result object
 
-Built at `backend/app.py:631`:
+Built at `backend/app.py:634`:
 
 | Key {result} | Contents |
 |---|---|
@@ -110,7 +110,7 @@ Built at `backend/app.py:631`:
 | `bossParticipation` {result} | `{bossName: {mainCharacter: [pullKey]}}` |
 | `pullCutoffTimestamps` {result} | `{pullKey: {cutoff: ms from pull start}}`; see [[backend-death-counting]] |
 | `icons` {result} | defensive and consumable icon names, by ability name |
-| `abilityIcons` {result} | killing-blow icon, by spell id (`backend/app.py:654`) |
+| `abilityIcons` {result} | killing-blow icon, by spell id (`backend/app.py:657`) |
 | `abilityInfo` {result} | what each defensive shown does, by name |
 | `abilityText` {result} | in-game text of each killing blow, by spell id; `Melee` and `Falling` use fixed text (`backend/app.py:103`) |
 
@@ -140,8 +140,8 @@ relied-on-by: [[feat-account]] — account deletion
 ## Gotchas
 
 - **A 200 does not mean success**: `/api/analyze` commits to 200 before any work. Read the stream for an `error` event.
-- **Share errors use the shared status mapper**: `share_results` answers a storage error through `_storage_response` (`backend/app.py:704`), so too large is 413 and anything else 500.
-- **Shares can live only in memory**: if the Supabase insert fails, the share is kept in process memory (`backend/supabase_client.py:241`) and the route passes `ephemeral: true` to the browser (`backend/app.py:707`), which warns that the link stops working when the server restarts (`frontend/src/App.js:1467`, `frontend/src/shareNote.js`).
+- **Share errors use the shared status mapper**: `share_results` answers a storage error through `_storage_response` (`backend/app.py:707`), so too large is 413 and anything else 500.
+- **Shares can live only in memory**: if the Supabase insert fails, the share is kept in process memory (`backend/supabase_client.py:241`) and the route passes `ephemeral: true` to the browser (`backend/app.py:710`), which warns that the link stops working when the server restarts (`frontend/src/App.js:1467`, `frontend/src/shareNote.js`).
 - **Cutoff keys become strings**: `pullCutoffTimestamps` uses integer keys in Python, which JSON turns into strings.
 
 ## Related

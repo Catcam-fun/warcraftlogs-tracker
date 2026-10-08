@@ -25,7 +25,7 @@ anchors:
   no_counted_death: "backend/app.py:383"
   get_report_fights: "backend/warcraftlogs.py:333"
   processing_loop: "backend/app.py:473"
-  result: "backend/app.py:631"
+  result: "backend/app.py:634"
   raid_encounters: "backend/analysis.py:234"
   raid_date_windows: "backend/analysis.py:262"
   resolve_report_window: "backend/analysis.py:280"
@@ -51,7 +51,7 @@ invariants:
   - "MUST: drop duplicate pulls before fetching deaths, so a pull logged by three raiders is counted once."
   - "MUST: sort pulls by start time, then report code, then fight id, so the copy of a pull that is kept never depends on which report was read first."
   - "NEVER: cache the deaths of a report that failed to load; get_report_deaths_bulk re-raises so the caller records the failure instead."
-content_hash: sha256:e789daedf54a5e3c52af06c0283adb91f4c4ee4d817c4bd9d3887b66e7a51127
+content_hash: sha256:ce2e705bba0ae41c16d0b16b407970b2450b3cc567215a826d6a673a50999fe4
 ---
 ## Summary
 
@@ -85,9 +85,9 @@ The generator yields a progress event at each stage. Click each step to see what
   body: Kept pulls are grouped by report (`backend/app.py:314`) and `fetch_report_deaths` runs for up to eight reports at once (`backend/app.py:440`). Inside one report the queries run one at a time. When the deaths are not cached, talent loadouts come first and alone (`backend/app.py:373`), then the bulk death query (`backend/app.py:376`). If no death in the report can count, it stops there (`backend/app.py:383`). Otherwise it reads raw defensive events (`backend/app.py:395`), instant kills (`backend/app.py:405`), then the hits before each death that can count (`backend/app.py:413`). Finished reports read and write the deaths, defensive and recap caches.
   gotcha: A report that throws is returned with empty death lists and its id is added to `failedReports` (`backend/app.py:431`, `backend/app.py:449`). Its pulls keep their pull numbers but are skipped by the processing loop (`backend/app.py:493`), so they count toward nobody's pulls or deaths.
 - title: Rank and enrich each pull | short: Processing | sub: slots, defensives, cutoffs
-  body: For each pull, in time order, the pull number per boss goes up by one (`backend/app.py:488`), guild members present are added to `pullParticipation` and `bossParticipation` (`backend/app.py:518`), saves the player died from anyway are dropped, and `rank_pull_deaths` assigns `slot` and `inWipe` (`backend/app.py:530`). Each guild member's death becomes a death event (`backend/app.py:547`). A real death with `slot <= maxCutoff` outside a wipe also gets `defensives.analyze_death` (`backend/app.py:571`). The legacy `pullCutoffTimestamps` are computed last (`backend/app.py:614`).
+  body: For each pull, in time order, the pull number per boss goes up by one (`backend/app.py:488`), guild members present are added to `pullParticipation` and `bossParticipation` (`backend/app.py:518`), saves the player died from anyway are dropped, and `rank_pull_deaths` assigns `slot` and `inWipe` (`backend/app.py:530`). Each guild member's death becomes a death event (`backend/app.py:547`). A real death with `slot <= maxCutoff` outside a wipe also gets `defensives.analyze_death` (`backend/app.py:571`). The legacy `pullCutoffTimestamps` are computed last (`backend/app.py:617`).
 - title: Send the result | short: Result | sub: one final event
-  body: The generator builds `meta`, `events`, participation maps, cutoffs and the icon and text lookups (`backend/app.py:631`), then yields one `{"result": ...}` event (`backend/app.py:663`). Any exception anywhere becomes one `{"error": ...}` event instead (`backend/app.py:667`).
+  body: The generator builds `meta`, `events`, participation maps, cutoffs and the icon and text lookups (`backend/app.py:634`), then yields one `{"result": ...}` event (`backend/app.py:666`). Any exception anywhere becomes one `{"error": ...}` event instead (`backend/app.py:670`).
 ```
 
 #### Raid selection

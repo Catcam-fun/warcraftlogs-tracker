@@ -22,15 +22,15 @@ anchors:
   wago_cache: backend/scripts/build_defensive_catalog.py:411
   table: backend/scripts/build_defensive_catalog.py:419
   patches: backend/scripts/build_defensive_catalog.py:434
-  potion_ranks: backend/scripts/build_defensive_catalog.py:713
-  unreviewed: backend/scripts/build_defensive_catalog.py:890
-  build_catalog: backend/scripts/build_defensive_catalog.py:910
-  rename_check: backend/scripts/build_defensive_catalog.py:949
-  main: backend/scripts/build_defensive_catalog.py:1049
-  fail_latest: backend/scripts/build_defensive_catalog.py:1060
+  potion_ranks: backend/scripts/build_defensive_catalog.py:714
+  unreviewed: backend/scripts/build_defensive_catalog.py:947
+  build_catalog: backend/scripts/build_defensive_catalog.py:966
+  rename_check: backend/scripts/build_defensive_catalog.py:1005
+  main: backend/scripts/build_defensive_catalog.py:1107
+  fail_latest: backend/scripts/build_defensive_catalog.py:1118
   output_patches: backend/defensive_catalog.py:7
   output_catalogs: backend/defensive_catalog.py:22
-  catalog_for: backend/defensives.py:122
+  catalog_for: backend/defensives.py:124
   standard_potion: backend/defensives.py:58
 links:
   - game-data
@@ -46,13 +46,13 @@ invariants:
   - "NEVER: hand-edit defensive_catalog.py; the curated lists live in the build script."
 flows:
   - data-build-path
-content_hash: sha256:99bf5f7104eecc430de5da523de4bc202233f6d846a85da059b8a08f7d90531f
+content_hash: sha256:234d33597b2eaeffbd0c95864c4674d52ea410f0003c34eedd2be89f1e80c98d
 ---
 ## Summary
 
 - `backend/scripts/build_defensive_catalog.py` is the largest build script. It writes `backend/defensive_catalog.py`, which `backend/defensives.py` reads to know every defensive's cooldown, charges, effect and the talents that change them (`backend/defensives.py:28`).
 - The split of work is stated at the top of the script: **the curated list decides which abilities count and for whom; the game data supplies the numbers** (`backend/scripts/build_defensive_catalog.py:3-5`).
-- There is **one catalog per patch**, because cooldowns and talents change between patches. `catalog_for` picks the patch that was live on the report's start day (`backend/defensives.py:122-128`).
+- There is **one catalog per patch**, because cooldowns and talents change between patches. `catalog_for` picks the patch that was live on the report's start day (`backend/defensives.py:124-130`).
 
 ## How it works
 
@@ -60,20 +60,20 @@ content_hash: sha256:99bf5f7104eecc430de5da523de4bc202233f6d846a85da059b8a08f7d9
 - title: List the patches | short: Patches | sub: from wago.tools builds
   body: patches() reads https://wago.tools/api/builds, skips background-download builds, keeps retail versions from FIRST_PATCH (11.0.2) on, and for each patch records the earliest build date and the last build version (backend/scripts/build_defensive_catalog.py:408, 431-445).
 - title: Load the tables | short: Tables | sub: one build at a time
-  body: GameData loads the DB2 tables one catalog needs for that build: SpellName, SpellEffect, SpellCooldowns, SpellCategories, SpellCategory, SpellClassOptions, SpellMisc, SpellDuration, SpellLabel, SpellShapeshift, TraitDefinition, TraitNodeEntry, ChrSpecialization and SpecializationSpells (backend/scripts/build_defensive_catalog.py:451-499). Each comes from table(), which downloads https://wago.tools/db2/{name}/csv?build=... (backend/scripts/build_defensive_catalog.py:419-431).
+  body: GameData loads the DB2 tables one catalog needs for that build: SpellName, SpellEffect, SpellCooldowns, SpellCategories, SpellCategory, SpellClassOptions, SpellMisc, SpellDuration, SpellLabel, SpellShapeshift, TraitDefinition, TraitNodeEntry, ChrSpecialization and SpecializationSpells (backend/scripts/build_defensive_catalog.py:451-500). Each comes from table(), which downloads https://wago.tools/db2/{name}/csv?build=... (backend/scripts/build_defensive_catalog.py:419-431).
   gotcha: Set WAGO_CACHE to a folder and every table is kept there gzipped as {name}_{build}.csv.gz, so a rerun reads from disk (backend/scripts/build_defensive_catalog.py:411, 419-427).
 - title: Check each curated spell | short: Rename check | sub: name must match
-  body: For every CURATED entry, a spell ID missing from the build is noted as not in this patch; a spell ID whose game name differs from the curated name is recorded as a problem (backend/scripts/build_defensive_catalog.py:945-951). A personal or external whose spell is a passive in that patch is left out too, since nobody presses it: Renewing Blaze from Midnight (12.0.0) on, when it became part of Obsidian Scales (backend/scripts/build_defensive_catalog.py:952-956).
+  body: For every CURATED entry, a spell ID missing from the build is noted as not in this patch; a spell ID whose game name differs from the curated name is recorded as a problem (backend/scripts/build_defensive_catalog.py:1001-1007). A personal or external whose spell is a passive in that patch is left out too, since nobody presses it: Renewing Blaze from Midnight (12.0.0) on, when it became part of Obsidian Scales (backend/scripts/build_defensive_catalog.py:1008-1012).
 - title: Fill in the numbers | short: Numbers | sub: cooldown, charges, effect
-  body: The cooldown is the longer of RecoveryTime and CategoryRecoveryTime, replaced by the charge recharge for charged spells, with COOLDOWN_FALLBACK for the few stored elsewhere (backend/scripts/build_defensive_catalog.py:957-962, 399). components() reads each effect from the game data at the places EFFECTS names, with talent modifiers attached (backend/scripts/build_defensive_catalog.py:776). The entry also gets known (baseline, talent or evidence), major (cooldown of 60s or more), talent_entries and aura_ms (backend/scripts/build_defensive_catalog.py:966-977).
+  body: The cooldown is the longer of RecoveryTime and CategoryRecoveryTime, replaced by the charge recharge for charged spells, with COOLDOWN_FALLBACK for the few stored elsewhere (backend/scripts/build_defensive_catalog.py:1013-1018, 399). components() reads each effect from the game data at the places EFFECTS names, with talent modifiers attached (backend/scripts/build_defensive_catalog.py:777). The entry also gets known (baseline, talent or evidence), major (cooldown of 60s or more), talent_entries and aura_ms (backend/scripts/build_defensive_catalog.py:1022-1033).
 - title: Attach talents | short: Talents | sub: cooldown, charges, duration
-  body: Modifiers collects the talents and spec passives that change a spell's cooldown, charges or duration, each tagged with who gets it (talent entries or specs) (backend/scripts/build_defensive_catalog.py:551-557, 968-976). Cooldown modifiers come from spell modifiers on the cooldown, charge-category recharge changes, and spell-category cooldown changes (aura 341: Angel's Mercy takes 20 seconds off Desperate Prayer through its category) (backend/scripts/build_defensive_catalog.py:627-654). A spec's mastery that stretches a duration (Augmentation's Mastery: Timewalker on Obsidian Scales, Zephyr and The War Within's Renewing Blaze) has 0 in the data because its size comes from the player's mastery stat; it is kept as a duration modifier marked mastery, with no size, and the analysis keeps the base duration (backend/scripts/build_defensive_catalog.py:598-600, 656-672; backend/defensives.py:429). TALENT_EFFECTS adds effects the data doesn't attach to the button's own spell (backend/scripts/build_defensive_catalog.py:256-264).
+  body: Modifiers collects the talents and spec passives that change a spell's cooldown, charges or duration, each tagged with who gets it (talent entries or specs) (backend/scripts/build_defensive_catalog.py:552-558, 968-976). Cooldown modifiers come from spell modifiers on the cooldown, charge-category recharge changes, and spell-category cooldown changes (aura 341: Angel's Mercy takes 20 seconds off Desperate Prayer through its category) (backend/scripts/build_defensive_catalog.py:628-655). A spec's mastery that stretches a duration (Augmentation's Mastery: Timewalker on Obsidian Scales, Zephyr and The War Within's Renewing Blaze) has 0 in the data because its size comes from the player's mastery stat; it is kept as a duration modifier marked mastery, with no size, and the analysis keeps the base duration (backend/scripts/build_defensive_catalog.py:599-601, 656-672; backend/defensives.py:431). TALENT_EFFECTS adds effects the data doesn't attach to the button's own spell (backend/scripts/build_defensive_catalog.py:256-264).
 - title: Potions and Healthstones | short: Consumables | sub: measured heals
-  body: A potion with a POTION_TYPICAL value gets that heal as an observed amount, and potion_ranks adds each quality rank's item level and tooltip heal (backend/scripts/build_defensive_catalog.py:987-990, 703-736). Iron Stomach, Soulburn and Gorebound Fortitude are added to consumables by hand-written rules (backend/scripts/build_defensive_catalog.py:1014-1042).
+  body: A potion with a POTION_TYPICAL value gets that heal as an observed amount, and potion_ranks adds each quality rank's item level and tooltip heal (backend/scripts/build_defensive_catalog.py:1043-1046, 703-736). Iron Stomach, Soulburn and Gorebound Fortitude are added to consumables by hand-written rules (backend/scripts/build_defensive_catalog.py:1070-1098).
 - title: Review new talents | short: Review | sub: survival words
-  body: unreviewed_talents finds talents whose tooltip names a tracked defensive together with a survival word (damage taken, absorb, heal, armor, immun, reduc) and that nothing yet handles; each becomes a problem (backend/scripts/build_defensive_catalog.py:887-907, 1034-1035).
+  body: unreviewed_talents finds talents whose tooltip names a tracked defensive together with a survival word (damage taken, absorb, heal, armor, immun, reduc) and that nothing yet handles; each becomes a problem (backend/scripts/build_defensive_catalog.py:944-963, 1034-1035).
 - title: Fail or write | short: Write | sub: latest patch must be clean
-  body: main() builds every patch in order. Problems on the latest patch stop the run with "spell data changed; update CURATED / EFFECTS"; on older patches they are printed as notes (backend/scripts/build_defensive_catalog.py:1059-1063). The file is written only when no patch filter was given (backend/scripts/build_defensive_catalog.py:1069-1081).
+  body: main() builds every patch in order. Problems on the latest patch stop the run with "spell data changed; update CURATED / EFFECTS"; on older patches they are printed as notes (backend/scripts/build_defensive_catalog.py:1117-1121). The file is written only when no patch filter was given (backend/scripts/build_defensive_catalog.py:1127-1139).
 ```
 
 #### The curated lists
@@ -96,30 +96,30 @@ Two related tables live in `backend/defensives.py`, not the build script: `DEMON
 
 #### Output shape
 
-`backend/defensive_catalog.py` holds five top-level names, written by `main()` (`backend/scripts/build_defensive_catalog.py:1071-1080`):
+`backend/defensive_catalog.py` holds five top-level names, written by `main()` (`backend/scripts/build_defensive_catalog.py:1129-1138`):
 
 - `PATCHES`: `[(first day live, patch)]`, oldest first (`backend/defensive_catalog.py:7`).
-- `CATALOGS`: `{patch: {spell ID: entry}}` (`backend/defensive_catalog.py:22`). An entry carries `name`, `class`, `specs`, `kind`, `known`, `cooldown_ms`, `charges`, `major`, `talent_entries`, `replaced_by_entries`, `mitigation` and `aura_ms`, plus `cooldown_mods`, `charge_mods`, `duration_mods`, `ranks`, `needs_form` or `form_armor` where they apply (`backend/scripts/build_defensive_catalog.py:970-1011`).
+- `CATALOGS`: `{patch: {spell ID: entry}}` (`backend/defensive_catalog.py:22`). An entry carries `name`, `class`, `specs`, `kind`, `known`, `cooldown_ms`, `charges`, `major`, `talent_entries`, `replaced_by_entries`, `mitigation` and `aura_ms`, plus `cooldown_mods`, `charge_mods`, `duration_mods`, `reset_by` (spells that bring it back early: RESETS, read from each patch's tooltip by reset_sources, `backend/scripts/build_defensive_catalog.py:912`; a talent that resets a tracked defensive and is in neither RESETS nor RESETS_REVIEWED fails the current patch's build), `ranks`, `needs_form` or `form_armor` where they apply (`backend/scripts/build_defensive_catalog.py:1026-1067`).
 - `HEALING_TAKEN`: per patch, talents and auras that change healing taken (`backend/defensive_catalog.py:15823`).
 - `LATEST` and `CATALOG`: the newest patch and its catalog (`backend/defensive_catalog.py:22312-22313`).
 
-`defensives.py` wraps each patch in a `Catalog` object (`backend/defensives.py:68-119`) and hashes the patches' cast IDs, buff names and talent entries into `CATALOG_FINGERPRINT`, which is part of the defensive cache key (`backend/defensives.py:163-168`).
+`defensives.py` wraps each patch in a `Catalog` object (`backend/defensives.py:68-121`) and hashes the patches' cast IDs, buff names and talent entries into `CATALOG_FINGERPRINT`, which is part of the defensive cache key (`backend/defensives.py:165-170`).
 
 ## Invariants
 
-- **MUST** fail the build when the current patch's game data names a curated spell ID differently than `CURATED` (`backend/scripts/build_defensive_catalog.py:949-951`, `backend/scripts/build_defensive_catalog.py:1060-1061`).
-- **MUST** fail the build when a current-patch talent names a tracked defensive with a survival word and nothing covers it (`backend/scripts/build_defensive_catalog.py:287-290`, `backend/scripts/build_defensive_catalog.py:1044-1045`).
-- **MUST** write the catalog file only from a run over every patch; a run with patch arguments ends with "dry run" (`backend/scripts/build_defensive_catalog.py:1069-1070`).
+- **MUST** fail the build when the current patch's game data names a curated spell ID differently than `CURATED` (`backend/scripts/build_defensive_catalog.py:1005-1007`, `backend/scripts/build_defensive_catalog.py:1118-1119`).
+- **MUST** fail the build when a current-patch talent names a tracked defensive with a survival word and nothing covers it (`backend/scripts/build_defensive_catalog.py:287-290`, `backend/scripts/build_defensive_catalog.py:1100-1103`).
+- **MUST** write the catalog file only from a run over every patch; a run with patch arguments ends with "dry run" (`backend/scripts/build_defensive_catalog.py:1127-1128`).
 - **NEVER** hand-edit `defensive_catalog.py`; its header says to edit the curated lists in the script (`backend/defensive_catalog.py:1-2`).
 
 ## Gotchas
 
-- **A patch's "first day" is its earliest build on wago.tools**: `patches()` takes the minimum `created_at` of the patch's builds (`backend/scripts/build_defensive_catalog.py:445-447`), and `catalog_for` compares that against the report's UTC start day (`backend/defensives.py:126-128`). A build created before the patch went live moves the switch-over earlier.
+- **A patch's "first day" is its earliest build on wago.tools**: `patches()` takes the minimum `created_at` of the patch's builds (`backend/scripts/build_defensive_catalog.py:445-447`), and `catalog_for` compares that against the report's UTC start day (`backend/defensives.py:128-130`). A build created before the patch went live moves the switch-over earlier.
 - **`WAGO_CACHE` holds pinned builds only**: a table fetched for a specific build is cached and reused as long as its file exists, which is safe because a build never changes. A table fetched without a build (the live data) is never cached, since it changes with every game build (`backend/scripts/build_defensive_catalog.py:419-423`, `backend/test_wago_cache.py`).
 - **Potions are scored from logs first**: the script's comment says each player's own potion heals in the same report are used when they drank one there; `POTION_TYPICAL` stands in otherwise (`backend/scripts/build_defensive_catalog.py:341-344`). A potion with no `POTION_TYPICAL` value keeps no typical heal.
 - **Renewing Blaze's window is its own aura**: in The War Within the 8s window is the button's aura (374348); the same-named 374349 is the heal-back that runs on after it, and Foci of Life shortens only that heal-back. So 374349 is not in `AURA_SPELLS`, and Foci of Life doesn't change the window (`backend/scripts/build_defensive_catalog.py:366-369`). Checked on live logs: the window lasts 8s with or without the heal-back still running.
-- **Only the newest expansion's potion items get ranks**: `potion_ranks` keeps items whose `ExpansionID` is the build's expansion, since older potions scale differently after an item squish (`backend/scripts/build_defensive_catalog.py:723-730`).
-- **Spec names must match**: a spec listed in `CURATED` has to exist in `defensives.SPEC_NAMES`, which `backend/test_defensives.py:617-620` checks.
+- **Only the newest expansion's potion items get ranks**: `potion_ranks` keeps items whose `ExpansionID` is the build's expansion, since older potions scale differently after an item squish (`backend/scripts/build_defensive_catalog.py:724-731`).
+- **Spec names must match**: a spec listed in `CURATED` has to exist in `defensives.SPEC_NAMES`, which `backend/test_defensives.py:618-621` checks.
 
 ## Context map
 

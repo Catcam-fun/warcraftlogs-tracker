@@ -18,12 +18,12 @@ anchors:
   saved_list: "frontend/src/SavedReports.js:10"
   open_saved: "frontend/src/SavedReports.js:35"
   load_into_state: "frontend/src/App.js:337"
-  list_endpoint: "backend/app.py:733"
-  create_endpoint: "backend/app.py:739"
-  get_endpoint: "backend/app.py:757"
-  delete_endpoint: "backend/app.py:765"
-  delete_all_endpoint: "backend/app.py:773"
-  status_map: "backend/app.py:726"
+  list_endpoint: "backend/app.py:736"
+  create_endpoint: "backend/app.py:742"
+  get_endpoint: "backend/app.py:760"
+  delete_endpoint: "backend/app.py:768"
+  delete_all_endpoint: "backend/app.py:776"
+  status_map: "backend/app.py:729"
   save_limiter: "backend/app.py:54"
   limits: "backend/supabase_client.py:31"
   save_analysis: "backend/supabase_client.py:89"
@@ -46,16 +46,16 @@ links:
 flows:
   - share-path
 invariants:
-  - "MUST: every /api/saved route run behind require_user and use g.user_id from the verified token (backend/app.py:734, backend/auth.py:88)."
+  - "MUST: every /api/saved route run behind require_user and use g.user_id from the verified token (backend/app.py:737, backend/auth.py:88)."
   - "MUST: every saved_analyses read and delete filter on both id and user_id (backend/supabase_client.py:148, backend/supabase_client.py:176)."
   - "NEVER: store or return WarcraftLogs credentials in a save; the config is stripped in the browser and again on write and read (frontend/src/SaveReportDialog.js:28, backend/supabase_client.py:101, backend/supabase_client.py:163)."
   - "MUST: keep at most MAX_SAVED_PER_USER (5) saves per user and clamp retention to 1-30 days (backend/supabase_client.py:93, backend/supabase_client.py:97)."
-content_hash: sha256:d835f1a072b51fa11ea041ada60c6fcdab5c0ddbdbc5d8d5d82eb76fe3fbf969
+content_hash: sha256:cc97412b758e30a73a23278d0b349e00ff5bf3a82fcc81c5a4d3c9cc64263b2c
 ---
 ## Summary
 
 - **What it is.** A per-account shelf of up to 5 analyses (`MAX_SAVED_PER_USER`, `backend/supabase_client.py:31`). Saving happens from the Results page; reopening happens on `/saved` (`frontend/src/App.js:2237`).
-- **Who can use it.** Only signed-in users. The Save button renders only when `user` is set (`frontend/src/App.js:1642`), and every `/api/saved` route is wrapped in `require_user` (`backend/app.py:734`).
+- **Who can use it.** Only signed-in users. The Save button renders only when `user` is set (`frontend/src/App.js:1642`), and every `/api/saved` route is wrapped in `require_user` (`backend/app.py:737`).
 - **What is stored.** The full result object plus the analysis config without credentials, packed as `br64:` brotli + base64 (`backend/supabase_client.py:68`, `backend/supabase_client.py:101`).
 - **How long.** 7, 14 or 30 days, chosen in the dialog (`frontend/src/SaveReportDialog.js:56`) and clamped server-side to 1-30 (`backend/supabase_client.py:93`).
 
@@ -65,16 +65,16 @@ content_hash: sha256:d835f1a072b51fa11ea041ada60c6fcdab5c0ddbdbc5d8d5d82eb76fe3f
 - title: Press Save on a result | short: Save | sub: signed-in only
   body: The Results header shows Save only for a signed-in user (frontend/src/App.js:1642). It opens SaveReportDialog, which needs both a user and loaded data (frontend/src/App.js:2313). The name defaults to "<guild> · <today>" (frontend/src/SaveReportDialog.js:8) and the keep-for select offers 7, 14 or 30 days, default 30 (frontend/src/SaveReportDialog.js:11).
 - title: Send it | short: POST /api/saved | sub: name, data, config, retentionDays
-  body: The dialog POSTs with the session token attached (auth true) and the config passed through stripSecrets, which drops clientId and clientSecret (frontend/src/SaveReportDialog.js:24, frontend/src/api.js:43). The route is rate limited to 30 saves per hour per client IP (backend/app.py:54, backend/app.py:741) and rejects a body that has no events object (backend/app.py:687, backend/app.py:745).
+  body: The dialog POSTs with the session token attached (auth true) and the config passed through stripSecrets, which drops clientId and clientSecret (frontend/src/SaveReportDialog.js:24, frontend/src/api.js:43). The route is rate limited to 30 saves per hour per client IP (backend/app.py:54, backend/app.py:744) and rejects a body that has no events object (backend/app.py:690, backend/app.py:748).
 - title: Server checks and stores | short: save_analysis | sub: purge, count, size
   body: save_analysis clamps retention, deletes this user's expired rows, counts what is left, refuses a 6th save, packs the payload, refuses over 3 MB compressed, then inserts a row with a fresh UUID, the name and guild cut to 100 characters, size_bytes and expires_at (backend/supabase_client.py:89).
   gotcha: The count check and the insert are separate calls, so save_analysis recounts after inserting; if two saves at once went over the limit, the one that went over deletes its own row and answers limit (backend/supabase_client.py:118).
 - title: See why it failed | short: Errors | sub: 409, 413, 429
-  body: _storage_response maps code limit to 409, too_large to 413 and not_found to 404 (backend/app.py:726). On 409 the dialog adds a "Manage saved reports" link to /saved (frontend/src/SaveReportDialog.js:35, frontend/src/App.js:2319).
+  body: _storage_response maps code limit to 409, too_large to 413 and not_found to 404 (backend/app.py:729). On 409 the dialog adds a "Manage saved reports" link to /saved (frontend/src/SaveReportDialog.js:35, frontend/src/App.js:2319).
 - title: Open the Saved page | short: /saved | sub: list, expiry, size
   body: SavedReports fetches GET /api/saved when a user is present (frontend/src/SavedReports.js:30). The server purges expired rows first, then returns id, name, guild, created_at, expires_at, retention_days and size_bytes, newest first, plus the limit (backend/supabase_client.py:129). Each card reads "Saved <date> · expires in Nd · <size>" (frontend/src/SavedReports.js:91). Signed out, the page shows a Sign in prompt instead (frontend/src/SavedReports.js:59).
 - title: Reopen one | short: Open | sub: GET /api/saved/<id>
-  body: openReport fetches the full row (frontend/src/SavedReports.js:35). The id must look like a UUID (backend/app.py:684). load_analysis selects by id and user_id, unpacks it, wraps rows from older versions that stored the bare analysis, and strips secrets from the config again (backend/supabase_client.py:143). handleLoadSavedReport merges that config into the form, sets data and navigates to /results (frontend/src/App.js:337).
+  body: openReport fetches the full row (frontend/src/SavedReports.js:35). The id must look like a UUID (backend/app.py:687). load_analysis selects by id and user_id, unpacks it, wraps rows from older versions that stored the bare analysis, and strips secrets from the config again (backend/supabase_client.py:143). handleLoadSavedReport merges that config into the form, sets data and navigates to /results (frontend/src/App.js:337).
 - title: Delete one | short: Delete | sub: confirm, then DELETE
   body: The trash button asks window.confirm, then calls DELETE /api/saved/<id> and drops the card locally (frontend/src/SavedReports.js:47). The server deletes by id and user_id (backend/supabase_client.py:172).
 ```
@@ -122,25 +122,25 @@ relied-on-by: [[feat-account]] — account deletion removes every save
 
 | Item {kind} | Where | Meaning |
 |---|---|---|
-| `GET /api/saved` {route} | `backend/app.py:733` | list the caller's saves and the limit |
-| `POST /api/saved` {route} | `backend/app.py:739` | create a save; 201 on success |
-| `GET /api/saved/<id>` {route} | `backend/app.py:757` | load one save |
-| `DELETE /api/saved/<id>` {route} | `backend/app.py:765` | delete one save |
-| `DELETE /api/saved` {route} | `backend/app.py:773` | delete all the caller's saves; no frontend caller |
+| `GET /api/saved` {route} | `backend/app.py:736` | list the caller's saves and the limit |
+| `POST /api/saved` {route} | `backend/app.py:742` | create a save; 201 on success |
+| `GET /api/saved/<id>` {route} | `backend/app.py:760` | load one save |
+| `DELETE /api/saved/<id>` {route} | `backend/app.py:768` | delete one save |
+| `DELETE /api/saved` {route} | `backend/app.py:776` | delete all the caller's saves; no frontend caller |
 | `MAX_SAVED_PER_USER` {const} | `backend/supabase_client.py:31` | 5 |
 | `MAX_SAVED_BYTES` {const} | `backend/supabase_client.py:32` | 3 MB, measured on the compressed blob |
 | `save_limiter` {const} | `backend/app.py:54` | 30 calls per 3600 s per client IP |
-| `SAVED_ID_RE` {const} | `backend/app.py:684` | 36 hex digits and dashes |
+| `SAVED_ID_RE` {const} | `backend/app.py:687` | 36 hex digits and dashes |
 | `retention_days` {column} | `backend/supabase_client.py:112` | 1-30, default 30 |
 | `expires_at` {column} | `backend/supabase_client.py:114` | now + retention_days |
 | `analysis_data` {column} | `backend/supabase_client.py:111` | `br64:` packed `{data, config}` |
-| `_storage_response` {code} | `backend/app.py:726` | limit 409, too_large 413, not_found 404, else 500 |
+| `_storage_response` {code} | `backend/app.py:729` | limit 409, too_large 413, not_found 404, else 500 |
 | `SaveReportDialog` {component} | `frontend/src/SaveReportDialog.js:7` | the save form |
 | `SavedReports` {component} | `frontend/src/SavedReports.js:10` | the /saved list |
 
 ## Invariants
 
-- **MUST** every `/api/saved` route run behind `require_user` and act on `g.user_id` from the verified token (`backend/app.py:734`, `backend/auth.py:88`). A test sends `?user_id=victim` and checks it is ignored (`backend/test_api.py:141`).
+- **MUST** every `/api/saved` route run behind `require_user` and act on `g.user_id` from the verified token (`backend/app.py:737`, `backend/auth.py:88`). A test sends `?user_id=victim` and checks it is ignored (`backend/test_api.py:141`).
 - **MUST** every `saved_analyses` read and delete filter on both `id` and `user_id` (`backend/supabase_client.py:148`, `backend/supabase_client.py:176`).
 - **NEVER** store or return WarcraftLogs credentials in a save: the browser strips them (`frontend/src/SaveReportDialog.js:28`), the server strips them on write (`backend/supabase_client.py:101`) and again on read (`backend/supabase_client.py:163`).
 - **MUST** keep at most 5 saves per user and clamp retention to 1-30 days (`backend/supabase_client.py:93`, `backend/supabase_client.py:97`).

@@ -21,7 +21,7 @@ anchors:
   find_mass_death_start: "backend/analysis.py:213"
   app_rank: "backend/app.py:530"
   app_defensive_gate: "backend/app.py:571"
-  app_cutoffs: "backend/app.py:604"
+  app_cutoffs: "backend/app.py:607"
   frontend_is_counted: "frontend/src/deathCounting.js:22"
   tests: "backend/test_death_slots.py:14"
 links:
@@ -39,7 +39,7 @@ invariants:
   - "MUST: a player who dies, is battle-rezzed and dies again takes two slots."
   - "NEVER: let a cheat death take a slot from a real death, or count toward a wipe."
   - "NEVER: count anything inside a wipe, real or cheat."
-content_hash: sha256:507c788a2ae7318e0290b268d1735bf92bc855e2178a34bf77ecae9910d33dae
+content_hash: sha256:f36a3890354fca831832b243ccaaab2374f23c6c1998b4630627d89c2be4b2d2
 ---
 ## Summary
 
@@ -75,7 +75,7 @@ Because a window can end at the wipe's last death, a cheat death a few milliseco
 
 #### The legacy cutoff timestamps
 
-The result also carries `pullCutoffTimestamps`: for each pull and each X from 1 to the number of real deaths, a time in ms from pull start (`backend/app.py:604`). It is the X-th real death's time, or, when that death is in a mass death, one millisecond before the mass death began (`find_mass_death_start`, `backend/analysis.py:213`). The frontend uses it only for results saved before `slot` existed (`frontend/src/deathCounting.js:11`, `frontend/src/deathCounting.js:26`).
+The result also carries `pullCutoffTimestamps`: for each pull and each X from 1 to the number of real deaths, a time in ms from pull start (`backend/app.py:607`). It is the X-th real death's time, or, when that death is in a mass death, one millisecond before the mass death began (`find_mass_death_start`, `backend/analysis.py:213`). The frontend uses it only for results saved before `slot` existed (`frontend/src/deathCounting.js:11`, `frontend/src/deathCounting.js:26`).
 
 `find_mass_death_start` uses the older detector `is_in_mass_death` (`backend/analysis.py:121`), which tries only windows that start at a death and look forward. It is kept for the old format; new counting does not depend on it.
 
