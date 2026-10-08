@@ -1,0 +1,65 @@
+"""Would-save verdicts obey the press, overkill, immunity and instant-kill rules"""
+from checks.rules_counting import is_counted
+from checks.verdict import PASS, fail, skip
+
+REACTION_S = 1.0
+
+
+def _immune(cat, name):
+    sid = cat.name_to_id.get(name)
+    if sid is None:
+        return False
+    return any(c.get("immune") for c in (cat.all[sid].get("mitigation") or []))
+
+
+def violations(defensives, cat):
+    s = defensives["survival"]
+    would, details = s.get("wouldSave") or {}, s.get("details") or {}
+    overkill, max_hp = s.get("overkill") or 0, s.get("maxHp") or 0
+    out = []
+    ready = {a["name"] for a in defensives.get("available", [])}
+    ready |= {defensives[k]["name"] for k in ("healthstone", "potion") if (defensives.get(k) or {}).get("name")}
+    ready |= set(s.get("consumables") or {})
+    cooling = {a["name"] for a in defensives.get("cooldown", [])}
+    for name, det in details.items():
+        if det.get("pressAgo") is not None and det["pressAgo"] < REACTION_S:
+            out.append(f"{name}: pressed {det['pressAgo']}s before the killing blow (rule: at least 1s)")
+    for name in would:
+        if name not in ready or name in cooling:
+            out.append(f"{name}: judged but on cooldown")
+    for name, det in details.items():
+        verdict = would.get(name)
+        if verdict is None:
+            continue
+        amount = det.get("amount") or 0
+        # details["amount"] is rounded, so an amount equal to the overkill can fall either way.
+        if verdict is True and (amount < overkill or "why" in det):
+            out.append(f"{name}: amount {amount} vs overkill {overkill} but marked saves")
+        elif verdict is False and amount > overkill and "why" not in det:
+            out.append(f"{name}: amount {amount} vs overkill {overkill} but marked not saves")
+    for name, det in details.items():
+        if (det.get("amount") or 0) > max_hp:
+            out.append(f"{name}: amount above max HP")
+    if s.get("deathType") == "instakill":
+        out += [f"{name}: instant kill but marked saves" for name, v in would.items() if v is not False]
+    if s.get("ignoresImmunity"):
+        out += [f"{name}: immunity marked saves against a hit that ignores immunity"
+                for name, v in would.items() if v is True and _immune(cat, name)]
+    return out
+
+
+def check(run):
+    """Would-save verdicts obey the press, overkill, immunity and instant-kill rules"""
+    max_cut = run.result["meta"]["maxCutoff"]
+    items, seen = [], 0
+    for player, evs in run.result["events"].items():
+        for ev in evs:
+            d = ev.get("defensives")
+            if not d or not d.get("survival") or not is_counted(ev, max_cut):
+                continue
+            seen += 1
+            where = f"{player} pull {ev['fightId']} {ev['timestamp']}"
+            items += [f"{where}: {v}" for v in violations(d, run.cat)]
+    if not seen:
+        return skip("no counted deaths with a would-save judgement")
+    return fail(items) if items else PASS
