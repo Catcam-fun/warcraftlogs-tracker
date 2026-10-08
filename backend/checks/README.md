@@ -44,7 +44,7 @@ This prints one target per raid, ready to paste. It looks at WCL's top Mythic ra
 
 ### Keys
 
-The environment needs `WCL_CLIENT_ID` and `WCL_CLIENT_SECRET` (the WarcraftLogs API client). They live in `.claude/settings.local.json`. Nothing is read from Supabase.
+The environment needs `WCL_CLIENT_ID` and `WCL_CLIENT_SECRET` (the WarcraftLogs API client) set. Nothing is read from or written to Supabase: the in-process analysis never reads or writes the shared report cache.
 
 ## What each check holds the site to
 

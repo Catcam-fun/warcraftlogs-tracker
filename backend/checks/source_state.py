@@ -1,4 +1,10 @@
-"""Source check: what each counted death row shows (active, ready, health) against WCL's auras, casts and Deaths table."""
+"""Source check: what each counted death row shows (active, ready, health) against WCL's auras, casts and Deaths table.
+
+The ready / on-cooldown recompute mirrors the site's cooldown-reduction inference (a one-charge
+ability pressed again sooner than its cooldown takes the shortest gap as its cooldown) and its
+lookback rule (long cooldowns reset when the encounter starts). It therefore validates the casts
+data the site read, not those heuristics themselves.
+"""
 import defensives
 from checks.common import TableCapped
 from checks.verdict import PASS, fail, skip
@@ -45,21 +51,34 @@ def active_mismatches(active_names, auras, death_ts, fight_start=None):
     return out
 
 
-def ready_at(cast_times, death_ts, cooldown_ms, charges):
-    """Whether a charge is left at death_ts: each use spends one, and charges come back one per
-    cooldown_ms, the recharge starting at the first use made with all charges full."""
-    have, back_at = charges, None
-    for t in sorted(t for t in cast_times if t <= death_ts):
-        while back_at is not None and back_at <= t:
+def ready_since(cast_times, at, cooldown_ms, charges):
+    """(whether a charge is left at `at`, when a charge last came back after none were left).
+
+    Each use spends one charge, and charges come back one per cooldown_ms, the recharge starting at
+    the first use made with all charges full. The second value is None when the ability never ran
+    out of charges up to `at` (ready all along)."""
+    have, back_at, since = charges, None, None
+
+    def refill(until):
+        nonlocal have, back_at, since
+        while back_at is not None and back_at <= until:
+            if have == 0:
+                since = back_at
             have += 1
             back_at = back_at + cooldown_ms if have < charges else None
+
+    for t in sorted(t for t in cast_times if t <= at):
+        refill(t)
         have = max(have - 1, 0)
         if back_at is None:
             back_at = t + cooldown_ms
-    while back_at is not None and back_at <= death_ts:
-        have += 1
-        back_at = back_at + cooldown_ms if have < charges else None
-    return have > 0
+    refill(at)
+    return have > 0, since
+
+
+def ready_at(cast_times, death_ts, cooldown_ms, charges):
+    """Whether a charge is left at death_ts (ready_since)."""
+    return ready_since(cast_times, death_ts, cooldown_ms, charges)[0]
 
 
 def entry_for(entries, pid, death_ts):
@@ -129,36 +148,49 @@ def report_span(run, rid, fid):
             max(f["end_time"] for f in fights))
 
 
+def report_casts(run, rid, fid, pid):
+    """The player's casts over the whole report span the site reads (report_span): cooldown
+    reduction shows up as a short gap anywhere in the report, not only near this death."""
+    return [e for e in run.casts(rid, pid, *report_span(run, rid, fid)) if e.get("type", "cast") == "cast"]
+
+
+def cooldown_window(entry, sid, casts, talents, spec, fight_start, at, history=False):
+    """(the cast times that decide readiness at `at`, cooldown, charges) for one catalog ability,
+    with the pull's talents and spec. With `history`, a short cooldown keeps every earlier cast of
+    the report instead of only the last cooldown x charges: enough to say whether it is ready, not
+    when it became ready (a press 65s before on a 60s cooldown made it ready only 5s before)."""
+    cd = defensives._talented_cooldown(entry, talents, spec)
+    charges = defensives._talented_charges(entry, talents, spec)
+    times = sorted(e["timestamp"] for e in casts if e.get("abilityGameID") == sid)
+    # A one-charge ability pressed again sooner than its cooldown allows: the player has
+    # cooldown reduction the catalog can't see, so their shortest gap is the cooldown.
+    if charges == 1 and len(times) > 1:
+        shortest = min(b - a for a, b in zip(times, times[1:]))
+        if shortest < cd - CDR_TOLERANCE_MS:
+            cd = shortest
+    # Long cooldowns reset when the encounter starts; short ones carry over from before the pull.
+    since = fight_start if entry["cooldown_ms"] >= ENCOUNTER_RESET_MS else 0 if history else at - cd * charges
+    return [t for t in times if max(since, 0) <= t <= at], cd, charges
+
+
 def _ready_items(run, rid, fid, pid, who, ev, fight_start, death_ts):
     d = ev["defensives"]
     site_ready = {a["name"] for a in d.get("available") or []}
     judged = []
-    talents = _talents(run, rid, fid, pid)
     for name in [a["name"] for a in d.get("available") or []] + [a["name"] for a in d.get("cooldown") or []]:
         sid = run.cat.name_to_id.get(name)
         entry = run.cat.all.get(sid) if sid is not None else None
         if entry is None or entry.get("kind") in CONSUMABLE_KINDS:
             continue
-        cd = defensives._talented_cooldown(entry, talents, ev.get("spec"))
-        charges = defensives._talented_charges(entry, talents, ev.get("spec"))
-        judged.append((name, sid, entry, cd, charges))
+        judged.append((name, sid, entry))
     if not judged:
         return []
-    # The whole report's casts, as the site reads them: cooldown reduction shows up as a short
-    # gap anywhere in the report, not only near this death.
-    casts = [e for e in run.casts(rid, pid, *report_span(run, rid, fid)) if e.get("type", "cast") == "cast"]
+    talents = _talents(run, rid, fid, pid)
+    casts = report_casts(run, rid, fid, pid)
     items = []
-    for name, sid, entry, cd, charges in judged:
-        times = sorted(e["timestamp"] for e in casts if e.get("abilityGameID") == sid)
-        # A one-charge ability pressed again sooner than its cooldown allows: the player has
-        # cooldown reduction the catalog can't see, so their shortest gap is the cooldown.
-        if charges == 1 and len(times) > 1:
-            shortest = min(b - a for a, b in zip(times, times[1:]))
-            if shortest < cd - CDR_TOLERANCE_MS:
-                cd = shortest
-        # Long cooldowns reset when the encounter starts; short ones carry over from before the pull.
-        since = fight_start if entry["cooldown_ms"] >= ENCOUNTER_RESET_MS else death_ts - cd * charges
-        wcl_ready = ready_at([t for t in times if max(since, 0) <= t <= death_ts], death_ts, cd, charges)
+    for name, sid, entry in judged:
+        times, cd, charges = cooldown_window(entry, sid, casts, talents, ev.get("spec"), fight_start, death_ts)
+        wcl_ready = ready_at(times, death_ts, cd, charges)
         if (name in site_ready) and not wcl_ready:
             items.append(f"{who} pull {fid} {name}: site ready, wcl casts say on cooldown")
         elif wcl_ready and name not in site_ready:
