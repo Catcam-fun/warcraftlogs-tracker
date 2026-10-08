@@ -98,11 +98,16 @@ def check(run):
 
     # Each ability's gap between measured and predicted, weighted by hits:
     # a handful of hits is noisy, a few hundred is not.
-    items = []
+    items, measured = [], 0
     for (pid, name), per in sorted(rows.items(), key=lambda kv: (kv[0][1], players[kv[0][0]]["name"])):
         n = sum(h for h, _, _ in per)
+        if n < MIN_FLAG_HITS:
+            continue
+        measured += 1
         real = sum(h * m for h, m, _ in per) / n
         predicted = sum(h * p for h, _, p in per) / n
-        if n >= MIN_FLAG_HITS and abs(real - predicted) > FLAG_AT:
+        if abs(real - predicted) > FLAG_AT:
             items.append(f"{players[pid]['name']} {name}: measured {real:.2f}, catalog {predicted:.2f} over {n} hits")
+    if not measured:
+        return skip(f"no defensive had enough matched hits to measure ({len(rows)} rows compared)")
     return fail(items) if items else PASS

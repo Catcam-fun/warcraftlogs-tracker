@@ -52,6 +52,11 @@ def violations(defensives, cat):
             if amount > missing + kb + HP_TOLERANCE * max_hp:
                 out.append(f"{name}: amount {amount} above missing health {round(missing)} "
                            f"plus the killing hit {kb}")
+    else:
+        # Without the killing hit's size or the health before it, only max HP bounds the amount.
+        for name, det in details.items():
+            if (det.get("amount") or 0) > max_hp:
+                out.append(f"{name}: amount above max HP")
     if s.get("deathType") == "instakill":
         out += [f"{name}: instant kill but marked saves" for name, v in would.items() if v is not False]
     if s.get("ignoresImmunity"):

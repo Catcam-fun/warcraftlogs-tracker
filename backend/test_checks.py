@@ -187,6 +187,17 @@ class DurationsCheckTests(unittest.TestCase):
         self.assertEqual(o.status, "fail")
         self.assertEqual(o.items, ["Barkskin: 1 of 1 uses longer than predicted, e.g. 49.0s vs 15.0s"])
 
+    def test_nothing_measured_is_a_skip(self):
+        from checks import source_durations
+        run = mock.Mock(); run.code = "X"
+        run.pulls = [{"id": 1, "start_time": 0, "end_time": 100_000}]
+        run.meta = {"abilities": {}, "player_details": {}}
+        run.cat.name_to_id, run.cat.all = {}, {}
+        raw = {"combatants": [], "casts": [], "buffs": []}
+        with mock.patch.object(source_durations.defensives, "fetch_defensive_raw", return_value=raw),              mock.patch.object(source_durations.defensives, "filter_defensive_raw", return_value={"talents": {}}):
+            o = source_durations.check(run)
+        self.assertEqual((o.status, o.reason), ("skip", "no duration-talent defensive uses measured"))
+
 
 class MitigationCheckTests(unittest.TestCase):
     def test_compares_with_hits_carrying_the_same_other_auras(self):
@@ -237,10 +248,36 @@ class MitigationCheckTests(unittest.TestCase):
         hits += [hit(600, "1966.", True)] * 20 + [hit(1000, "1966.", False)] * 15 + [hit(600, "1966.", True)]
         with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
             self.assertEqual(source_mitigation.check(run).status, "pass")
-        # A log that marks no hit AoE (before Midnight): the AoE-only reduction can't be predicted.
+        # A log that marks no hit AoE (before Midnight): the AoE-only reduction can't be predicted,
+        # so nothing is measured, and that is a skip, never a pass.
         hits = [dict(h, isAoE=False) for h in hits]
         with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
-            self.assertEqual(source_mitigation.check(run).status, "pass")
+            o = source_mitigation.check(run)
+        self.assertEqual(o.status, "skip")
+        self.assertIn("no defensive had enough matched hits to measure", o.reason)
+
+    def test_wrong_catalog_value_is_flagged(self):
+        # The catalog says Barkskin takes 20% off; matched hits show 10% over 25 hits: one item.
+        from checks import source_mitigation
+        run = mock.Mock(); run.code = "X"
+        run.pulls = [{"id": 1, "start_time": 0, "end_time": 100_000}]
+        run.meta = {"abilities": {22812: "Barkskin", 9: "Mark of the Wild"},
+                    "friendlies": [{"id": 3, "name": "Oak", "type": "Druid"}],
+                    "player_details": {}, "ability_schools": {}}
+        run.cat.name_to_id = {"Barkskin": 22812}
+        run.cat.all = {22812: {"name": "Barkskin", "kind": "personal", "class": "Druid", "mitigation": [{"dr": 0.2}]}}
+        run.cat.relevant_talent_entries = set()
+        run.combatants.return_value = []
+        hit = lambda through, buffs: {"type": "damage", "targetID": 3, "abilityGameID": 1, "fight": 1,
+                                      "unmitigatedAmount": 1250, "mitigated": 1250 - through,
+                                      "amount": through, "buffs": buffs}
+        hits = [hit(1000, "9.")] * 10 + [hit(900, "22812.9.")] * 25
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
+            o = source_mitigation.check(run)
+        self.assertEqual((o.status, o.items), ("fail", ["Oak Barkskin: measured 0.10, catalog 0.20 over 25 hits"]))
+        # Too few matched hits to judge (under 20): a skip, not a pass.
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits[:15]):
+            self.assertEqual(source_mitigation.check(run).status, "skip")
 
 
 class SlotsRuleTests(unittest.TestCase):
@@ -379,6 +416,11 @@ class VerdictRuleTests(unittest.TestCase):
         d = self.base(); d["survival"]["details"]["Barkskin"]["amount"] = 1_111
         self.assertIn("Barkskin: amount 1111 above missing health 500 plus the killing hit 600", violations(d, cat))
         d = self.base(); d["survival"]["details"]["Barkskin"]["amount"] = 1_110
+        self.assertEqual(violations(d, cat), [])
+        # Without the killing hit's size, max HP is the bound.
+        d = self.base(); del d["survival"]["killingHit"]; d["survival"]["details"]["Barkskin"]["amount"] = 1_001
+        self.assertIn("Barkskin: amount above max HP", violations(d, cat))
+        d["survival"]["details"]["Barkskin"]["amount"] = 1_000
         self.assertEqual(violations(d, cat), [])
 
     def bad(self):
@@ -675,6 +717,12 @@ class StateTests(unittest.TestCase):
         run.hits_before.assert_called_with("R", 1, 7, start + 50_000)
         run.hits_before.return_value = [dict(kb, buffs="1022.")]
         self.assertEqual(source_state.check(run).items, ["Oak pull 1: active Fiery Brand has no aura band at death"])
+
+    def test_report_with_no_kept_pull_listed_uses_the_deaths_own_pull(self):
+        run, _ = self._run()
+        run.result = {"pullParticipation": {"Elm": ["S_4"]}}
+        self.assertEqual(source_state.check(run).status, "pass")
+        run.casts.assert_called_with("R", 7, 0, 160_000)
 
     def test_cooldown_reduction_seen_anywhere_in_the_report(self):
         # Live 2026-10-07 (Decoil, Dancing Rune Weapon): the only short gap between presses was in
