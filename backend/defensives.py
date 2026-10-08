@@ -79,7 +79,9 @@ class Catalog:
         # Every personal defensive is tracked (accuracy over API cost, the
         # owner's call); the per-player summary counts only major (60s+) ones.
         self.tracked = self.personal
-        self.cast_ids = sorted(set(self.tracked) | set(self.consumable))
+        # Spells that bring a tracked defensive back early (Cold Snap, Black Ox Brew): their casts are read too.
+        self.reset_ids = frozenset(r["spell"] for d in self.tracked.values() for r in d.get("reset_by", ()))
+        self.cast_ids = sorted(set(self.tracked) | set(self.consumable) | self.reset_ids)
         # Shields a talent adds to a button (Matted Fur): scored from their real size in the log.
         self.observed_auras = sorted({c["aura"] for d in self.all.values() for c in d.get("mitigation") or ()
                                       if isinstance(c, dict) and c.get("aura")})
@@ -329,7 +331,7 @@ def index_defensive_events(raw, cat=None):
     casts = defaultdict(list)           # sourceID -> [(ts, spellID)]
     for e in raw.get("casts", []):
         sid = e.get("abilityGameID")
-        if e.get("type") == "cast" and sid in cat.all and e.get("sourceID") is not None:
+        if e.get("type") == "cast" and (sid in cat.all or sid in cat.reset_ids) and e.get("sourceID") is not None:
             casts[e["sourceID"]].append((e["timestamp"], sid))
     buffs = defaultdict(list)           # targetID -> [(ts, type, abilityGameID, sourceID, shield size)]
     for e in raw.get("buffs", []):
@@ -441,48 +443,62 @@ def _talented_charges(entry, talent_entries, spec):
                                   for m in entry.get("charge_mods", ()))
 
 
-def _effective_cooldown(entry, own_casts_of_spell, cd=None, charges=None):
-    cd = entry["cooldown_ms"] if cd is None else cd
-    charges = entry["charges"] if charges is None else charges
-    if charges == 1 and len(own_casts_of_spell) > 1:
-        gaps = [b - a for a, b in zip(own_casts_of_spell, own_casts_of_spell[1:])]
-        shortest = min(gaps)
-        if shortest < cd - CDR_TOLERANCE_MS:
-            cd = shortest
-    return cd
+def _inferred_cooldown(own_casts_of_spell, reset_times, loadout):
+    """The cooldown a player's presses prove they have when it is shorter than their talents allow
+    (cooldown reduction the catalog can't see), or None: their shortest gap between two presses of a
+    one-charge ability, leaving out gaps a reset (Cold Snap, Black Ox Brew) falls in, since the
+    reset, not the cooldown, ended those. `loadout(t)` -> (cooldown, charges) at a press."""
+    best = None
+    for a, b in zip(own_casts_of_spell, own_casts_of_spell[1:]):
+        cd, charges = loadout(a)
+        if charges != 1 or any(a < r <= b for r in reset_times):
+            continue
+        if b - a < cd - CDR_TOLERANCE_MS and (best is None or b - a < best):
+            best = b - a
+    return best
 
 
-def _charges_at(death_ts, casts_in_window, charges, recharge_ms):
-    """Simulate charges up to the death. Returns (charges_left, ms_until_next)."""
-    have, recharge_done = charges, None
-    for t in casts_in_window:
-        while recharge_done is not None and recharge_done <= t:
-            have += 1
-            recharge_done = recharge_done + recharge_ms if have < charges else None
-        have = max(have - 1, 0)
-        if recharge_done is None:
-            recharge_done = t + recharge_ms
-    while recharge_done is not None and recharge_done <= death_ts:
-        have += 1
-        recharge_done = recharge_done + recharge_ms if have < charges else None
-    return have, (recharge_done - death_ts if recharge_done is not None else 0)
+def _replay(casts, resets, at, loadout, inferred=None):
+    """(charges left at `at`, ms until the next one comes back, when it last came back after none
+    were left or None if it never ran out), replayed the way the game counts charges.
 
+    Each press spends a charge; charges come back one at a time, the recharge starting at the first
+    spend and lasting the cooldown of the talents the player had then (`loadout(t)` -> (cooldown,
+    charges)), or `inferred` when that is shorter (_inferred_cooldown). `resets`: [(time, "all" |
+    "one")] presses of a spell that brings it back: "all" = every charge back at once, "one" = one
+    charge back (the running recharge goes on)."""
+    def cd_at(t):
+        cd = loadout(t)[0]
+        return min(cd, inferred) if inferred is not None else cd
 
-def _ready_since(death_ts, casts_in_window, charges, recharge_ms):
-    """When an ability that is ready at the death last came off cooldown (None: ready all along)."""
-    have, recharge_done, since = charges, None, None
-    for t in list(casts_in_window) + [death_ts]:
-        while recharge_done is not None and recharge_done <= t:
+    events = sorted([(t, 1, None) for t in casts if t <= at] + [(t, 0, how) for t, how in resets if t <= at])
+    have = loadout(events[0][0] if events else at)[1]
+    back_at, since = None, None
+
+    def refill(until):
+        nonlocal have, back_at, since
+        while back_at is not None and back_at <= until:
             if have == 0:
-                since = recharge_done
+                since = back_at
             have += 1
-            recharge_done = recharge_done + recharge_ms if have < charges else None
-        if t == death_ts:
-            break
+            back_at = back_at + cd_at(back_at) if have < loadout(back_at)[1] else None
+
+    for t, is_press, how in events:
+        refill(t)
+        most = loadout(t)[1]
+        have = min(have, most)
+        if not is_press:
+            if have == 0:
+                since = t
+            have = most if how == "all" else min(have + 1, most)
+            if have >= most:
+                back_at = None
+            continue
         have = max(have - 1, 0)
-        if recharge_done is None:
-            recharge_done = t + recharge_ms
-    return since
+        if back_at is None:
+            back_at = t + cd_at(t)
+    refill(at)
+    return have, (back_at - at if back_at is not None else 0), since
 
 
 # Heals over time among the scored defensives, by tick count: their heal lands
@@ -531,8 +547,11 @@ def _auras(hit):
 
 def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts,
                   indexed, ability_names, actor_names, hits=None, ability_schools=None, cat=None,
-                  aoe_known=True, armor_k=None, soulwell=False):
+                  aoe_known=True, armor_k=None, soulwell=False, pull_starts=None):
     """Defensive picture for one death. All timestamps are report-relative ms.
+
+    `pull_starts`: {fight ID: start} of the report's kept pulls, so presses in other pulls are
+    replayed with the talents the player had in them.
 
     With `hits` (the player's hits in the seconds before their deaths, and
     instant kills: fetch_death_windows, fetch_instakills) it also estimates
@@ -590,6 +609,21 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
     ready_entries, ready_since = [], {}
 
     pressed_this_pull = {sid for t, sid in own_casts if fight_start <= t <= death_ts}
+    # The talents (and spec) the player had at a moment: those of the latest pull that started by
+    # then (talents change only out of combat, so a press between pulls was made with the last
+    # loadout the log recorded), else the first recorded pull's. Without pull starts or any
+    # recorded loadout: this pull's.
+    loadouts = sorted(((start, indexed["talents"][(f, player_id)],
+                        (indexed.get("specs") or {}).get((f, player_id)) or spec)
+                       for f, start in (pull_starts or {}).items() if (f, player_id) in indexed["talents"]),
+                      key=lambda lo: lo[0])
+
+    def loadout_at(t):
+        if not loadouts:
+            return talent_entries, spec
+        before = [lo for lo in loadouts if lo[0] <= t]
+        _, talents, pull_spec_ = before[-1] if before else loadouts[0]
+        return talents, pull_spec_
     for sid, entry in cat.tracked.items():
         if not _has_ability(sid, entry, player_class, spec, talent_entries, casts_by_spell, pressed_this_pull):
             continue
@@ -598,19 +632,27 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
             result["active"].append({"name": name, "kind": "personal", "major": entry["major"]})
             continue
         all_casts = casts_by_spell.get(sid, [])
-        charges = _talented_charges(entry, talent_entries, spec)
-        recharge = _effective_cooldown(entry, all_casts, _talented_cooldown(entry, talent_entries, spec), charges)
         # Long cooldowns reset when the encounter starts. Short ones carry over, and charges come
         # back one at a time from the first spend, so every earlier cast in the report counts:
         # the cast that put a one-charge ability on cooldown is always more than one cooldown back
-        # when it is ready again, and it decides when it came back.
+        # when it is ready again, and it decides when it came back. Each press counts with the
+        # talents the player had then (loadout_at), and a reset (Cold Snap) brings it back at once.
         lookback = fight_start if entry["cooldown_ms"] >= ENCOUNTER_RESET_MS else 0
+        how = {r["spell"]: r["restores"] for r in entry.get("reset_by", ())}
+        resets = [(t, how[s]) for t, s in own_casts if s in how and lookback <= t <= death_ts]
+        if lookback == fight_start:
+            def loadout(_t, entry=entry):
+                return _talented_cooldown(entry, talent_entries, spec), _talented_charges(entry, talent_entries, spec)
+        else:
+            def loadout(t, entry=entry):
+                talents, pull_spec_ = loadout_at(t)
+                return _talented_cooldown(entry, talents, pull_spec_), _talented_charges(entry, talents, pull_spec_)
+        inferred = _inferred_cooldown(all_casts, [t for t, s in own_casts if s in how], loadout)
         window = [t for t in all_casts if lookback <= t <= death_ts]
-        left, ready_in = _charges_at(death_ts, window, charges, recharge)
+        left, ready_in, since = _replay(window, resets, death_ts, loadout, inferred)
         if left > 0:
             result["available"].append({"name": name, "major": entry["major"]})
             ready_entries.append(entry)
-            since = _ready_since(death_ts, window, charges, recharge)
             ready_since[name] = max(fight_start, since if since is not None else fight_start)
         else:
             result["cooldown"].append({

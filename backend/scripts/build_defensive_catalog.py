@@ -491,6 +491,7 @@ class GameData:
         self.shapeshift = {int(r["SpellID"]): int(r["ShapeshiftMask_0"]) for r in table("SpellShapeshift", build)
                            if int(r["ShapeshiftMask_0"] or 0)}
         self.definitions = table("TraitDefinition", build)
+        self.definition_spells = {int(r["SpellID"]) for r in self.definitions if int(r["SpellID"] or 0)}
         self.node_entries = table("TraitNodeEntry", build)
         specs = {r["ID"]: r["Name_lang"] for r in table("ChrSpecialization", build)}
         self.spec_spells = {}                     # passive spell -> spec names it belongs to
@@ -884,13 +885,68 @@ def talent_component(gd, mods, talent, field, source, extra, problems):
     return comp
 
 
+# Spells that bring a tracked defensive back before its cooldown ends. Their effects are scripted
+# (Cold Snap: effect 77, Black Ox Brew: effect 30 plus a script), so the game data has no number to
+# read: the tooltip of each patch says which buttons come back and how much. Read per patch by
+# reset_sources(); "all" = the cooldown is reset (every charge back), "one" = one charge comes back.
+#   Cold Snap 235219, 11.0.2 to 12.1.0: "Resets the cooldown of your Ice Barrier, Frost Nova,
+#     $?a417493[][Cone of Cold, ]Ice Cold, and Ice Block."
+#   Black Ox Brew 115399, 11.x: "...refills your Energy, Purifying Brew charges, and resets the cooldown
+#     of Celestial Brew."  12.x: "...and grants one charge of Celestial Brew or Celestial Infusion."
+RESETS = {235219: "Cold Snap", 115399: "Black Ox Brew"}
+RESET_PHRASES = (("resets the cooldowns? of", "all"), ("grants one charge of", "one"))
+# Talents whose tooltip resets or refills a button named like a tracked defensive but that bring no
+# tracked defensive back early (checked in every patch from 11.0.2).
+RESETS_REVIEWED = {
+    "Flame and Frost": "Cauterize resets Frost spells under 4 min (Ice Block and Ice Cold are 4 min);"
+                       " Ice Block / Ice Cold / Cold Snap reset Fire spells: no tracked Fire-school"
+                       " defensive on a Frost Mage (Blazing Barrier is Fire only)",
+    "Master of Time": "Alter Time resets Blink and Shimmer", "Time Walk": "Alter Time resets Blink and Shimmer",
+    "Chaotic Transformation": "Metamorphosis resets Blade Dance and Eye Beam",
+    "Violent Transformation": "Metamorphosis resets Sigil of Flame, Immolation Aura, Fel Devastation, Voidblade, The Hunt",
+    "Mass Acceleration": "Metamorphosis resets Spirit Bomb or Reap",
+}
+RESET_WORDS = re.compile(r"reset|refill|grants? (one|a|an additional|1) charge|gains? (one|a|1) charge", re.I)
+
+
+def reset_sources(gd, desc, catalog, problems):
+    """Mark each tracked defensive with the spells that bring it back early (RESETS), from this
+    patch's tooltips, and report talents that reset a tracked defensive but are not reviewed."""
+    tracked = {d["name"]: d for d in catalog.values() if d["kind"] == "personal"}
+    for sid, name in RESETS.items():
+        if sid not in gd.names:
+            continue
+        if gd.names[sid] != name:
+            problems.append(f"{sid}: expected {name!r}, game data says {gd.names[sid]!r}")
+            continue
+        text = desc.get(sid) or ""
+        found = False
+        for phrase, restores in RESET_PHRASES:
+            for mo in re.finditer(phrase, text, re.I):
+                clause = text[mo.end():].split(".")[0]
+                for target, entry in tracked.items():
+                    if re.search(rf"\b{re.escape(target)}\b", clause):
+                        entry.setdefault("reset_by", []).append({"spell": sid, "name": name, "restores": restores})
+                        found = True
+        if not found:
+            problems.append(f"{name}: its tooltip no longer says which defensive it resets: review RESETS")
+    for sid in sorted(set(gd.definition_spells)):
+        talent, text = gd.names.get(sid), desc.get(sid) or ""
+        if talent in RESETS.values() or talent in RESETS_REVIEWED or not RESET_WORDS.search(text):
+            continue
+        if any(re.search(rf"\b{re.escape(n)}\b", text) for n in tracked):
+            problems.append(f"talent {talent!r} resets or refills a tracked defensive: review RESETS / RESETS_REVIEWED")
+    for entry in catalog.values():
+        if entry.get("reset_by"):
+            entry["reset_by"].sort(key=lambda r: r["spell"])
+
+
 SURVIVAL_WORDS = re.compile(r"damage taken|damage you take|maximum health|absorb|heal|armor|immun|reduc", re.I)
 
 
-def unreviewed_talents(gd, build, catalog, mods):
+def unreviewed_talents(gd, desc, catalog, mods):
     """Talents whose tooltip names a tracked defensive with a survival word and that
     no modifier, TALENT_EFFECTS entry or TALENTS_REVIEWED line covers."""
-    desc = {int(r["ID"]): r["Description_lang"] for r in table("Spell", build)}
     handled = set(TALENTS_REVIEWED)
     for d in catalog.values():
         for c in d.get("mitigation") or ():
@@ -1041,7 +1097,9 @@ def build_catalog(build):
             if hp_mods:
                 entry["mitigation"].append({"hp": 0.0, "mods": hp_mods})
     heal = {"talents": mods.healing_taken(), "auras": healing_taken_auras(gd, mods)}
-    for talent in unreviewed_talents(gd, build, catalog, mods):
+    desc = {int(r["ID"]): r["Description_lang"] for r in table("Spell", build)}
+    reset_sources(gd, desc, catalog, problems)
+    for talent in unreviewed_talents(gd, desc, catalog, mods):
         problems.append(f"talent {talent!r} names a defensive: review it (TALENT_EFFECTS / TALENTS_REVIEWED)")
     return catalog, heal, problems, missing
 
@@ -1068,7 +1126,7 @@ def main():
         starts.append((first_day, patch))
     if only:
         raise SystemExit("Built " + ", ".join(catalogs) + " (dry run: the catalog file is only written for all patches).")
-    with open(out, "w") as f:
+    with open(out, "w", newline="\n") as f:
         f.write('"""GENERATED by scripts/build_defensive_catalog.py from wago.tools game data.\n'
                 'Edit the curated lists in that script, not this file.\n\n'
                 'One catalog per game patch; a report uses the patch that was live when it was logged."""\n\n')
