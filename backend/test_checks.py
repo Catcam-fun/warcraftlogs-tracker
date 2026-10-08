@@ -101,6 +101,18 @@ class RunTests(unittest.TestCase):
             self.assertNotIn("targetID", query)
             self.assertEqual(variables["p"], 7)
 
+    def test_damage_taken_filters_by_the_unit_hit(self):
+        # Live 2026-10-07: DamageTaken with targetID returned only a Demon Hunter's 13 self-hits;
+        # sourceID returned all 41 hits they took, the boss's killing blow included.
+        reply = {"reportData": {"report": {"events": {"data": [{"timestamp": 1}], "nextPageTimestamp": None}}}}
+        with mock.patch("checks.common.graphql_query", return_value=reply) as q:
+            run = Run("t", parse_target("X:manaforge"))
+            self.assertEqual(run.hits_before("X", 5, 7, 20_000), [{"timestamp": 1}])
+            query, variables = q.call_args[0][1], q.call_args[0][2]
+            self.assertIn("dataType: DamageTaken, sourceID: $p", query)
+            self.assertIn("includeResources: true", query)     # hitPoints / maxHitPoints for the labels
+            self.assertEqual((variables["p"], variables["s"], variables["e"], variables["f"]), (7, 5_000, 20_050, [5]))
+
     def test_points_is_none_on_error(self):
         with mock.patch("checks.common.graphql_query", side_effect=Exception("down")):
             self.assertIsNone(points("t"))
@@ -205,6 +217,32 @@ class MitigationCheckTests(unittest.TestCase):
             self.assertEqual(source_mitigation.check(run).status, "pass")
 
 
+    def test_aoe_reduction_is_predicted_hit_by_hit(self):
+        # Live 2026-10-07 (Esra, Manaforge): one boss ability's hits are not all marked AoE, so Feint's
+        # AoE-only 40% must be predicted per hit, not from one sample hit of the ability.
+        from checks import source_mitigation
+        run = mock.Mock(); run.code = "X"
+        run.pulls = [{"id": 1, "start_time": 0, "end_time": 100_000}]
+        run.meta = {"abilities": {1966: "Feint"}, "friendlies": [{"id": 2, "name": "Esra", "type": "Rogue"}],
+                    "player_details": {}, "ability_schools": {}}
+        run.cat.name_to_id = {"Feint": 1966}
+        run.cat.all = {1966: {"name": "Feint", "kind": "personal", "class": "Rogue",
+                              "mitigation": [{"dr": 0.4, "school": "aoe"}]}}
+        run.cat.relevant_talent_entries = set()
+        run.combatants.return_value = []
+        hit = lambda through, buffs, aoe: {"type": "damage", "targetID": 2, "abilityGameID": 1, "fight": 1,
+                                           "unmitigatedAmount": 1250, "mitigated": 1250 - through,
+                                           "amount": through, "buffs": buffs, "isAoE": aoe}
+        hits = [hit(1000, "", True)] * 10 + [hit(1000, "", False)] * 10
+        hits += [hit(600, "1966.", True)] * 20 + [hit(1000, "1966.", False)] * 15 + [hit(600, "1966.", True)]
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
+            self.assertEqual(source_mitigation.check(run).status, "pass")
+        # A log that marks no hit AoE (before Midnight): the AoE-only reduction can't be predicted.
+        hits = [dict(h, isAoE=False) for h in hits]
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
+            self.assertEqual(source_mitigation.check(run).status, "pass")
+
+
 class SlotsRuleTests(unittest.TestCase):
     def test_rank_clauses(self):
         d = lambda ts, who, cheat=False: (ts, who, cheat)
@@ -251,6 +289,13 @@ class SlotsCheckTests(unittest.TestCase):
         capped = self._run({"A": [self._ev(2, "A", 500, 1)]}, {2: TableCapped("r", 2)})
         self.assertEqual(rules_slots.check(capped).items, ["pull 2: 200+ deaths, table capped"])
         self.assertEqual(rules_slots.check(self._run({}, {})).status, "skip")
+
+    def test_same_player_twice_on_one_millisecond(self):
+        # Live 2026-10-07 (Hunterben, Manaforge pull 66): WCL lists two deaths of one player on the
+        # same millisecond; the site gives them slots 1 and 2, and so does the rule.
+        table = [{"id": 1, "timestamp": 1500}, {"id": 1, "timestamp": 1500}, {"id": 2, "timestamp": 1900}]
+        evs = [self._ev(1, "A", 500, 2), self._ev(1, "A", 500, 1), self._ev(1, "B", 900, 3)]
+        self.assertEqual(rules_slots.check(self._run({"A": evs}, {1: table})).status, "pass")
 
 
 class CountingRuleTests(unittest.TestCase):
@@ -344,7 +389,7 @@ class VerdictRuleTests(unittest.TestCase):
 class LabelRuleTests(unittest.TestCase):
     def hit(self, ts, amount, hp_after, aid=1, overkill=0):
         return {"timestamp": ts, "amount": amount, "overkill": overkill, "absorbed": 0,
-                "hitPoints": hp_after, "maxHitPoints": 1000, "abilityGameID": aid}
+                "hitPoints": hp_after, "maxHitPoints": 1000, "abilityGameID": aid, "resourceActor": 2}
 
     def test_one_shot_burst_and_was_low(self):
         kb = self.hit(1000, 900, 0, overkill=50)                       # 950 of 1000 from full
@@ -364,11 +409,22 @@ class LabelRuleTests(unittest.TestCase):
 
     def test_threshold_edges(self):
         # "quick" is measured from the last moment at high health (t=0 here) to the killing blow.
-        self.assertEqual(label([self.hit(0, 10, 990), self.hit(600, 790, 200), self.hit(1001, 200, 0, overkill=5)], 2)["deathType"], "wasLow")
-        self.assertEqual(label([self.hit(0, 10, 990), self.hit(600, 790, 200), self.hit(999, 200, 0, overkill=5)], 2)["deathType"], "burst")
+        self.assertEqual(label([self.hit(0, 10, 990), self.hit(600, 100, 700), self.hit(1001, 700, 0, overkill=5)], 2)["deathType"], "wasLow")
+        self.assertEqual(label([self.hit(0, 10, 990), self.hit(600, 100, 700), self.hit(999, 700, 0, overkill=5)], 2)["deathType"], "burst")
         # One-shot needs a single hit of 80 % of max HP or more (800 of 1000); 799 is burst.
         self.assertEqual(label([self.hit(0, 10, 990), self.hit(100, 190, 800), self.hit(500, 800, 0)], 2)["deathType"], "oneShot")
         self.assertEqual(label([self.hit(0, 10, 990), self.hit(100, 191, 799), self.hit(500, 799, 0)], 2)["deathType"], "burst")
+
+    def test_high_just_before_a_hit_and_only_the_players_own_health(self):
+        # Live 2026-10-07 (Manaforge): heals land between hits, so a player at 85%+ just before a hit
+        # (hitPoints + amount) was at high health then; and hits whose resources are the attacker's
+        # (resourceActor 1) say nothing about the player's health.
+        h = self.hit
+        hits = [h(0, 10, 500), h(2000, 600, 300), h(2500, 300, 0, overkill=5)]   # 90% just before t=2000
+        self.assertEqual(label(hits, 2)["deathType"], "burst")
+        attacker = dict(h(2200, 10, 990), resourceActor=1)
+        hits = [h(0, 10, 500), h(1500, 100, 400), attacker, h(2500, 400, 0, overkill=5)]
+        self.assertEqual(label(hits, 3)["deathType"], "wasLow")
 
     def test_set_up_hit_needs_ten_percent_and_a_burst_has_none(self):
         small = [self.hit(0, 10, 990), self.hit(2000, 99, 500), self.hit(3000, 500, 0, overkill=1)]
@@ -427,6 +483,10 @@ class LabelRuleTests(unittest.TestCase):
         o = rules_labels.check(run)
         self.assertEqual((o.status, o.items), ("fail", ["Bob pull 2: site wasLow/None/None, rule burst/None/None"]))
         ev["defensives"]["survival"]["deathType"] = "instakill"
+        self.assertEqual(rules_labels.check(run).status, "skip")
+        # No killing hit in WCL's hits means nothing was compared: a skip, never a pass.
+        ev["defensives"]["survival"]["deathType"] = "burst"
+        run.hits_before.return_value = hits[:2]
         self.assertEqual(rules_labels.check(run).status, "skip")
 
 
@@ -555,6 +615,8 @@ class StateTests(unittest.TestCase):
                              "cooldown": [{"name": "Barkskin", "readyIn": 40, "usedAgo": 20}],
                              "survival": {"hpBeforePct": 40, "maxHp": 1000, "overkill": 55, "deathType": "damage"}}}
         run.counted_deaths.return_value = [ev]
+        run.meta_for.return_value = {"abilities": {207771: "Fiery Brand"}}
+        run.hits_before.return_value = []
         run.deaths_table.return_value = [{"id": 7, "timestamp": start + 50_000, "overkill": 55,
                                           "events": [{"type": "damage", "amount": 405, "overkill": 55, "timestamp": start + 50_000}]}]
         return run, ev
@@ -600,6 +662,19 @@ class StateTests(unittest.TestCase):
         ev["defensives"]["available"] = [{"name": "Renewal"}, {"name": "Barkskin"}]
         ev["defensives"]["cooldown"] = []
         self.assertEqual(source_state.check(run).status, "pass")
+
+    def test_enemy_debuff_defensive_read_from_the_killing_hit(self):
+        # Live 2026-10-07 (Soulcleavi, Manaforge pull 35): Fiery Brand is a debuff on the boss, never a
+        # band on the player; WCL's killing hit lists it (207771) when it was up.
+        run, ev = self._run()
+        start = 100_000
+        ev["defensives"]["active"] = [{"name": "Fiery Brand", "kind": "personal"}]
+        kb = {"type": "damage", "timestamp": start + 50_000, "overkill": 55, "buffs": "207771.1022."}
+        run.hits_before.return_value = [dict(kb, overkill=0, timestamp=start + 40_000, buffs=""), kb]
+        self.assertEqual(source_state.check(run).status, "pass")
+        run.hits_before.assert_called_with("R", 1, 7, start + 50_000)
+        run.hits_before.return_value = [dict(kb, buffs="1022.")]
+        self.assertEqual(source_state.check(run).items, ["Oak pull 1: active Fiery Brand has no aura band at death"])
 
     def test_cooldown_reduction_seen_anywhere_in_the_report(self):
         # Live 2026-10-07 (Decoil, Dancing Rune Weapon): the only short gap between presses was in

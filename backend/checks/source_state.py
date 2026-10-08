@@ -45,6 +45,16 @@ def entry_for(entries, pid, death_ts):
     return None
 
 
+def killing_hit_auras(run, rid, fid, pid, death_ts):
+    """Names of the auras WCL lists on the player's killing hit (the last overkill hit up to 50 ms after death)."""
+    names = run.meta_for(rid).get("abilities") or {}
+    kills = [h for h in run.hits_before(rid, fid, pid, death_ts)
+             if (h.get("overkill") or 0) > 0 and h["timestamp"] <= death_ts + ENTRY_TOLERANCE_MS]
+    if not kills:
+        return set()
+    return {names.get(a) for a in defensives._auras(kills[-1])}
+
+
 def _killing_event(entry):
     """The damage event with overkill > 0 and the greatest timestamp (events are newest-first, so ties keep the newest)."""
     kills = [e for e in entry.get("events") or [] if e.get("type") == "damage" and (e.get("overkill") or 0) > 0]
@@ -138,7 +148,15 @@ def check(run):
 
         active = [a["name"] for a in d.get("active") or []]
         if active:
-            for name in active_mismatches(active, run.buffs(rid, fid, pid), death_ts):
+            auras = run.buffs(rid, fid, pid)
+            missing = active_mismatches(active, auras, death_ts)
+            # A defensive that is a debuff on the enemy (Fiery Brand) is never a band on the player;
+            # WCL's killing hit lists it when it was up.
+            not_buffs = [n for n in missing if not any(a.get("name") == n for a in auras)]
+            if not_buffs:
+                snapshot = killing_hit_auras(run, rid, fid, pid, death_ts)
+                missing = [n for n in missing if n not in not_buffs or n not in snapshot]
+            for name in missing:
                 items.append(f"{who} pull {fid}: active {name} has no aura band at death")
 
         if d:
