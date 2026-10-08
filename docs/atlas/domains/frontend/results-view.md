@@ -24,10 +24,10 @@ anchors:
   results_route: frontend/src/App.js:1595
   cutoff_select: frontend/src/App.js:1696
   player_list: frontend/src/App.js:2102
-  death_row: frontend/src/DeathRow.js:235
-  death_context: frontend/src/DeathRow.js:249
-  ready_tip: frontend/src/DeathRow.js:309
-  tip: frontend/src/DeathRow.js:198
+  death_row: frontend/src/DeathRow.js:237
+  death_context: frontend/src/DeathRow.js:251
+  ready_tip: frontend/src/DeathRow.js:316
+  tip: frontend/src/DeathRow.js:200
   summarize_defensives: frontend/src/DefensivePanel.js:20
   summary_chip: frontend/src/DefensivePanel.js:43
 invariants:
@@ -46,7 +46,7 @@ links:
   - feat-analyze
   - feat-share
   - feat-saved
-content_hash: sha256:c2d55ea4ea40f6f7f0aad4fd5a9ade983163f8bb7c4208ffa142d896ab629a31
+content_hash: sha256:30f882e89fa44f6c25e95f3f0852a3b3f606b29e269ff8dd59fa7a74daee52cb
 ---
 ## Summary
 
@@ -54,7 +54,7 @@ The **Results view** is what a raid officer reads after an analysis. It lives in
 
 - The page reads one stored object, `data`, and a handful of filter states. All tables are derived with `useMemo` from those (`frontend/src/App.js:1266-1273`).
 - "First X deaths per pull" is decided by `isCounted` (`frontend/src/deathCounting.js:22`), using the `slot` and `inWipe` fields the backend put on each death.
-- Each death row is a `DeathRow` (`frontend/src/DeathRow.js:235`); a player's defensive rollup is `summarizeDefensives` plus two small chips (`frontend/src/DefensivePanel.js:20`).
+- Each death row is a `DeathRow` (`frontend/src/DeathRow.js:237`); a player's defensive rollup is `summarizeDefensives` plus two small chips (`frontend/src/DefensivePanel.js:20`).
 - What it deliberately does not do: it never decides a slot, a wipe, a death type or whether a defensive would have saved someone. Those come from the backend; this page counts, filters, sorts and explains.
 
 ## How it works
@@ -81,15 +81,15 @@ Changing any filter re-runs the same pipeline. You can think of it as a sieve: e
 
 `DeathRow` has four columns (`frontend/src/fp-design.css:725`): the killing blow, a health bar, the defensive strip, and a "View log" link with the time.
 
-- **Killing blow line**: `#pullNo · ability name`, a CHEAT badge for a cheat death, then one context line chosen in this order (`frontend/src/DeathRow.js:249-261`): cheat death, no hit in the log, no killing blow recorded, instant kill, one-shot ("one-shot from N%"), burst ("burst from N%: K hits in Ts"), rot ("worn down by X (rot, K hits)"), set up by the biggest hit, and finally plain "at N%, hit for M%". The label itself comes from `survival.deathType`, `burst`, `rot` and `biggestHit`, set by the backend.
-- **Killing-blow tooltip**: the spell's in-game description from `data.abilityText` (by spell ID), the killing blow size, rot / burst / set-up rows, health before it and overkill, warnings for "ignores immunity" and "ignores reduction", and how many counted raiders that ability killed in these results (`frontend/src/DeathRow.js:263-306`). The kill count is `killCounts`, built with the same `isCounted` rule (`frontend/src/App.js:1276-1284`).
-- **Health bar**: width is `hpBeforePct`, capped at 100; hidden for instant kills (`frontend/src/DeathRow.js:420-423`).
-- **Defensive strip**, left to right (`frontend/src/DeathRow.js:363-407`):
+- **Killing blow line**: `#pullNo · ability name`, a CHEAT badge for a cheat death, then one context line chosen in this order (`frontend/src/DeathRow.js:251-261`): cheat death, no hit in the log, no killing blow recorded, instant kill, one-shot ("one-shot from N%", or "one-shot by X (P%) from N%" when a smaller hit finished them), burst ("burst from N%: K hits in Ts"), rot ("worn down by X (rot, K hits)"), set up by the biggest hit, and finally plain "at N%, hit for M%". The label itself comes from `survival.deathType`, `burst`, `rot`, `oneShotHit` and `biggestHit`, set by the backend.
+- **Killing-blow tooltip**: the spell's in-game description from `data.abilityText` (by spell ID), the killing blow size, rot / burst / set-up rows, health before it and overkill, warnings for "ignores immunity" and "ignores reduction", and how many counted raiders that ability killed in these results (`frontend/src/DeathRow.js:265-306`). The kill count is `killCounts`, built with the same `isCounted` rule (`frontend/src/App.js:1276-1284`).
+- **Health bar**: width is `hpBeforePct`, capped at 100; hidden for instant kills (`frontend/src/DeathRow.js:427-423`).
+- **Defensive strip**, left to right (`frontend/src/DeathRow.js:370-407`):
   - **Active** (gold ring, "ON" tag): auras up when they died, including externals with who cast them.
   - **Ready** (green ring and check if it would have saved them, dimmed if not): every entry of `available` plus each consumable in `survival.consumables`. The verdict comes from `survival.wouldSave[name]`.
   - **On cooldown** (greyed, with seconds until ready): `cooldown` entries plus a used Healthstone or potion.
-  - **"all together ✓"** when no single ability saves them but `allTogetherWouldSave` is true, and **"?"** when the pull had no talent data (`frontend/src/DeathRow.js:426-435`).
-- **Ready-icon tooltip** verdicts, from `survival.details[name]` (`frontend/src/DeathRow.js:320-325`): "Saves them · N to spare", "Can't tell" (timeline unreadable), "Doesn't help" with a reason from `whyText` (`frontend/src/DeathRow.js:112-131`), or "Not enough · N short". Below that: amount prevented or healed, heal-over-time ticks that land in time, the press time, talents that changed it, and where a potion or Healthstone value came from (`frontend/src/DeathRow.js:165-179`).
+  - **"all together ✓"** when no single ability saves them but `allTogetherWouldSave` is true, and **"?"** when the pull had no talent data (`frontend/src/DeathRow.js:433-435`).
+- **Ready-icon tooltip** verdicts, from `survival.details[name]` (`frontend/src/DeathRow.js:327-325`): "Saves them · N to spare", "Can't tell" (timeline unreadable), "Doesn't help" with a reason from `whyText` (`frontend/src/DeathRow.js:114-131`), or "Not enough · N short". Below that: amount prevented or healed, heal-over-time ticks that land in time, the press time, talents that changed it, and where a potion or Healthstone value came from (`frontend/src/DeathRow.js:167-179`).
 
 ## Diagram
 
@@ -141,10 +141,10 @@ The pieces of the Results view. Filter by kind.
 | Search {filter} | Case-insensitive substring on player name | `frontend/src/App.js:1758` |
 | Hidden players {filter} | "Hide" on a row; a pill list restores them | `frontend/src/App.js:1768` |
 | Group characters {filter} | Merge alts into a main for both tables, this session only | `frontend/src/App.js:1805` |
-| `DeathRow` {row} | One death: killing blow, context line, health bar, defensive strip, log link | `frontend/src/DeathRow.js:235` |
-| `Tip` / `TipBox` {row} | Hover or focus tooltip, portaled to `document.body` and kept inside the viewport | `frontend/src/DeathRow.js:198`, `frontend/src/DeathRow.js:183` |
-| `Icon` {row} | Blizzard icon, then WarcraftLogs' copy, then the name's first letter | `frontend/src/DeathRow.js:215` |
-| `effectText` {row} | Describes an ability from its catalog components, or its game text for externals | `frontend/src/DeathRow.js:80` |
+| `DeathRow` {row} | One death: killing blow, context line, health bar, defensive strip, log link | `frontend/src/DeathRow.js:237` |
+| `Tip` / `TipBox` {row} | Hover or focus tooltip, portaled to `document.body` and kept inside the viewport | `frontend/src/DeathRow.js:200`, `frontend/src/DeathRow.js:185` |
+| `Icon` {row} | Blizzard icon, then WarcraftLogs' copy, then the name's first letter | `frontend/src/DeathRow.js:217` |
+| `effectText` {row} | Describes an ability from its catalog components, or its game text for externals | `frontend/src/DeathRow.js:82` |
 | `summarizeDefensives` {panel} | Per player: deaths with data, assessed, preventable, one-shots, top 3 savers and top 3 unused majors | `frontend/src/DefensivePanel.js:20` |
 | `DefensiveSummaryChip` {panel} | "N/M preventable" (green at 0, red at half or more, amber between) and "K one-shots" | `frontend/src/DefensivePanel.js:43` |
 | `DefensiveTopUnused` {panel} | "Would have saved them most often", else "Most often unused at death" | `frontend/src/DefensivePanel.js:71` |
@@ -174,8 +174,8 @@ relied-on-by: [[feat-saved]] — an opened saved report renders through this sam
 
 - **MUST** count through `isCounted` / `countedDeaths` everywhere: the matrix (`frontend/src/App.js:1195`, `frontend/src/App.js:1228`), the player list (`frontend/src/App.js:1048`) and `killCounts` (`frontend/src/App.js:1279`). A second rule anywhere would make the tables disagree.
 - **NEVER** count a death with `inWipe`, whatever X is (`frontend/src/deathCounting.js:24`). Mass deaths at a wipe say nothing about who failed first.
-- **NEVER** recompute `slot`, `inWipe`, `deathType` or `wouldSave` in the browser. They come from the backend (`backend/analysis.py:188`, `backend/app.py:533-534`, `backend/defensives.py:1664`); the view only reads them.
-- **MUST** skip defensive data without the current shape (`active` and `available` arrays) so saves and shares from older versions still render (`frontend/src/DeathRow.js:21`, `frontend/src/DefensivePanel.js:17`).
+- **NEVER** recompute `slot`, `inWipe`, `deathType` or `wouldSave` in the browser. They come from the backend (`backend/analysis.py:188`, `backend/app.py:533-534`, `backend/defensives.py:1668`); the view only reads them.
+- **MUST** skip defensive data without the current shape (`active` and `available` arrays) so saves and shares from older versions still render (`frontend/src/DeathRow.js:23`, `frontend/src/DefensivePanel.js:17`).
 
 ## Gotchas
 
@@ -186,7 +186,7 @@ relied-on-by: [[feat-saved]] — an opened saved report renders through this sam
 - **Color scale ignores the search box**: matrix colors are computed over all visible players, not just the searched ones, so a cell keeps its color while you search (`frontend/src/App.js:1971-1982`).
 - **Cheat deaths in the player list are not gated by the toggle**: `computeFilteredStats` counts cheat deaths whatever `enableCheatDeath` says, and only hides them in the display (`frontend/src/App.js:1047-1052`, `frontend/src/App.js:2111`); the matrix gates them (`frontend/src/App.js:1198`). In practice the backend only sends cheat deaths when detection ran.
 - **One-shots include instant kills**: the "one-shots" chip counts `deathType` `oneShot` and `instakill` together (`frontend/src/DefensivePanel.js:33`).
-- **Potion quality art follows PUBLIC_URL**: `qualityArt` builds `${PUBLIC_URL}/art/quality/<name>.png` like every other art path (`frontend/src/DeathRow.js:162`), so it also loads when the site is served under a sub-path (`frontend/src/qualityArt.test.js`).
+- **Potion quality art follows PUBLIC_URL**: `qualityArt` builds `${PUBLIC_URL}/art/quality/<name>.png` like every other art path (`frontend/src/DeathRow.js:164`), so it also loads when the site is served under a sub-path (`frontend/src/qualityArt.test.js`).
 - **Death rows are keyed by index**: `DeathRow` gets `key={idx}` (`frontend/src/App.js:2183`), so open tooltips can attach to a different row when the list changes under them.
 
 ## Glossary

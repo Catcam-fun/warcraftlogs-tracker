@@ -36,7 +36,7 @@ invariants:
   - "MUST: a new raid is added to RAID_ENCOUNTERS before the boss-side scripts run, since all four read it."
 flows:
   - data-build-path
-content_hash: sha256:a4ca4c4fb238fdca0f99ec5d826b964bc0cc47828cc068e17d237154b6379f6e
+content_hash: sha256:b15b7d63c194de5016ca56175f271e411a138ed38156a1b31c7eff597708ccab
 ---
 ## Summary
 
@@ -54,7 +54,7 @@ The generated modules, what writes them, and who reads them.
 | `defensive_catalog.py` {wago} | `build_defensive_catalog.py` | wago.tools, one build per patch | `PATCHES`, `CATALOGS`, `HEALING_TAKEN`, `LATEST`, `CATALOG` (`backend/defensive_catalog.py:7`, `22`, `15865`, `22354-22355`) | `defensives.py` (`backend/defensives.py:28`); `build_spell_icons.py` (`backend/scripts/build_spell_icons.py:25`) |
 | `boss_spell_flags.py` {wago} | `build_boss_spell_flags.py` | wago.tools, live tables | `IGNORES_IMMUNITY` (`backend/boss_spell_flags.py:4`) | `defensives.py` (`backend/defensives.py:26`) |
 | `boss_spell_text.py` {wago} | `build_boss_spell_text.py` | wago.tools, latest build | `TEXTS`, `SPELLS`, `text_for()` (`backend/boss_spell_text.py:5`, `3341`, `7853`) | `app.py` killing-blow text (`backend/app.py:659`) |
-| `spell_icons.py` {wago} | `build_spell_icons.py` | wago.tools, latest build, plus the catalog | `ICONS`, `DESCRIPTIONS` (`backend/spell_icons.py:5`, `90`) | `defensives.py` (`backend/defensives.py:29`); icons load from render.worldofwarcraft.com in `frontend/src/DeathRow.js:20` |
+| `spell_icons.py` {wago} | `build_spell_icons.py` | wago.tools, latest build, plus the catalog | `ICONS`, `DESCRIPTIONS` (`backend/spell_icons.py:5`, `90`) | `defensives.py` (`backend/defensives.py:29`); icons load from render.worldofwarcraft.com in `frontend/src/DeathRow.js:22` |
 | `armor_constants.py` {wcl} | `build_armor_constants.py` | WCL top-ranked kills, three difficulties | `ARMOR_K`, `IGNORES_ARMOR`, `REDUCED_BY_ARMOR` (`backend/armor_constants.py:6`, `134-135`) | `defensives.py` (`backend/defensives.py:25`) |
 | `raid_wide_damage.py` {wcl} | `build_raid_wide.py` | WCL top-ranked Mythic kills | `RAID_WIDE` (`backend/raid_wide_damage.py:5`) | `defensives.py` rot check (`backend/defensives.py:27`, `1676`) |
 
@@ -119,7 +119,7 @@ band structural "Committed to the repo"
 
 - **The files are huge**: `defensive_catalog.py` is over 22,000 lines and `boss_spell_text.py` nearly 8,000. Read the build script, or the header and top-level names, rather than the whole file.
 - **Every wago script shares one downloader**: `build_boss_spell_flags.py`, `build_boss_spell_text.py` and `build_spell_icons.py` import `table` (and `patches`) from `build_defensive_catalog.py` (`backend/scripts/build_boss_spell_flags.py:23`, `backend/scripts/build_boss_spell_text.py:31`, `backend/scripts/build_spell_icons.py:24`), so `WAGO_CACHE` speeds all of them.
-- **Icons are a wago fact served from Blizzard**: `build_spell_icons.py` reads icon file names from wago.tools only; the images are loaded by the browser from render.worldofwarcraft.com, with WCL's `assets.rpglogs.com` as the fallback (`frontend/src/DeathRow.js:20`, `frontend/src/DeathRow.js:213`).
+- **Icons are a wago fact served from Blizzard**: `build_spell_icons.py` reads icon file names from wago.tools only; the images are loaded by the browser from render.worldofwarcraft.com, with WCL's `assets.rpglogs.com` as the fallback (`frontend/src/DeathRow.js:22`, `frontend/src/DeathRow.js:215`).
 - **Tests pin some of the output**: every catalog ability must have an icon (`backend/test_defensives.py:523-526`), catalog specs must exist in `SPEC_NAMES` (`backend/test_defensives.py:617-620`), and the boss text renderer has its own tests (`backend/test_boss_spell_text.py:25-34`).
 
 ## Related
