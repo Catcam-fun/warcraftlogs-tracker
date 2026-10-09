@@ -2,7 +2,7 @@
 defensives.py - What defensive options a player had when they died.
 
 For every death this answers, per defensive the player actually had:
-  - active:     its aura was on them when they died
+  - active:     its aura was on them when they died (with its caster's talented numbers)
   - available:  they had it and it was off cooldown, but it wasn't pressed
   - cooldown:   it was pressed earlier and hadn't come back yet
 plus whether they used a Healthstone / health potion this pull, and which raid
@@ -486,6 +486,32 @@ def _talented_charges(entry, talent_entries, spec):
                                   for m in entry.get("charge_mods", ()))
 
 
+def _active_detail(entry, loadout, observed_absorbs):
+    """An active defensive as its caster had it: {"talentsKnown"} and, with their loadout (talents,
+    spec), the talented "effect" (as the ready buttons resolve it), "auraMs", "cooldownMs", "charges"
+    and "talents" (every talent that changed one of them)."""
+    if loadout is None or loadout[0] is None:
+        return {"talentsKnown": False}
+    talents, spec = loadout
+    applied = []
+    comps, _ = _resolve(entry, talents, observed_absorbs, spec, applied)
+    for field, key in (("duration", "duration_mods"), ("cooldown", "cooldown_mods"), ("charges", "charge_mods")):
+        for m in entry.get(key, ()):
+            rank = 0 if m.get("mastery") else _mod_rank(m, talents, spec)
+            if rank:
+                applied.append({"talent": m["talent"], "field": field, "rank": rank,
+                                **{k: m[k] for k in ("add_ms", "add", "mult") if k in m}})
+    out = {"talentsKnown": True, "auraMs": _talented_duration(entry, talents, spec),
+           "cooldownMs": round(_talented_cooldown(entry, talents, spec)),
+           "charges": _talented_charges(entry, talents, spec)}
+    if comps:
+        out["effect"] = [{k: (round(v, 3) if isinstance(v, float) else v) for k, v in c.items() if v is not None}
+                         for c in comps]
+    if applied:
+        out["talents"] = applied
+    return out
+
+
 def _inferred_cooldown(own_casts_of_spell, reset_times, loadout):
     """The cooldown a player's presses prove they have when it is shorter than their talents allow
     (cooldown reduction the catalog can't see), or None: their shortest gap between two presses of a
@@ -813,6 +839,16 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
         if talents is None:
             return None
         return talents, (indexed.get("specs") or {}).get((fight_id, caster))
+
+    # What each active defensive did as its caster had it: this pull's loadout, the caster's for an
+    # external another player cast (unknown when the log has no loadout for them).
+    for a in result["active"]:
+        entry = cat.all[cat.name_to_id[a["name"]]]
+        src = active.get(a["name"])
+        if a["kind"] == "external" and src != player_id:
+            a.update(_active_detail(entry, caster_loadout(src) if src is not None else None, {}))
+        else:
+            a.update(_active_detail(entry, (talent_entries, spec), observed))
 
     if hits is not None:
         death_mult = _heal_taken_mult(_auras(killing), cat) if killing is not None else 1.0
