@@ -79,7 +79,6 @@ ICONS = {'Algari Healing Potion': 'inv_flask_red',
  'Shield Wall': 'ability_warrior_shieldwall',
  'Shield of Vengeance': 'ability_paladin_shieldofthetemplar',
  'Silvermoon Health Potion': 'inv_12_profession_alchemy_lightpotion_orange',
- 'Soul Immolation': 'inv_12_dh_void_ability_voidpurge',
  'Spell Reflection': 'ability_warrior_shieldreflection',
  'Spirit Link Totem': 'spell_shaman_spiritlink',
  'Stone Bulwark Totem': 'ability_shaman_stonebulwark',
@@ -246,8 +245,6 @@ DESCRIPTIONS = {'Algari Healing Potion': 'Restores health.',
                         'expires, it bursts to inflict Holy damage equal to the total amount absorbed, '
                         'divided among all nearby enemies.',
  'Silvermoon Health Potion': 'Restores health.',
- 'Soul Immolation': 'Light your soul aflame, healing yourself for of your maximum health, generating Fury '
-                    'and shattering Soul Fragments over 5 sec.',
  'Spell Reflection': 'Raise your, reflecting on you and reducing magic damage you take by 20% for 5 sec.',
  'Spirit Link Totem': 'Summons a totem at the target location for 6 sec, which reduces damage taken by all '
                       'party and raid members within 10 yards by 10%. Immediately and every 1 sec, the '

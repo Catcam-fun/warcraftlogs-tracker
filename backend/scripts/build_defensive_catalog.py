@@ -31,8 +31,6 @@ CURATED = [
     (196555, "Netherwalk", "DemonHunter", ["Havoc"], "personal"),
     (187827, "Metamorphosis", "DemonHunter", ["Vengeance"], "personal"),
     (204021, "Fiery Brand", "DemonHunter", ["Vengeance"], "personal"),
-    # Pressed on cooldown for its resources, and a heal since 12.0.5 (ONLY_WITH).
-    (1241937, "Soul Immolation", "DemonHunter", ["Devourer"], "personal"),
     (196718, "Darkness", "DemonHunter", None, "external"),
     # Druid
     (22812, "Barkskin", "Druid", None, "personal"),
@@ -197,7 +195,6 @@ MITIGATION = {
     "Ultimate Penitence": {"absorb": None},
     "Incarnation: Guardian of Ursoc": {"hp": .30, "dur": 30}, "Earth Elemental": {"hp": .15},
     "Mortal Coil": {"heal": .20}, "Impending Victory": {"heal": .30},
-    "Soul Immolation": {"heal": .24},              # "healing yourself for ${$s2*$s3}%": 4% x 6 ticks
     "Sentinel": {"dr": .02, "hp": .01},             # per stack (STACK_DECAY)
     "Stone Bulwark Totem": {"absorb": None},
     # Leech and immunity to charm/fear only, unless Unholy Endurance adds a reduction (TALENT_EFFECTS).
@@ -260,15 +257,6 @@ EFFECTS = {
     # Bond (381755 renamed after it, BUTTON_NEEDS).
     "Earth Elemental": [("hp", 381755, "aura:133")],
     "Mortal Coil": [("heal", 108396, 0)], "Impending Victory": [("heal", 202166, 0)],
-    # 4% of max health a tick, 6 ticks over 5 s, the first on the press (the tooltip's $s3 = 6; on
-    # P6CwHkgFR9Krf1Bz every press ticked 6 times, 25,254 each at about 631k max health): "first_tick"
-    # keeps that schedule (a tick at the press, then one each period). Its duration can't change for a
-    # Devourer: Agonizing Flames (x1.5) is a Vengeance-only node (90971, spec set 10) and the +4 s is Havoc's.
-    # Spontaneous Immolation adds 1 to effect 1 (aura 107, op 12): +1% a tick, +6% over the 6 ticks, as its
-    # tooltip says (${$s1*$1241937s3}% = 1 x 6; $s3 is effect 2, 6, in every patch with the heal).
-    # Effect 4: armor +0, filled by Infernal Armor (+20%) for Devourers ("$?c3[Soul Immolation]...").
-    "Soul Immolation": [("heal", 1241937, "aura:20", 6, {"first_tick": True}),
-                        ("armor", 1241937, "aura:101", {"optional": True})],
     "Sentinel": [("dr", 389539, "aura:87", 1, {"stacks": True}), ("hp", 389539, "aura:133", 1, {"stacks": True})],
     "Ardent Defender": [("dr", 31850, "aura:87"), ("hp", 31850, "aura:137", {"optional": True}),
                         ("heal_taken", 31850, "aura:118", {"optional": True})],
@@ -445,9 +433,10 @@ DURATION_FROM = {"Earth Elemental": 188616}
 # analysis reads only those as the defensive being up.
 EFFECT_AURAS = {"Earth Elemental": [381755]}
 
-# Curated buttons that are a defensive only in patches whose data has this effect: Soul Immolation burns
-# the Demon Hunter in 12.0.0-12.0.1 (aura 3) and heals from 12.0.5 (aura 20).
-ONLY_WITH = {"Soul Immolation": (1241937, "aura:20")}
+# Curated buttons that are a defensive only in patches whose data has this effect: {name: (spell, effect)}.
+# (Soul Immolation, which burns the Demon Hunter in 12.0.0-12.0.1 and heals from 12.0.5, was the first; the
+# owner keeps only true defensives as buttons, and it is a Devourer's rotational resource cooldown.)
+ONLY_WITH = {}
 
 # Buttons that are a defensive only with a talent, where the game data has that talent: Midnight's Earth
 # Elemental raises max health only with Primordial Bond ("$?a1279819[, increasing your maximum health by
@@ -461,6 +450,15 @@ BUTTON_NEEDS = {"Earth Elemental": 1279819}
 #   shortens it by its own share, as it does the duration) -> decay_after_ms
 STACK_DECAY = {"Sentinel": [(r"\$\{\$d-(\d+)\} sec, you will begin to lose 1 stack per second", "decay_end_ms", None),
                             (r"\$<delay> sec, you will begin to lose 1 stack per second", "decay_after_ms", 13)]}
+
+# Talents whose casts of other buttons lengthen a tracked defensive: button -> (talent, the spell its tooltip
+# names it by, the buttons whose casts extend it). Zealot's Paragon: "Hammer of Wrath and Judgment ... extend
+# the duration of $?s384092[Crusade]?s394088[Avenging Crusader]?s385438[Sentinel][Avenging Wrath] by
+# ${$s1/1000}.1 sec" (effect 0: 500 ms a rank). Written as "extended_by": {talent, entries, ms (a rank),
+# casts (every Paladin button of those names in the patch)}. Checked on FaC4AgJ8vMTfP1VN (12.1.0): all 16
+# Sentinels of a Protection Paladin with Righteous Protector (12 s) and two ranks lasted 12 s + 1 s per
+# Judgment or Hammer of Wrath cast while it was up, to the 10 ms (16.0 to 25.0 s).
+EXTENDED_BY = {"Sentinel": ("Zealot's Paragon", 385438, ("Judgment", "Hammer of Wrath"))}
 
 # talent -> catalog spell whose modifier it copies onto potions and Healthstones.
 ALSO_CONSUMABLES = {"Iron Stomach": 185311}
@@ -1044,8 +1042,6 @@ RESETS_REVIEWED = {
     "Violent Transformation": "Metamorphosis resets Sigil of Flame, Immolation Aura, Fel Devastation, Voidblade, The Hunt",
     "Mass Acceleration": "Metamorphosis resets Spirit Bomb or Reap",
     "Impending Victory": "a kill of an enemy that yields experience or honor resets it: observed recasts cover it",
-    "Spontaneous Immolation": "a kill of an enemy that yields experience or honor resets Soul Immolation:"
-                              " observed recasts cover it",
     "Wild Guardian": "Incarnation: Guardian of Ursoc grants Wild Guardian charges; resets Thrash and Mangle",
     "Lunar Storm": "resets Rapid Fire / Wildfire Bomb; names the Hunter's Sentinel",
 }
@@ -1224,6 +1220,17 @@ def build_catalog(build):
             if not entries:
                 problems.append(f"{name}: {gd.names[need]} ({need}) is in no talent tree")
             entry["needs"] = {"talent": gd.names[need], "entries": entries}
+        if name in EXTENDED_BY:
+            talent, via, by = EXTENDED_BY[name]
+            who, tsid = talent_who(gd, mods, talent)
+            ms = gd.value(tsid, 0) if tsid else None
+            if who and not (ms and re.search(rf"\?s{via}\[{re.escape(name)}\]", desc.get(tsid) or "")):
+                problems.append(f"{name}: {talent}'s tooltip no longer extends it: review EXTENDED_BY")
+            elif who:
+                fam = gd.family.get(sid, (None,))[0]
+                casts = sorted(s for s, n in gd.names.items() if n in by and s not in gd.passive
+                               and gd.family.get(s, (None,))[0] == fam and (gd.cooldowns.get(s) or gd.charge_cat.get(s)))
+                entry["extended_by"] = {**who, "ms": int(ms), "casts": casts}
         if name in STACK_DECAY:
             text = desc.get(sid) or ""
             how = None

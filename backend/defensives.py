@@ -104,6 +104,9 @@ class Catalog:
         # Spells that bring a tracked defensive back early (Cold Snap, Black Ox Brew): their casts are read too.
         self.reset_ids = frozenset(r["spell"] for d in self.tracked.values() for r in d.get("reset_by", ()))
         self.cast_ids = sorted(set(self.tracked) | set(self.consumable) | self.reset_ids)
+        # Casts that lengthen a tracked defensive (Zealot's Paragon: Judgment and Hammer of Wrath on
+        # Sentinel), read from the death windows (fetch_death_windows), not the report-wide casts.
+        self.extend_ids = frozenset(c for d in self.tracked.values() for c in (d.get("extended_by") or {}).get("casts", ()))
         self.longest_cooldown_ms = max((d["cooldown_ms"] for d in self.tracked.values()), default=0)
         # Shields a talent adds to a button (Matted Fur): scored from their real size in the log.
         self.observed_auras = sorted({c["aura"] for d in self.all.values() for c in d.get("mitigation") or ()
@@ -126,6 +129,7 @@ class Catalog:
             entries.update(d["talent_entries"], d.get("replaced_by_entries", ()))
             entries.update(((d.get("needs_form") or {}).get("unless") or {}).get("entries", ()))
             entries.update((d.get("needs") or {}).get("entries", ()))
+            entries.update((d.get("extended_by") or {}).get("entries", ()))
             for c in d.get("mitigation") or []:
                 if isinstance(c, dict) and c.get("needs"):
                     entries.update(c["needs"].get("entries", ()))
@@ -590,7 +594,7 @@ def _replay(casts, resets, at, loadout, inferred=None):
 # Heals over time among the scored defensives, by tick count: their heal lands
 # over the aura's duration, not at once. Same tick counts as EFFECTS in
 # scripts/build_defensive_catalog.py (tested).
-HEAL_OVER_TIME = {"Frenzied Regeneration": 3, "Crimson Vial": 4, "Soul Immolation": 6}
+HEAL_OVER_TIME = {"Frenzied Regeneration": 3, "Crimson Vial": 4}
 
 
 def _buffs_active_at(death_ts, buff_events, max_ms=None):
@@ -954,9 +958,13 @@ WINDOW_HEAL_IDS = frozenset(set(KILLING_HIT_HEALS) | {a for a in KILLING_HIT_HEA
 # And a Brewmaster's Stagger pool: their staggered amounts (STAGGER_AURA absorbs) and ticks, from up to
 # STAGGER_LOOKBACK_MS before each window (the ticks inside it come with the hits).
 WINDOW_EXTRAS_IDS = sorted(WINDOW_HEAL_IDS | STACK_SIZED | LOADOUT_SIZED | {STAGGER_AURA, STAGGER_TICK})
+# And the dying players' own casts of buttons that lengthen a defensive while it is up (Zealot's Paragon:
+# Judgment and Hammer of Wrath on Sentinel), in any patch's catalog: the replay presses inside the window,
+# so only the casts inside it matter.
+WINDOW_CAST_IDS = sorted({c for cat in _CATALOGS.values() for c in cat.extend_ids})
 AURA_EVENTS = {"applybuff", "applybuffstack", "removebuffstack", "removebuff",
                "applydebuff", "applydebuffstack", "removedebuffstack", "removedebuff"}
-WINDOW_TYPES = {"damage", "heal", "absorbed"} | AURA_EVENTS
+WINDOW_TYPES = {"damage", "heal", "absorbed", "cast"} | AURA_EVENTS
 # What is kept of a heal or aura event (fetch_death_windows).
 HEAL_FIELDS = ("timestamp", "type", "sourceID", "targetID", "abilityGameID", "fight", "amount", "stack",
                "attackerID", "extraAbilityGameID")
@@ -965,7 +973,8 @@ HIT_FIELDS = ("timestamp", "type", "sourceID", "sourceInstance", "targetID", "ab
               "isAoE", "resourceActor", "hitPoints", "maxHitPoints", "armor")
 # For the windows' cache key in app.py: windows cached with other extras or without a field kept
 # here (sourceInstance, for Fiery Brand's unit) are not reused.
-WINDOW_EXTRAS_KEY = hashlib.sha1(repr((WINDOW_EXTRAS_IDS, HIT_FIELDS, HEAL_FIELDS, STAGGER_LOOKBACK_MS)).encode()).hexdigest()[:12]
+WINDOW_EXTRAS_KEY = hashlib.sha1(repr((WINDOW_EXTRAS_IDS, WINDOW_CAST_IDS, HIT_FIELDS, HEAL_FIELDS,
+                                       STAGGER_LOOKBACK_MS)).encode()).hexdigest()[:12]
 
 
 def _events_query(blocks):
@@ -1059,8 +1068,11 @@ def fetch_death_windows(token, report_code, pulls, heals=True):
     if heals:
         every = [d for _, ds in pulls for d in ds]
         names = sorted({n for _, n in every if n})
-        flt = ("target.name in (" + ", ".join(json.dumps(n, ensure_ascii=False) for n in names) + ")"
-               f" and ability.id in ({', '.join(map(str, WINDOW_EXTRAS_IDS))})")
+        who = ", ".join(json.dumps(n, ensure_ascii=False) for n in names)
+        flt = f"target.name in ({who}) and ability.id in ({', '.join(map(str, WINDOW_EXTRAS_IDS))})"
+        if WINDOW_CAST_IDS:
+            flt = (f"({flt}) or (source.name in ({who}) and type = \"cast\""
+                   f" and ability.id in ({', '.join(map(str, WINDOW_CAST_IDS))}))")
         blocks["extras"] = ([fid for fid, _ in pulls],
                             max(min(t for t, _ in every) - LETHAL_WINDOW_MS - STAGGER_LOOKBACK_MS, 0),
                             max(t for t, _ in every) + KILLING_BLOW_AFTER_MS + 1, "All", flt)
@@ -1089,7 +1101,10 @@ def fetch_death_windows(token, report_code, pulls, heals=True):
                if e.get("type") != "damage" or (e.get("targetID"), e.get("timestamp")) not in seen]
     out = index_hits(events)
     for e in events:
-        if e.get("type") in WINDOW_TYPES - {"damage"} and e.get("targetID") is not None:
+        if e.get("type") == "cast":
+            if e.get("sourceID") is not None:        # the caster's own (its target is the enemy)
+                out.setdefault(e["sourceID"], []).append({k: e[k] for k in HEAL_FIELDS if k in e})
+        elif e.get("type") in WINDOW_TYPES - {"damage"} and e.get("targetID") is not None:
             out.setdefault(e["targetID"], []).append({k: e[k] for k in HEAL_FIELDS if k in e})
     for hits in out.values():
         hits.sort(key=lambda e: e["timestamp"])
@@ -1688,7 +1703,8 @@ def _option(entry_name, comps, dur_ms, legacy_ticks=None):
     Effects last the aura's duration; without one (Bear Form, Soulburn's health)
     they're up until the death. Heals land when pressed, or over time.
     """
-    opt = {"name": entry_name, "lasting": [], "instant": [], "hots": []}
+    opt = {"name": entry_name, "lasting": [], "instant": [], "hots": [],
+           "comps": comps, "dur_ms": dur_ms, "legacy_ticks": legacy_ticks, "extend": None}
     for c in comps or ():
         if "heal" in c or "heal_amount" in c:
             over = c.get("over_ms") or (dur_ms if legacy_ticks else None)
@@ -1734,9 +1750,28 @@ def _stack_layers(c, dur_ms):
     return layers
 
 
+def _at_press(opt, press):
+    """The option as pressed at `press`: an aura that each cast of some buttons lengthens (Zealot's Paragon:
+    Judgment and Hammer of Wrath on Sentinel; `extend` = (ms a cast, the player's cast times)) lasts its
+    duration plus that much for every such cast while it is up, a cast at or after the press counting."""
+    if not opt.get("extend") or not opt.get("dur_ms") or opt["dur_ms"] < 0:
+        return opt
+    dur = _extended_ms(opt["dur_ms"], *opt["extend"], press)
+    return opt if dur == opt["dur_ms"] else _option(opt["name"], opt["comps"], dur, opt["legacy_ticks"])
+
+
+def _extended_ms(dur_ms, ms, casts, press):
+    """How long an aura pressed at `press` lasts when each cast in `casts` while it is up adds `ms`."""
+    end = press + dur_ms
+    for t in sorted(casts):
+        if press <= t < end:
+            end += ms
+    return end - press
+
+
 def _tick_times(c, ticks, over, press):
     """When a heal over time's ticks land: evenly over its duration, the last as it ends; or, with the
-    game's tick period (`tick_ms`) and a tick as it is pressed (`first_tick`: Soul Immolation, 6 ticks
+    game's tick period (`tick_ms`) and a tick as it is pressed (`first_tick`: as Soul Immolation's 6 ticks
     in 5 s on every press in the logs), at the press and every period after."""
     if c.get("tick_ms"):
         first = 0 if c.get("first_tick") else 1
@@ -1761,6 +1796,7 @@ def _simulate(options, press, win, kb_index):
     `win`: the death's hits, prepared (_Window).
     """
     hits, points = win.hits, win.points
+    options = [_at_press(o, press) for o in options]
     stagger = win.stagger or {}
     cut = 0.0                 # share of the Stagger pool the presses cut off (ticks and purifies keep it)
     lasting = [(c, press + ms if ms else float("inf")) for o in options for c, ms in o["lasting"]]
@@ -1808,7 +1844,7 @@ def _simulate(options, press, win, kb_index):
             heals += [(at, total / ticks, c.get("boosted")) for at in _tick_times(c, ticks, over, press)]
     heals.sort(key=lambda x: x[0])
     kb_ts = hits[kb_index]["timestamp"]
-    hot_ticks = sum(1 for o in options for _, ticks, over in o["hots"]
+    hot_ticks = sum(1 for o in options for c, ticks, over in o["hots"]
                     for at in _tick_times(c, ticks, over, press) if at < kb_ts)
     hi = 0
 
@@ -2280,7 +2316,9 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     heal_events = [h for h in hits or () if h.get("type") in ("heal", "absorbed")
                    or (h.get("type") in AURA_EVENTS and h.get("abilityGameID") in WINDOW_HEAL_IDS)]
     aura_events = [h for h in hits or () if h.get("type") in AURA_EVENTS]
-    hits = [h for h in hits or () if h.get("type") not in ("heal", "absorbed") and h.get("type") not in AURA_EVENTS]
+    # The player's own casts that lengthen a defensive (fetch_death_windows: Judgment, Hammer of Wrath).
+    own_casts = [h for h in hits or () if h.get("type") == "cast"]
+    hits = [h for h in hits or () if h.get("type") not in ("heal", "absorbed", "cast") and h.get("type") not in AURA_EVENTS]
     killing = _killing_blow(hits, death_ts)
     if killing is not None and killing.get("type") == "instakill":
         # Killed outright by a mechanic: no damage to reduce, absorb or heal.
@@ -2352,6 +2390,11 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
         dur = (aura_ms or {}).get(name) if not entry.get("estimated") else None
         legacy = HEAL_OVER_TIME.get(name) if dur else None
         opts = [_option(name, comps, dur, legacy)]
+        ext = entry.get("extended_by")
+        rank = _mod_rank(ext, talent_entries, spec) if ext else 0
+        if rank:
+            opts[0]["extend"] = (ext["ms"] * rank, [c["timestamp"] for c in own_casts
+                                                    if c.get("abilityGameID") in ext["casts"]])
         if name in (forms or {}):
             # Needs a form first (Frenzied Regeneration needs Bear Form): judged with it.
             form_comps, _ = _resolve(forms[name], talent_entries, observed_absorbs or {}, spec, applied)

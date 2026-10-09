@@ -191,27 +191,25 @@ class NewDefensivesTests(unittest.TestCase):
             self.assertEqual(defensives._resolve(up, {}, {"Ultimate Penitence": 609_600}, "Discipline")[0],
                              [{"absorb_amount": 609_600, "school": None}], patch)
 
-    def test_soul_immolation_heals_only_from_12_0_5(self):
-        # 12.0.0-12.0.1: it burns the Demon Hunter (aura 3); from 12.0.5 it heals 4% of max health a tick
-        # (aura 20), six ticks over 5 s, the first on the press (P6CwHkgFR9Krf1Bz: 6 ticks of 25,254).
+    def test_soul_immolation_is_not_listed(self):
+        # The owner's rule (2026-10-08): only true defensives are buttons. Soul Immolation is a Devourer's
+        # rotational resource cooldown; its real heal is in the log already.
         for patch in ALL:
-            if patch < "12.0.5":
-                self.assertNotIn("Soul Immolation", defensives._CATALOGS[patch].name_to_id, patch)
-                continue
-            si = entry(patch, "Soul Immolation")
-            self.assertEqual((si["specs"], si["aura_ms"]), (["Devourer"], 5_000), patch)
-            self.assertEqual(fields(defensives._resolve(si, {}, {}, "Devourer")[0]),
-                             [{"heal": 0.24, "tick_ms": 1_000, "first_tick": True}], patch)
-        self.assertEqual(defensives.HEAL_OVER_TIME["Soul Immolation"], 6)
+            self.assertNotIn("Soul Immolation", defensives._CATALOGS[patch].name_to_id, patch)
+        self.assertNotIn("Soul Immolation", defensives.HEAL_OVER_TIME)
 
-    def test_soul_immolation_ticks_from_the_press(self):
-        # The log's schedule: a tick as it is pressed, then one a second (6 ticks in its 5 s).
-        si = entry("12.1.0", "Soul Immolation")
-        comps, _ = defensives._resolve(si, {}, {}, "Devourer")
-        opt = defensives._option("Soul Immolation", comps, 5_000, defensives.HEAL_OVER_TIME["Soul Immolation"])
+    def test_ticks_from_the_press_with_another_option_alongside(self):
+        # A heal over time with the game's tick period and a tick on the press (6 ticks of a second, as Soul
+        # Immolation logs): the schedule holds whatever else is pressed with it.
+        hot = {"heal": 0.24, "tick_ms": 1_000, "first_tick": True}
+        opt = defensives._option("HoT", [hot], 5_000, 6)
+        other = defensives._option("Other", [{"heal": 0.1, "over_ms": 3_000, "ticks": 3}], 3_000)
         for kb, ticks in ((10_500, 1), (11_500, 2), (15_500, 6)):
             win = defensives._Window([hit(9_000, 600_000, 400_000), hit(kb, 400_000, 0, overkill=10)], SCHOOLS)
             self.assertEqual(defensives._simulate([opt], 10_000, win, 1)[1], ticks, kb)
+            # The other option's own ticks (every second from 1 s) land on top, never fewer of the first's.
+            extra = sum(1 for t in (11_000, 12_000, 13_000) if t < kb)
+            self.assertEqual(defensives._simulate([opt, other], 10_000, win, 1)[1], ticks + extra, kb)
 
     def test_earth_elemental(self):
         # The War Within: +15% max health while it is out (60 s), for every Shaman with it. Midnight: only with
@@ -302,7 +300,7 @@ class EarthElementalAuraTests(unittest.TestCase):
                     mock.patch.object(source_durations.defensives, "filter_defensive_raw",
                                       return_value={"talents": {(1, 7): {}}}), \
                     mock.patch.object(source_durations.defensives, "pull_spec", return_value="Elemental"), \
-                    mock.patch.object(source_durations.defensives, "_talented_duration", return_value=36_000):
+                    mock.patch.object(source_durations.defensives, "_talented_duration", return_value=36_000),                     mock.patch.object(source_durations.defensives, "_paged", return_value=[]):
                 return source_durations.check(run).status
         self.assertEqual(check(36_700), "pass")
         self.assertEqual(check(38_000), "fail")
@@ -372,6 +370,77 @@ class SentinelTests(unittest.TestCase):
         r = defensives.assess_survival(hits, 110_000, [e], [], {500: "Frost Bolt"}, SCHOOLS, spec="Protection",
                                        aura_ms={"Sentinel": 20_000})
         self.assertTrue(r["wouldSave"]["Sentinel"])
+
+
+class ZealotsParagonTests(unittest.TestCase):
+    """Zealot's Paragon (391142): each Judgment or Hammer of Wrath cast while Sentinel is up extends it by
+    0.5 s a rank. FaC4AgJ8vMTfP1VN (12.1.0), a Protection Paladin with Righteous Protector (Sentinel 12 s) and
+    two ranks: all 16 Sentinels lasted 12 s + 1 s per such cast while up (16.0 to 25.0 s, to the 10 ms)."""
+    RP_ZP = {102440: 1, 102433: 2}
+    JUDGMENT, HAMMER = 275779, 1241413
+
+    def test_catalog(self):
+        for patch in ALL:
+            ext = entry(patch, "Sentinel")["extended_by"]
+            self.assertEqual((ext["talent"], ext["ms"]), ("Zealot's Paragon", 500), patch)
+            self.assertIn(self.JUDGMENT, ext["casts"], patch)
+        self.assertIn(self.HAMMER, entry("12.1.0", "Sentinel")["extended_by"]["casts"])
+        self.assertTrue({self.JUDGMENT, self.HAMMER} <= defensives._LATEST.extend_ids)
+        # Loadouts are trimmed to the entries the catalog reads: Zealot's Paragon's must survive that.
+        self.assertTrue(set(ext["entries"]) <= defensives._CATALOGS[patch].relevant_talent_entries)
+        self.assertIn(102433, defensives._LATEST.relevant_talent_entries)
+
+    def test_each_cast_while_up_extends_it(self):
+        e = entry("12.1.0", "Sentinel")
+        comps, _ = defensives._resolve(e, self.RP_ZP, {}, "Protection")
+        dur = defensives._talented_duration(e, self.RP_ZP, "Protection")
+        self.assertEqual(dur, 12_000)
+        opt = defensives._option("Sentinel", comps, dur)
+        # Casts at 1 s, 5 s, 13 s (inside the 14 s the first two give) and 20 s (after it ran out): 12 + 3 = 15 s.
+        opt["extend"] = (1_000, [-500, 1_000, 5_000, 13_000, 20_000])
+        at = defensives._at_press(opt, 0)
+        self.assertEqual(max(ms for _, ms in at["lasting"]), 15_000)
+        self.assertEqual(defensives._at_press(dict(opt, extend=None), 0)["lasting"], opt["lasting"])
+
+    def test_the_casts_come_with_the_death_window(self):
+        # Judgment casts in the window (from the windows' extras block) keep it up past its 12 s: pressed
+        # before a hit at 100 s, it is still up (4 stacks) for the killing blow at 114 s only with them.
+        e = entry("12.1.0", "Sentinel")
+        kb = 114_000
+        casts = [{"timestamp": t, "type": "cast", "sourceID": 1, "abilityGameID": self.JUDGMENT}
+                 for t in (101_000, 103_000, 105_000)]
+        hits = [hit(100_000, 800_000, 200_000), hit(kb, 200_000, 0, overkill=50_000)]
+        def save(with_casts, talents):
+            r = defensives.assess_survival(hits + (casts if with_casts else []), kb, [e], [], {500: "Frost Bolt"},
+                                           SCHOOLS, talent_entries=talents, spec="Protection",
+                                           aura_ms={"Sentinel": 12_000})
+            return r["details"]["Sentinel"]["amount"]
+        without = save(False, self.RP_ZP)
+        self.assertGreater(save(True, self.RP_ZP), without)        # 15 s with the casts
+        self.assertEqual(save(True, {102440: 1}), without)          # no Zealot's Paragon: no extension
+
+    def test_the_durations_check_counts_the_casts(self):
+        # Deawina's first Sentinel: 20.0 s with 8 Judgments / Hammers of Wrath while up (12 s + 8 x 1 s).
+        from unittest import mock
+        from checks import source_durations
+        def check(n_casts):
+            run = mock.Mock(); run.code = "X"
+            run.pulls = [{"id": 1, "start_time": 0, "end_time": 100_000}]
+            run.meta = {"abilities": {389539: "Sentinel"}, "player_details": {}}
+            run.cat = defensives._LATEST
+            buffs = [{"type": "applybuff", "abilityGameID": 389539, "targetID": 7, "timestamp": 1_000},
+                     {"type": "removebuff", "abilityGameID": 389539, "targetID": 7, "timestamp": 21_000}]
+            raw = {"combatants": [{"sourceID": 7}], "casts": [], "buffs": buffs}
+            judgments = [{"type": "cast", "sourceID": 7, "abilityGameID": self.JUDGMENT, "timestamp": 2_000 + 1_500 * i}
+                         for i in range(n_casts)]
+            with mock.patch.object(source_durations.defensives, "fetch_defensive_raw", return_value=raw), \
+                    mock.patch.object(source_durations.defensives, "filter_defensive_raw",
+                                      return_value={"talents": {(1, 7): self.RP_ZP}}), \
+                    mock.patch.object(source_durations.defensives, "pull_spec", return_value="Protection"), \
+                    mock.patch.object(source_durations.defensives, "_paged", return_value=judgments):
+                return source_durations.check(run).status
+        self.assertEqual(check(8), "pass")
+        self.assertEqual(check(2), "fail")
 
 
 if __name__ == "__main__":
