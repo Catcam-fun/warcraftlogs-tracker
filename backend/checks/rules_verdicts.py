@@ -1,16 +1,21 @@
 """Would-save verdicts obey the press, overkill, immunity and instant-kill rules
 
 A press is never less than 1s before the killing blow, nor before the ability was ready: its ready
-time is recomputed from WCL's casts (source_state.cooldown_window over the report's whole cast
-history, then ready_since; the catalog cooldown and charges with the pull's talents). A Healthstone
+time is recomputed from WCL's casts (source_state.ability_state over the report's whole cast
+history, each press with its own pull's talents, resets such as Cold Snap included). A Healthstone
 or potion is ready from its last use this pull plus its cooldown; unused this pull it is ready all
 along. A name whose ready time can't be
 determined (no killing hit found, not in the catalog, on cooldown at the killing blow) is skipped.
 Whether the killing hit ignores immunity is read from WCL's killing ability (the death event's
 abilityId, else the report's abilities named like the killing hit) against
 boss_spell_flags.IGNORES_IMMUNITY, not from the site's own flag.
+A Healthstone credited with Soulburn first (details "soulburn") must have been pressed when Soulburn
+could have been cast, read from WCL: its buff (387626) on the player, or Soulburn off its cooldown (the
+player's casts) and at least one Soul Shard left after the last cast that spent some (WCL's
+classResources type 7, the amount before the cost).
 """
 from boss_spell_flags import IGNORES_IMMUNITY
+from defensives import LETHAL_WINDOW_MS
 from checks import source_state
 from checks.rules_counting import is_counted
 from checks.verdict import PASS, fail, skip
@@ -91,9 +96,44 @@ def early_presses(details, kb_ts, ready):
     for name, det in details.items():
         if det.get("pressAgo") is None or ready.get(name) is None:
             continue
-        if kb_ts - det["pressAgo"] * 1000 < ready[name] - READY_TOLERANCE_MS:
+        if ready[name] > kb_ts + READY_TOLERANCE_MS:
+            out.append(f"{name}: judged but still on cooldown at the killing blow "
+                       f"(ready {round((ready[name] - kb_ts) / 1000, 1)}s after it)")
+        elif kb_ts - det["pressAgo"] * 1000 < ready[name] - READY_TOLERANCE_MS:
             out.append(f"{name}: pressed {det['pressAgo']}s before the killing blow "
                        f"but only ready {round((kb_ts - ready[name]) / 1000, 1)}s before")
+    return out
+
+
+SOUL_SHARDS = 7          # WCL classResources type
+
+
+def soulburn_possible(t, casts, auras, sb):
+    """Could Soulburn have been cast at t (see the module docstring)? `casts`: WCL casts with resources;
+    `auras`: the player's aura events; `sb`: the catalog's "soulburn" (spell, buff, cooldown, cost)."""
+    buff = [e for e in auras if e.get("abilityGameID") == sb["buff"] and e["timestamp"] <= t]
+    if buff and buff[-1].get("type") in ("applybuff", "refreshbuff") and t - buff[-1]["timestamp"] < sb["buff_ms"]:
+        return True
+    own = [e for e in casts if e.get("type") == "cast" and e["timestamp"] <= t]
+    if any(e.get("abilityGameID") == sb["spell"] and t - e["timestamp"] < sb["cooldown_ms"] for e in own):
+        return False
+    spent = [c for e in own for c in e.get("classResources") or () if c.get("type") == SOUL_SHARDS]
+    return bool(spent) and (spent[-1].get("amount") or 0) - (spent[-1].get("cost") or 0) >= sb["cost"]
+
+
+def soulburn_presses(details, kb_ts, casts, auras, sb):
+    """Healthstones credited with Soulburn first at a press when it couldn't have been cast (any moment
+    within the 0.1 s pressAgo rounding that allows it passes)."""
+    out = []
+    for name, det in details.items():
+        if not det.get("soulburn") or det.get("pressAgo") is None:
+            continue
+        press = kb_ts - det["pressAgo"] * 1000
+        lo, hi = press - READY_TOLERANCE_MS, press + READY_TOLERANCE_MS
+        moments = {lo, hi} | {e["timestamp"] for e in list(casts) + list(auras) if lo <= e["timestamp"] <= hi}
+        if not any(soulburn_possible(t, casts, auras, sb) for t in moments):
+            out.append(f"{name}: credited with Soulburn {det['pressAgo']}s before the killing blow, "
+                       f"when the log shows it couldn't be cast (no shard, or on cooldown)")
     return out
 
 
@@ -110,7 +150,8 @@ def ready_times(run, ev, rid, fid, pid, fight_start, kb_ts, names):
     survival = ev["defensives"]["survival"]
     consumables = survival.get("consumables") or {}
     cat = run.cat
-    talents = source_state._talents(run, rid, fid, pid)
+    this_pull = (source_state._talents(run, rid, fid, pid), ev.get("spec"))
+    loadouts = None
     casts = source_state.report_casts(run, rid, fid, pid)
     out = {}
     for name in names:
@@ -121,18 +162,21 @@ def ready_times(run, ev, rid, fid, pid, fight_start, kb_ts, names):
                     and fight_start <= e["timestamp"] <= kb_ts]
             if used:
                 t, sid = max(used)
-                back = t + cat.all[sid]["cooldown_ms"]
-                if back <= kb_ts:
-                    out[name] = back
+                # Kept even when it is not back by the killing blow: a judged consumable still on
+                # cooldown is the very case to flag. Game rule (the site's too, checked independently
+                # here from WCL casts): a Healthstone is 60 s, health potions share 300 s, from the
+                # last use of that kind in this pull; the pull resets them.
+                out[name] = t + cat.all[sid]["cooldown_ms"]
             continue
         sid = cat.name_to_id.get(name)
         entry = cat.all.get(sid) if sid is not None else None
         if entry is None:
             continue
-        times, cd, charges = source_state.cooldown_window(entry, sid, casts, talents, ev.get("spec"),
-                                                          fight_start, kb_ts, history=True)
-        ok, since = source_state.ready_since(times, kb_ts, cd, charges)
-        if ok and since is not None:
+        if loadouts is None:
+            loadouts = source_state.pull_loadouts(run, rid, fid, pid)
+        left, since = source_state.ability_state(entry, sid, casts, loadouts, this_pull, fight_start, kb_ts,
+                                                 source_state.report_encounters(run, rid))
+        if left > 0 and since is not None:
             out[name] = since
     return out
 
@@ -160,7 +204,13 @@ def _press_items(run, ev, player):
     kb_ts = killing_hit_ts(run.hits_before(rid, fid, pid, death_ts), death_ts)
     if kb_ts is None:
         return []
-    return early_presses(details, kb_ts, ready_times(run, ev, rid, fid, pid, fight_start, kb_ts, names))
+    out = early_presses(details, kb_ts, ready_times(run, ev, rid, fid, pid, fight_start, kb_ts, names))
+    sb = run.cat.soulburn
+    if sb and any(det.get("soulburn") for det in details.values()):
+        start = kb_ts - LETHAL_WINDOW_MS - sb["buff_ms"] - READY_TOLERANCE_MS
+        out += soulburn_presses(details, kb_ts, run.resource_casts(rid, pid, start, kb_ts),
+                                run.aura_events(rid, pid, start, kb_ts), sb)
+    return out
 
 
 def check(run):

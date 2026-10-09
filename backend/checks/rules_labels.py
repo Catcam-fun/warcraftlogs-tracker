@@ -1,24 +1,33 @@
 """Death labels follow the rules: one-shot, burst, rot (raid-wide only) or set up by
 
 The owner's rule, from the hits since the player was last at 85%+ health:
-  one-shot: that was under a second before death and a single hit took 80%+ of max HP;
-  burst: under a second, but no single hit that big;
+  one-shot: that was at most 1.5 s before death and a single hit took 80%+ of max HP; when that hit
+    (the biggest since last high) is not the killing blow, it is named as the one-shot hit (oneShotHit);
+  burst: at most 1.5 s, but no single hit that big;
   worn down by (rot): only from a raid-wide ability in raid_wide_damage.py hitting them repeatedly
     (3+ hits of one RAID_WIDE ability, that ability 60%+ of the damage since last high, none of its
     hits 35%+ of max HP);
-  set up by: otherwise, the biggest hit (at least 10% of max HP) since they were last at high health.
+  set up by: otherwise (neither one-shot nor burst), the biggest hit (at least 10% of max HP) since they
+    were last at high health.
 "Last at high health" is the latest moment before the killing blow with health >= 0.85 * maxHitPoints: just
 after a hit (hitPoints) or just before one (hitPoints + amount; heals land between hits), the killing blow
-included. Only hits whose resources are the player's own (resourceActor 2) carry the player's health.
-"Under a second" is inclusive: the killing blow is at most REACTION_MS after that moment.
-The Results page shows "set up by" only when deathType is not burst, so biggestHit is not compared for bursts.
+included. For the killing blow, max HP and health are max_hp_before's (its own maxHitPoints is logged after the
+death removed the player's max-health auras): its aura list against the last own-health hit's, sized from the
+game data, written separately from the site. Every hit counts against the max HP they had when it landed. Only hits whose resources are the player's own (resourceActor 2, or 1 on self-damage) carry the player's health.
+The 1.5 s is inclusive: the killing blow is at most BURST_WINDOW_MS after that moment. It is the owner's
+description window (2026-10-08), not the 1 s press cutoff (REACTION_MS) of the defensive replay.
 """
 from collections import defaultdict
 
-from checks.verdict import PASS, fail, skip
+from checks.verdict import PASS, Outcome, fail, skip
+from defensive_catalog import PATCHES
+from defensives import SPEC_NAMES
+from defensives import LETHAL_WINDOW_MS
+from features import KILLING_HIT_HEALS
+from max_health_auras import MAX_HEALTH, STACKING
 from raid_wide_damage import RAID_WIDE
 
-HIGH, ONE_SHOT, SETUP, REACTION_MS = 0.85, 0.80, 0.10, 1000
+HIGH, ONE_SHOT, SETUP, BURST_WINDOW_MS = 0.85, 0.80, 0.10, 1500
 ROT_MIN_HITS, ROT_SHARE, ROT_MAX_HIT = 3, 0.6, 0.35
 KILL_SLACK_MS = 50
 
@@ -28,34 +37,365 @@ def full_hit(h):
 
 
 def _own_hp(h):
-    """The hit carries the player's own health (with includeResources, resourceActor 1 is the attacker's)."""
-    return h.get("resourceActor") == 2 and bool(h.get("maxHitPoints"))
+    """The hit carries the player's own health. With includeResources, resourceActor 2 is the target's
+    (the player's); resourceActor 1 is the attacker's, which on self-damage (source = target: Touch of
+    Death, Set Fire to the Pain) is the player too."""
+    if not h.get("maxHitPoints"):
+        return False
+    if h.get("resourceActor") == 2:
+        return True
+    return h.get("resourceActor") == 1 and h.get("sourceID") is not None and h.get("sourceID") == h.get("targetID")
 
 
-def _max_hp(hits, kb_index):
-    for h in [hits[kb_index]] + hits[:kb_index][::-1]:
+# The death strips the player's auras 0-39 ms before WCL logs the killing hit (587 killing hits, six logs,
+# 2026-10-08). An aura that came up within this span, after the hit before, and is not on the killing
+# hit's own list was set off by the killing hit itself.
+DEATH_STRIP_MS = 50
+SAME_MOMENT_MS = 2          # a cheat death's absorb and its heal (or the aura it brings) are logged within 2 ms
+
+
+def patch_of(report_start_ms):
+    """The game patch live when a report was logged (defensive_catalog.PATCHES: first day live)."""
+    from datetime import datetime, timezone
+    day = datetime.fromtimestamp(report_start_ms / 1000, tz=timezone.utc).date().isoformat()
+    live = [p for first, p in PATCHES if first <= day]
+    return live[-1] if live else PATCHES[0][1]
+
+
+class Loadout:
+    """What decides an aura's size for one player: the patch, their talents ({entry: rank} from WCL's
+    CombatantInfo; None when the log has none) and spec name."""
+
+    def __init__(self, patch, talents=None, spec=None):
+        self.patch, self.talents, self.spec = patch, talents, spec
+
+
+def aura_size(aura_id, loadout):
+    """(share, flat) an aura changes max health by for this loadout, from the game data
+    (max_health_auras: each term where the game puts the effect, with the talents and spec passives
+    that change it); (0.0, 0) when it doesn't. A str (why) when it can't be sized: a term not in the
+    data, or a term or modifier that needs a talent when the log has no loadout."""
+    terms = []
+    for first, value in MAX_HEALTH.get(aura_id, ()):
+        if tuple(map(int, first.split("."))) <= tuple(map(int, loadout.patch.split("."))):
+            terms = value
+
+    def has(who):
+        if "entries" in who:
+            if loadout.talents is None:
+                return None
+            return max((loadout.talents.get(e, 0) for e in who["entries"]), default=0)
+        if "specs" in who:
+            if not loadout.spec:
+                return None
+            return int(loadout.spec.replace(" ", "").lower() in {x.replace(" ", "").lower() for x in who["specs"]})
+        return 1
+
+    total, flat = 1.0, 0
+    for t in terms:
+        rank = has(t)
+        if rank is None:
+            return f"aura {aura_id}: needs the player's loadout, none in the log"
+        if not rank:
+            continue
+        if "flat" in t:
+            flat += t["flat"]
+            continue
+        if t["share"] is None:
+            return f"aura {aura_id}: size not in the game data"
+        share = t["share"]
+        for m in t.get("mods", ()):
+            r = has(m)
+            if r is None:
+                return f"aura {aura_id}: a modifier needs the player's loadout, none in the log"
+            if r:
+                share = share + m["add"] * r if "add" in m else share * m["mult"]
+        total *= 1 + share
+    return (total - 1, flat)
+
+
+def by_loadout(aura_id, patch):
+    """Whether an aura's size in a patch depends on a loadout (a term or modifier for some talents or
+    specs). Such an aura is sized with its caster's: talents raise an aura from whoever cast it."""
+    terms = []
+    for first, value in MAX_HEALTH.get(aura_id, ()):
+        if tuple(map(int, first.split("."))) <= tuple(map(int, patch.split("."))):
+            terms = value
+    return any("entries" in w or "specs" in w for t in terms for w in [t, *t.get("mods", ())])
+
+
+def caster_of(events, aura_id, t):
+    """Who cast an aura on the player, from the last of its aura events at or before t (WCL's sourceID
+    on apply, stack and remove events); None when there is none."""
+    src = [e.get("sourceID") for e in events or () if e.get("abilityGameID") == aura_id
+           and e["timestamp"] <= t and e.get("sourceID") is not None]
+    return src[-1] if src else None
+
+
+def _listed(h):
+    return {int(x) for x in str(h.get("buffs") or "").split(".") if x.isdigit()}
+
+
+def stacks_of(aura_id, patch):
+    """Max stacks of an aura in a patch (game data SpellAuraOptions.CumulativeAura; 1 when it doesn't stack)."""
+    n = 1
+    for first, m in STACKING.get(aura_id, ()):
+        if tuple(map(int, first.split("."))) <= tuple(map(int, patch.split("."))):
+            n = m
+    return n
+
+
+def stack_count(events, aura_id, t):
+    """Stacks of an aura at time t from WCL's aura events of the player ({type, timestamp, abilityGameID,
+    stack}), or None when they can't be told: the last event at or before t, else what the first one after
+    it implies."""
+    evs = sorted((e for e in events if e.get("abilityGameID") == aura_id), key=lambda e: e["timestamp"])
+    done = [e for e in evs if e["timestamp"] <= t]
+    if done:
+        e = done[-1]
+        if e["type"].startswith("remove") and not e["type"].endswith("stack"):
+            return 0
+        if not e["type"].endswith("stack"):
+            return e.get("stack") or 1
+        return e.get("stack")
+    nxt = next(iter(e for e in evs if e["timestamp"] > t), None)
+    if nxt is None:
+        return None
+    if nxt["type"] in ("applybuff", "applydebuff"):
+        return 0
+    if nxt["type"].startswith("apply") and nxt.get("stack"):
+        return nxt["stack"] - 1
+    if nxt["type"].startswith("remove") and nxt["type"].endswith("stack") and nxt.get("stack") is not None:
+        return nxt["stack"] + 1
+    return None
+
+
+def max_hp_before(hits, kb_index, loadout=None, bands=(), heals=(), aura_events=None, pid=None,
+                  loadout_for=None):
+    """(max HP, health, why not sized or None) just before the killing blow hits[kb_index] landed (hits:
+    this death's, time order); (0, 0, None) when the killing hit doesn't carry the player's health.
+
+    WCL logs the killing hit after the death stripped the player's auras, so its own maxHitPoints has
+    lost their max-health auras (live 2026-10-08: Strikepal, Nerub-ar p16, auras removed at
+    1910329-1910332, killing hit at 1910349 with max 10061382; 11198315 on every hit and heal before).
+    Instead, from the player's last own-health hit before it (or the one before that when the last one's
+    aura list changed but its max did not yet: WCL's max lags the list, 26 of 258 changes in six logs):
+    its max, with every aura on the killing hit's list and not on that hit's (came up) multiplied in and
+    every one the other way (ran out) divided out, sized for the player's `loadout` (aura_size). Each
+    hit's list is the auras up on it, before the death's strip. An aura that can't be sized makes the
+    whole result unknown (the third value says why).
+    An aura the killing hit set off (`bands`: [(start, end, aura ID, name)] from WCL's Buffs table;
+    came up after the hit before it, within DEATH_STRIP_MS, not on its list), or a cheat death that
+    absorbed part of it (`heals`: WCL's [(ts, amount, ability ID, name, "heal" | "absorbed")] in that
+    span, an absorb from an aura not on its list) is not max HP they had before the blow, and that
+    aura's own heals are not health they had: Soulcleavi, Manaforge p54, Last Resort's Metamorphosis
+    healed 11748168 at 8002681, 18995479 -> 30743647, and Oblivion read 30743644 taken; Padflash,
+    Manaforge p79, Cauterize absorbed 33273760 of Oblivion and healed 2919591, 2903317 -> 5822908.
+    A stacking aura (stacks_of > 1) counts per stack, its stacks on the reference hit and DEATH_STRIP_MS
+    before the killing hit read from `aura_events` (WCL's Buffs and Debuffs events of the player); without
+    them, or when they can't be told, the death isn't sized (third value).
+    An aura whose size depends on a loadout (by_loadout) is sized with its caster's: the caster from
+    `aura_events` (caster_of), their Loadout from `loadout_for(caster)` (the player `pid` has `loadout`).
+    Live: a warrior's Rallying Cry with Battlefield Commander reads x1.12 on every player it lands on.
+    A cheat death whose aura is used up rather than absorbing (Guardian Spirit: its aura's band ends 1 ms
+    before its heal, no absorb) sets off its heal the same way: a band under the heal's name ending within
+    SAME_MOMENT_MS of it, after the hit before.
+    Never below the killing hit's own max (the death only takes max health away) nor below the health.
+    """
+    kb = hits[kb_index]
+    if not _own_hp(kb):
+        return 0, 0, None
+    t1 = kb["timestamp"]
+    prev_t = hits[kb_index - 1]["timestamp"] if kb_index else float("-inf")
+    on_kb = _listed(kb)
+    own = [h for h in hits[:kb_index] if _own_hp(h)]
+    why = []
+
+    def size(aid):
+        if loadout is None:
+            return (0.0, 0)
+        lo = loadout
+        if by_loadout(aid, loadout.patch):
+            caster = caster_of(aura_events, aid, t1)
+            if caster is None:
+                why.append(f"aura {aid}: who cast it is not in its aura events")
+                return (0.0, 0)
+            if caster != pid:
+                lo = loadout_for(caster) if loadout_for else None
+                if lo is None:
+                    why.append(f"aura {aid}: its caster's loadout is not known")
+                    return (0.0, 0)
+        v = aura_size(aid, lo)
+        if isinstance(v, str):
+            why.append(v)
+            return (0.0, 0)
+        return v
+
+    if not own:
+        value = float(kb["maxHitPoints"])
+    else:
+        ref = own[-1]
+        if len(own) > 1 and own[-2]["maxHitPoints"] == ref["maxHitPoints"] and \
+                any(size(a) != (0.0, 0) for a in _listed(own[-2]) ^ _listed(ref)):
+            ref = own[-2]
+        value = float(ref["maxHitPoints"])
+        stacking = {a for a in on_kb | _listed(ref) if loadout is not None and stacks_of(a, loadout.patch) > 1
+                    and (by_loadout(a, loadout.patch) or aura_size(a, loadout) != (0.0, 0))}
+        for aid in on_kb - _listed(ref) - stacking:
+            v = size(aid)
+            value = value * (1 + v[0]) + v[1]
+        for aid in _listed(ref) - on_kb - stacking:
+            v = size(aid)
+            value = (value - v[1]) / (1 + v[0])
+        for aid in stacking:
+            if aura_events is None:
+                why.append(f"aura {aid}: stacks, its aura events not read")
+                continue
+            n0 = stack_count(aura_events, aid, ref["timestamp"]) if aid in _listed(ref) else 0
+            n1 = stack_count(aura_events, aid, t1 - DEATH_STRIP_MS) if aid in on_kb else 0
+            if n0 is None or n1 is None:
+                why.append(f"aura {aid}: stacks can't be told from its aura events")
+                continue
+            if n0 != n1:
+                v = size(aid)
+                value = value * (1 + v[0] * n1) / (1 + v[0] * n0)
+    # What the killing hit set off. A cheat death absorbs part of it and heals in the same moment, under
+    # the same name (Defy Fate, Cauterize, Embrace the Shadow: absorb and heal within SAME_MOMENT_MS); an
+    # aura that came up in that moment and is not on its list came with it (Last Resort's
+    # Metamorphosis, 1 ms before Last Resort's absorb). Their heals are not health the player had before
+    # the blow; other heals landing then are (Leech, a healer's Reversion 24 ms before its own absorb).
+    absorbs = [(ts, name) for ts, amount, aid, name, typ in heals if typ == "absorbed" and prev_t < ts <= t1]
+    healed = [(ts, name) for ts, amount, aid, name, typ in heals if typ == "heal" and prev_t < ts <= t1]
+    set_off = {name for ts, name in absorbs
+               if any(n == name and abs(t - ts) <= SAME_MOMENT_MS for t, n in healed)}
+    set_off |= {name for start, end, aid, name in bands
+                if prev_t < start <= t1 and aid not in on_kb
+                and any(abs(start - ts) <= SAME_MOMENT_MS for ts, _ in absorbs)}
+    # A cheat death's aura (EffectAura 316, features.KILLING_HIT_HEALS) used up as it heals: its band ends
+    # just before the heal. Only those heals: any other heal (a Prayer of Mending jump) stays health they
+    # had. The death's strip ends the other bands with or after their last heals (Atonement healed 1 ms
+    # before the strip ended its band, Zeforus, Voidspire p35; Ebon Might healed in the strip's
+    # millisecond, Arzoker, Quel'Danas p46).
+    set_off |= {name for ts, amount, hid, name, typ in heals
+                if typ == "heal" and prev_t < ts <= t1 and hid in KILLING_HIT_HEALS
+                and any(aid == KILLING_HIT_HEALS[hid] and end is not None and prev_t < end < ts
+                        and ts - end <= SAME_MOMENT_MS for start, end, aid, n in bands)}
+    health = kb.get("amount") or 0
+    health -= sum(amount for ts, amount, aid, name, typ in heals
+                  if typ == "heal" and prev_t < ts <= t1 and name in set_off)
+    health = max(health, 0)
+    return max(round(value), kb["maxHitPoints"], health), health, ("; ".join(sorted(set(why))) or None)
+
+
+def aura_bands(auras):
+    """[(start, end, aura ID, name)] from a Buffs table's auras (guid, name, bands)."""
+    return sorted((b["startTime"], b.get("endTime"), a.get("guid"), a.get("name"))
+                  for a in auras if a.get("guid") is not None for b in a.get("bands") or [])
+
+
+def loadout_of(run, rid, fid, pid):
+    """The player's Loadout for one pull, from WCL's CombatantInfo (talents and spec) and the report's patch."""
+    talents, spec = None, None
+    for c in run.combatants(rid, fid):
+        if c.get("sourceID") == pid and c.get("fight", fid) == fid:
+            if c.get("talentTree"):            # an empty tree: not recorded, as the site reads it
+                talents = {t["id"]: t.get("rank") or 1 for t in c["talentTree"]}
+            spec = SPEC_NAMES.get(c.get("specID"))
+    return Loadout(patch_of(run.meta_for(rid)["report_start"]), talents, spec)
+
+
+def run_max_hp_before(run, rid, fid, pid, hits, kb_index):
+    """max_hp_before for one death with the player's loadout. WCL's heals in the DEATH_STRIP_MS before
+    the killing hit are read when the hit shows something may have been set off by it: it was partly
+    absorbed (Last Resort, Cheat Death and Defy Fate absorb the lethal part), its aura list has an aura
+    the last own-health hit's didn't, or it took more health than the list-based max allows. Only when
+    a heal landed there is the Buffs table read, for the aura behind it. All from WCL's own data, never
+    the site's numbers."""
+    loadout = loadout_of(run, rid, fid, pid)
+    kb = hits[kb_index]
+    aura_events = None
+    lists = [_listed(h) for h in hits[:kb_index + 1] if _own_hp(h)]
+    listed = set().union(*lists) if lists else set()
+    changed = listed - set.intersection(*lists) if lists else set()
+
+    def loadout_for(caster):
+        lo = loadout_of(run, rid, fid, caster)
+        return lo if lo.talents is not None else None
+    if any(stacks_of(a, loadout.patch) > 1 and (by_loadout(a, loadout.patch) or aura_size(a, loadout) != (0.0, 0))
+           for a in listed) or \
+            any(by_loadout(a, loadout.patch) for a in changed):
+        # A stacking max-health aura on their hits (its stacks), or one sized by a loadout that came or
+        # went (who cast it): from WCL's aura events of the player.
+        start = kb["timestamp"] - LETHAL_WINDOW_MS
+        aura_events = run.aura_events(rid, pid, start, kb["timestamp"] + 1)
+    value, health, why = max_hp_before(hits, kb_index, loadout, aura_events=aura_events, pid=pid,
+                                       loadout_for=loadout_for)
+    if not value:
+        return value, health, why
+    own = [h for h in hits[:kb_index] if _own_hp(h)]
+    listed_max = max_hp_before(hits[:kb_index] + [dict(kb, amount=0)], kb_index, loadout, aura_events=aura_events,
+                               pid=pid, loadout_for=loadout_for)[0]
+    # Something the killing hit set off: an absorb on it, more health than the lists allow, an aura it
+    # brought, or one used up just before it (Guardian Spirit's aura goes as it heals).
+    suspicious = (kb.get("absorbed") or 0) > 0 or (kb.get("amount") or 0) > listed_max or \
+        (own and _listed(kb) ^ _listed(own[-1]))
+    if not suspicious:
+        return value, health, why
+    t1 = kb["timestamp"]
+    names = run.meta_for(rid).get("abilities") or {}
+    heals = [(e["timestamp"], e.get("amount") or 0, e.get("abilityGameID"), names.get(e.get("abilityGameID")),
+              e.get("type")) for e in run.heals_taken(rid, pid, t1 - DEATH_STRIP_MS, t1 + 1)
+             if e.get("type") in ("heal", "absorbed")]
+    if not any(typ == "heal" for *_, typ in heals):
+        return value, health, why
+    return max_hp_before(hits, kb_index, loadout, aura_bands(run.buffs(rid, fid, pid)), heals, aura_events,
+                         pid, loadout_for)
+
+
+def max_at(hits, i, kb_index, max_hp):
+    """The max HP the player had when hits[i] landed: the killing blow's is `max_hp`; a hit with their
+    own health carries it; otherwise the last own-health hit before it."""
+    if i == kb_index:
+        return max_hp
+    for h in hits[i::-1]:
         if _own_hp(h):
             return h["maxHitPoints"]
-    return 0
+    return max_hp
 
 
-def label(hits, kb_index):
-    """{"deathType", "rot", "biggestHit"} for the killing blow at hits[kb_index] (hits: one player's, time order)."""
+def label(hits, kb_index, max_hp=None, health=None):
+    """{"deathType", "rot", "biggestHit", "oneShotHit"} for the killing blow at hits[kb_index] (hits: one player's,
+    time order). `max_hp` / `health`: what they had just before it (default: max_hp_before without the patch's
+    aura sizes). Every hit is measured against the max HP they had when it landed (max_at)."""
     kb = hits[kb_index]
-    max_hp = _max_hp(hits, kb_index)
-    since_i, since_ts = -1, None      # index of the latest high-health hit before the killing blow
+    if max_hp is None:
+        max_hp, health, _ = max_hp_before(hits, kb_index)
+    health = (kb.get("amount") or 0) if health is None else health
+    share = {id(h): full_hit(h) / (max_at(hits, i, kb_index, max_hp) or 1) for i, h in enumerate(hits)}
+    # The last moment they were at high health, in log order (hits on one millisecond keep the
+    # log's order): just before a hit, at its time (one with their health: after + amount; one
+    # without: what the last hit with their health left, as only heals land between hits; the
+    # killing blow: `health`), or just after a hit with their health, at its time.
+    since_i, since_ts, last = -1, None, None   # hits since the high moment: hits[since_i + 1:]
     for i in range(kb_index + 1):
         h = hits[i]
-        if not _own_hp(h):
-            continue
-        after = h.get("hitPoints") or 0
-        if i < kb_index and after >= HIGH * h["maxHitPoints"]:
-            since_i, since_ts = i, h["timestamp"]                 # high just after this hit
-        elif after + (h.get("amount") or 0) >= HIGH * h["maxHitPoints"]:
-            since_i, since_ts = i - 1, h["timestamp"]             # high just before this hit
+        own = _own_hp(h)
+        top = max_hp if i == kb_index else h["maxHitPoints"] if own else last and last[1]
+        if i == kb_index:
+            now = health
+        elif own:
+            now = (h.get("hitPoints") or 0) + (h.get("amount") or 0)
+        else:
+            now = last and last[0]
+        if top and now >= HIGH * top:
+            since_i, since_ts = i - 1, h["timestamp"]                 # high just before this hit
+        if i < kb_index and own:
+            last = (h.get("hitPoints") or 0, h["maxHitPoints"])
+            if last[0] >= HIGH * last[1]:
+                since_i, since_ts = i, h["timestamp"]                 # high just after this hit
     run = hits[since_i + 1:kb_index + 1]
-    quick = since_ts is not None and kb["timestamp"] - since_ts <= REACTION_MS
-    one_shot = quick and any(full_hit(h) >= ONE_SHOT * max_hp for h in run)
+    quick = since_ts is not None and kb["timestamp"] - since_ts <= BURST_WINDOW_MS
+    one_shot = quick and any(share[id(h)] >= ONE_SHOT for h in run)
     death_type = "oneShot" if one_shot else "burst" if quick else "wasLow"
     rot = None
     if death_type == "wasLow":
@@ -66,15 +406,20 @@ def label(hits, kb_index):
         for aid, hs in by_ability.items():
             if aid in RAID_WIDE and len(hs) >= ROT_MIN_HITS \
                     and sum(full_hit(h) for h in hs) >= ROT_SHARE * total \
-                    and max(full_hit(h) for h in hs) < ROT_MAX_HIT * max_hp:
+                    and max(share[id(h)] for h in hs) < ROT_MAX_HIT:
                 rot = aid
         biggest = None
         if rot is None:
-            cands = [h for h in run[:-1] if full_hit(h) >= SETUP * max_hp]
+            cands = [h for h in run[:-1] if share[id(h)] >= SETUP]
             biggest = max(cands, key=full_hit, default=None)
         return {"deathType": death_type, "rot": rot,
-                "biggestHit": biggest.get("abilityGameID") if biggest else None}
-    return {"deathType": death_type, "rot": None, "biggestHit": None}
+                "biggestHit": biggest.get("abilityGameID") if biggest else None, "oneShotHit": None}
+    shot = None
+    if one_shot:
+        top = max(run[:-1], key=full_hit, default=None)
+        if top is not None and full_hit(top) > full_hit(kb):
+            shot = top.get("abilityGameID")
+    return {"deathType": death_type, "rot": None, "biggestHit": None, "oneShotHit": shot}
 
 
 def death_hits(hits, death_ts):
@@ -96,7 +441,7 @@ def death_hits(hits, death_ts):
 
 def check(run):
     """Death labels follow the rules: one-shot, burst, rot (raid-wide only) or set up by"""
-    items, seen, compared = [], 0, 0
+    items, seen, compared, skipped = [], 0, 0, []
     for ev in run.counted_deaths():
         s = (ev.get("defensives") or {}).get("survival")
         if not s or s.get("deathType") == "instakill":
@@ -105,21 +450,36 @@ def check(run):
         rid, fid, name = ev["reportId"], ev["fightId"], ev.get("originalCharacter")
         pid = run.actor_id(rid, name)
         if pid is None:
+            skipped.append(f"{name} pull {fid}: not among report {rid}'s players")
             continue
         death_ts = ev["timestamp"] + run.fight(rid, fid)["start_time"]
         got = death_hits(run.hits_before(rid, fid, pid, death_ts), death_ts)
-        if got is None or not _max_hp(*got):
+        if got is None:
+            skipped.append(f"{name} pull {fid}: no killing hit in WCL's damage taken")
+            continue
+        if not max_hp_before(*got)[0]:
+            skipped.append(f"{name} pull {fid}: WCL's hits carry none of the player's health")
+            continue
+        max_hp, health, why = run_max_hp_before(run, rid, fid, pid, *got)
+        if why:
+            skipped.append(f"{name} pull {fid}: {why}")
             continue
         compared += 1
-        rule = label(*got)
-        site = (s.get("deathType"), (s.get("rot") or {}).get("abilityId"), (s.get("biggestHit") or {}).get("abilityId"))
-        if rule["deathType"] == "burst" and site[0] == "burst":
-            site = site[:2] + (None,)      # the page hides biggestHit on bursts
-        if site != (rule["deathType"], rule["rot"], rule["biggestHit"]):
-            items.append(f"{name} pull {fid}: site {site[0]}/{site[1]}/{site[2]}, "
-                         f"rule {rule['deathType']}/{rule['rot']}/{rule['biggestHit']}")
+        rule = label(*got, max_hp=max_hp, health=health)
+        site = (s.get("deathType"), (s.get("rot") or {}).get("abilityId"), (s.get("biggestHit") or {}).get("abilityId"),
+                (s.get("oneShotHit") or {}).get("abilityId"))
+        want = (rule["deathType"], rule["rot"], rule["biggestHit"], rule["oneShotHit"])
+        if site != want:
+            items.append(f"{name} pull {fid}: site {'/'.join(map(str, site))}, rule {'/'.join(map(str, want))}")
     if not seen:
         return skip("no counted deaths with a survival block")
+    # Every death left out is counted and named, so a pass shows what it did not cover.
+    note = ""
+    if skipped:
+        note = f"{len(skipped)} of {seen} deaths not compared: {'; '.join(skipped[:3])}" \
+            + (f"; {len(skipped) - 3} more" if len(skipped) > 3 else "")
     if not compared:
-        return skip("no counted death has a killing hit in WCL's damage taken")
-    return fail(items) if items else PASS
+        return skip("no counted death has a killing hit in WCL's damage taken" + (f"; {note}" if note else ""))
+    if items:
+        return fail(items, reason=note)
+    return Outcome("pass", reason=note) if note else PASS

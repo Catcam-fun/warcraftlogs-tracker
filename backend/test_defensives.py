@@ -1,8 +1,10 @@
 import unittest
 import os
 import sys
+import types
 
 import defensives
+import features
 from defensive_catalog import CATALOG
 
 ICE_BLOCK, ICE_COLD, MIRROR, ALTER_TIME = 45438, 414658, 55342, 342245
@@ -70,11 +72,82 @@ class DefensiveAnalysisTests(unittest.TestCase):
                                  (100_010, "removebuff", ICE_BLOCK, 1), (100_010, "removebuff", 999, 5)]}}
         r = defensives.analyze_death(1, "Mage", "Frost", 7, 0, 100_000, indexed, names_map, {5: "Holypriest"})
         self.assertIn("Ice Block", names(r["active"]))
-        self.assertIn({"name": "Pain Suppression", "kind": "external", "by": "Holypriest"}, r["active"])
+        pain = next(a for a in r["active"] if a["name"] == "Pain Suppression")
+        self.assertEqual((pain["kind"], pain["by"]), ("external", "Holypriest"))
         # Removed well before death -> not active.
         indexed["buffs"][1] = [(50_000, "applybuff", ICE_BLOCK, 1), (60_000, "removebuff", ICE_BLOCK, 1)]
         r = defensives.analyze_death(1, "Mage", "Frost", 7, 0, 100_000, indexed, names_map, {})
         self.assertNotIn("Ice Block", names(r["active"]))
+
+    def test_an_active_defensive_carries_the_players_talented_values(self):
+        # Barkskin up at death with Oakskin and Improved Barkskin: 30% for 12s, the talents listed.
+        barkskin = 22812
+        r = run("Druid", "Balance", talents={123795, 128591}, auras=[barkskin])
+        a = next(x for x in r["active"] if x["name"] == "Barkskin")
+        self.assertTrue(a["talentsKnown"])
+        self.assertEqual(a["effect"], [{"dr": 0.3}])
+        self.assertEqual((a["auraMs"], a["cooldownMs"], a["charges"]), (12_000, 60_000, 1))
+        self.assertIn({"talent": "Oakskin", "field": "dr", "rank": 1, "add": 0.1}, a["talents"])
+        self.assertIn({"talent": "Improved Barkskin", "field": "duration", "rank": 1, "add_ms": 4000}, a["talents"])
+        # Without the pull's talents: base values aren't claimed as theirs.
+        r = run("Druid", "Balance", auras=[barkskin])
+        a = next(x for x in r["active"] if x["name"] == "Barkskin")
+        self.assertEqual(a, {"name": "Barkskin", "kind": "personal", "major": True, "talentsKnown": False})
+
+    def test_an_active_external_carries_its_casters_talents(self):
+        # Ironbark from a Restoration Druid with Improved Ironbark (-20s) and Regenerative Heartwood (+4s).
+        ironbark = 102342
+        names_map = {sid: d["name"] for sid, d in CATALOG.items()}
+        indexed = {"casts": {}, "talents": {(7, 1): set(), (7, 5): {103141, 103139, 103131}},
+                   "buffs": {1: [(95_000, "applybuff", ironbark, 5)]}}
+        kb = [{"timestamp": 100_000, "type": "damage", "targetID": 1, "amount": 1, "overkill": 1,
+               "buffs": f"{ironbark}."}]
+        r = defensives.analyze_death(1, "Mage", "Frost", 7, 0, 100_000, indexed, names_map, {5: "Treehugger"},
+                                     hits=kb)
+        a = next(x for x in r["active"] if x["name"] == "Ironbark")
+        self.assertEqual((a["kind"], a["by"], a["talentsKnown"]), ("external", "Treehugger", True))
+        self.assertEqual((a["auraMs"], a["cooldownMs"]), (16_000, 70_000))
+        self.assertIn({"talent": "Improved Ironbark", "field": "cooldown", "rank": 1, "add_ms": -20000}, a["talents"])
+        # The caster's loadout isn't in the log: talents unknown.
+        del indexed["talents"][(7, 5)]
+        r = defensives.analyze_death(1, "Mage", "Frost", 7, 0, 100_000, indexed, names_map, {5: "Treehugger"},
+                                     hits=kb)
+        a = next(x for x in r["active"] if x["name"] == "Ironbark")
+        self.assertFalse(a["talentsKnown"])
+        self.assertNotIn("auraMs", a)
+
+    def test_a_totems_external_has_no_caster_to_read(self):
+        # Spirit Link Totem's aura names the totem (an NPC), not the Shaman: its caster isn't known, and the
+        # tooltip says so instead of claiming a player's talents are unknown.
+        totem = 98008
+        names_map = {sid: d["name"] for sid, d in CATALOG.items()}
+        indexed = {"casts": {}, "talents": {(7, 1): set()}, "buffs": {1: [(95_000, "applybuff", totem, 77)]}}
+        kb = [{"timestamp": 100_000, "type": "damage", "targetID": 1, "amount": 1, "overkill": 1, "buffs": f"{totem}."}]
+        r = defensives.analyze_death(1, "Mage", "Frost", 7, 0, 100_000, indexed, names_map, {5: "Shammy"}, hits=kb)
+        a = next(x for x in r["active"] if x["name"] == "Spirit Link Totem")
+        self.assertEqual((a["by"], a["talentsKnown"], a.get("casterUnknown")), (None, False, True))
+        # A self-cast external (Pain Suppression on themselves) reads their own loadout: no caster flag.
+        ps = 33206
+        indexed = {"casts": {}, "talents": {(7, 1): set()}, "buffs": {1: [(95_000, "applybuff", ps, 1)]}}
+        kb[0]["buffs"] = f"{ps}."
+        r = defensives.analyze_death(1, "Priest", "Discipline", 7, 0, 100_000, indexed, names_map, {}, hits=kb)
+        a = next(x for x in r["active"] if x["name"] == "Pain Suppression")
+        self.assertEqual((a["kind"], a["by"], a["talentsKnown"]), ("external", None, True))
+        self.assertNotIn("casterUnknown", a)
+
+    def test_an_unknown_spec_is_said_when_a_spec_passive_would_change_it(self):
+        # The caster's talents are in the log but not their spec: a spec passive that would change the
+        # entry isn't in the numbers, so the tooltip says the spec is unknown. Whole milliseconds always.
+        entry = {"name": "X", "kind": "external", "aura_ms": 8000, "cooldown_ms": 60_000, "charges": 1,
+                 "mitigation": None,
+                 "duration_mods": [{"talent": "Long Shield", "specs": ["Holy"], "mult": 1.15}]}
+        self.assertEqual(defensives._active_detail(entry, (set(), None), {}),
+                         {"talentsKnown": True, "auraMs": 8000, "cooldownMs": 60_000, "charges": 1, "specKnown": False})
+        a = defensives._active_detail(entry, (set(), "Holy"), {})
+        self.assertEqual(a["auraMs"], 9200)
+        self.assertNotIn("specKnown", a)
+        entry["duration_mods"] = [{"talent": "Odd", "entries": [1], "mult": 1.0001}]
+        self.assertEqual(defensives._active_detail(entry, ({1: 1}, None), {})["auraMs"], 8001)
 
     def test_missing_aura_removal_is_capped_by_duration(self):
         # The log never recorded Ice Block (10s) ending; 60s later it isn't still up.
@@ -96,7 +169,8 @@ class DefensiveAnalysisTests(unittest.TestCase):
         r = defensives.analyze_death(1, "Mage", "Frost", 7, 0, 100_000, indexed, names_map, {5: "Holypriest"},
                                      hits=kb)
         self.assertNotIn("Ice Block", names(r["active"]))
-        self.assertIn({"name": "Pain Suppression", "kind": "external", "by": "Holypriest"}, r["active"])
+        pain = next(a for a in r["active"] if a["name"] == "Pain Suppression")
+        self.assertEqual((pain["kind"], pain["by"]), ("external", "Holypriest"))
 
     def test_used_ability_is_on_cooldown_with_timings(self):
         r = run("Mage", "Frost", talents=entries(ICE_BLOCK),
@@ -142,7 +216,9 @@ class DefensiveAnalysisTests(unittest.TestCase):
     def test_external_on_killing_blow(self):
         r = run("Mage", "Frost", talents=set(), auras=[999], ability_names={999: "Pain Suppression"})
         ext = [a for a in r["active"] if a["kind"] == "external"]
-        self.assertEqual(ext, [{"name": "Pain Suppression", "kind": "external", "by": None}])
+        # No aura event names the caster: unknown, and said so.
+        self.assertEqual(ext, [{"name": "Pain Suppression", "kind": "external", "by": None, "talentsKnown": False,
+                                "casterUnknown": True}])
 
     def test_consumables_this_pull_only(self):
         r = run("Mage", "Frost", talents=set(),
@@ -171,8 +247,32 @@ class DefensiveAnalysisTests(unittest.TestCase):
         self.assertIn("Mirror Image", names(r["cooldown"]))
 
     def test_charges_recover_one_at_a_time(self):
-        left, ready = defensives._charges_at(30_000, [0, 1_000], charges=2, recharge_ms=25_000)
+        left, ready, _ = defensives._replay([0, 1_000], [], 30_000, lambda t: (25_000, 2))
         self.assertEqual((left, ready), (1, 20_000))  # 2nd charge starts after the 1st returns
+
+    def test_casts_reach_back_to_the_last_encounters_end(self):
+        # Long cooldowns reset when an encounter ends, so a press after the last one ended carries into
+        # the first kept pull: casts are read from that end (at most the longest cooldown back, Lay on
+        # Hands' 10 minutes), and never less than 3 minutes back for short cooldowns.
+        cat = defensives._LATEST
+        self.assertEqual(cat.longest_cooldown_ms, 600_000)
+        self.assertEqual(defensives.cast_lookback(cat, 1_000_000, 500_000), 500_000)
+        self.assertEqual(defensives.cast_lookback(cat, 1_000_000, 0), 400_000)
+        self.assertEqual(defensives.cast_lookback(cat, 1_000_000, 900_000), 820_000)
+        self.assertEqual(defensives.cast_lookback(cat, 100_000, 0), 0)
+        starts = {}
+
+        def fake_paged(_tok, _code, data_type, flt, start_time=None, **_kw):
+            starts[data_type] = start_time
+            return []
+
+        orig = defensives._paged
+        defensives._paged = fake_paged
+        try:
+            defensives.fetch_defensive_raw("t", "R", [7], 1_000_000, 1_100_000, cat, combatants=[], prev_end=500_000)
+        finally:
+            defensives._paged = orig
+        self.assertEqual((starts["Casts"], starts["Buffs"]), (500_000, 820_000))
 
     def test_fetch_keeps_only_dead_players_without_player_filters(self):
         # WCL returns nothing for source.id / target.id filters on Casts and
@@ -306,6 +406,31 @@ class SurvivalTests(unittest.TestCase):
         talented = {e: 1 for e in self.talent(FEINT, "Elusiveness")}
         r = defensives.assess_survival([kb], 100_000, ready(FEINT), [], NAMES, SCHOOLS, talent_entries=talented)
         self.assertTrue(r["wouldSave"]["Feint"])                      # 20% of 1.15M = 230k
+
+    def test_elusiveness_takes_part_of_feints_area_reduction(self):
+        # Measured on real hits (research FE, 11.0.7 to 12.1.0): with Elusiveness, Feint keeps 4/7 of an AoE
+        # hit (3/7 = 0.4286 off on seven Rogues), not 0.6 x 0.8 = 0.48; with Mirrors too, 0.491429 (0.5086 off
+        # on five). Elusiveness takes 4/35 off the AoE effect (40% -> 2/7) on top of its 20% on every hit. The
+        # catalog carries it in every patch (the build script's MEASURED_MODS).
+        from defensive_catalog import CATALOGS
+        elusiveness = set(self.talent(FEINT, "Elusiveness"))
+        mirrors = set(self.talent(FEINT, "Mirrors"))
+        for patch, cat in CATALOGS.items():
+            feint = next(d for d in cat.values() if d["name"] == "Feint")
+            keep = lambda talents: (lambda comps: (1 - comps[0]["dr"]) * (1 - (comps[1]["dr"] if len(comps) > 1 else 0)))(
+                defensives._resolve(feint, {e: 1 for e in talents}, {})[0])
+            comps, _ = defensives._resolve(feint, {e: 1 for e in elusiveness}, {})
+            self.assertAlmostEqual(comps[0]["dr"], 2 / 7, places=6, msg=patch)
+            self.assertAlmostEqual(keep(elusiveness), 4 / 7, places=6, msg=patch)
+            self.assertAlmostEqual(keep(elusiveness | mirrors), 0.491429, places=6, msg=patch)
+            self.assertAlmostEqual(keep(set()), 0.6, places=6, msg=patch)
+            self.assertAlmostEqual(keep(mirrors), 0.5, places=6, msg=patch)
+        # A 1M AoE killing blow with 450k overkill: 3/7 of it (428,571) is too little, where 0.52 would have saved.
+        kb = hit(100_000, 550_000, 0, overkill=450_000, aoe=True)
+        r = defensives.assess_survival([kb], 100_000, ready(FEINT), [], NAMES, SCHOOLS,
+                                       talent_entries={e: 1 for e in elusiveness})
+        self.assertFalse(r["wouldSave"]["Feint"])
+        self.assertAlmostEqual(r["details"]["Feint"]["amount"], 428_571, delta=1)
 
     def test_evasion_dodges_melee_only(self):
         melee = self.assess(hit(100_000, 1_000_000, 0, overkill=500_000, ability=1), available=[EVASION])
@@ -468,9 +593,152 @@ class OlderLogTests(unittest.TestCase):
                                               aoe_known=False)
         self.assertIsNone(unmarked["wouldSave"]["Feint"])
 
-    def test_report_marks_aoe_only_if_some_hit_is_aoe(self):
-        self.assertFalse(defensives.logs_mark_aoe({1: [{"isAoE": False}], 2: [{"isAoE": False}]}))
-        self.assertTrue(defensives.logs_mark_aoe({1: [{"isAoE": False}], 2: [{"isAoE": True}]}))
+    def test_cant_tell_gives_the_reason_it_cant_tell(self):
+        # An armor increase can't be judged when an earlier hit's armor rule isn't known (Cleave: physical,
+        # not measured), though it plainly doesn't reduce the Frost Bolt that killed them. The verdict is
+        # "can't tell", and the reason is the earlier hit's, not "armor doesn't reduce Frost Bolt".
+        hide = {"name": "Test Hide", "kind": "personal", "mitigation": [{"armor": 1.0}]}
+        hits = [dict(hit(95_000, 300_000, 400_000, ability=600), armor=2_000),
+                dict(hit(100_000, 400_000, 0, overkill=900_000), armor=2_000)]
+        r = defensives.assess_survival(hits, 100_000, [hide], [], NAMES, SCHOOLS, talent_entries={},
+                                       armor_k=2_000)
+        self.assertIsNone(r["wouldSave"]["Test Hide"])
+        self.assertEqual(r["details"]["Test Hide"]["why"], "armorUnknown")
+        self.assertEqual(r["details"]["Test Hide"]["whyHit"], "Cleave")
+        # The same on unmarked AoE: the reason says area damage isn't marked.
+        kb = dict(hit(100_000, 1_000_000, 0, overkill=300_000), isAoE=False)
+        r = defensives.assess_survival([kb], 100_000, ready(FEINT), [], NAMES, SCHOOLS, talent_entries={},
+                                       aoe_known=False)
+        self.assertEqual(r["details"]["Feint"]["why"], "aoeUnknown")
+        self.assertNotIn("whyHit", r["details"]["Feint"])
+
+    def test_armor_that_reduces_the_hit_but_whose_size_isnt_known_has_its_own_reason(self):
+        # A melee swing: armor surely reduces it. Without their armor on the hit, or without the boss's
+        # armor constant, how much more armor would take off can't be worked out: a reason of its own
+        # (armorValueUnknown, naming what is missing), not "isn't known whether armor reduces it".
+        hide = {"name": "Test Hide", "kind": "personal", "mitigation": [{"armor": 1.0}]}
+        swing = hit(100_000, 400_000, 0, overkill=900_000, ability=defensives.MELEE_SWING)
+        r = defensives.assess_survival([swing], 100_000, [hide], [], NAMES, SCHOOLS, talent_entries={},
+                                       armor_k=2_000)
+        self.assertEqual((r["details"]["Test Hide"]["why"], r["details"]["Test Hide"]["missing"]),
+                         ("armorValueUnknown", "armor"))
+        r = defensives.assess_survival([dict(swing, armor=2_000)], 100_000, [hide], [], NAMES, SCHOOLS,
+                                       talent_entries={})
+        self.assertEqual((r["details"]["Test Hide"]["why"], r["details"]["Test Hide"]["missing"]),
+                         ("armorValueUnknown", "constant"))
+        self.assertIsNone(r["wouldSave"]["Test Hide"])
+
+
+class AoeByAbilityTests(unittest.TestCase):
+    # Live 2026-10-08: WCL marks isAoE only on hits that dealt damage. A hit an absorb took whole (amount 0,
+    # no health on it), an immune or a missed one is never marked, even of an ability marked AoE on every
+    # other hit (Uncontrolled Burn: 31,127 of 41,277 marked, every unmarked one amount 0). The game treats
+    # those as AoE: Feint took 0.400 off 54 such hits on Maar (Undermine, 11.1.7) and 10 on Esra
+    # (Manaforge Omega), as off the marked ones, and 0.000 off hits of abilities
+    # never marked. Every hit that dealt damage of one ability is marked alike (Undermine, Manaforge
+    # Omega, Nerub-ar Palace, Voidspire, Coiled Altar logs). An ability is AoE when any hit of it is.
+    def absorbed(self, ts, ability, absorbed):
+        return {"timestamp": ts, "type": "damage", "targetID": 1, "abilityGameID": ability, "amount": 0,
+                "absorbed": absorbed, "overkill": 0, "isAoE": False}
+
+    def test_a_hit_absorbed_whole_counts_as_aoe_when_its_ability_is(self):
+        # A Cleave takes them to half health; a 500k hit of ability 500 is absorbed whole; then ability 500
+        # kills them with 500k overkill. Feint (40% off AoE) takes 400k off the killing blow alone (not
+        # enough), and 200k more off the absorbed hit when ability 500 counts as AoE (enough).
+        window = [hit(97_000, 500_000, 500_000, ability=600), self.absorbed(99_000, 500, 500_000),
+                  hit(100_000, 500_000, 0, overkill=500_000, aoe=True)]
+        args = (window, 100_000, ready(FEINT), [], NAMES, SCHOOLS)
+        by_hit = defensives.assess_survival(*args, talent_entries={})
+        self.assertFalse(by_hit["wouldSave"]["Feint"])
+        by_ability = defensives.assess_survival(*args, talent_entries={}, aoe_abilities={500})
+        self.assertTrue(by_ability["wouldSave"]["Feint"])
+        self.assertEqual(by_ability["details"]["Feint"]["amount"], 600_000)
+        # Its status unknown (the extra fetch failed): the verdict can't be told.
+        unknown = defensives.assess_survival(*args, talent_entries={}, aoe_abilities=set(), aoe_unknown={500})
+        self.assertIsNone(unknown["wouldSave"]["Feint"])
+        # Known not AoE (an ability never marked, whose hits the report could tell): as by hit.
+        never = defensives.assess_survival(*args, talent_entries={}, aoe_abilities=set())
+        self.assertFalse(never["wouldSave"]["Feint"])
+
+    def test_school_applies_reads_the_abilitys_status(self):
+        h = {"abilityGameID": 500, "isAoE": False}
+        self.assertFalse(defensives._school_applies("aoe", h, {}))
+        self.assertTrue(defensives._school_applies("aoe", dict(h, aoeAbility=True), {}))
+        self.assertIsNone(defensives._school_applies("aoe", dict(h, aoeAbility=None), {}))
+        self.assertFalse(defensives._school_applies("aoe", dict(h, aoeAbility=False, isAoE=False), {}))
+        # A report that marks no hit at all: unknown, whatever else is on the hit.
+        self.assertIsNone(defensives._school_applies("aoe", dict(h, aoeKnown=False, aoeAbility=True), {}))
+
+    def test_status_from_the_windows_and_what_they_cannot_tell(self):
+        dealt = lambda a, aoe: {"type": "damage", "abilityGameID": a, "amount": 5, "isAoE": aoe}
+        none = lambda a: {"type": "damage", "abilityGameID": a, "amount": 0, "absorbed": 9, "isAoE": False}
+        windows = {1: [dealt(10, True), none(10), none(20), none(30), {"type": "instakill", "abilityGameID": 40}],
+                   2: [dealt(30, False), none(50)]}
+        self.assertEqual(defensives.aoe_abilities(windows), {10})
+        # 10 is marked; 30 dealt damage unmarked (not AoE); 20 only absorbed whole: can't tell. Only the
+        # given players' hits are asked about (50 is player 2's).
+        self.assertEqual(defensives.aoe_undecided(windows, [1], {10}), {20})
+        self.assertEqual(defensives.aoe_undecided(windows, [1, 2], {10}), {20, 50})
+
+    def test_fetch_reads_the_abilities_hits_in_the_reports_pulls(self):
+        from unittest import mock
+        # 20 is marked on a hit that dealt damage; 50 dealt damage unmarked; 60 was only ever absorbed
+        # whole (WCL never marks those, so it stays unknown, not single-target), even on a hit marked.
+        page = {"reportData": {"report": {"a": {"data": [
+            {"type": "damage", "abilityGameID": 20, "amount": 5, "isAoE": True},
+            {"type": "damage", "abilityGameID": 50, "amount": 5, "isAoE": False},
+            {"type": "damage", "abilityGameID": 60, "amount": 0, "absorbed": 9, "isAoE": True}],
+            "nextPageTimestamp": None}}}}
+        with mock.patch.object(defensives, "graphql_query", return_value=page) as q:
+            self.assertEqual(defensives.fetch_aoe_abilities("t", "R", [3, 4], 100, 900, {50, 20, 60}),
+                             ({20}, {20, 50}))
+        query = q.call_args[0][1]
+        self.assertIn("dataType: DamageTaken", query)
+        self.assertIn("fightIDs: [3, 4]", query)
+        self.assertIn("endTime: 901", query)
+        self.assertIn('ability.id in (20, 50, 60)', query)
+        self.assertNotIn("includeResources", query)
+
+    def test_fetch_stops_once_every_ability_is_decided(self):
+        from unittest import mock
+        first = {"reportData": {"report": {"a": {"data": [
+            {"type": "damage", "abilityGameID": 20, "amount": 5, "isAoE": True}], "nextPageTimestamp": 500}}}}
+        second = {"reportData": {"report": {"a": {"data": [
+            {"type": "damage", "abilityGameID": 50, "amount": 5, "isAoE": False}], "nextPageTimestamp": 700}}}}
+        import copy
+        pages = lambda *ps: [copy.deepcopy(p) for p in ps]
+        with mock.patch.object(defensives, "graphql_query", side_effect=pages(first, second)) as q:
+            self.assertEqual(defensives.fetch_aoe_abilities("t", "R", [3], 100, 900, {20}), ({20}, {20}))
+        self.assertEqual(q.call_count, 1)
+        with mock.patch.object(defensives, "graphql_query", side_effect=pages(first, second, first)) as q:
+            self.assertEqual(defensives.fetch_aoe_abilities("t", "R", [3], 100, 900, {20, 50}), ({20}, {20, 50}))
+        self.assertEqual(q.call_count, 2)
+
+    def test_a_hit_that_dealt_damage_keeps_its_own_mark(self):
+        # Only hits that dealt no damage take their ability's status; a hit that dealt damage carries
+        # WCL's own mark (every one of an ability marked alike on the logs tried; the safer rule).
+        kb = hit(100_000, 1_000_000, 0, overkill=300_000, aoe=False)        # 40% of 1.3M would save
+        r = defensives.assess_survival([kb], 100_000, ready(FEINT), [], NAMES, SCHOOLS, talent_entries={},
+                                       aoe_abilities={500})
+        self.assertFalse(r["wouldSave"]["Feint"])
+        r = defensives.assess_survival([dict(kb, isAoE=True)], 100_000, ready(FEINT), [], NAMES, SCHOOLS,
+                                       talent_entries={}, aoe_abilities=set(), aoe_unknown={500})
+        self.assertTrue(r["wouldSave"]["Feint"])
+
+    def test_classes_with_an_aoe_only_effect(self):
+        self.assertEqual(defensives.aoe_classes(defensives._CATALOGS["12.1.0"]), {"Rogue"})
+        # The War Within's Merely a Setback (5% avoidance on a Mage barrier) brings Mages in there.
+        self.assertEqual(defensives.aoe_classes(defensives._CATALOGS["11.1.7"]), {"Rogue", "Mage"})
+        # Merely a Setback (11.x: 5% avoidance, an AoE-only cut, while Prismatic or Blazing Barrier is up)
+        # as a talent component on a Mage barrier brings Mages in; an external would reach anyone.
+        from types import SimpleNamespace
+        setback = {"dr": 0.05, "school": "aoe", "needs": {"entries": [117252], "talent": "Merely a Setback"}}
+        cat = SimpleNamespace(all={1966: CATALOG[FEINT],
+                                   235450: {"name": "Prismatic Barrier", "kind": "personal", "class": "Mage",
+                                            "mitigation": [{"absorb": 0.3}, setback]}})
+        self.assertEqual(defensives.aoe_classes(cat), {"Rogue", "Mage"})
+        cat.all[1] = {"name": "Shared", "kind": "external", "class": "Priest", "mitigation": [setback]}
+        self.assertIsNone(defensives.aoe_classes(cat))
 
 
 class StandardPotionTests(unittest.TestCase):
@@ -563,14 +831,11 @@ class InstakillTests(unittest.TestCase):
 
 
 class HealOverTimeTests(unittest.TestCase):
-    """Frenzied Regeneration / Crimson Vial heal over their duration, not at once."""
-
-    def test_tick_counts_match_the_catalog_build(self):
-        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
-        import build_defensive_catalog as build
-        ticks = {n: e[3] for n, effs in build.EFFECTS.items() for e in effs
-                 if len(e) > 3 and isinstance(e[3], int) and e[3] > 1}
-        self.assertEqual(ticks, defensives.HEAL_OVER_TIME)
+    """Heals over time land tick by tick, on the game's schedule (wago.tools SpellEffect EffectAuraPeriod,
+    SpellMisc Attributes_5). Frenzied Regeneration (22842: 8% a tick, period 1000 ms, 3 s, Attributes_5
+    0x200 "extra initial period") ticks as it is applied and then every second: 4 ticks, 32% (logs
+    natL8vxjNmGpy43F and 2VtyDR4CF6PGLjbd: 161 auras that ran their 3 s, 161 with 4 ticks at +0, +1, +2, +3 s,
+    at every haste). Crimson Vial (185311, no 0x200) ticks first a second after the press: 4 ticks."""
 
     frenzied = next(sid for sid, d in CATALOG.items() if d["name"] == "Frenzied Regeneration")
 
@@ -579,11 +844,20 @@ class HealOverTimeTests(unittest.TestCase):
                                           aura_ms={"Frenzied Regeneration": 3_000}, ready_since=ready_since)
 
     def test_ticks_land_while_they_are_low(self):
-        # Low for five seconds, then killed: 24% of 1M over 3 ticks lands in full (240k > 200k overkill).
+        # Low for five seconds, then killed: 32% of 1M over 4 ticks lands in full (320k > 200k overkill).
         r = self.assess([hit(95_000, 700_000, 300_000), hit(100_000, 300_000, 0, overkill=200_000)])
         self.assertTrue(r["wouldSave"]["Frenzied Regeneration"])
-        self.assertEqual(r["details"]["Frenzied Regeneration"]["hot"]["ticks"], 3)
-        self.assertAlmostEqual(r["details"]["Frenzied Regeneration"]["amount"], 240_000, delta=1)
+        self.assertEqual(r["details"]["Frenzied Regeneration"]["hot"]["ticks"], 4)
+        self.assertEqual(r["details"]["Frenzied Regeneration"]["hot"]["of"], 4)
+        self.assertAlmostEqual(r["details"]["Frenzied Regeneration"]["amount"], 320_000, delta=1)
+
+    def test_the_whole_heal_includes_its_own_healing_taken_increase(self):
+        # Verdant Heart's +20% healing taken while Frenzied Regeneration is up raises every tick, so the
+        # whole heal the ticks before death are a part of is 32% x 1.2, never less than what landed.
+        opt = {"lasting": [({"heal_taken": 0.2}, 3_000)], "hots": [({"heal": 0.32}, 4, 3_000)]}
+        self.assertAlmostEqual(defensives._hot_full(opt, 1_000_000), 384_000)
+        opt["hots"][0][0]["boosted"] = True
+        self.assertAlmostEqual(defensives._hot_full(opt, 1_000_000), 320_000)
 
     def test_real_heals_topping_them_up_waste_the_extra(self):
         # Low when it would tick, but a healer brought them back to full before they were hit from full.
@@ -593,17 +867,81 @@ class HealOverTimeTests(unittest.TestCase):
         self.assertLessEqual(r["details"]["Frenzied Regeneration"]["amount"], 10_000)
 
     def test_cannot_press_before_it_was_ready(self):
-        # Off cooldown 1.5s before the killing blow: only the first tick lands in time.
-        r = self.assess([hit(90_000, 900_000, 100_000), hit(100_000, 100_000, 0, overkill=150_000)],
+        # Off cooldown 1.5s before the killing blow: the tick on the press and the one a second later land.
+        r = self.assess([hit(90_000, 900_000, 100_000), hit(100_000, 100_000, 0, overkill=170_000)],
                         ready_since={"Frenzied Regeneration": 98_500})
+        self.assertEqual(r["details"]["Frenzied Regeneration"]["hot"]["ticks"], 2)
+        self.assertAlmostEqual(r["details"]["Frenzied Regeneration"]["amount"], 160_000, delta=1)
+        self.assertFalse(r["wouldSave"]["Frenzied Regeneration"])
+
+    def test_the_tick_on_the_press_lands_a_second_before_the_killing_blow(self):
+        r = self.assess([hit(90_000, 900_000, 100_000), hit(100_000, 100_000, 0, overkill=50_000)],
+                        ready_since={"Frenzied Regeneration": 99_000})
         self.assertEqual(r["details"]["Frenzied Regeneration"]["hot"]["ticks"], 1)
         self.assertAlmostEqual(r["details"]["Frenzied Regeneration"]["amount"], 80_000, delta=1)
-        self.assertFalse(r["wouldSave"]["Frenzied Regeneration"])
+        self.assertTrue(r["wouldSave"]["Frenzied Regeneration"])
+
+    def test_catalog_schedules(self):
+        import defensive_catalog
+        for patch, cat in defensive_catalog.CATALOGS.items():
+            by = {d["name"]: d for d in cat.values()}
+            fr = next(c for c in by["Frenzied Regeneration"]["mitigation"] if "heal" in c)
+            self.assertEqual((fr["heal"], fr["ticks"], fr["tick_ms"], fr.get("first_tick")), (0.32, 4, 1_000, True), patch)
+            self.assertNotIn("over_ms", fr, patch)           # it lasts the aura (talents lengthen it)
+            cv = next(c for c in by["Crimson Vial"]["mitigation"] if "heal" in c)
+            self.assertEqual((cv["heal"], cv["ticks"], cv["tick_ms"], cv.get("first_tick")), (0.2, 4, 1_000, None), patch)
+            # Talent heals over time (their own spell): no tick on application, every second.
+            talent_hots = {(c["needs"]["talent"], c["ticks"], c["over_ms"], c["tick_ms"], c.get("first_tick"))
+                           for d in by.values() for c in d["mitigation"] or ()
+                           if "heal" in c and c.get("needs") and "over_ms" in c}
+            expect = {("Infernal Vitality", 10, 10_000, 1_000, None), ("Rejuvenating Wind", 8, 8_000, 1_000, None)}
+            if patch.startswith("11.0."):
+                expect.add(("Den Recovery", 4, 4_000, 1_000, None))
+            self.assertEqual(talent_hots, expect, patch)
+
+    def test_reinvigoration_spreads_the_same_ticks_over_four_seconds(self):
+        # 372945 from 11.1.0: effect 0 aura 107 op 1 (duration) +1000 ms, effect 1 aura 108 op 19 (period)
+        # +33%: "heals over 1.0 additional sec". 4000 / 1330 is 3 ticks after the one on application.
+        import defensive_catalog
+        for patch, cat in defensive_catalog.CATALOGS.items():
+            fr = next(d for d in cat.values() if d["name"] == "Frenzied Regeneration")
+            heal = next(c for c in fr["mitigation"] if "heal" in c)
+            mods = heal.get("period_mods") or []
+            if patch.startswith("11.0."):
+                self.assertEqual(mods, [], patch)
+                continue
+            self.assertEqual([(m["talent"], m["mult"]) for m in mods], [("Reinvigoration", 1.33)], patch)
+            talents = {e: 1 for m in mods for e in m["entries"]}
+            dur = defensives._talented_duration(fr, talents, "Feral")
+            self.assertEqual(dur, 4_000, patch)
+            comps, _ = defensives._resolve(fr, talents, {}, "Feral")
+            opt = defensives._option("Frenzied Regeneration", comps, dur)
+            (c, n, over), = opt["hots"]
+            self.assertEqual((n, over), (4, 4_000), patch)
+            self.assertAlmostEqual(c["heal"], 0.32, places=6)
+            self.assertEqual([round(t) for t in defensives._tick_times(c, n, over, 10_000)],
+                             [10_000, 11_330, 12_660, 13_990], patch)
+            # Without it: 4 ticks in 3 s.
+            comps, _ = defensives._resolve(fr, {}, {}, "Feral")
+            (c, n, over), = defensives._option("Frenzied Regeneration", comps, 3_000)["hots"]
+            self.assertEqual([round(t) for t in defensives._tick_times(c, n, over, 10_000)],
+                             [10_000, 11_000, 12_000, 13_000], patch)
+
+    def test_a_longer_aura_adds_ticks(self):
+        # Ticks are the period's whole multiples within the aura, plus the one on application.
+        hot = {"heal": 0.32, "ticks": 4, "tick_ms": 1_000, "first_tick": True}
+        (c, n, over), = defensives._option("x", [hot], 5_000)["hots"]
+        self.assertEqual(n, 6)
+        self.assertAlmostEqual(c["heal"], 0.48)
+        (c, n, over), = defensives._option("x", [dict(hot, first_tick=None)], 4_000)["hots"]
+        self.assertEqual(n, 4)
+        self.assertAlmostEqual(c["heal"], 0.32)
 
     def test_ready_since(self):
         # One charge, 36s cooldown, pressed at 10s: ready again at 46s.
-        self.assertEqual(defensives._ready_since(100_000, [10_000], 1, 36_000), 46_000)
-        self.assertIsNone(defensives._ready_since(100_000, [], 1, 36_000))
+        one = lambda t: (36_000, 1)
+        self.assertEqual(defensives._replay([10_000], [], 100_000, one)[2], 46_000)
+        self.assertIsNone(defensives._replay([], [], 100_000, one)[2])
 
 class PullSpecTests(unittest.TestCase):
     def test_spec_comes_from_each_pulls_record(self):
@@ -613,6 +951,17 @@ class PullSpecTests(unittest.TestCase):
         self.assertEqual(defensives.pull_spec(idx, 3, 1, "Demonology"), "Demonology")
         self.assertEqual(defensives.pull_spec(idx, 4, 1, "Demonology"), "Destruction")
         self.assertEqual(defensives.pull_spec(idx, 5, 1, "Demonology"), "Demonology")   # not recorded
+
+    def test_an_empty_talent_tree_is_an_unknown_loadout(self):
+        # Every loadout in the cached logs (6,096 pull loadouts over 8 raids' reports) lists 11 to 82 entries:
+        # a player always has some, so an empty tree means the log didn't record it. Unknown (no entry), as a
+        # missing tree is, never "known, no talents" (that would deny a Brewmaster every purify talent).
+        idx = defensives.index_defensive_events({"combatants": [
+            {"fight": 3, "sourceID": 1, "specID": 268, "talentTree": []},
+            {"fight": 4, "sourceID": 1, "specID": 268, "talentTree": [{"id": 124860, "rank": 1}]}]},
+            defensives._CATALOGS["11.1.0"])
+        self.assertNotIn((3, 1), idx["talents"])
+        self.assertEqual(idx["talents"][(4, 1)], {124860: 1})
 
     def test_spec_names_match_the_catalog(self):
         from defensive_catalog import CATALOGS
@@ -722,19 +1071,78 @@ class LethalWindowTests(unittest.TestCase):
         self.assertEqual((r["burst"]["hits"], r["burst"]["total"], r["burst"]["abilities"][0]["times"]),
                          (3, 1_040_000, 3))
         self.assertNotIn("rot", r)
-        # One 90% hit and a tick right after it: a one-shot.
+        self.assertNotIn("biggestHit", r)                          # "Set up by" is only for neither
+        # One 90% hit and a tick right after it: a one-shot by the 90% hit, not "set up by" it.
         r = self.assess([hit(99_200, 900_000, 100_000), hit(99_900, 100_000, 0, overkill=40_000)])
         self.assertEqual(r["deathType"], "oneShot")
-        self.assertEqual(r["biggestHit"]["pctOfMax"], 90)           # the 90% hit is named
-        # A small tick, then a 120% killing blow: a one-shot, nothing set it up.
+        self.assertNotIn("biggestHit", r)
+        self.assertEqual((r["oneShotHit"]["name"], r["oneShotHit"]["pctOfMax"], r["oneShotHit"]["ago"]),
+                         ("Frost Bolt", 90, 0.7))
+        # A small tick, then a 120% killing blow: a one-shot by the killing blow itself.
         r = self.assess([hit(99_600, 100_000, 900_000), hit(99_900, 900_000, 0, overkill=300_000)])
         self.assertEqual(r["deathType"], "oneShot")
+        self.assertNotIn("biggestHit", r)
+        self.assertNotIn("oneShotHit", r)
+        # Live (Chazh, Voidspire pull 66): Melee for 92% of max health, then a Judgment of 81% kills
+        # 0.4s later. The biggest 80%+ hit is named; the killing blow has its own row.
+        r = self.assess([hit(99_600, 920_000, 76_000, ability=1), hit(100_000, 76_000, 0, overkill=734_000)])
+        self.assertEqual(r["deathType"], "oneShot")
+        self.assertNotIn("biggestHit", r)
+        self.assertEqual((r["oneShotHit"]["name"], r["oneShotHit"]["pctOfMax"]), ("Melee", 92))
+        # Two 80%+ hits and the killing blow is the bigger one: nothing more to name.
+        r = self.assess([hit(99_600, 820_000, 176_000, ability=1), hit(100_000, 176_000, 0, overkill=724_000)])
+        self.assertEqual(r["deathType"], "oneShot")
+        self.assertNotIn("oneShotHit", r)
+
+    def test_one_shot_and_burst_need_high_health_within_a_second_and_a_half(self):
+        # Owner's rule (2026-10-08): high health no more than 1.5s before the killing blow.
+        # The press cutoff (REACTION_MS) stays at 1s.
+        self.assertEqual((defensives.BURST_WINDOW_MS, defensives.REACTION_MS), (1_500, 1_000))
+        def at(high_ts):
+            return self.assess([hit(high_ts, 10_000, 900_000), hit(99_500, 200_000, 600_000),
+                                hit(100_000, 600_000, 0, overkill=10_000)])
+        self.assertEqual(at(98_500)["deathType"], "burst")         # exactly 1.5s: inclusive
+        self.assertEqual(at(98_501)["deathType"], "burst")         # 1.499s
+        self.assertEqual(at(98_499)["deathType"], "wasLow")        # 1.501s
+        r = at(98_800)                                             # 1.2s: a burst now, wasLow under 1s
+        self.assertEqual((r["deathType"], r["burstMs"]), ("burst", 1200))
         self.assertNotIn("biggestHit", r)
         # One big chunk among them: a set-up hit, not rot.
         r = self.assess([hit(96_000, 600_000, 400_000), hit(98_000, 150_000, 250_000),
                          hit(100_000, 250_000, 0, overkill=40_000)])
         self.assertNotIn("rot", r)
         self.assertEqual(r["biggestHit"]["pctOfMax"], 60)
+
+    def test_high_health_just_before_a_hit_on_the_killing_blows_millisecond(self):
+        # At 99% (last hit 3s before), then three hits on the killing blow's millisecond: a burst
+        # from 99% at once, not "set up by" (the hits ahead of it on that millisecond count).
+        drops = [hit(97_000, 10_000, 990_000), hit(100_000, 400_000, 590_000, ability=600),
+                 hit(100_000, 400_000, 190_000, ability=600), hit(100_000, 190_000, 0, overkill=200_000, ability=600)]
+        r = self.assess(drops)
+        self.assertEqual((r["deathType"], r["burst"]["hits"], r["burst"]["ms"], r["fromPct"], r["burstMs"]),
+                         ("burst", 3, 0, 99, 0))
+        self.assertNotIn("biggestHit", r)
+        # A small hit 0.5s before: still at 99% until the killing millisecond, so the burst took 0 ms.
+        r = self.assess([hit(99_500, 10_000, 990_000)] + drops[1:])
+        self.assertEqual((r["deathType"], r["burst"]["hits"], r["burst"]["ms"]), ("burst", 3, 0))
+        # From 99%, an 85% hit and a small finishing tick on one millisecond: a one-shot by the 85% hit.
+        r = self.assess([hit(97_000, 10_000, 990_000), hit(100_000, 850_000, 140_000, ability=1),
+                         hit(100_000, 140_000, 0, overkill=50_000)])
+        self.assertEqual((r["deathType"], r["oneShotHit"]["name"], r["oneShotHit"]["pctOfMax"]),
+                         ("oneShot", "Melee", 85))
+        # Exactly 1.5s from high health just before a hit (no point after it is high): inclusive.
+        def before(ts):
+            return self.assess([hit(ts, 300_000, 690_000), hit(100_000, 690_000, 0, overkill=10_000)])
+        self.assertEqual((before(98_500)["deathType"], before(98_500)["burstMs"]), ("burst", 1500))
+        self.assertEqual(before(98_499)["deathType"], "wasLow")
+        # A hit without their health between: they kept what the last hit left until it landed.
+        other = dict(hit(99_000, 100_000, 950_000), resourceActor=1)
+        r = self.assess([hit(97_000, 10_000, 900_000), other, hit(100_000, 800_000, 0, overkill=100_000)])
+        self.assertEqual((r["deathType"], r["fromPct"]), ("oneShot", 90))
+        # Still at 90% just after a shielded hit: that hit isn't "since they were last high".
+        r = self.assess([hit(95_000, 50_000, 900_000, absorbed=400_000, ability=600),
+                         hit(97_000, 500_000, 400_000), hit(100_000, 400_000, 0, overkill=10_000)])
+        self.assertEqual((r["deathType"], r["biggestHit"]["name"]), ("wasLow", "Frost Bolt"))
 
     def test_heals_need_time_to_react(self):
         # The big hit and the tick 50ms apart: no time to heal in between, and at full health before.
@@ -794,6 +1202,42 @@ class LethalWindowTests(unittest.TestCase):
         # 55s is in A's window; 80s and 120s are between deaths (not kept).
         self.assertEqual([h["timestamp"] for h in hits[1]], [55_000, 55_000])
 
+    def test_window_request_reads_the_heals_a_killing_hit_sets_off(self):
+        # One more block over all the pulls (All stream) on the players who died: only the killing-hit heals
+        # (features.KILLING_HIT_HEALS) and their absorbs, and stacking max-health auras' stack changes.
+        queries = []
+
+        def fake(token, q, v):
+            queries.append(q)
+            dmg = {"timestamp": 59_990, "type": "damage", "targetID": 1, "amount": 5, "overkill": 1,
+                   "hitPoints": 0, "maxHitPoints": 10, "resourceActor": 2}
+            heal = {"timestamp": 59_989, "type": "heal", "targetID": 1, "abilityGameID": 404381, "amount": 3,
+                    "sourceID": 9, "overheal": 0}
+            late = dict(heal, timestamp=200_000)
+            report = {a: {"data": [dmg]} for a in __import__("re").findall(r"(p\d+): events", q)}
+            stack = {"timestamp": 59_000, "type": "removebuffstack", "targetID": 1, "abilityGameID": 389539,
+                     "stack": 4, "sourceID": 1}
+            report["extras"] = {"data": [heal, late, stack]}
+            return {"reportData": {"report": report}}
+        with __import__("unittest.mock").mock.patch.object(defensives, "graphql_query", side_effect=fake):
+            hits = defensives.fetch_death_windows("t", "R", [(3, [(60_000, "A")])])
+        self.assertEqual(len(queries), 1)
+        self.assertIn("extras: events(fightIDs: [3]", queries[0])
+        self.assertIn("dataType: All", queries[0])
+        self.assertIn("389539", queries[0])                 # Sentinel's stacks
+        self.assertIn("195181", queries[0])                 # Bone Shield's charges (Foul Bulwark fills it)
+        self.assertIn("97463", queries[0])                  # Rallying Cry: who cast it
+        self.assertIn("47788", queries[0])                  # Guardian Spirit's aura, removed as it heals
+        self.assertIn("404381", queries[0])
+        self.assertIn("209258", queries[0])
+        self.assertEqual([(h["type"], h["timestamp"]) for h in hits[1]],
+                         [("removebuffstack", 59_000), ("heal", 59_989), ("damage", 59_990)])
+        self.assertEqual(hits[1][0]["stack"], 4)
+        self.assertNotIn("overheal", hits[1][0])
+        with __import__("unittest.mock").mock.patch.object(defensives, "graphql_query", side_effect=fake):
+            self.assertEqual([h["type"] for h in defensives.fetch_death_windows("t", "R", [(3, [(60_000, "A")])],
+                                                                                 heals=False)[1]], ["damage"])
+
     def test_identical_hits_at_the_same_moment_all_count(self):
         # Two droplets soaked in the same millisecond for the same amount are two hits.
         same = [hit(99_978, 301_233, 698_767), hit(99_978, 301_233, 397_534)]      # from full health
@@ -850,6 +1294,17 @@ class TalentEffectTests(unittest.TestCase):
         # Improved Ardent Defender reaches Ardent Defender by spell label, not class mask.
         ad = self.by_name(self.tww, "Ardent Defender")
         self.assertIn("Improved Ardent Defender", [m["talent"] for c in ad["mitigation"] for m in c.get("mods", ())])
+
+    def test_strength_of_will_makes_unending_resolve_forty_percent_in_every_patch(self):
+        # Strength of Will (317138: aura 107, a flat -15 on Unending Resolve's -25 reduction) is 0.40 in
+        # every patch; live, back-to-back hits read 0.4000 with it (148 pairs, five Warlocks), 0.25 without.
+        import defensive_catalog
+        for patch in defensive_catalog.CATALOGS:
+            ur = defensive_catalog.CATALOGS[patch][104773]
+            comps, _ = defensives._resolve(ur, {91468: 1}, {})
+            self.assertEqual([c.get("dr") for c in comps if c.get("dr")], [0.4], patch)
+            comps, _ = defensives._resolve(ur, {}, {})
+            self.assertEqual([c.get("dr") for c in comps if c.get("dr")], [0.25], patch)
 
     def test_talent_heal_over_time_carries_its_duration(self):
         ur = self.by_name(defensives._LATEST, "Unending Resolve")
@@ -965,3 +1420,1202 @@ class PotionRankTests(unittest.TestCase):
         r = defensives.potion_rank(sid, cat, [(1, sid, 4_500_000, 9_000_000, 1.0, 500)], {}, None)
         self.assertNotIn("rank", r)
         self.assertEqual(r["unknown"], 4.3)
+
+
+class ReadyTimeTests(unittest.TestCase):
+    """A press is credited only once the ability was really back: its ready time comes from every
+    earlier cast of the report, not only those within one cooldown of the death."""
+    BARKSKIN, FIERY_BRAND = 22812, 204021
+
+    def die(self, player_class, spec, casts, death, talents=frozenset(), fight_start=20_000, big_hit_at=None,
+            other_pulls=None, encounters=None):
+        """`other_pulls`: {fight ID: (start, talents)} of the report's other kept pulls."""
+        indexed = {"casts": {1: sorted(casts)},
+                   "talents": {(7, 1): talents if isinstance(talents, dict) else set(talents),
+                               **{(f, 1): t for f, (_, t) in (other_pulls or {}).items()}}}
+        hits = [hit(big_hit_at or death - 13_000, 400_000, 600_000), hit(death, 600_000, 0, overkill=50_000)]
+        pull_starts = {7: fight_start, **{f: s for f, (s, _) in (other_pulls or {}).items()}}
+        return defensives.analyze_death(1, player_class, spec, 7, fight_start, death, indexed,
+                                        {**NAMES, **{sid: d["name"] for sid, d in CATALOG.items()}}, {},
+                                        hits=hits, ability_schools=SCHOOLS, pull_starts=pull_starts,
+                                        encounters=encounters)
+
+    ICE_BARRIER, COLD_SNAP, CELESTIAL_BREW, BLACK_OX_BREW, FADE = 11426, 235219, 322507, 115399, 586
+
+    def test_cold_snap_brings_ice_barrier_back_at_once(self):
+        # Ice Barrier (30s) pressed at 50s, Cold Snap at 55s: back at 55s, not 80s.
+        r = self.die("Mage", "Frost", [(50_000, self.ICE_BARRIER), (55_000, self.COLD_SNAP)], 63_000,
+                     talents=entries(self.ICE_BARRIER), fight_start=40_000, big_hit_at=54_000)
+        self.assertIn("Ice Barrier", names(r["available"]))
+        self.assertLessEqual(r["survival"]["details"]["Ice Barrier"]["pressAgo"], 8.0)
+
+    def test_a_gap_ended_by_a_reset_is_not_cooldown_reduction(self):
+        # Pressed at 50s, Cold Snap at 55s, pressed again at 56s: the 6s gap is the reset, not a 6s
+        # cooldown, so at 70s it is on cooldown until 86s.
+        casts = [(50_000, self.ICE_BARRIER), (55_000, self.COLD_SNAP), (56_000, self.ICE_BARRIER)]
+        r = self.die("Mage", "Frost", casts, 70_000, talents=entries(self.ICE_BARRIER), fight_start=40_000)
+        self.assertEqual([c["readyIn"] for c in r["cooldown"] if c["name"] == "Ice Barrier"], [16])
+
+    def test_black_ox_brew_gives_back_one_charge_in_midnight(self):
+        # Celestial Brew with Endless Draught (2 charges, 90s): both spent at 50s and 51s; Black Ox Brew at
+        # 55s gives one back ("grants one charge"), pressed at 56s: none left at 60s.
+        talents = entries(self.CELESTIAL_BREW) | {117618}
+        casts = [(50_000, self.CELESTIAL_BREW), (51_000, self.CELESTIAL_BREW), (55_000, self.BLACK_OX_BREW)]
+        r = self.die("Monk", "Brewmaster", casts, 60_000, talents=talents, fight_start=40_000)
+        self.assertIn("Celestial Brew", names(r["available"]))
+        r = self.die("Monk", "Brewmaster", casts + [(56_000, self.CELESTIAL_BREW)], 60_000, talents=talents,
+                     fight_start=40_000)
+        self.assertNotIn("Celestial Brew", names(r["available"]))
+
+    def test_a_gap_across_an_encounter_is_not_cooldown_reduction(self):
+        # Divine Shield (300s): pressed at 200s (pull 3) and 320s (pull 4) is the encounter reset, not a
+        # 120s cooldown. Pressed at 610s in this pull (from 600s): back at 910s, so at 740s on cooldown.
+        talents = entries(642)
+        casts = [(200_000, 642), (320_000, 642), (610_000, 642)]
+        for encounters in (None, [(150_000, 250_000), (300_000, 450_000), (600_000, 800_000)]):
+            r = self.die("Paladin", "Holy", casts, 740_000, talents=talents, fight_start=600_000,
+                         other_pulls={3: (150_000, talents), 4: (300_000, talents)}, encounters=encounters)
+            self.assertEqual([c["readyIn"] for c in r["cooldown"] if c["name"] == "Divine Shield"], [170])
+
+    def test_a_press_after_a_wipe_carries_into_the_next_pull(self):
+        # Long cooldowns reset when the encounter ends. Divine Shield (300s) pressed at 260s, after pull 3
+        # ended (150s to 250s) and before this pull (from 300s): back only at 560s, so at 400s on cooldown.
+        talents = entries(642)
+        encounters = [(150_000, 250_000), (300_000, 500_000)]
+        r = self.die("Paladin", "Holy", [(260_000, 642)], 400_000, talents=talents, fight_start=300_000,
+                     other_pulls={3: (150_000, talents)}, encounters=encounters)
+        self.assertEqual([(c["readyIn"], c["usedAgo"]) for c in r["cooldown"] if c["name"] == "Divine Shield"],
+                         [(160, 140)])
+        # Pressed at 200s, during pull 3: the wipe at 250s reset it, so it is ready in this pull.
+        r = self.die("Paladin", "Holy", [(200_000, 642)], 400_000, talents=talents, fight_start=300_000,
+                     other_pulls={3: (150_000, talents)}, encounters=encounters)
+        self.assertIn("Divine Shield", names(r["available"]))
+
+    def test_each_press_counts_with_its_own_pulls_talents(self):
+        # Fade: 30s, 20s with two ranks of Improved Fade. Pull 3 (from 0) without it, this pull (from 100s)
+        # with it. Pressed at 90s in pull 3: back at 120s, so at 115s it is on cooldown for 5s more.
+        talents = {e: 1 for e in entries(self.FADE)}
+        r = self.die("Priest", "Shadow", [(90_000, self.FADE)], 115_000, talents={**talents, 103836: 2},
+                     fight_start=100_000, other_pulls={3: (0, talents)})
+        self.assertEqual([c["readyIn"] for c in r["cooldown"] if c["name"] == "Fade"], [5])
+
+    def test_a_cast_older_than_one_cooldown_still_sets_the_ready_time(self):
+        # Barkskin (60s) pressed at 0: back at 60s, 3s before the killing blow at 63s. Pressing it
+        # before the big hit at 59s would have saved more, but it wasn't back yet.
+        r = self.die("Druid", "Balance", [(0, self.BARKSKIN)], 63_000, big_hit_at=59_000)
+        self.assertIn("Barkskin", names(r["available"]))
+        self.assertLessEqual(r["survival"]["details"]["Barkskin"]["pressAgo"], 3.0)
+
+    def test_back_less_than_a_second_before_the_killing_blow_is_too_late(self):
+        r = self.die("Druid", "Balance", [(0, self.BARKSKIN)], 60_500)
+        det = r["survival"]["details"]["Barkskin"]
+        self.assertEqual(det.get("why"), "readyTooLate")
+        self.assertNotIn("pressAgo", det)
+        self.assertFalse(r["survival"]["wouldSave"]["Barkskin"])
+
+    def test_charges_come_back_one_at_a_time_over_every_earlier_cast(self):
+        # Fiery Brand with Down in Flames: 2 charges, 48s each. Spent at 0 and 1s, the first charge is
+        # back at 48s (spent at 49s), the next at 96s (spent at 97s), the next only at 144s.
+        talents = entries(self.FIERY_BRAND) | {112876}
+        casts = [(t, self.FIERY_BRAND) for t in (0, 1_000, 49_000, 97_000)]
+        r = self.die("DemonHunter", "Vengeance", casts, 143_000, talents=talents)
+        self.assertNotIn("Fiery Brand", names(r["available"]))
+        self.assertEqual([(c["readyIn"], c["usedAgo"]) for c in r["cooldown"] if c["name"] == "Fiery Brand"],
+                         [(1, 46)])
+
+    def test_angels_mercy_shortens_desperate_prayer(self):
+        # Angel's Mercy (238100): aura 341, -20000 ms on spell category 671, Desperate Prayer's category.
+        import defensive_catalog
+        for patch, cat in defensive_catalog.CATALOGS.items():
+            mods = cat[19236].get("cooldown_mods") or []
+            self.assertIn(-20000, [m.get("add_ms") for m in mods if m["talent"] == "Angel's Mercy"], patch)
+
+
+class MaxHealthBeforeKillingBlowTests(unittest.TestCase):
+    """Health before the killing blow is taken against the max health the player had just before it.
+
+    WCL logs the killing hit after the death removed the player's auras, so its maxHitPoints has lost
+    every max-health aura they had (live 2026-10-08, every one of the four 105% deaths: Strikepal,
+    nerubar p16, auras stripped at 1910329-1910332, killing hit at 1910349 with max 10061382 against
+    11198315 on every hit and heal before; Zorthar, voidspire p58, and Batchester, midnight-s2 p42,
+    lost 5% the same way)."""
+
+    NERUBAR = defensives.catalog_for(1740420145769)          # WgYbA1r7fXdZKtPF, patch 11.0.7
+
+    def assess(self, hits, available=(), **kw):
+        durations = {CATALOG[s]["name"]: CATALOG[s].get("aura_ms") for s in available}
+        return defensives.assess_survival(hits, hits[-1]["timestamp"], ready(*available), [], NAMES, SCHOOLS,
+                                          aura_ms=durations, **kw)
+
+    @staticmethod
+    def at(ts, amount, hp_after, max_hp, overkill=0, absorbed=0, ability=500, buffs=()):
+        return dict(hit(ts, amount, hp_after, overkill=overkill, absorbed=absorbed, ability=ability),
+                    maxHitPoints=max_hp, buffs="".join(f"{a}." for a in buffs))
+
+    def sizer(self, player_class="Warrior", spec="Arms", cat=None, names=None):
+        cat = cat or self.NERUBAR
+        return defensives._aura_sizer(cat, player_class, spec, {}, names or {})
+
+    def test_strikepal_max_health_is_the_last_hit_before_the_killing_blow(self):
+        # Live: last hit 1908720 at 6243724 / 11198315, healed to 10531185, then Phase Lunge for
+        # 10531185 + 4552041 overkill + 829401 absorbed, logged with max 10061382.
+        hits = [self.at(1_908_720, 60_714, 6_243_724, 11_198_315),
+                self.at(1_910_349, 10_531_185, 0, 10_061_382, overkill=4_552_041, absorbed=829_401)]
+        r = self.assess(hits, available=[DIVINE_SHIELD])
+        self.assertEqual(r["maxHp"], 11_198_315)
+        self.assertEqual(r["hpBeforePct"], 94)
+        self.assertEqual(r["killingHit"]["pctOfMax"], 142)
+        self.assertEqual(r["deathType"], "oneShot")
+        self.assertTrue(r["wouldSave"]["Divine Shield"])
+        missing = 11_198_315 - 10_531_185
+        self.assertLessEqual(r["details"]["Divine Shield"]["amount"], missing + 15_912_627 + 1)
+
+    def test_full_health_one_shot_reads_100_percent(self):
+        # Live (Zorthar, voidspire p58): 557900 / 557900, Melee for 557900 + 501183 overkill, logged
+        # with max 531340 (557900 / 1.05).
+        hits = [self.at(6_941_373, 14_798, 543_102, 557_900),
+                self.at(6_943_162, 557_900, 0, 531_340, overkill=501_183, ability=1)]
+        r = self.assess(hits)
+        self.assertEqual((r["maxHp"], r["hpBeforePct"], r["killingHit"]["pctOfMax"]), (557_900, 100, 190))
+
+    def test_auras_lost_before_the_killing_blow_come_off_by_game_data(self):
+        # Live (Nerub-ar, 11.0.7): Black Attunement (403295, +2% max health) on the last hit, not on the
+        # killing hit; the killing hit took exactly 7587780, its own max. 98% was wrong, 100% is right.
+        hits = [self.at(8_773_545, 10_000, 7_700_000, 7_739_535, buffs=[403295]),
+                self.at(8_775_890, 7_587_780, 0, 7_587_780, overkill=1_000_000)]
+        r = self.assess(hits, aura_size=self.sizer())
+        self.assertEqual((r["maxHp"], r["hpBeforePct"]), (7_587_780, 100))
+        # gZBT7Y1j8dNCbwqp actor 14 at 3182550: Fortitude of the Bear (388035, +20% in 11.0.7) ran out.
+        hits = [self.at(3_177_579, 10_000, 3_000_000, 9_256_106, buffs=[388035]),
+                self.at(3_182_550, 2_246_960, 0, 7_713_421, overkill=500_000)]
+        r = self.assess(hits, aura_size=self.sizer("Hunter", "BeastMastery"))
+        self.assertEqual((r["maxHp"], r["hpBeforePct"]), (7_713_422, 29))
+        # An aura on the killing hit that wasn't on the last hit came up in between (Vampiric Blood +30%).
+        hits = [self.at(95_000, 10_000, 500_000, 1_000_000), self.at(100_000, 600_000, 0, 1_000_000,
+                                                                       overkill=1, buffs=[55233])]
+        r = self.assess(hits, aura_size=self.sizer("DeathKnight", "Blood"))
+        self.assertEqual((r["maxHp"], r["hpBeforePct"]), (1_300_000, 46))
+
+    def test_a_list_change_the_max_has_not_caught_up_with(self):
+        # Live (bpQCAqm89GhTLW7Z actor 19): Black Attunement left the list at 3055385 but the max read
+        # 7359162 until later; the killing hit at 3055954 took exactly 7214865 = 7359162 / 1.02.
+        hits = [self.at(3_054_635, 10_000, 7_300_000, 7_359_162, buffs=[403295]),
+                self.at(3_055_385, 10_000, 7_290_000, 7_359_162),
+                self.at(3_055_954, 7_214_865, 0, 7_214_865, overkill=1_000_000)]
+        r = self.assess(hits, aura_size=self.sizer())
+        self.assertEqual((r["maxHp"], r["hpBeforePct"]), (7_214_865, 100))
+
+    def test_havoc_metamorphosis_is_not_vengeances(self):
+        # Havoc's Metamorphosis (162264) has no max-health effect; Vengeance's (187827) is +40%.
+        names = {162264: "Metamorphosis", 187827: "Metamorphosis"}
+        hits = [self.at(95_000, 10_000, 1_000_000, 1_000_000),
+                self.at(100_000, 1_000_000, 0, 1_000_000, overkill=1, buffs=[162264])]
+        r = self.assess(hits, aura_size=self.sizer("DemonHunter", "Havoc", names=names))
+        self.assertEqual((r["maxHp"], r["hpBeforePct"], r["deathType"]), (1_000_000, 100, "oneShot"))
+        hits[-1]["buffs"] = "187827."
+        r = self.assess(hits, aura_size=self.sizer("DemonHunter", "Vengeance", names=names))
+        self.assertEqual(r["maxHp"], 1_400_000)
+
+    @staticmethod
+    def healed(ts, amount, ability, kind="heal"):
+        return {"timestamp": ts, "type": kind, "targetID": 1, "abilityGameID": ability, "amount": amount}
+
+    def test_what_the_killing_hit_healed_is_not_health_before_it(self):
+        # Live (Soulcleavi, manaforge p54): at 18995479 / 29370419 when Oblivion landed; Last Resort
+        # (209258) absorbed part of it and put him in Metamorphosis, which healed 11748168 (187827) in the
+        # same moment; the hit was logged at 8002696 with 30743644 taken. Health before the blow: 65%.
+        hits = [self.at(8_000_138, 900_304, 15_378_866, 29_370_419),
+                dict(hit(8_001_031, 0, 0), resourceActor=None, maxHitPoints=None, hitPoints=None),
+                self.healed(8_002_681, 58_740_838, 209258, "absorbed"), self.healed(8_002_681, 11_748_168, 187827),
+                self.at(8_002_696, 30_743_644, 0, 29_370_419, overkill=39_340_044, absorbed=58_740_840)]
+        r = self.assess(hits)
+        self.assertEqual((r["maxHp"], r["hpBeforePct"]), (29_370_419, 65))
+        # A Metamorphosis heal without Last Resort's absorb with it is an ordinary press: not the blow's.
+        self.assertEqual(self.assess([h for h in hits if h.get("abilityGameID") != 209258])["hpBeforePct"], 100)
+        # Heals before the hit before the killing hit were health they had.
+        hits[1]["timestamp"] = 8_002_690
+        self.assertEqual(self.assess(hits)["hpBeforePct"], 100)
+
+    def test_a_cheat_death_heal_inside_the_killing_hit(self):
+        # Live (Arzoker, Quel'Danas p34, k9mC7RxjKPt1TgZW): 339946 / 507980 on his last hit; Defy Fate
+        # (404381) healed 136670 inside Terminate and an Ebon Might heal (395152, 92026) landed with it;
+        # Terminate read 507980 taken. Before the blow: 507980 - 136670 = 371310, 73%: not a one-shot
+        # from full health.
+        hits = [self.at(23_324_344, 58_669, 339_946, 507_980),
+                self.healed(23_325_226, 1_015_960, 404195, "absorbed"),
+                self.healed(23_325_226, 136_670, 404381), self.healed(23_325_226, 92_026, 395152),
+                self.at(23_325_227, 507_980, 0, 507_980, overkill=2_896_634, absorbed=1_015_960, ability=1)]
+        r = self.assess(hits)
+        self.assertEqual((r["maxHp"], r["hpBeforePct"], r["deathType"]), (507_980, 73, "wasLow"))
+        # Padflash (Manaforge p79): Cauterize (87023) healed 2919591, leaving exactly his hit-before 2903317.
+        hits = [self.at(26_609_056, 3_896_114, 2_903_317, 16_636_880), self.healed(26_609_235, 2_919_591, 87023),
+                self.healed(26_609_236, 33_273_760, 86949, "absorbed"),
+                self.at(26_609_251, 5_822_908, 0, 16_636_880, overkill=41_093_092, absorbed=33_273_760)]
+        self.assertEqual(self.assess(hits)["hpBeforePct"], 17)          # 2903317 / 16636880
+        # Live (Alemonk, Quel'Danas p32): a Defy Fate heal 1 ms after the hit before and 31 ms before the
+        # killing hit, with no Defy Fate absorb of the killing hit: health they had (301048, 62%).
+        hits = [self.at(22_878_976, 19_449, 277_176, 489_498), self.healed(22_878_977, 23_288, 404381),
+                self.at(22_879_008, 301_048, 0, 489_498, overkill=10_145)]
+        self.assertEqual(self.assess(hits)["hpBeforePct"], 62)
+
+    def test_a_cheat_death_aura_used_up_by_the_killing_hit(self):
+        # Guardian Spirit, Ardent Defender and All-Devouring Nucleus carry EffectAura 316 like Defy Fate; WCL
+        # logs no absorb for Guardian Spirit, it removes the aura as it heals (live, Manaforge
+        # 2VtyDR4CF6PGLjbd p75: 47788 removed at 25624450, 48153 healed 981289 at 25624451).
+        removed = dict(self.healed(25_624_450, None, 47788, "removebuff"), sourceID=277)
+        hits = [self.at(25_624_000, 100_000, 1_000_000, 4_000_000), removed,
+                self.healed(25_624_451, 1_600_000, 48153),
+                self.at(25_624_460, 2_600_000, 0, 4_000_000, overkill=5_000_000)]
+        self.assertEqual(self.assess(hits)["hpBeforePct"], 25)          # (2600000 - 1600000) / 4000000
+        # A Guardian Spirit heal without its aura going after the hit before is not the killing hit's.
+        hits[1]["timestamp"] = 25_623_990
+        self.assertEqual(self.assess(hits)["hpBeforePct"], 65)
+        self.assertEqual({h: features.KILLING_HIT_HEALS[h] for h in (48153, 66235, 1236692)},
+                         {48153: 47788, 66235: 31850, 1236692: 1235500})
+        # Arzoker p89: Defy Fate healed 42827 at 13395295 and absorbed its part of Terminate at 13395314,
+        # 19 ms apart, both after the hit before: the killing hit's.
+        hits = [self.at(13_394_226, 37_642, 433_271, 507_980), self.healed(13_395_294, 507_980, 410355, "absorbed"),
+                self.healed(13_395_295, 42_827, 404381), self.healed(13_395_314, 1_015_960, 404195, "absorbed"),
+                self.at(13_395_315, 507_980, 0, 507_980, overkill=922_534, absorbed=1_523_940)]
+        self.assertEqual(self.assess(hits)["hpBeforePct"], 92)          # 465153 / 507980
+
+    def test_a_stacking_aura_counts_per_stack(self):
+        # Sentinel (389539): +1% max health per stack, 15 stacks (game data: CumulativeAura 15, "per
+        # stack"), losing one a second. 15 stacks on the last hit, 3 at the killing blow: x1.03 / 1.15.
+        sizer = defensives._aura_sizer(defensives._LATEST, "Paladin", "Protection", {})
+        self.assertEqual(sizer.stacks(389539), 15)
+        aura = lambda ts, kind, n: {"timestamp": ts, "type": kind, "targetID": 1, "abilityGameID": 389539, "stack": n}
+        hits = [aura(89_000, "applybuffstack", 15), self.at(90_000, 10_000, 1_000_000, 1_150_000, buffs=[389539]),
+                aura(95_000, "removebuffstack", 9), aura(98_000, "removebuffstack", 3),
+                self.at(100_000, 900_000, 0, 1_000_000, overkill=1, buffs=[389539])]
+        r = self.assess(hits, aura_size=sizer)
+        self.assertEqual(r["maxHp"], round(1_150_000 * 1.03 / 1.15))
+        # Without its stack events the stacks can't be told: the last hit's max stands.
+        r = self.assess([hits[1], hits[-1]], aura_size=sizer)
+        self.assertEqual(r["maxHp"], 1_150_000)
+        self.assertEqual(defensives._stacks_at([aura(95_000, "removebuffstack", 9)], 389539, 90_000), 10)
+
+    def test_earlier_hits_are_measured_against_the_max_they_had_then(self):
+        # A 300k hit at 1M max is 30% of max, even though Vampiric Blood ran out before the killing blow.
+        hits = [self.at(90_000, 300_000, 700_000, 1_300_000, buffs=[55233]),
+                self.at(99_000, 10_000, 680_000, 1_000_000),
+                self.at(100_000, 680_000, 0, 1_000_000, overkill=50_000)]
+        r = self.assess(hits, aura_size=self.sizer("DeathKnight", "Blood"))
+        self.assertEqual(r["biggestHit"]["pctOfMax"], 23)          # 300k of 1.3M
+        self.assertEqual(r["deathType"], "wasLow")
+
+    def test_a_recorded_gain_on_the_killing_blow_is_kept(self):
+        hits = [self.at(95_000, 100_000, 600_000, 1_000_000),
+                self.at(100_000, 600_000, 0, 1_100_000, overkill=200_000)]
+        self.assertEqual(self.assess(hits)["maxHp"], 1_100_000)
+
+    def test_replay_caps_extra_health_with_the_max_before_the_killing_blow(self):
+        hits = [self.at(95_000, 10_000, 940_000, 1_000_000),
+                self.at(100_000, 940_000, 0, 900_000, overkill=50_000)]
+        r = self.assess(hits, available=[EXHIL])
+        self.assertEqual(r["hpBeforePct"], 94)
+        self.assertTrue(r["wouldSave"]["Exhilaration"])       # 60k missing > 50k overkill
+
+    def test_soulburn_healthstone_is_a_max_health_aura(self):
+        # Game data: Soulburn: Healthstone (387636), EffectAura 133, +20% max health.
+        self.assertEqual(defensives.max_health_size(387636, "11.0.7"), (0.2, 0))
+
+
+class MaxHealthWhereTheGameDataPutsItTests(unittest.TestCase):
+    """An aura's max-health effect is sized from where the game data puts it (max_health_auras.py)."""
+
+    def assess(self, hits, sizer):
+        return defensives.assess_survival(hits, hits[-1]["timestamp"], [], [], NAMES, SCHOOLS, aura_size=sizer)
+
+    @staticmethod
+    def at(ts, amount, hp_after, max_hp, overkill=0, buffs=()):
+        return dict(hit(ts, amount, hp_after, overkill=overkill), maxHitPoints=max_hp,
+                    buffs="".join(f"{a}." for a in buffs))
+
+    def sizer(self, cls, spec, talents=None):
+        return defensives._aura_sizer(defensives._LATEST, cls, spec, talents or {})
+
+    def test_a_restoration_druid_shifting_to_bear_form(self):
+        # Bear Form (5487) has no max-health effect of its own; its text names its passive 1178's
+        # Stamina +25% ("Stamina increased by $1178s2%"), which every druid's Bear Form carries.
+        hits = [self.at(95_000, 10_000, 600_000, 1_000_000),
+                self.at(100_000, 625_000, 0, 1_000_000, overkill=1, buffs=[5487])]
+        r = self.assess(hits, self.sizer("Druid", "Restoration"))
+        self.assertEqual((r["maxHp"], r["hpBeforePct"]), (1_250_000, 50))
+        # A Guardian's Bear Form also has the spec passive's +10% (270100), Ursoc's Spirit +5% (talent).
+        latest = defensives._LATEST.patch
+        self.assertEqual(defensives.max_health_size(5487, latest, {}, "Guardian"), (0.35, 0))
+        self.assertEqual(defensives.max_health_size(5487, latest, {103297: 1}, "Guardian"), (0.4, 0))
+
+    def test_fount_of_strength_on_frenzied_regeneration(self):
+        # Fount of Strength (441675): "Frenzied Regeneration also increases your maximum health by $s3%"
+        # (10); only with the talent (entry 117218).
+        latest = defensives._LATEST.patch
+        self.assertEqual(defensives.max_health_size(22842, latest, {}, "Guardian"), (0.0, 0))
+        self.assertEqual(defensives.max_health_size(22842, latest, {117218: 1}, "Guardian"), (0.1, 0))
+        hits = [self.at(95_000, 10_000, 500_000, 1_000_000),
+                self.at(100_000, 550_000, 0, 1_000_000, overkill=1, buffs=[22842])]
+        r = self.assess(hits, self.sizer("Druid", "Guardian", {117218: 1}))
+        self.assertEqual((r["maxHp"], r["hpBeforePct"]), (1_100_000, 50))
+
+    def test_talents_on_other_buttons_and_stat_debuffs(self):
+        latest = defensives._LATEST.patch
+        # Fortifying Brew 20% ($health = 115203 s1), Ironshell Brew +10%.
+        self.assertEqual(defensives.max_health_size(120954, latest, {101498: 1}, "Brewmaster"), (0.3, 0))
+        # Desperate Prayer 25%, Light's Inspiration +10%; Barkskin only with Ward of the Forest (+20%).
+        self.assertEqual(defensives.max_health_size(19236, latest, {103826: 1}, "Holy"), (0.35, 0))
+        self.assertEqual(defensives.max_health_size(22812, latest, {}, "Guardian"), (0.0, 0))
+        self.assertEqual(defensives.max_health_size(22812, latest, {103224: 1}, "Guardian"), (0.2, 0))
+        # Havoc's Metamorphosis stays at nothing; Hexing Strike (EffectAura 80, all stats -5%) lowers it.
+        self.assertEqual(defensives.max_health_size(162264, latest, {}, "Havoc"), (0.0, 0))
+        self.assertEqual(defensives.max_health_size(1260567, latest), (-0.05, 0))
+
+    def test_base_points_zero_that_talents_fill(self):
+        # Game data 12.1.0: Bone Shield 195181 effect 2 is EffectAura 133 with base points 0; Foul Bulwark
+        # 206974 (entry 96302) adds 1 to it (EffectAura 107 on effect 2): +1% max health per charge.
+        # Ancestral Vigor 207400 effect 0 (133, bp 0) gets +5 from its talent 207401; Grimoire of Sacrifice
+        # 196099 effect 1 (137 Stamina, bp 0) +3 from Profane Bargain 389576.
+        latest = defensives._LATEST.patch
+        self.assertEqual(defensives.max_health_size(195181, latest, {}, "Blood"), (0.0, 0))
+        self.assertEqual(defensives.max_health_size(195181, latest, {96302: 1}, "Blood"), (0.01, 0))
+        self.assertEqual(defensives.max_health_size(207400, latest, {}, "Restoration"), (0.0, 0))
+        self.assertEqual(defensives.max_health_size(207400, latest, {101909: 1}, "Restoration"), (0.05, 0))
+        self.assertEqual(defensives.max_health_size(196099, latest, {91426: 1}, "Affliction"), (0.03, 0))
+        # Improved Ardent Defender's +20% is its modifier on Ardent Defender's own effect 4, counted once.
+        self.assertEqual(defensives.max_health_size(31850, latest, {102441: 1}, "Protection"), (0.2, 0))
+        # The loadouts the site reads keep those talents.
+        self.assertTrue({96302, 101909, 91426, 134033} <= defensives._LATEST.relevant_talent_entries)
+        # Bone Shield with Foul Bulwark: 10 charges on the last hit, 5 at the killing blow -> x1.05 / 1.10.
+        sizer = self.sizer("DeathKnight", "Blood", {96302: 1})
+        aura = lambda ts, kind, n: {"timestamp": ts, "type": kind, "targetID": 1, "abilityGameID": 195181,
+                                    "stack": n, "sourceID": 1}
+        hits = [aura(89_000, "applybuffstack", 10), self.at(90_000, 10_000, 1_000_000, 1_100_000, buffs=[195181]),
+                aura(95_000, "removebuffstack", 5),
+                self.at(100_000, 900_000, 0, 1_000_000, overkill=1, buffs=[195181])]
+        self.assertEqual(self.assess(hits, sizer)["maxHp"], 1_050_000)
+        # Without the talent the charges change nothing.
+        self.assertEqual(self.assess(hits, self.sizer("DeathKnight", "Blood"))["maxHp"], 1_100_000)
+
+    def test_an_aura_is_sized_with_its_casters_loadout(self):
+        # Live (Voidspire, P6CwHkgFR9Krf1Bz p43, actor 8): 511853 max on the hit at 4525705; actor 24, a
+        # warrior with Battlefield Commander (entry 134033, +2%) and not Inspiring Presence, cast Rallying
+        # Cry 97463 on him at 4526123; the next hit read 573274 = 511853 x 1.12. Actor 8 has neither talent.
+        loadouts = {24: ({134033: 1}, "Fury")}
+        sizer = defensives._aura_sizer(defensives._LATEST, "Priest", "Discipline", {}, None, 8, loadouts.get)
+        cry = {"timestamp": 4_526_123, "type": "applybuff", "sourceID": 24, "targetID": 8, "abilityGameID": 97463}
+        hits = [self.at(4_525_705, 10_000, 400_000, 511_853), cry,
+                self.at(4_526_791, 500_000, 0, 511_853, overkill=1, buffs=[97463])]
+        self.assertEqual(self.assess(hits, sizer)["maxHp"], 573_275)
+        # With the target's own loadout it would read x1.10.
+        self.assertEqual(defensives.max_health_size(97463, defensives._LATEST.patch, {}, "Discipline"), (0.1, 0))
+        # A caster whose loadout isn't known: left as it was (the last hit's max).
+        sizer = defensives._aura_sizer(defensives._LATEST, "Priest", "Discipline", {}, None, 8, {}.get)
+        self.assertEqual(self.assess(hits, sizer)["maxHp"], 511_853)
+        # A self-cast aura uses the player's own loadout.
+        self.assertEqual(sizer.by_caster(97463, 8), (0.1, 0))
+
+    def test_every_players_loadout_is_kept(self):
+        # Another player's talents size an aura they cast on a player who died.
+        raw = {"combatants": [{"type": "combatantinfo", "fight": 3, "sourceID": 24, "specID": 72,
+                               "talentTree": [{"id": 134033, "rank": 1}, {"id": 1, "rank": 1}]}]}
+        idx = defensives.filter_defensive_raw(raw, {8})
+        self.assertEqual(idx["talents"][(3, 24)], {134033: 1})
+        self.assertEqual(idx["specs"][(3, 24)], "Fury")
+
+
+STAGGER_TICK, DAMPEN_HARM, DIFFUSE_MAGIC = 124255, 122278, 122783
+
+
+def stagger_tick(ts, amount, hp_after, overkill=0):
+    """A Brewmaster's own Stagger tick as WCL logs it: source and target are the Monk, and a
+    `mitigated` share is listed (0.600 through while Invoke Niuzao takes 40% of each tick, defensives or not)."""
+    raw = (amount + overkill) / 0.6
+    return {"timestamp": ts, "type": "damage", "sourceID": 1, "targetID": 1, "abilityGameID": STAGGER_TICK,
+            "amount": amount, "overkill": overkill, "absorbed": 0, "mitigated": round(raw * 0.4),
+            "unmitigatedAmount": round(raw), "hitPoints": hp_after, "maxHitPoints": MAX, "resourceActor": 2}
+
+
+class StaggerTests(unittest.TestCase):
+    """Stagger (115069) is an absorb aura (aura 69): damage reductions cut the hit first, Stagger then
+    delays a share of what is left into ticks of 124255 every 0.5 s over 10 s. A tick is never reduced by
+    a defensive up while it ticks (Weavi, Undermine: 246 ticks under Fortifying Brew, 26 under Dampen
+    Harm, 1.000 through, or 0.600 with Invoke Niuzao up, as without them), while shields absorb ticks
+    (1194 of Weavi's ticks absorbed)."""
+
+    def assess(self, hits, available, spec="Brewmaster"):
+        durations = {CATALOG[s]["name"]: CATALOG[s].get("aura_ms") for s in available}
+        return defensives.assess_survival(hits, 100_000, ready(*available), [], NAMES, SCHOOLS,
+                                          aura_ms=durations, spec=spec)
+
+    def test_a_stagger_tick_is_never_reduced(self):
+        hits = [stagger_tick(99_500, 100_000, 300_000), stagger_tick(100_000, 300_000, 0, overkill=50_000)]
+        r = self.assess(hits, [DAMPEN_HARM])
+        self.assertFalse(r["wouldSave"]["Dampen Harm"])
+        self.assertEqual(r["details"]["Dampen Harm"]["amount"], 0)
+        self.assertEqual(r["details"]["Dampen Harm"]["why"], "stagger")
+        self.assertTrue(r["ignoresReduction"])
+        self.assertTrue(r["staggerTick"])
+
+    def test_shields_still_absorb_a_stagger_tick(self):
+        kb = stagger_tick(100_000, 300_000, 0, overkill=50_000)
+        self.assertAlmostEqual(defensives._prevented([{"absorb": 0.3}], kb, MAX, 700_000, SCHOOLS), 300_000)
+        self.assertEqual(defensives._prevented([{"dr": 0.5}], kb, MAX, 700_000, SCHOOLS), 0)
+
+    def test_a_reduction_counts_only_on_the_part_of_a_hit_that_was_not_staggered(self):
+        # A 800k Frost hit: 400k taken at once, 400k staggered (WCL logs it as absorbed) into ticks
+        # after it. Diffuse Magic (60% magic) pressed before it shrinks both parts, but the staggered
+        # part would only have ticked later, by an amount the log can't give (Purifying Brew, the pool's
+        # other hits): only the part taken at once counts, 240k, short of the 300k overkill.
+        hits = [hit(97_000, 400_000, 600_000, absorbed=400_000),
+                stagger_tick(100_000, 600_000, 0, overkill=300_000)]
+        brew = self.assess(hits, [DIFFUSE_MAGIC])
+        self.assertAlmostEqual(brew["details"]["Diffuse Magic"]["amount"], 240_000, delta=1)
+        self.assertFalse(brew["wouldSave"]["Diffuse Magic"])
+        # Anyone else's absorbed part is a shield's: the reduction saves it for later hits.
+        other = self.assess(hits, [DIFFUSE_MAGIC], spec="Frost")
+        self.assertAlmostEqual(other["details"]["Diffuse Magic"]["amount"], 400_000, delta=1)
+
+
+FIERY_BRAND, BRANDED = 204021, 207771
+
+
+def enemy_hit(ts, amount, hp_after, source, instance=None, overkill=0, auras=()):
+    h = dict(hit(ts, amount, hp_after, overkill=overkill), sourceID=source,
+             buffs="".join(f"{a}." for a in auras))
+    if instance is not None:
+        h["sourceInstance"] = instance
+    return h
+
+
+class FieryBrandTests(unittest.TestCase):
+    """Fiery Brand by patch, from the game data (207771 effect 0):
+    - The War Within (11.x): aura 269 on the branded enemy, "dealing 40% less damage to" the Demon Hunter.
+      Measured on adjacent hit pairs: the branded unit's hits 0.400 (Lazelele, Nerub-ar, 123 pairs;
+      Lunchay, Undermine, 288 pairs), other units' hits 0.00 / -0.025 (77 pairs).
+    - Midnight (12.0.0 on): aura 87 on the Demon Hunter himself (implicit target: caster), "reducing the
+      damage you take by 40%": every hit. Felvix, Voidspire (Lightblinded Vanguard, 3 bosses): 207771 is a
+      buff on him; hits from the branded boss read 0.585 of unbranded, the other bosses' 0.564."""
+
+    def assess(self, hits, patch="11.0.7", friendlies=(), attackable=(50, 60)):
+        entry = defensives._CATALOGS[patch].all[FIERY_BRAND]
+        return defensives.assess_survival(hits, 100_000, [entry], [], NAMES, SCHOOLS,
+                                          aura_ms={"Fiery Brand": entry["aura_ms"]}, friendly_ids=set(friendlies),
+                                          attackable=None if attackable is None else set(attackable))
+
+    def test_the_catalog_follows_the_patch(self):
+        self.assertEqual(defensives._CATALOGS["11.0.7"].all[FIERY_BRAND]["mitigation"],
+                         [{"dr": 0.4, "from_target": BRANDED}])
+        self.assertEqual(defensives._CATALOGS["12.0.0"].all[FIERY_BRAND]["mitigation"], [{"dr": 0.4}])
+
+    def test_the_war_within_brands_one_enemy_the_best(self):
+        # A 600k hit from the boss (unit 50), then a 500k hit from an add (unit 60) kills (100k overkill).
+        hits = [enemy_hit(97_000, 600_000, 400_000, source=50),
+                enemy_hit(100_000, 400_000, 0, source=60, overkill=100_000)]
+        # Branded, the boss's hit is 240k smaller, the add's 200k: the boss is the better target. Never both.
+        r = self.assess(hits)
+        self.assertAlmostEqual(r["details"]["Fiery Brand"]["amount"], 240_000, delta=1)
+        self.assertTrue(r["wouldSave"]["Fiery Brand"])
+        # In Midnight it is on the Demon Hunter: 40% of both hits.
+        mid = self.assess(hits, patch="12.0.0")
+        self.assertAlmostEqual(mid["details"]["Fiery Brand"]["amount"], 0.4 * 1_100_000, delta=1)
+
+    def test_only_an_enemy_the_raid_attacked_can_be_branded(self):
+        # The killing hit came from a rocket nobody damaged (Goblin Guided Rocket): the boss is the only target.
+        hits = [enemy_hit(97_000, 600_000, 400_000, source=50),
+                enemy_hit(100_000, 400_000, 0, source=60, overkill=300_000)]
+        r = self.assess(hits, attackable=(50,))
+        self.assertAlmostEqual(r["details"]["Fiery Brand"]["amount"], 240_000, delta=1)
+        self.assertFalse(r["wouldSave"]["Fiery Brand"])
+        # Nobody it could brand hit them: it helps nothing.
+        r = self.assess(hits, attackable=())
+        self.assertEqual(r["details"]["Fiery Brand"]["amount"], 0)
+        self.assertEqual(r["details"]["Fiery Brand"]["why"], "notBranded")
+        self.assertFalse(r["wouldSave"]["Fiery Brand"])
+        # Which units the raid attacked isn't known: can't tell.
+        r = self.assess(hits, attackable=None)
+        self.assertIsNone(r["wouldSave"]["Fiery Brand"])
+        self.assertEqual(r["details"]["Fiery Brand"]["why"], "brandUnknown")
+
+    def test_another_instance_of_the_same_add_is_branded_on_its_own(self):
+        hits = [enemy_hit(97_000, 600_000, 400_000, source=60, instance=2),
+                enemy_hit(100_000, 400_000, 0, source=60, instance=1, overkill=300_000)]
+        r = self.assess(hits)
+        self.assertAlmostEqual(r["details"]["Fiery Brand"]["amount"], 0.4 * 700_000, delta=1)
+        self.assertFalse(r["wouldSave"]["Fiery Brand"])
+
+    def test_nothing_to_brand_for_the_environment_or_a_friend(self):
+        for source, friends in ((-1, ()), (None, ()), (7, (7,))):
+            hits = [enemy_hit(100_000, 400_000, 0, source=source, overkill=100_000)]
+            r = self.assess(hits, friendlies=friends, attackable=(-1, 7))
+            self.assertEqual(r["details"]["Fiery Brand"]["amount"], 0, source)
+            self.assertEqual(r["details"]["Fiery Brand"]["why"], "notBranded", source)
+            self.assertFalse(r["wouldSave"]["Fiery Brand"], source)
+
+    def test_hits_from_a_unit_already_branded_are_not_cut_again(self):
+        # The boss was branded for the first hit (WCL lists 207771 on it: already 40% smaller).
+        hits = [enemy_hit(97_000, 600_000, 400_000, source=50, auras=(BRANDED,)),
+                enemy_hit(100_000, 400_000, 0, source=50, overkill=300_000)]
+        r = self.assess(hits)
+        self.assertAlmostEqual(r["details"]["Fiery Brand"]["amount"], 0.4 * 700_000, delta=1)
+
+
+class DampenHarmTests(unittest.TestCase):
+    """Dampen Harm (122278): "Reduces all damage you take by 20% to 50% ..., with larger attacks being
+    reduced by more" (effects 1 and 2: dummies of 20 and 50, no curve in the data). Fitted on real hits
+    (Atlai and Weavi, Undermine): 0.20 + 0.30 x min(x, 1), x the hit after the player's other reductions
+    as a share of their max health (0.285 at x = 0.285, 0.350 at 0.500, 0.383 at 0.610)."""
+    DH = {"dr": 0.2, "dr_hit": 0.5}
+
+    def test_the_catalog_carries_both_ends_from_the_game_data(self):
+        for patch in ("11.0.2", "12.1.0"):
+            self.assertEqual(defensives._CATALOGS[patch].all[DAMPEN_HARM]["mitigation"], [self.DH])
+
+    def test_larger_hits_are_reduced_by_more(self):
+        kb = hit(100_000, 400_000, 0, overkill=200_000)               # 600k: x = 0.6, cut 0.38
+        self.assertAlmostEqual(defensives._prevented([self.DH], kb, MAX, 600_000, SCHOOLS), 0.38 * 600_000)
+        small = hit(100_000, 50_000, 0, overkill=50_000)              # 100k: x = 0.1, cut 0.23
+        self.assertAlmostEqual(defensives._prevented([self.DH], small, MAX, 50_000, SCHOOLS), 0.23 * 100_000)
+
+    def test_capped_at_half_for_a_hit_of_max_health_or_more(self):
+        kb = hit(100_000, 1_000_000, 0, overkill=500_000)             # 1.5M: x = 1.5, cut 0.50
+        self.assertAlmostEqual(defensives._prevented([self.DH], kb, MAX, 0, SCHOOLS), 0.5 * 1_500_000)
+
+    def test_size_after_the_other_reductions_pressed_with_it(self):
+        # Shield Wall's 40% first: 1M becomes 600k, x = 0.6, Dampen Harm cuts 0.38 of that.
+        kb = hit(100_000, 1_000_000, 0)
+        keep = 0.6 * (1 - 0.38)
+        self.assertAlmostEqual(defensives._prevented([{"dr": 0.4}, self.DH], kb, MAX, 0, SCHOOLS), (1 - keep) * 1_000_000)
+
+    def test_size_after_armor_pressed_with_it(self):
+        # Bear Form's +220% armor on a melee swing first: 10k armor against K = 10k takes 50%, 32k takes
+        # 76.2%, so the hit keeps 0.238 / 0.5 = 0.476 of itself; x = 0.476, Dampen Harm cuts 0.343 of that.
+        kb = dict(hit(100_000, 1_000_000, 0, ability=1), armor=10_000, armorK=10_000)
+        armor_keep = (1 - 32_000 / 42_000) / 0.5
+        keep = armor_keep * (1 - (0.2 + 0.3 * armor_keep))
+        self.assertAlmostEqual(defensives._prevented([{"armor": 2.2}, self.DH], kb, MAX, 0, {1: PHYS}),
+                               (1 - keep) * 1_000_000, delta=1)
+
+    def test_size_against_the_max_health_they_had_at_that_hit(self):
+        # The same 600k hit on a player with 2M max health: x = 0.3, cut 0.29.
+        kb = dict(hit(100_000, 400_000, 0, overkill=200_000), maxHitPoints=2 * MAX)
+        self.assertAlmostEqual(defensives._prevented([self.DH], kb, 2 * MAX, 1_600_000, SCHOOLS), 0.29 * 600_000)
+
+
+def pool_tick(ts, raw, hp_after, overkill=0):
+    """A Stagger tick nothing reduced: its size is what it took off the pool."""
+    return {"timestamp": ts, "type": "damage", "sourceID": 1, "targetID": 1, "abilityGameID": STAGGER_TICK,
+            "amount": raw - overkill, "overkill": overkill, "absorbed": 0, "unmitigatedAmount": raw,
+            "hitPoints": hp_after, "maxHitPoints": MAX, "resourceActor": 2}
+
+
+def staggered(ts, amount, source=50, ability=500):
+    """WCL's absorbed event for the share of a hit Stagger delayed."""
+    return {"timestamp": ts, "type": "absorbed", "sourceID": 1, "targetID": 1,
+            "abilityGameID": defensives.STAGGER_AURA, "attackerID": source, "extraAbilityGameID": ability,
+            "amount": amount}
+
+
+class StaggerPoolTests(unittest.TestCase):
+    """The pool as the logs show it (Weavi, Undermine p24): each staggered hit's amount is an absorbed
+    event of 115069; every staggered hit restarts 20 ticks and each tick deals the pool over the ticks
+    left (pool / tick read 20.00, 19.00, ... on 116 of 130 staggered hits); purifies take part of it off."""
+
+    def test_pool_before_a_staggered_hit_from_the_ticks_around_it(self):
+        ticks = [pool_tick(500, 200_000, 0), pool_tick(1_000, 200_000, 0), pool_tick(1_500, 200_000, 0),
+                 pool_tick(2_500, 135_000, 0)]
+        first, second = staggered(0, 4_000_000), staggered(2_000, 1_000_000)
+        pools = defensives._stagger_pools(ticks, [first, second])
+        self.assertEqual(pools[id(first)], [0])                     # 20 x 200k - 4M: nothing before
+        # The tick before left 200k x 17 = 3.4M; the tick after says 20 x 135k - 1M = 1.7M. A purify
+        # came in between; the share it took reads 1 - 1.7M / 3.4M = 0.5000 if it came before the hit,
+        # 1 - 2.7M / 4.4M = 0.386 if after: Purifying Brew's 50%, before. The tick after is right.
+        self.assertEqual(pools[id(second)], [1_700_000])
+
+    @staticmethod
+    def pools(tick, second_amount, casts=None, purify=None, tick_before=200_000, first=4_000_000, talents=None):
+        """The pool estimates before a second staggered hit at 2 s: the first (at 0) staggered `first`,
+        three ticks of `tick_before` (the pool then: 17 x tick_before), and `tick` the tick after it.
+        `casts`: times of Purifying Brew casts, or (time, spell) for other buttons."""
+        ticks = [pool_tick(500, tick_before, 0), pool_tick(1_000, tick_before, 0),
+                 pool_tick(1_500, tick_before, 0), pool_tick(2_500, tick, 0)]
+        ins = [staggered(0, first), staggered(2_000, second_amount)]
+        cast = lambda t: {"timestamp": t[0] if isinstance(t, tuple) else t, "type": "cast",
+                          "abilityGameID": t[1] if isinstance(t, tuple) else defensives.PURIFYING_BREW}
+        out = defensives._stagger_pools(ticks, ins, None if casts is None else [cast(t) for t in casts], purify,
+                                        talents)
+        return out[id(ins[1])]
+
+    # Trait node entries in The War Within (11.1.0's STAGGER_PURIFY).
+    QUICK_SIP, TRANQUIL_SPIRIT, MANTRA, STAGGERING_STRIKES = 124837, 124860, 125042, 124839
+    P11 = defensives.STAGGER_PURIFY["11.1.0"]
+
+    def test_the_fits_read_the_players_talents(self):
+        # Quick Sip and Tranquil Spirit are talents: without them a Brewmaster never purifies a share between
+        # ticks but with the brew. With the loadout known the brew clears only its own share; without a
+        # loadout in the log every talent is allowed.
+        purify = defensives.STAGGER_PURIFY["11.1.0"]
+        keeps = lambda talents: defensives._purify_keeps(purify, talents)
+        self.assertEqual(keeps({}), ([0.5], None, [1.0], None, 0))
+        self.assertEqual(keeps({self.QUICK_SIP: 1}), ([0.5], None, [0.9, 0.95, 1.0], None, 0))
+        self.assertEqual(keeps({self.TRANQUIL_SPIRIT: 1, self.MANTRA: 1}), ([0.4], None, [1.0], 0.95, 8))
+        self.assertEqual(keeps(None), ([0.4, 0.5], None, [0.9, 0.95, 1.0], 0.95, 8))
+        # A sphere's 5% fits only with Tranquil Spirit (Weavi, Quel'Danas p104, and Obimonk have Quick Sip only).
+        fits = lambda to, talents: defensives._purify_fits(1_000_000, to, keeps(talents), None, False)
+        self.assertTrue(fits(950_000, {self.TRANQUIL_SPIRIT: 1}))
+        self.assertTrue(fits(950_000, {self.QUICK_SIP: 1}))            # a Quick Sip of 5%
+        self.assertFalse(fits(902_500, {self.QUICK_SIP: 1}))           # two 5%: a sphere and a Quick Sip
+        self.assertFalse(fits(950_000, {}))
+        # Pool 3.4M, 600k staggered, the tick after 191.5k: 0.05 before the hit, 0.0425 after it: a 5% before
+        # it fits only for a player with Quick Sip or Tranquil Spirit; without either, both readings stay.
+        self.assertEqual(self.pools(191_500, 600_000, casts=[], purify=self.P11, talents={self.QUICK_SIP: 1}), [3_230_000])
+        self.assertEqual(self.pools(191_500, 600_000, casts=[], purify=self.P11, talents={}), [3_400_000, 3_230_000])
+
+    def test_one_stretch_has_at_most_seven_spheres_and_expel_harm(self):
+        # The most spheres read in 500 ms over 33 pulls is 7, and The War Within's Expel Harm adds one: one
+        # Quick Sip event and 8 Tranquil Spirits leave 0.9 x 0.95^8 at the least; Midnight's Expel Harm
+        # doesn't count. A share the passives could reach only with more (0.95^42: Weavi, Undermine p24, read
+        # 2,144,052 -> 5 next to Touch of Death) fits nothing.
+        for patch, most in (("11.1.0", 8), ("12.0.7", 7)):
+            keeps = defensives._purify_keeps(defensives.STAGGER_PURIFY[patch])
+            fits = lambda to: defensives._purify_fits(10_000_000, to, keeps, None, False)
+            self.assertTrue(fits(round(10_000_000 * 0.9 * 0.95 ** most)), patch)
+            self.assertFalse(fits(round(10_000_000 * 0.9 * 0.95 ** (most + 1))), patch)
+            self.assertFalse(fits(round(10_000_000 * 0.95 ** 42)), patch)
+        # Pool 3.4M, 600k staggered, the tick after 71.7k: 1.434M. Read after the hit 0.3585 = 1 - 0.95^20
+        # (20 spheres), read before it 0.755: neither is a purify the game has, so both readings stay.
+        self.assertEqual(self.pools(71_700, 600_000, casts=[], purify=self.P11), [3_400_000, 834_000])
+
+    def test_a_flat_purify_fits_any_change_on_its_side(self):
+        # Weavi, Undermine p24: Touch of Death (322109; 325095: every Brewmaster's purifies a flat amount)
+        # 165 ms before a staggered hit; the tick before said 2,144,052, the tick after 5. He has neither Quick
+        # Sip nor Tranquil Spirit, so nothing after the hit fits: the purify was Touch of Death, before it.
+        # Here: pool 3.4M, 1M staggered, the tick after 50k: 0 left before the hit.
+        self.assertEqual(self.pools(50_000, 1_000_000, casts=[(1_835, 322109)], purify=self.P11, talents={}), [0])
+        # Without the cast nothing fits either side: both readings.
+        self.assertEqual(self.pools(50_000, 1_000_000, casts=[], purify=self.P11, talents={}), [3_400_000, 0])
+        # Touch of Death after the hit, and a Quick Sip of 5% that fits before it: both readings.
+        self.assertEqual(self.pools(191_500, 600_000, casts=[(2_100, 322109)], purify=self.P11, talents={self.QUICK_SIP: 1}),
+                         [3_400_000, 3_230_000])
+        # Staggering Strikes purifies on Blackout Kick (205523) only for players with the talent.
+        bok = [(1_835, 205523)]
+        self.assertEqual(self.pools(50_000, 1_000_000, casts=bok, purify=self.P11, talents={}), [3_400_000, 0])
+        self.assertEqual(self.pools(50_000, 1_000_000, casts=bok, purify=self.P11, talents={self.STAGGERING_STRIKES: 1}), [0])
+        # With no loadout in the log the talent may be there: Blackout Kick makes its side fit but doesn't decide
+        # on its own (both readings); Touch of Death, every Brewmaster's, still does.
+        self.assertEqual(self.pools(50_000, 1_000_000, casts=bok, purify=self.P11), [3_400_000, 0])
+        self.assertEqual(self.pools(50_000, 1_000_000, casts=[(1_835, 322109)], purify=self.P11), [0])
+        # Unknown loadout, Blackout Kick after the hit and a Quick Sip that fits before it: both fit, both kept.
+        self.assertEqual(self.pools(191_500, 600_000, casts=[(2_100, 205523)], purify=self.P11), [3_400_000, 3_230_000])
+
+    def test_a_purifying_brew_cast_says_which_side(self):
+        # Pool 3.4M, 680k staggered, the tick after 102k: 20 x 102k - 680k = 1.36M. Read before the hit
+        # the purify took 0.6 (Purifying Brew with Mantra of Purity), read after it 0.5 (without): both
+        # fit, so without the casts it can't be told. A cast on one side says which.
+        self.assertEqual(self.pools(102_000, 680_000), [3_400_000, 1_360_000])
+        self.assertEqual(self.pools(102_000, 680_000, casts=[1_800]), [1_360_000])
+        self.assertEqual(self.pools(102_000, 680_000, casts=[2_200]), [3_400_000])
+        # 20 x 120k - 1M = 1.4M: 0.588 before, 0.4545 after, neither a purify the game has; a cast on
+        # one side doesn't settle it either (the other could have had a flat one): both are kept.
+        self.assertEqual(self.pools(120_000, 1_000_000), [3_400_000, 1_400_000])
+        self.assertEqual(self.pools(120_000, 1_000_000, casts=[1_800]), [3_400_000, 1_400_000])
+
+    def test_a_cast_on_a_side_that_fits_nothing_keeps_both_readings(self):
+        # Pool 3.4M, 600k staggered, the tick after 190k: 3.2M. Read before the hit the purify took
+        # 0.0588, read after it 0.05: a Quick Sip after the hit fits, but the Purifying Brew was cast
+        # before it, and nothing with a brew fits that side (a flat purify could have been there too).
+        # The cast says the purify the after side fits isn't the whole story: both readings are kept.
+        # Without the casts the Quick Sip after the hit decides it.
+        self.assertEqual(self.pools(190_000, 600_000), [3_400_000])
+        self.assertEqual(self.pools(190_000, 600_000, casts=[1_800]), [3_400_000, 3_200_000])
+        # The mirror: 3.4M, 600k, the tick after 191.5k: 3.23M, 0.05 before the hit (a Quick Sip), 0.0425
+        # after it, where the brew was cast: both readings again. Without the cast the Quick Sip decides.
+        self.assertEqual(self.pools(191_500, 600_000), [3_230_000])
+        self.assertEqual(self.pools(191_500, 600_000, casts=[2_200]), [3_400_000, 3_230_000])
+
+    def test_one_quick_sip_purifies_ten_percent_at_once(self):
+        # Quick Sip purifies 5% for each 3 s of Shuffle gained, in one event: Keg Smash's 5 s can cross
+        # two thresholds (Weavi, Quel'Danas p104: 0.1000 on 10 hits). Pool 3.4M, 37,820 staggered, the
+        # tick after 154,891: 3.06M, 0.1000 read before the hit, 0.0989 after. Only the first is a share
+        # the game has (two separate 5% would be 0.0975).
+        self.assertEqual(self.pools(154_891, 37_820), [3_060_000])
+        keeps = defensives._purify_keeps(defensives.STAGGER_PURIFY["11.1.0"])
+        self.assertEqual(keeps[0], [0.4, 0.5])                       # Purifying Brew, with Mantra of Purity or not
+        self.assertEqual(keeps[2], [0.9, 0.95, 1.0])                 # one Quick Sip event: 10%, 5% or none
+        self.assertEqual(keeps[3], 0.95)                             # each Tranquil Spirit
+
+    def test_tranquil_spirit_clears_five_percent_for_every_sphere(self):
+        # Atlai (Undermine, AaM31gBWwFHmD7Rz pulls 32 and 38, ticks with no staggered hit between): a
+        # sphere alone 0.0500, Expel Harm drawing 1 sphere 0.0975, 2 spheres 0.1426, 5 spheres 0.2649 =
+        # 1 - 0.95^6 (The War Within: Expel Harm counts too), two spheres Spinning Crane Kick pulled in
+        # 0.0975, a sphere with a brew 0.5250. So several 5% purifies can share a stretch (up to 7 spheres
+        # and Expel Harm); a second 10% Quick Sip can't (one Keg Smash per stretch; Press the Advantage's
+        # bonus strike grants no Shuffle).
+        keeps = defensives._purify_keeps(defensives.STAGGER_PURIFY["11.1.0"])
+        fits = lambda to, brew=False: defensives._purify_fits(1_000_000, to, keeps, 1_000_000, brew)
+        self.assertTrue(fits(735_092))                  # 0.95^6: Expel Harm and 5 spheres
+        self.assertTrue(fits(698_337))                  # 0.95^7: Expel Harm and 6 spheres
+        self.assertTrue(fits(771_637))                  # a 10% Quick Sip and 3 spheres
+        self.assertTrue(fits(451_250, True))            # a brew and 2 spheres
+        self.assertFalse(fits(810_000))                 # two 10% Quick Sips
+        self.assertFalse(fits(451_250))                 # a brew's share, but no brew cast
+
+    def test_a_cast_on_one_side_and_a_quick_sip_on_the_other_is_undecided(self):
+        # Pool 340k (17 x 20k), 3.06M staggered, the tick after 161.5k: 170k. Read before the hit the
+        # purify took 0.5 (the brew, cast there), read after it 0.05: a Quick Sip could have come after
+        # the hit as well, so the truth lies between: both are kept. Without passive purifies in the
+        # game data the cast settles it.
+        args = dict(casts=[1_800], tick_before=20_000, first=400_000)
+        self.assertEqual(self.pools(161_500, 3_060_000, **args), [340_000, 170_000])
+        brew_only = {"brew": {"share": 0.5}}
+        self.assertEqual(self.pools(161_500, 3_060_000, purify=brew_only, **args), [170_000])
+
+    def test_midnights_purifying_brew_clears_at_least_8_percent_of_max_health(self):
+        # Pool 136k (17 x 8k): half is 68k, but Midnight's brew clears at least 8% of max health (1M):
+        # 80k, leaving 56k; 1M staggered, the tick after 52.8k. Read before the hit 0.588: a purify
+        # only with the minimum, so the tick after is right; The War Within's brew has none.
+        args = dict(tick_before=8_000, first=160_000)
+        self.assertEqual(self.pools(52_800, 1_000_000, purify=defensives.STAGGER_PURIFY["12.0.0"], **args), [56_000])
+        self.assertEqual(self.pools(52_800, 1_000_000, purify=defensives.STAGGER_PURIFY["11.1.0"], **args),
+                         [136_000, 56_000])
+
+    def test_undecided_pool_that_decides_the_verdict_is_cant_tell(self):
+        # Before the second (fully staggered) hit the pool was 665k (tick before) or 350k (tick after:
+        # 20 x 52.5k - 700k); the shares 0.474 and 0.231 match no purify, and no cast says which. Diffuse
+        # Magic, ready only after the first hit, cuts 60% of the 700k: 0.308 or 0.4 of the pool, 32.3k or
+        # 42k off the two ticks after, against 35k overkill. Saves with one reading, not the other.
+        first = dict(hit(80_000, 300_000, 935_000, absorbed=700_000), sourceID=50)
+        second = dict(hit(90_000, 0, 70_000, absorbed=700_000), sourceID=50)
+        ticks = [pool_tick(80_500, 35_000, 900_000)]
+        after = [pool_tick(90_500, 52_500, 17_500), pool_tick(91_000, 52_500, 0, overkill=35_000)]
+        ins = [staggered(80_000, 700_000), staggered(90_000, 700_000)]
+        pools = defensives._stagger_pools(ticks + after, ins)
+        self.assertEqual(pools[id(ins[1])], [665_000, 350_000])
+        r = defensives.assess_survival([first, second] + ins + ticks + after, 91_000, ready(DIFFUSE_MAGIC), [],
+                                       NAMES, SCHOOLS, aura_ms={"Diffuse Magic": 30_000}, spec="Brewmaster",
+                                       ready_since={"Diffuse Magic": 85_000})
+        self.assertIsNone(r["wouldSave"]["Diffuse Magic"])
+        self.assertEqual(r["details"]["Diffuse Magic"]["why"], "staggerUnknown")
+        self.assertIsNone(r["allTogetherWouldSave"])
+
+    def test_a_reduction_before_a_staggered_hit_shrinks_every_later_tick(self):
+        # A 1M Frost hit from full: 300k taken at once, 700k staggered (absorbed event), then 20 ticks
+        # of 35k; the 20th kills (15k health left, 20k overkill). Diffuse Magic (60% magic) pressed
+        # before it cuts the 300k by 180k and the pool by 60%, so every tick by 21k: 600k in all.
+        hit_ = dict(hit(90_000, 300_000, 680_000, absorbed=700_000), sourceID=50)
+        ticks = [pool_tick(90_500 + 500 * j, 35_000, 680_000 - 35_000 * (j + 1)) for j in range(19)]
+        ticks.append(pool_tick(100_000, 35_000, 0, overkill=20_000))
+        events = [hit_, staggered(90_000, 700_000)] + ticks
+        r = defensives.assess_survival(events, 100_000, ready(DIFFUSE_MAGIC), [], NAMES, SCHOOLS,
+                                       aura_ms={"Diffuse Magic": 30_000}, spec="Brewmaster")
+        self.assertAlmostEqual(r["details"]["Diffuse Magic"]["amount"], 600_000, delta=2)
+        # Without the staggered amount in the log, only the part taken at once counts.
+        r = defensives.assess_survival([hit_] + ticks, 100_000, ready(DIFFUSE_MAGIC), [], NAMES, SCHOOLS,
+                                       aura_ms={"Diffuse Magic": 30_000}, spec="Brewmaster")
+        self.assertAlmostEqual(r["details"]["Diffuse Magic"]["amount"], 180_000, delta=2)
+
+    def test_a_reduction_only_on_part_of_the_pool(self):
+        # The pool already held an earlier hit's share when a second 700k came in, pressed between: the
+        # cut is 60% of the new share only. The tick before says the pool was 35k x 19 = 665k (the log
+        # skips the ticks between here), the tick after 20 x 66.5k - 700k = 630k: the replay takes the
+        # estimate that credits least, 665k, so each later tick shrinks by 0.6 x 700k / 1365k.
+        ticks = [pool_tick(80_500, 35_000, 900_000)]
+        first = dict(hit(80_000, 300_000, 935_000, absorbed=700_000), sourceID=50)
+        second = dict(hit(90_000, 300_000, 600_000, absorbed=700_000), sourceID=50)
+        after = [pool_tick(90_500, 66_500, 533_500), pool_tick(91_000, 66_500, 0, overkill=400_000)]
+        events = [first, staggered(80_000, 700_000), second, staggered(90_000, 700_000)] + ticks + after
+        r = defensives.assess_survival(events, 91_000, ready(DIFFUSE_MAGIC), [], NAMES, SCHOOLS,
+                                       aura_ms={"Diffuse Magic": 30_000}, spec="Brewmaster")
+        share = 0.6 * 700_000 / 1_365_000
+        self.assertAlmostEqual(r["details"]["Diffuse Magic"]["amount"], 180_000 + 2 * 66_500 * share, delta=2)
+
+
+class ShuffleGrantTests(unittest.TestCase):
+    """The catalog build reads what grants Shuffle (Quick Sip counts the seconds gained) from Monk
+    tooltips; only the grants reviewed for the purify fits pass: Keg Smash 5 s, Blackout Kick 3 s,
+    Spinning Crane Kick 1 s."""
+
+    @staticmethod
+    def build():
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
+        import build_defensive_catalog as build
+        return build
+
+    def purify(self, grants, extra_desc=None, spirit_text=None, drop=()):
+        """stagger_purify on game data where each of `grants` {name: seconds} has a tooltip granting it,
+        Quick Sip, Tranquil Spirit and Staggering Strikes are talents and Touch of Death's 325095 is a
+        Brewmaster spell (as in every patch); `extra_desc` {spell: (name, tooltip, a talent?)} adds Monk
+        spells; `drop`: spells left out of the data."""
+        build = self.build()
+        values = {(build.PURIFYING_BREW, 0): 50.0, (build.QUICK_SIP, 0): 5.0, (build.QUICK_SIP, 1): 3.0,
+                  (build.TRANQUIL_SPIRIT, 0): 5.0}
+        monk = (build.MONK_FAMILY, [0] * 4)
+        names = {build.QUICK_SIP: "Quick Sip", build.TRANQUIL_SPIRIT: "Tranquil Spirit", 387625: "Staggering Strikes",
+                 205523: "Blackout Kick", 325095: "Touch of Death", 322109: "Touch of Death"}
+        desc = {build.TRANQUIL_SPIRIT: spirit_text or "When you consume a Healing Sphere or cast Expel Harm, your "
+                                                      "current Stagger amount is lowered by $s1%.",
+                387625: "When you Blackout Kick, your Stagger is reduced by $<reduc>.",
+                325095: "Touch of Death reduces delayed Stagger damage by $s1% of damage dealt."}
+        family = {sid: monk for sid in names}
+        entries = {build.QUICK_SIP: {1}, build.TRANQUIL_SPIRIT: {2}, 387625: {3}}
+        spec_spells = {325095: {"Brewmaster"}}
+        for sid, (name, text, talent) in (extra_desc or {}).items():
+            names[sid], desc[sid], family[sid] = name, text, monk
+            if talent:
+                entries[sid] = {4}
+        for k, (name, seconds) in enumerate(grants.items()):
+            sid = 900_000 + k
+            names[sid], desc[sid], family[sid] = name, "Strike, granting Shuffle for $s2 sec.", monk
+            values[(sid, 1)] = seconds
+        for sid in drop:
+            names.pop(sid, None)
+            desc.pop(sid, None)
+        gd = types.SimpleNamespace(names=names, family=family, value=lambda s, i: values.get((s, i)),
+                                   spec_spells=spec_spells)
+        mods = build.Modifiers.__new__(build.Modifiers)
+        mods.gd, mods.entries_for_spell, mods.effect = gd, entries, lambda *a: []
+        problems = []
+        out = build.stagger_purify(gd, mods, desc, problems)
+        return out, problems
+
+    def test_who_has_each_purify(self):
+        # Quick Sip and Tranquil Spirit are talents: their entries go in the catalog, so the fits read the
+        # player's loadout. Tranquil Spirit counts Expel Harm where its tooltip says so (The War Within).
+        # The flat purifies: Touch of Death (325095, every Brewmaster) and Staggering Strikes (a talent, on
+        # a Brewmaster's Blackout Kick 205523).
+        out, problems = self.purify({"Keg Smash": 5.0, "Blackout Kick": 3.0, "Spinning Crane Kick": 1.0})
+        self.assertEqual(problems, [])
+        self.assertEqual(out["quick_sip"]["entries"], [1])
+        self.assertEqual(out["tranquil_spirit"], {"share": 0.05, "entries": [2], "expel_harm": True})
+        self.assertEqual(out["flat"], [{"name": "Staggering Strikes", "casts": [205523], "entries": [3]},
+                                       {"name": "Touch of Death", "casts": [322109]}])
+        midnight, _ = self.purify({"Keg Smash": 5.0, "Blackout Kick": 3.0, "Spinning Crane Kick": 1.0},
+                                  spirit_text="When you consume a Healing Sphere, you clear $s1% of your Stagger.")
+        self.assertFalse(midnight["tranquil_spirit"]["expel_harm"])
+
+    def test_a_purify_the_fits_were_not_reviewed_for_fails_the_build(self):
+        grants = {"Keg Smash": 5.0, "Blackout Kick": 3.0, "Spinning Crane Kick": 1.0}
+        _, problems = self.purify(grants, extra_desc={999_001: ("Iron Gut", "Clears 20% of your Stagger.", True)})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("Iron Gut", problems[0])
+        # The reviewed ones that take nothing off between ticks pass.
+        _, problems = self.purify(grants, extra_desc={383700: ("Gai Plin's Imperial Brew", "Purifying Brew "
+                                                               "instantly heals you for 25% of the purified Stagger damage.", True)})
+        self.assertEqual(problems, [])
+        # A flat purify gone from the data fails too.
+        _, problems = self.purify(grants, drop=(387625,))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("Staggering Strikes", problems[0])
+
+    def test_the_three_reviewed_grants_pass(self):
+        out, problems = self.purify({"Keg Smash": 5.0, "Blackout Kick": 3.0, "Spinning Crane Kick": 1.0})
+        self.assertEqual(problems, [])
+        self.assertEqual(out["shuffle_s"], {"Blackout Kick": 3.0, "Keg Smash": 5.0, "Spinning Crane Kick": 1.0})
+
+    def test_a_missing_changed_or_new_grant_fails_the_build(self):
+        _, problems = self.purify({"Keg Smash": 5.0, "Blackout Kick": 3.0})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("Spinning Crane Kick", problems[0])
+        _, problems = self.purify({"Keg Smash": 6.0, "Blackout Kick": 3.0, "Spinning Crane Kick": 1.0})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("Keg Smash", problems[0])
+        _, problems = self.purify({"Keg Smash": 5.0, "Blackout Kick": 3.0, "Spinning Crane Kick": 1.0,
+                                   "Tiger Palm": 1.0})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("Tiger Palm", problems[0])
+
+
+class MeasuredModsTests(unittest.TestCase):
+    """MEASURED_MODS (build script): Elusiveness' -4/35 on Feint's AoE effect, measured with that effect at 40%
+    and Elusiveness' own -20% on Feint's effect 1. Either moving fails the build."""
+
+    def run_it(self, base=0.4, own_add=0.2, in_tree=True):
+        build = ShuffleGrantTests.build()
+        gd = types.SimpleNamespace(names={79008: "Elusiveness"})
+        mods = types.SimpleNamespace(entries_for_spell={79008: {112632}} if in_tree else {},
+                                     effect=lambda s, i, f, t: [{"talent": "Elusiveness", "entries": [112632], "add": own_add}]
+                                     if (s, i) == (1966, 1) else [])
+        comp, problems = {"dr": base, "school": "aoe"}, []
+        build.measured_mods("Feint", 1966, 0, comp, "dr", "dr", 1, gd, mods, problems)
+        return comp, problems
+
+    def test_added_when_what_it_was_measured_with_holds(self):
+        comp, problems = self.run_it()
+        self.assertEqual(problems, [])
+        self.assertEqual(comp["mods"], [{"talent": "Elusiveness", "entries": [112632], "add": -0.114286}])
+
+    def test_a_moved_value_fails_the_build(self):
+        for kwargs, word in (({"base": 0.45}, "measured at 0.4"), ({"own_add": 0.25}, "own change"),
+                             ({"in_tree": False}, "no talent tree")):
+            comp, problems = self.run_it(**kwargs)
+            self.assertEqual(len(problems), 1, kwargs)
+            self.assertIn(word, problems[0])
+            self.assertNotIn("mods", comp)
+
+
+class AttackedUnitsTests(unittest.TestCase):
+    def test_units_the_raid_damaged_from_the_damage_done_table(self):
+        from unittest import mock
+        table = {"reportData": {"report": {"table": {"data": {"entries": [
+            {"id": 876, "name": "Chrome King Gallywix", "total": 1561920441},
+            {"id": 883, "name": "1500-Pound Dud", "total": 712},
+            {"id": 900, "name": "Nothing", "total": 0}]}}}}}
+        with mock.patch.object(defensives, "graphql_query", return_value=table) as q:
+            self.assertEqual(defensives.fetch_attacked_units("t", "R", [1, 2], 0, 10), [876, 883])
+        self.assertIn("dataType: DamageDone", q.call_args[0][1])
+        self.assertIn("viewBy: Target", q.call_args[0][1])
+
+    def test_only_patches_with_an_effect_on_the_enemy_fetch_them(self):
+        self.assertTrue(defensives.brands_enemies(defensives._CATALOGS["11.0.7"]))
+        self.assertFalse(defensives.brands_enemies(defensives._CATALOGS["12.0.0"]))
+
+
+class StaggerWindowFetchTests(unittest.TestCase):
+    def test_the_extras_block_reads_the_stagger_pool_from_before_the_window(self):
+        # A Brewmaster's staggered amounts, ticks and Purifying Brew casts (no target: by caster) from
+        # STAGGER_LOOKBACK_MS before the window; ticks inside it come once, with the hits.
+        queries = []
+        tick = lambda t: {"timestamp": t, "type": "damage", "sourceID": 1, "targetID": 1,
+                          "abilityGameID": STAGGER_TICK, "amount": 5, "unmitigatedAmount": 5}
+
+        def fake(token, q, v):
+            queries.append(q)
+            report = {a: {"data": [tick(50_000), dict(tick(59_990), overkill=1, hitPoints=0)]}
+                      for a in __import__("re").findall(r"(p\d+): events", q)}
+            report["extras"] = {"data": [
+                tick(40_000), tick(50_000), tick(30_000),       # before the lookback: dropped
+                {"timestamp": 41_000, "type": "absorbed", "sourceID": 1, "targetID": 1,
+                 "abilityGameID": defensives.STAGGER_AURA, "attackerID": 9, "extraAbilityGameID": 7, "amount": 100},
+                {"timestamp": 42_000, "type": "cast", "sourceID": 1, "targetID": -1,
+                 "abilityGameID": defensives.PURIFYING_BREW},
+                {"timestamp": 43_000, "type": "applydebuff", "targetID": 1, "abilityGameID": STAGGER_TICK}]}
+            return {"reportData": {"report": report}}
+        with __import__("unittest.mock").mock.patch.object(defensives, "graphql_query", side_effect=fake):
+            hits = defensives.fetch_death_windows("t", "R", [(3, [(60_000, "A")])])
+        casts = __import__("re").search(r"type = 'cast' and ability\.id in \(([\d, ]+)\)", queries[0])
+        self.assertIn(defensives.PURIFYING_BREW, {int(c) for c in casts.group(1).split(", ")})
+        self.assertIn("startTime: 34500", queries[0])
+        self.assertEqual([(h["type"], h["timestamp"]) for h in hits[1]],
+                         [("damage", 40_000), ("absorbed", 41_000), ("cast", 42_000), ("damage", 50_000),
+                          ("damage", 59_990)])
+        self.assertEqual(hits[1][1]["attackerID"], 9)
+
+
+DEMONIC_HS, SOULBURN_SPELL, SOULBURN_BUFF = 452930, 385899, 387626
+SOULBURN_TALENT, GOREBOUND_TALENT = 91469, 117447
+
+
+def spend(ts, amount, cost=10, ability=105174):
+    """A Warlock's cast that spent Soul Shards: WCL's classResources amount is before the cost (tenths)."""
+    return {"timestamp": ts, "type": "cast", "sourceID": 1, "abilityGameID": ability, "shards": [amount, cost]}
+
+
+def soulburn_cast(ts, amount=30):
+    return [spend(ts, amount, 10, SOULBURN_SPELL),
+            {"timestamp": ts, "type": "applybuff", "targetID": 1, "abilityGameID": SOULBURN_BUFF}]
+
+
+class SoulburnTests(unittest.TestCase):
+    """Soulburn (385899, a Soul Shard, 6 s cooldown, off the global cooldown) makes the next Healthstone add
+    30% of max health to its heal and +20% max health for 12 s. A Warlock with the talent (without Gorebound
+    Fortitude, which always gives it) gets it only when the log shows Soulburn could have been cast first:
+    its buff (387626) already up, or Soulburn off cooldown and a Soul Shard in hand. Shards are read from
+    WCL's casts that spent some (classResources: the amount before the cost, in tenths): between two
+    spends they only go up, so after the earlier one is a floor and before the later one a ceiling."""
+    cat = defensives.catalog_for(None)
+    sb = cat.soulburn
+
+    def tl(self, events):
+        return defensives.SoulburnTimeline(events, self.sb)
+
+    def test_the_catalog_reads_soulburn_casts_and_talents(self):
+        self.assertEqual(self.sb["spell"], SOULBURN_SPELL)
+        self.assertIn(SOULBURN_SPELL, self.cat.cast_ids)
+        self.assertIn(SOULBURN_TALENT, self.cat.relevant_talent_entries)
+        out = defensives.index_defensive_events({"casts": [
+            {"type": "cast", "timestamp": 5, "sourceID": 1, "abilityGameID": SOULBURN_SPELL}]}, self.cat)
+        self.assertEqual(out["casts"][1], [(5, SOULBURN_SPELL)])
+
+    def test_the_typical_demonic_healthstone_has_no_soulburn_in_it(self):
+        # Measured without a Soulburn cast: 0.30 of max health (0.35 with Sweet Souls in The War Within's
+        # logs); with one, 0.60 / 0.65 in every log.
+        self.assertEqual(defensives._CATALOGS["12.0.0"].demonic_healthstone, 0.30)
+        self.assertEqual(defensives._CATALOGS["11.1.0"].demonic_healthstone, 0.35)
+
+    def test_shards_from_the_spends_around_the_moment(self):
+        self.assertIs(self.tl([spend(1_000, 30)]).state(2_000), True)            # 2 left after it
+        self.assertIs(self.tl([spend(1_000, 10), spend(5_000, 5)]).state(2_000), False)   # under 1 before the next
+        self.assertIsNone(self.tl([spend(1_000, 10), spend(5_000, 30)]).state(2_000))    # 0 to 3: can't tell
+        self.assertIs(self.tl([spend(5_000, 5)]).state(2_000), False)
+        self.assertIsNone(self.tl([spend(5_000, 30)]).state(2_000))
+        self.assertIsNone(self.tl([]).state(2_000))
+        self.assertIsNone(defensives.SoulburnTimeline(None, self.sb).state(2_000))     # not fetched
+
+    def test_soulburn_cooldown_and_buff(self):
+        events = soulburn_cast(1_000, amount=30)        # 2 shards left, buff up
+        self.assertIs(self.tl(events).state(1_500), True)
+        consumed = events + [{"timestamp": 1_400, "type": "removebuff", "targetID": 1, "abilityGameID": SOULBURN_BUFF}]
+        self.assertIs(self.tl(consumed).state(1_500), False)          # on its 6 s cooldown
+        self.assertIs(self.tl(consumed).state(7_000), True)           # ready again, shards left
+        self.assertIn(7_000, self.tl(consumed).changes)
+        # Used up by another spell it empowers (a Demonic Gateway at 1,400: the buff's removebuff with it).
+        gate = events + [{"timestamp": 1_400, "type": "cast", "sourceID": 1, "abilityGameID": self.sb["consumed_by"][0]},
+                         {"timestamp": 1_400, "type": "removebuff", "targetID": 1, "abilityGameID": SOULBURN_BUFF}]
+        self.assertIs(self.tl(gate).state(1_399), True)
+        self.assertIs(self.tl(gate).state(1_400), False)
+
+    def estimate(self, sid, heals=(), talents=None, casts=()):
+        return defensives.consumable_estimate(sid, self.cat, list(heals), 1.0, talents or {}, "Demonology",
+                                              soulburn_casts=list(casts))
+
+    def test_estimate_with_and_without_soulburn(self):
+        e = self.estimate(HEALTHSTONE, talents={SOULBURN_TALENT: 1})
+        self.assertAlmostEqual(e["mitigation"][0]["heal"], 0.25)
+        self.assertFalse([c for c in e["mitigation"] if c.get("hp")])
+        with_ = e["withSoulburn"]["mitigation"]
+        self.assertAlmostEqual(next(c["heal"] for c in with_ if "heal" in c), 0.55)
+        self.assertEqual([(c["hp"], c["dur_ms"]) for c in with_ if c.get("hp")], [(0.2, 12_000)])
+        self.assertNotIn("withSoulburn", self.estimate(HEALTHSTONE))           # no talent
+
+    def test_own_heals_are_split_by_a_soulburn_cast_before_them(self):
+        heals = [(10_000, DEMONIC_HS, 300_000, 1_000_000, 1.0), (80_000, DEMONIC_HS, 600_000, 1_000_000, 1.0),
+                 (150_000, DEMONIC_HS, 600_000, 1_000_000, 1.0)]
+        e = self.estimate(DEMONIC_HS, heals, {SOULBURN_TALENT: 1}, casts=[79_999, 150_000])
+        self.assertAlmostEqual(e["mitigation"][0]["heal"], 0.30)
+        self.assertAlmostEqual(e["withSoulburn"]["mitigation"][0]["heal"], 0.60)
+        # The range shown is of the heals without Soulburn's share, as the estimate reads them.
+        self.assertEqual(e["samples"], {"n": 3, "minShare": 0.3, "maxShare": 0.3})
+        only = self.estimate(DEMONIC_HS, heals[1:], {SOULBURN_TALENT: 1}, casts=[79_999, 150_000])
+        self.assertAlmostEqual(only["mitigation"][0]["heal"], 0.30)
+
+    def test_a_soulburn_spent_on_another_spell_is_not_on_the_healthstone(self):
+        # Soulburn's buff goes to the first spell it empowers (its tooltip: Demonic Circle: Teleport, Demonic
+        # Gateway, Drain Life, Health Funnel, Healthstone). 2VtyDR4CF6PGLjbd-like: Soulburn, then a Demonic
+        # Gateway 2 s later (the buff removed with it), then a Healthstone healing the plain 35%.
+        heals = [(10_000, DEMONIC_HS, 350_000, 1_000_000, 1.0), (80_000, DEMONIC_HS, 350_000, 1_000_000, 1.0),
+                 (150_000, DEMONIC_HS, 650_000, 1_000_000, 1.0), (152_000, DEMONIC_HS, 350_000, 1_000_000, 1.0)]
+        e = defensives.consumable_estimate(DEMONIC_HS, self.cat, heals, 1.0, {SOULBURN_TALENT: 1}, "Demonology",
+                                           soulburn_casts=[74_000, 150_000], soulburn_spent=[76_000])
+        self.assertAlmostEqual(e["mitigation"][0]["heal"], 0.35)
+        # 80,000: the Gateway used it; 152,000: the 150,000 Healthstone did.
+        self.assertEqual(e["samples"], {"n": 4, "minShare": 0.35, "maxShare": 0.35})
+
+    def test_the_spells_that_use_soulburn_are_read_and_passed_on(self):
+        from unittest import mock
+        spent = self.sb["consumed_by"]
+        self.assertTrue(set(spent) <= set(self.cat.cast_ids))
+        indexed = defensives.index_defensive_events({"casts": [
+            {"type": "cast", "timestamp": 5, "sourceID": 1, "abilityGameID": spent[0]}]}, self.cat)
+        self.assertEqual(indexed["casts"][1], [(5, spent[0])])
+        indexed = {"casts": {1: [(74_000, SOULBURN_SPELL), (76_000, spent[0]), (20_000, HEALTHSTONE)]},
+                   "talents": {(7, 1): {SOULBURN_TALENT: 1}},
+                   "heals": {1: [(80_000, HEALTHSTONE, 250_000, 1_000_000, 1.0, None, 7)]}}
+        hits = [hit(190_000, 600_000, 400_000), hit(200_000, 400_000, 0, overkill=350_000)]
+        r = defensives.analyze_death(1, "Warlock", "Demonology", 7, 150_000, 200_000, indexed, NAMES, {1: "Wl"},
+                                     hits=hits, ability_schools=SCHOOLS, cat=self.cat, soulburn_events=None)
+        self.assertEqual(r["survival"]["details"]["Healthstone"].get("why"), "soulburnUnknown")
+        with mock.patch.object(defensives, "consumable_estimate", wraps=defensives.consumable_estimate) as est:
+            defensives.analyze_death(1, "Warlock", "Demonology", 7, 150_000, 200_000, indexed, NAMES, {1: "Wl"},
+                                     hits=hits, ability_schools=SCHOOLS, cat=self.cat, soulburn_events=None)
+        self.assertEqual(est.call_args.kwargs["soulburn_spent"], [76_000])
+
+    def test_gorebound_always_has_it(self):
+        both = {SOULBURN_TALENT: 1, GOREBOUND_TALENT: 1}
+        e = self.estimate(HEALTHSTONE, talents=both)
+        self.assertAlmostEqual(e["mitigation"][0]["heal"], 0.55)               # 25% + 30%, not x1.3
+        self.assertNotIn("withSoulburn", e)
+        typical = self.estimate(DEMONIC_HS, talents=both)
+        self.assertAlmostEqual(typical["mitigation"][0]["heal"], 0.60)
+        self.assertEqual([(c["hp"], c["dur_ms"]) for c in typical["mitigation"] if c.get("hp")], [(0.2, 12_000)])
+        own = self.estimate(DEMONIC_HS, [(10_000, DEMONIC_HS, 600_000, 1_000_000, 1.0)], both)
+        self.assertAlmostEqual(own["mitigation"][0]["heal"], 0.60)
+
+    def survive(self, events):
+        # At 400k of 1M after a hit 10 s before; the killing blow takes 750k. A Healthstone's 25% leaves
+        # them 100k short; with Soulburn (55%, +20% max health) they live.
+        hits = [hit(90_000, 600_000, 400_000), hit(100_000, 400_000, 0, overkill=350_000)]
+        hs = self.estimate(HEALTHSTONE, talents={SOULBURN_TALENT: 1})
+        timeline = defensives.SoulburnTimeline(events, self.sb)
+        return defensives.assess_survival(hits, 100_000, [], [hs], NAMES, SCHOOLS,
+                                          talent_entries={SOULBURN_TALENT: 1}, soulburn=timeline)
+
+    def test_credited_only_when_it_could_have_been_cast(self):
+        yes = self.survive([spend(85_000, 30)])
+        self.assertTrue(yes["wouldSave"]["Healthstone"])
+        self.assertTrue(yes["details"]["Healthstone"]["soulburn"])
+        self.assertTrue(yes["allTogetherWouldSave"])
+        no = self.survive([spend(85_000, 10), spend(99_500, 5)])
+        self.assertFalse(no["wouldSave"]["Healthstone"])
+        self.assertNotIn("soulburn", no["details"]["Healthstone"])
+        self.assertFalse(no["allTogetherWouldSave"])
+
+    def test_cant_tell_when_the_shards_are_not_known(self):
+        for events in ([spend(85_000, 10), spend(99_500, 30)], [], None):
+            r = self.survive(events)
+            self.assertIsNone(r["wouldSave"]["Healthstone"])
+            self.assertEqual(r["details"]["Healthstone"]["why"], "soulburnUnknown")
+            self.assertIsNone(r["allTogetherWouldSave"])
+
+    def test_a_press_is_never_credited_with_a_shard_gained_too_late(self):
+        # Below a shard until a spend at 99,300 that shows 2 (gained after the latest press, 99,000).
+        r = self.survive([spend(85_000, 10), spend(99_100, 5, cost=0), spend(99_300, 20)])
+        self.assertFalse(r["wouldSave"]["Healthstone"])
+
+    def test_the_fetch_reads_the_warlocks_casts_and_soulburn_buff(self):
+        from unittest import mock
+        queries = []
+
+        def fake(token, q, v):
+            queries.append(q)
+            return {"reportData": {"report": {"s3": {"data": [
+                {"timestamp": 50_000, "type": "cast", "sourceID": 1, "abilityGameID": 105174,
+                 "classResources": [{"amount": 240000, "max": 250000, "type": 0},
+                                    {"amount": 30, "max": 50, "type": 7, "cost": 30}]},
+                {"timestamp": 50_100, "type": "cast", "sourceID": 1, "abilityGameID": 686,
+                 "classResources": [{"amount": 240000, "max": 250000, "type": 0, "cost": 100}]},
+                {"timestamp": 51_000, "type": "applybuff", "sourceID": 1, "targetID": 1,
+                 "abilityGameID": SOULBURN_BUFF}]}}}}
+        with mock.patch.object(defensives, "graphql_query", side_effect=fake):
+            got = defensives.fetch_soulburn_windows("t", "R", [(3, [(60_000, "Wl")])], self.sb)
+        self.assertIn("startTime: 25000", queries[0])
+        self.assertIn("source.name in (\\\"Wl\\\") and type = 'cast'", queries[0])
+        self.assertIn(f"ability.id = {SOULBURN_BUFF}", queries[0])
+        self.assertIn("includeResources: true", queries[0])
+        self.assertEqual([(e["type"], e.get("shards")) for e in got[1]],
+                         [("cast", [30, 30]), ("cast", None), ("applybuff", None)])
+
+    def death(self, events, talents=None):
+        indexed = {"casts": {1: [(10_000, HEALTHSTONE)]}, "talents": {(7, 1): talents or {SOULBURN_TALENT: 1}},
+                   "heals": {}}
+        hits = [hit(90_000, 600_000, 400_000), hit(100_000, 400_000, 0, overkill=350_000)]
+        return defensives.analyze_death(1, "Warlock", "Demonology", 7, 50_000, 100_000, indexed, NAMES, {1: "Wl"},
+                                        hits=hits, ability_schools=SCHOOLS, cat=self.cat,
+                                        soulburn_events=events)["survival"]
+
+    def test_a_death_reads_its_soulburn_events(self):
+        self.assertTrue(self.death([spend(88_000, 30)])["wouldSave"]["Healthstone"])
+        self.assertEqual(self.death(None)["details"]["Healthstone"]["why"], "soulburnUnknown")
+        gore = self.death(None, {SOULBURN_TALENT: 1, GOREBOUND_TALENT: 1})
+        self.assertTrue(gore["wouldSave"]["Healthstone"])                    # always has it
+
+    def test_which_deaths_fetch_soulburn_data(self):
+        indexed = {"talents": {(3, 1): {SOULBURN_TALENT: 1}, (3, 2): {SOULBURN_TALENT: 1, GOREBOUND_TALENT: 1},
+                               (3, 4): {SOULBURN_TALENT: 1}, (4, 1): {}}, "specs": {}}
+        friendlies = [{"id": 1, "name": "Wl", "type": "Warlock"}, {"id": 2, "name": "Gb", "type": "Warlock"},
+                      {"id": 3, "name": "Nl", "type": "Warlock"}, {"id": 4, "name": "Pr", "type": "Priest"}]
+        counted = {3: [(1, "Wl"), (2, "Gb"), (3, "Nl"), (4, "Pr")], 4: [(5, "Wl")]}
+        self.assertEqual(defensives.soulburn_pulls(indexed, counted, friendlies, self.cat), [(3, [(1, "Wl")])])
+
+    def test_pulls_close_together_share_a_block_and_only_death_spans_are_kept(self):
+        from unittest import mock
+        queries = []
+
+        def fake(token, q, v):
+            queries.append(q)
+            cast = lambda t: {"timestamp": t, "type": "cast", "sourceID": 1, "abilityGameID": 686}
+            return {"reportData": {"report": {"s3": {"data": [cast(30_000), cast(70_000), cast(130_000)]}}}}
+        with mock.patch.object(defensives, "graphql_query", side_effect=fake):
+            got = defensives.fetch_soulburn_windows("t", "R", [(3, [(60_000, "Wl")]), (4, [(150_000, "Wl")])],
+                                                    self.sb)
+        self.assertEqual(len(queries), 1)
+        self.assertIn("fightIDs: [3, 4]", queries[0])
+        self.assertEqual([e["timestamp"] for e in got[1]], [30_000, 130_000])     # 70,000 is in no span

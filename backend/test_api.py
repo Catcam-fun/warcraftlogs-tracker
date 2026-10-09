@@ -333,6 +333,85 @@ class AnalyzeFlowTests(unittest.TestCase):
         _, fights_calls, bulk_calls = self._run()
         self.assertEqual((fights_calls, bulk_calls), (0, 0))
 
+    def test_aoe_abilities_are_read_only_for_what_the_windows_cant_tell(self):
+        # A Rogue (Feint takes 40% off AoE) took a hit of ability 7 absorbed whole, which WCL never marks
+        # AoE: whether ability 7 is AoE is read from the report's pulls (one request). Ability 8 is marked
+        # in the windows and ability 9 dealt damage unmarked: both are known.
+        base_fights = self._fights
+
+        def fights(token, rid, cls="Rogue"):
+            meta = base_fights(token, rid)
+            meta["friendlies"][0]["type"] = cls
+            meta["player_details"] = {10: {"class": cls, "spec": "Outlaw", "name": "Bob"}}
+            return meta
+
+        def windows(_token, _rid, pulls):
+            hit = {"type": "damage", "targetID": 10, "maxHitPoints": 900}
+            return {10: [dict(hit, timestamp=3_000, abilityGameID=8, amount=100, hitPoints=800, resourceActor=2,
+                              isAoE=True),
+                         dict(hit, timestamp=4_000, abilityGameID=7, amount=0, absorbed=300, isAoE=False),
+                         dict(hit, timestamp=5_000, abilityGameID=9, amount=800, overkill=100, hitPoints=0,
+                              resourceActor=2, isAoE=False)]}
+        self._windows = windows
+        for cls, calls in (("Rogue", 2), ("Warrior", 0)):
+            for c in (app_module.report_meta_cache, app_module.report_fights_cache, app_module.deaths_lru,
+                      app_module.defensive_lru, app_module.recap_lru):
+                c._data.clear()
+            self._fights = lambda token, rid, cls=cls: fights(token, rid, cls)
+            with mock.patch.object(app_module.defensives, "fetch_aoe_abilities", autospec=True,
+                                   return_value=({7}, {7})) as aoe, \
+                    mock.patch.object(app_module.defensives, "analyze_death",
+                                      wraps=app_module.defensives.analyze_death) as death:
+                self._run()
+            self.assertEqual(aoe.call_count, calls, cls)        # one per report, only for a Rogue
+            if calls:
+                self.assertEqual(sorted(c.args[1:3] for c in aoe.call_args_list), [("R1", [1]), ("R2", [1])])
+                self.assertTrue(all(set(c.args[5]) == {7} for c in aoe.call_args_list))
+                self.assertEqual(death.call_args.kwargs["aoe_abilities"], {7, 8})
+                self.assertEqual(death.call_args.kwargs["aoe_unknown"], frozenset())
+        # The request failing: ability 7's status is unknown, not "not AoE".
+        for c in (app_module.report_meta_cache, app_module.report_fights_cache, app_module.deaths_lru,
+                  app_module.defensive_lru, app_module.recap_lru):
+            c._data.clear()
+        self._fights = lambda token, rid: fights(token, rid, "Rogue")
+        with mock.patch.object(app_module.defensives, "fetch_aoe_abilities", autospec=True,
+                               side_effect=RuntimeError("rate limited")), \
+                mock.patch.object(app_module.defensives, "analyze_death",
+                                  wraps=app_module.defensives.analyze_death) as death:
+            self._run()
+        self.assertEqual((death.call_args.kwargs["aoe_abilities"], death.call_args.kwargs["aoe_unknown"]),
+                         ({8}, frozenset({7})))
+        # Ability 7 never dealt damage anywhere in the report's pulls: unknown, not "not AoE".
+        for c in (app_module.report_meta_cache, app_module.report_fights_cache, app_module.deaths_lru,
+                  app_module.defensive_lru, app_module.recap_lru):
+            c._data.clear()
+        with mock.patch.object(app_module.defensives, "fetch_aoe_abilities", autospec=True,
+                               return_value=(set(), set())), \
+                mock.patch.object(app_module.defensives, "analyze_death",
+                                  wraps=app_module.defensives.analyze_death) as death:
+            self._run()
+        self.assertEqual((death.call_args.kwargs["aoe_abilities"], death.call_args.kwargs["aoe_unknown"]),
+                         ({8}, frozenset({7})))
+        # No hit in the windows marked AoE: WCL marks every report (14 reports, Nerub-ar Palace to the
+        # Midnight raids, 2026-10-09), so an unmarked hit that dealt damage is still single-target and
+        # ability 7 is still read from the report's pulls.
+        unmarked = windows
+
+        def windows_unmarked(token, rid, pulls):
+            return {p: [dict(h, isAoE=False) for h in hs] for p, hs in unmarked(token, rid, pulls).items()}
+        self._windows = windows_unmarked
+        for c in (app_module.report_meta_cache, app_module.report_fights_cache, app_module.deaths_lru,
+                  app_module.defensive_lru, app_module.recap_lru):
+            c._data.clear()
+        with mock.patch.object(app_module.defensives, "fetch_aoe_abilities", autospec=True,
+                               return_value=({7}, {7})) as aoe, \
+                mock.patch.object(app_module.defensives, "analyze_death",
+                                  wraps=app_module.defensives.analyze_death) as death:
+            self._run()
+        self.assertEqual(aoe.call_count, 2)
+        self.assertEqual((death.call_args.kwargs["aoe_abilities"], death.call_args.kwargs["aoe_unknown"],
+                          death.call_args.kwargs.get("aoe_known", True)), ({7}, frozenset(), True))
+
     def test_talent_loadouts_are_read_first_and_not_twice(self):
         for c in (app_module.report_meta_cache, app_module.report_fights_cache, app_module.deaths_lru, app_module.defensive_lru, app_module.recap_lru):
             c._data.clear()

@@ -118,6 +118,17 @@ def _report(data):
     return (data.get("reportData") or {}).get("report") or {}
 
 
+def fetch_meta(token, rid, fetch=None, tries=2):
+    """get_fights for one report. get_fights hides a failed fetch as a report with no fights, which
+    would make every check skip or misjudge, so an empty answer is retried once and then raised."""
+    fetch = fetch or get_fights
+    for _ in range(tries):
+        meta = fetch(token, rid)
+        if meta.get("fights"):
+            return meta
+    raise RuntimeError(f"WCL returned no fights for report {rid} (fetch failed or empty report)")
+
+
 class Run:
     """One target's shared state. Nothing is fetched until a property or method needs it."""
 
@@ -149,7 +160,7 @@ class Run:
         return self.meta_for(self.code)
 
     def meta_for(self, rid):
-        return self._memo(("meta", rid), lambda: get_fights(self.token, rid))
+        return self._memo(("meta", rid), lambda: fetch_meta(self.token, rid))
 
     @property
     def pulls(self):
@@ -243,6 +254,25 @@ class Run:
         return self._memo(("casts", rid, pid, start, end),
                           lambda: self._events(rid, "Casts", "sourceID", pid, start, end))
 
+    def resource_casts(self, rid, pid, start, end):
+        """The player's casts in [start, end] with their class resources (a Warlock's Soul Shards)."""
+        return self._memo(("resource-casts", rid, pid, start, end),
+                          lambda: self._events(rid, "Casts", "sourceID", pid, start, end, resources=True))
+
+    def heals_taken(self, rid, pid, start, end):
+        """Healing the player received in [start, end], with resources (for health around a killing hit)."""
+        return self._memo(("heals", rid, pid, start, end),
+                          lambda: self._events(rid, "Healing", "targetID", pid, start, end, resources=True))
+
+    def aura_events(self, rid, pid, start, end):
+        """The player's buff and debuff events in [start, end], with stack counts and who cast them
+        (sourceID). For Buffs and Debuffs, `sourceID` is the unit that has the aura; `targetID` returns
+        the player's own casts on anyone (verified live, Manaforge g2R9GZcd1rP6JKpw actor 67: 87 events, all
+        self-cast, against 124 with `sourceID`, a shaman's Ancestral Vigor among them, sourceID 3)."""
+        return self._memo(("auras", rid, pid, start, end), lambda: sorted(
+            self._events(rid, "Buffs", "sourceID", pid, start, end) +
+            self._events(rid, "Debuffs", "sourceID", pid, start, end), key=lambda e: e["timestamp"]))
+
     def hits_before(self, rid, fid, pid, death_ts):
         # For DamageTaken, sourceID is the unit that took the damage; targetID returns only the hits
         # the player dealt to themselves (verified live: 13 self-hits instead of 41).
@@ -255,6 +285,14 @@ class Run:
             f = self.fight(rid, fid)
             return defensives.fetch_combatants(self.token, rid, [fid], f["start_time"], f["end_time"])
         return self._memo(("combatants", rid, fid), make)
+
+    def report_combatants(self, rid, fids):
+        """Loadouts of every player in the given pulls of one report, in one query."""
+        def make():
+            fights = [self.fight(rid, f) for f in fids]
+            return defensives.fetch_combatants(self.token, rid, list(fids), min(f["start_time"] for f in fights),
+                                               max(f["end_time"] for f in fights))
+        return self._memo(("report-combatants", rid, tuple(fids)), make)
 
     def counted_deaths(self):
         """Every counted death: within the cutoff, not in a wipe, not a cheat death."""

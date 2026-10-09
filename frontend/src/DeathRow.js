@@ -10,7 +10,11 @@ import { createPortal } from 'react-dom';
        blow, survival.details[name] = {amount, why?, school?, effect?, talents?,
        source?, typical?, pressAgo?} (defensives._explain, assess_survival):
        judged over the seconds before the death (survival.window), with the
-       biggest hit of those seconds in survival.biggestHit.
+       hit that set the death up in survival.biggestHit (only when it was neither
+       a one-shot nor a burst) and, on a one-shot finished by a smaller hit, the
+       hit that took 80%+ in survival.oneShotHit. Each active[] entry carries
+       {talentsKnown, effect?, auraMs?, cooldownMs?, charges?, talents?}: its
+       caster's talented numbers (defensives._active_detail; older results lack them).
      icons:       {defensive name: icon file name} for render.worldofwarcraft.com.
      abilityIcons: {spell ID: icon file name} for killing blows (death.abilityId).
      abilityInfo: {name: {kind, cooldownMs, auraMs, charges, effect, typicalHeal?, description?}}.
@@ -84,14 +88,19 @@ function effectText(effect, info) {
       ? ` ${secs(info.cooldownMs)} cooldown${info.charges > 1 ? `, ${info.charges} charges` : ''}.` : '';
     return info.description + cd;
   }
-  const parts = (effect || []).map((c) => {
+  // Sentinel: a value per stack, the stacks dropping one a second (the per-stack values are listed once).
+  const stacked = (effect || []).filter((c) => c.stacks);
+  const parts = (effect || []).filter((c) => !c.stacks).map((c) => {
     const scope = typeof c.school === 'number' ? `${schoolScope(c.school)} ` : SCOPE[c.school] || '';
     const over = c.over_ms ? ` over ${secs(c.over_ms)}` : '';
     if (c.immune) return c.school === 'melee' ? 'Dodges all melee attacks' : `Immune to ${scope}damage`;
+    if (c.dr && c.dr_hit) return `Reduces damage taken by ${pct(c.dr)} to ${pct(c.dr_hit)}, more on larger hits`;
+    if (c.dr && c.from_target) return `Reduces damage taken from the branded enemy by ${pct(c.dr)}`;
     if (c.dr) return `Reduces ${scope}damage taken by ${pct(c.dr)}`;
     if (c.dr_missing) return `Reduces damage taken by up to ${pct(c.dr_missing)} more, the lower their health`;
     if (c.armor) return `Increases armor by ${pct(c.armor)}`;
     if (c.absorb) return `Absorbs ${scope}damage equal to ${pct(c.absorb)} of max health`;
+    if (c.absorb_amount && c.share) return `Absorbs ${pct(c.share)} of each hit, up to ${fmt(c.absorb_amount)}`;
     if (c.absorb_amount) return `Absorbs ${fmt(c.absorb_amount)} ${scope}damage`;
     if (c.hp) return c.current ? `Increases current and max health by ${pct(c.hp)}` : `Increases max health by ${pct(c.hp)}`;
     if (c.heal) return `Heals ${pct(c.heal)} of max health${over}`;
@@ -99,8 +108,14 @@ function effectText(effect, info) {
     if (c.heal_taken) return `Increases healing received by ${pct(c.heal_taken)}`;
     return null;
   }).filter(Boolean);
+  if (stacked.length) {
+    const per = stacked.map((c) => (c.dr ? `${pct(c.dr)} less damage taken` : c.hp ? `${pct(c.hp)} max health` : null))
+      .filter(Boolean).join(' and ');
+    parts.push(`${stacked[0].stacks} stacks, each ${per}, dropping one a second near the end`);
+  }
   if (!parts.length && info?.typicalHeal) parts.push(`Heals about ${fmt(info.typicalHeal)}`);
   let text = parts.join('. ');
+  if (info?.needs && text) text = `With ${info.needs}: ${text.charAt(0).toLowerCase()}${text.slice(1)}`;
   if (info?.auraMs && text) text += ` for ${secs(info.auraMs)}`;
   if (info?.cooldownMs) {
     text += `${text ? '. ' : ''}${secs(info.cooldownMs)} cooldown`;
@@ -109,7 +124,9 @@ function effectText(effect, info) {
   return text ? `${text}.` : '';
 }
 
-function whyText(d, hitName) {
+// Why a defensive doesn't help, or why it can't be told. `whyHit`: the earlier hit a can't-tell is about
+// (assess_survival), when it isn't the killing blow.
+export function whyText(d, hitName) {
   switch (d.why) {
     case 'school':
       return d.school === 'melee' ? `${hitName} isn't a melee attack`
@@ -118,6 +135,11 @@ function whyText(d, hitName) {
         : `${hitName} isn't physical damage`;
     case 'pierces': return `${hitName} goes through immunities`;
     case 'noReduction': return 'Nothing reduced this hit, so damage reduction doesn\'t work on it';
+    case 'notBranded': return 'no enemy it could brand (one the raid attacked) hit them in time for it to help';
+    case 'brandUnknown': return 'the log didn\'t say which enemies the raid could attack, so this can\'t be checked';
+    case 'staggerUnknown': return 'it depends on whether a purify came before or after a staggered hit, and the log doesn\'t say';
+    case 'soulburnUnknown': return 'only with Soulburn first, and the log doesn\'t show whether they had a Soul Shard for it';
+    case 'stagger': return 'a reduction does nothing to a Stagger tick as it lands, and it couldn\'t have been up for the hits that filled the pool';
     case 'fullHealth': return 'They were at full health, so a heal can\'t help';
     case 'aoeUnknown': return 'This log doesn\'t mark area damage, so this can\'t be checked';
     case 'instakill': return 'it was an instant kill, with no damage to reduce, absorb or heal';
@@ -125,7 +147,10 @@ function whyText(d, hitName) {
     case 'tooFast': return 'their health only dropped in the last second, too fast to react';
     case 'readyTooLate': return 'it came off cooldown less than a second before they died';
     case 'notArmor': return `armor doesn't reduce ${hitName}`;
-    case 'armorUnknown': return `it isn't known whether armor reduces ${hitName}`;
+    case 'armorUnknown': return `it isn't known whether armor reduces ${d.whyHit || hitName}`;
+    case 'armorValueUnknown': return d.missing === 'armor'
+      ? `their armor isn't in the log at ${d.whyHit || hitName}, so what more armor would take off it can't be worked out`
+      : `the boss's armor constant isn't known, so what more armor would take off ${d.whyHit || hitName} can't be worked out`;
     default: return null;
   }
 }
@@ -144,13 +169,30 @@ const ADDS_WHAT = {
   heal: 'heal', heal_taken: 'healing received', absorb: 'shield',
 };
 const TALENT_TEXT = (t) => {
+  if (t.field === 'charges') return `+${t.add * t.rank} charge${t.add * t.rank === 1 ? '' : 's'}`;
+  if ('add_ms' in t) return `${t.add_ms < 0 ? '−' : '+'}${secs(Math.abs(t.add_ms) * t.rank)} ${t.field}`;
+  if ((t.field === 'duration' || t.field === 'cooldown') && 'mult' in t) {
+    return `${t.field} ×${Math.round((1 + (t.mult - 1) * t.rank) * 100) / 100}`;
+  }
   if ('adds' in t) {
     if (t.field === 'absorb' && t.adds > 1) return `adds a ${fmt(t.adds)} shield`;
     const vs = t.school ? ` vs ${schoolScope(t.school)}` : '';
-    return `adds ${pct(t.adds * t.rank)}${t.field === 'absorb' ? ' of max health as a' : ''} ${ADDS_WHAT[t.field] || ''}${vs}`.trim();
+    const lasts = t.dur_ms ? ` for ${secs(t.dur_ms)}` : '';
+    return `adds ${pct(t.adds * t.rank)}${t.field === 'absorb' ? ' of max health as a' : ''} ${ADDS_WHAT[t.field] || ''}${vs}`.trim() + lasts;
   }
-  return 'add' in t ? `+${pct(t.add * t.rank)}` : `×${Math.round((1 + (t.mult - 1) * t.rank) * 100) / 100}`;
+  // A talent can take some off as well as add (Elusiveness on Feint's area reduction: −11.4%, measured).
+  const vs = t.school ? ` vs ${schoolScope(t.school)}` : '';
+  const what = ADDS_WHAT[t.field] ? ` ${ADDS_WHAT[t.field]}` : '';
+  if ('add' in t) return `${t.add < 0 ? '−' : '+'}${pct(Math.abs(t.add * t.rank))}${what}${vs}`;
+  return `×${Math.round((1 + (t.mult - 1) * t.rank) * 100) / 100}${vs}`;
 };
+// Talent rows, keyed by position: one talent can change two effects of the same kind (Elusiveness on both
+// of Feint's reductions).
+const TalentRows = ({ talents }) => (
+  <div className="kv">
+    {talents.map((t, i) => <Row key={`${t.talent}-${t.field}-${i}`} a={t.talent} b={TALENT_TEXT(t)} cls="tal" />)}
+  </div>
+);
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 // The game's own quality overlays for potions in the bags (UI atlas crops in
 // public/art/quality): The War Within's three ranks, Midnight's two.
@@ -230,6 +272,43 @@ const TipHead = ({ name, icons, icon, sub, glyph, quality }) => (
 );
 const Row = ({ a, b, cls }) => <div className="r"><span className={cls}>{a}</span><span>{b}</span></div>;
 
+/* An active defensive as its caster had it: their talented numbers and the talents that changed them
+   (analyze_death); results saved before these fields existed show the base text. */
+export const activeTip = (a, inf, icons) => () => {
+  const mine = a.talentsKnown ? {
+    ...inf,
+    ...(a.auraMs != null ? { auraMs: a.auraMs } : {}),
+    ...(a.cooldownMs != null ? { cooldownMs: a.cooldownMs } : {}),
+    ...(a.charges != null ? { charges: a.charges } : {}),
+  } : inf;
+  const talents = a.talents || [];
+  // With the caster's loadout, only their own numbers: never the base ones beside their talents.
+  const effect = a.talentsKnown ? (a.effect || []) : (a.effect || inf?.effect);
+  // Externals have no numbers in the catalog: the game's text (base numbers) is shown, so the talented
+  // duration, cooldown and charges follow it.
+  const fromText = !(effect || []).length && inf?.description && talents.length > 0;
+  const talented = fromText ? [
+    mine.auraMs ? `lasts ${secs(mine.auraMs)}` : null,
+    mine.cooldownMs ? `${secs(mine.cooldownMs)} cooldown` : null,
+    mine.charges > 1 ? `${mine.charges} charges` : null,
+  ].filter(Boolean).join(', ') : '';
+  const whose = a.by ? `${a.by}'s` : 'Their';
+  return (
+    <>
+      <TipHead name={a.name} icons={icons} sub={a.kind === 'external' ? `External${a.by ? ` from ${a.by}` : ''}` : null} />
+      <div className="vd gold">Active when they died</div>
+      {talents.length > 0 && <TalentRows talents={talents} />}
+      <p className="desc">{effectText(effect, mine)}</p>
+      {talented && <p className="desc">With these talents: {talented}.</p>}
+      {a.talentsKnown === false && (
+        <div className="note">{a.casterUnknown ? 'Caster unknown (the aura names no player): base values shown.'
+          : `${a.kind === 'external' && a.by ? `${a.by}'s talents` : 'Talents'} unknown: base values shown.`}</div>
+      )}
+      {a.specKnown === false && <div className="note">{whose} spec isn't in the log: spec passives not included.</div>}
+    </>
+  );
+};
+
 /* ---------- the row ---------- */
 
 export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText, killCounts, logHref, timeLabel }) {
@@ -246,12 +325,14 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
   const kbSchool = s?.killingHit.school;
 
   const instakill = s?.deathType === 'instakill';
+  // Results saved before oneShotHit existed carry a one-shot's big hit as biggestHit.
+  const shotHit = s && (s.oneShotHit || (s.deathType === 'oneShot' ? s.biggestHit : null));
   const ctx = death.isCheatDeath ? 'prevented death (cheat death)'
     : notLogged ? 'the log has no hit for this death'
     : !s ? (current ? 'no killing blow recorded' : '')
     : instakill ? 'instant kill, with no damage to stop'
     : s.deathType === 'oneShot'
-      ? `one-shot from ${s.fromPct ?? s.hpBeforePct}% · died by ${fmt(s.overkill)}`
+      ? `one-shot${shotHit ? ` by ${shotHit.name} (${shotHit.pctOfMax}%)` : ''} from ${s.fromPct ?? s.hpBeforePct}% · died by ${fmt(s.overkill)}`
     : s.deathType === 'burst' && s.burst
       ? `burst from ${s.fromPct ?? s.hpBeforePct}%: ${s.burst.hits} hits ${s.burst.ms < 50 ? 'at once' : `in ${secsFine(s.burst.ms)}`} · died by ${fmt(s.overkill)}`
       : s.rot
@@ -280,7 +361,12 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
               ))}{s.burst.abilities.length > 3 && ', …'}</span>
               <small>{s.burst.hits} hits, {fmt(s.burst.total)} {s.burst.ms < 50 ? 'at once' : `in ${secsFine(s.burst.ms)}`}</small></span>} />
           )}
-          {s.biggestHit && s.deathType !== 'burst' && (
+          {shotHit && s.deathType === 'oneShot' && (
+            <Row a="One-shot by" b={<span className="stack">
+              <span><School mask={shotHit.school}>{shotHit.name}</School> {fmt(shotHit.size)} <i>· {shotHit.pctOfMax}%</i></span>
+              <small>{shotHit.ago >= 0.1 ? `${shotHit.ago}s before` : 'same moment'}</small></span>} />
+          )}
+          {s.biggestHit && s.deathType === 'wasLow' && (
             <Row a="Set up by" b={<span className="stack">
               <span><School mask={s.biggestHit.school}>{s.biggestHit.name}</School> {fmt(s.biggestHit.size)} <i>· {s.biggestHit.pctOfMax}%</i></span>
               <small>{s.biggestHit.times > 1
@@ -293,7 +379,9 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
       )}
       {instakill && <div className="note warn">Instant kill: the game killed them outright, with no damage to reduce, absorb or heal. Only avoiding the mechanic prevents it.</div>}
       {s?.ignoresImmunity && <div className="note warn">Goes through immunities (Ice Block, Divine Shield…)</div>}
-      {s?.ignoresReduction && <div className="note warn">Ignores damage reduction (shields and heals still work)</div>}
+      {s?.staggerTick
+        ? <div className="note warn">A Stagger tick: a reduction does nothing to it as it lands, but one pressed before the hits that filled the pool would have made it smaller (shields and heals still work)</div>
+        : s?.ignoresReduction && <div className="note warn">Ignores damage reduction (shields and heals still work)</div>}
       {notLogged && <p>WarcraftLogs recorded no hit or instant kill for this death, so what killed them isn't known and defensives can't be checked against it.</p>}
       {!s && current && !notLogged && <p>No hit with health data was recorded for this death, so defensives can't be checked against it.</p>}
       {(kills > 0 && !notLogged) || (s?.window && !instakill) ? (
@@ -320,6 +408,7 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
     const verdict = !det || !s ? null
       : v === true ? <div className="vd g">✓ Saves them · {fmt(det.amount - s.overkill)} to spare</div>
       : det.why === 'needsTimeline' ? <div className="vd n">Can't tell: the log's health before this death couldn't be read</div>
+      : v == null && det.why ? <div className="vd n">Can't tell<small>{cap(whyText(det, hitName) || '')}</small></div>
       : det.why ? <div className="vd b">✗ Doesn't help<small>{cap(whyText(det, hitName) || '')}</small></div>
       : det.amount > 0 ? <div className="vd b">✗ Not enough · {fmt(s.overkill - det.amount)} short</div>
       : null;
@@ -345,12 +434,9 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
             {det.pressAgo != null && <Row a="Press" b={`${det.pressAgo}s before death`} />}
           </div>
         )}
-        {talents.length > 0 && (
-          <div className="kv">
-            {talents.map((t) => <Row key={`${t.talent}-${t.field}`} a={t.talent} b={TALENT_TEXT(t)} cls="tal" />)}
-          </div>
-        )}
+        {talents.length > 0 && <TalentRows talents={talents} />}
         {det?.soulwell && <div className="note">Not used in this log, but a Warlock's Soulwell had one for them.</div>}
+        {det?.soulburn && <div className="note">With Soulburn pressed first: the log shows a Soul Shard and Soulburn ready then.</div>}
         {withForm[name] && <div className="note">Needs {withForm[name]}: checked as shifting into it first.</div>}
         <p className="desc">{det?.source === 'log' && det.samples
           ? (inf?.cooldownMs ? `${secs(inf.cooldownMs)} cooldown.` : '')
@@ -363,13 +449,9 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
   const strip = [];
   if (current) {
     d.active.forEach((a) => strip.push(
-      <Tip key={`a-${a.name}`} className="i act" content={() => (
-        <>
-          <TipHead name={a.name} icons={icons} sub={a.kind === 'external' ? `External${a.by ? ` from ${a.by}` : ''}` : null} />
-          <div className="vd gold">Active when they died</div>
-          <p className="desc">{effectText(info(a.name)?.effect, info(a.name))}</p>
-        </>
-      )}><Icon name={a.name} icons={icons} /></Tip>
+      <Tip key={`a-${a.name}`} className="i act" content={activeTip(a, info(a.name), icons)}>
+        <Icon name={a.name} icons={icons} />
+      </Tip>
     ));
     if (d.active.length) strip.push(<span key="s1" className="sep" />);
     const ready = [
