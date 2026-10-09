@@ -703,7 +703,12 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
     instant kills: fetch_death_windows, fetch_instakills) it also estimates
     whether the defensives they had ready would have saved them.
     `cat`: the catalog of the patch the report was logged on (catalog_for).
-    `aoe_known`: whether this report marks AoE hits at all (logs_mark_aoe).
+    `aoe_known`: False for a log that marks no AoE hits at all (an effect limited to AoE is then unknown).
+    No report the site reads is one: WCL marks every report tried, The War Within's too (Nerub-ar Palace
+    11.0.7: 35,511 of 77,667 hits; Undermine 11.1.7: 57,859 of 103,268; 14 reports from Nerub-ar Palace to
+    the Midnight raids, 2026-10-09: 42 to 1,743 marked hits in each pull read, every ability's damaging hits
+    marked alike), so the analysis never infers it from a few deaths' windows, where no marked hit only
+    means which hits those deaths took.
     `aoe_abilities`: the abilities with a hit marked AoE in the report (aoe_abilities of the windows,
     plus fetch_aoe_abilities for those they can't tell); `aoe_unknown`: those whose status couldn't be
     fetched. None: each hit's own mark decides.
@@ -1252,14 +1257,6 @@ def fetch_instakills(token, report_code, fight_ids, start_time, end_time):
     return index_hits(_fetch_blocks(token, report_code, blocks)["k"])
 
 
-def logs_mark_aoe(hits_by_player):
-    """Does this report mark AoE hits? A report with no hit marked isAoE at all can't tell area damage
-    from the rest, and an effect limited to it is then unknown (_school_applies). Every log tried marks
-    them, The War Within's too (Nerub-ar Palace 11.0.7: 35,511 of 77,667 hits; Undermine 11.1.7: 57,859 of
-    103,268); this is the fallback for a log that doesn't."""
-    return any(h.get("isAoE") for hits in (hits_by_player or {}).values() for h in hits)
-
-
 # WCL marks isAoE only on hits that dealt damage. A hit an absorb took whole (amount 0, no health on it),
 # an immune or a missed one is never marked, even of an ability marked on every other hit (Uncontrolled
 # Burn, Undermine: 31,127 of 41,277 marked, every unmarked one amount 0), and the game treats those as
@@ -1364,7 +1361,7 @@ def _school_applies(school, hit, ability_schools, immunity=False):
     if school in (None, "all"):
         return True
     if school == "aoe":
-        # None: this log marks no hit AoE at all (logs_mark_aoe), so whether it applies is unknown.
+        # None: this log marks no hit AoE at all (aoe_known), so whether it applies is unknown.
         if not hit.get("aoeKnown", True):
             return None
         # The ability's status in the report (aoeAbility, from assess_survival): a hit absorbed whole
