@@ -46,7 +46,7 @@ invariants:
   - "NEVER: let a cheat death take a real death's slot; it is counted separately as +N cheat (frontend/src/deathCounting.js:31)."
   - "MUST: defensive analysis exist only for deaths that could count (slot <= maxCutoff, not in a wipe, not a cheat death) (backend/app.py:583)."
   - "NEVER: call the server when a filter changes; every table is recomputed from the loaded result (frontend/src/App.js:1266)."
-content_hash: sha256:607efa181e62045428dfd11c89e2239d7cbd998b24f0c35c8a4ec5541f4ffdd5
+content_hash: sha256:2b0d096ab5a8de48ac44eee862f5e7139a01ffeb2d38e5c0767fa79ca640ae78
 ---
 ## Summary
 
@@ -75,9 +75,9 @@ You arrive here after an analysis, a saved report, a share link, or a Recent run
 - title: Hover the killing blow | short: Killing blow | sub: spell text, kill count
   body: The tooltip shows the ability's icon (abilityIcons by spell ID), its in-game description (abilityText, backend/app.py:674), the hit size, and "Killed N raiders in these pulls" from killCounts (frontend/src/App.js:1276).
 - title: Hover a defensive | short: Defensive verdict | sub: saves, not enough, can't tell
-  body: Ready abilities and consumables are green when the server's replay says they would have saved the player, red otherwise, with the amount and press time (frontend/src/DeathRow.js:326). Active and on-cooldown abilities have their own tooltips (frontend/src/DeathRow.js:382).
+  body: Ready abilities and consumables are green when the server's replay says they would have saved the player, red otherwise, with the amount and press time (frontend/src/DeathRow.js:328). Active and on-cooldown abilities have their own tooltips (frontend/src/DeathRow.js:384).
 - title: Open the log | short: View log | sub: WarcraftLogs deaths view
-  body: Each row links to https://www.warcraftlogs.com/reports/<report>#fight=<fight>&type=deaths (frontend/src/App.js:1336), opened in a new tab (frontend/src/DeathRow.js:451).
+  body: Each row links to https://www.warcraftlogs.com/reports/<report>#fight=<fight>&type=deaths (frontend/src/App.js:1336), opened in a new tab (frontend/src/DeathRow.js:453).
 ```
 
 ## Diagram

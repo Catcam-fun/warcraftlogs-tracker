@@ -26,7 +26,7 @@ anchors:
   player_list: frontend/src/App.js:2102
   death_row: frontend/src/DeathRow.js:241
   death_context: frontend/src/DeathRow.js:257
-  ready_tip: frontend/src/DeathRow.js:322
+  ready_tip: frontend/src/DeathRow.js:324
   tip: frontend/src/DeathRow.js:204
   summarize_defensives: frontend/src/DefensivePanel.js:20
   summary_chip: frontend/src/DefensivePanel.js:43
@@ -46,7 +46,7 @@ links:
   - feat-analyze
   - feat-share
   - feat-saved
-content_hash: sha256:07ed4f4a9e556198ba11a2afc27f3169e0c2663c4daf324497693c05b8bf7970
+content_hash: sha256:164498844d4a87a860e30220b77c08d2132be0a7c57acb572d5c0e452c8e4b71
 ---
 ## Summary
 
@@ -82,14 +82,14 @@ Changing any filter re-runs the same pipeline. You can think of it as a sieve: e
 `DeathRow` has four columns (`frontend/src/fp-design.css:725`): the killing blow, a health bar, the defensive strip, and a "View log" link with the time.
 
 - **Killing blow line**: `#pullNo · ability name`, a CHEAT badge for a cheat death, then one context line chosen in this order (`frontend/src/DeathRow.js:257-269`): cheat death, no hit in the log, no killing blow recorded, instant kill, one-shot ("one-shot from N%", or "one-shot by X (P%) from N%" when a smaller hit finished them), burst ("burst from N%: K hits in Ts"), rot ("worn down by X (rot, K hits)"), set up by the biggest hit, and finally plain "at N%, hit for M%". The label itself comes from `survival.deathType`, `burst`, `rot`, `oneShotHit` and `biggestHit`, set by the backend.
-- **Killing-blow tooltip**: the spell's in-game description from `data.abilityText` (by spell ID), the killing blow size, rot / burst / one-shot by / set-up rows ("One-shot by" names a one-shot's big hit when a smaller hit finished them; "Set up by" only on deaths that were neither one-shot nor burst), health before it and overkill, warnings for "ignores immunity" and "ignores reduction", and how many counted raiders that ability killed in these results (`frontend/src/DeathRow.js:271-319`). The kill count is `killCounts`, built with the same `isCounted` rule (`frontend/src/App.js:1276-1284`).
-- **Health bar**: width is `hpBeforePct`, capped at 100; hidden for instant kills (`frontend/src/DeathRow.js:433-436`).
-- **Defensive strip**, left to right (`frontend/src/DeathRow.js:376-420`):
+- **Killing-blow tooltip**: the spell's in-game description from `data.abilityText` (by spell ID), the killing blow size, rot / burst / one-shot by / set-up rows ("One-shot by" names a one-shot's big hit when a smaller hit finished them; "Set up by" only on deaths that were neither one-shot nor burst), health before it and overkill, warnings for "ignores immunity" and "ignores reduction", and how many counted raiders that ability killed in these results (`frontend/src/DeathRow.js:271-321`). The kill count is `killCounts`, built with the same `isCounted` rule (`frontend/src/App.js:1276-1284`).
+- **Health bar**: width is `hpBeforePct`, capped at 100; hidden for instant kills (`frontend/src/DeathRow.js:435-438`).
+- **Defensive strip**, left to right (`frontend/src/DeathRow.js:378-422`):
   - **Active** (gold ring, "ON" tag): auras up when they died, including externals with who cast them.
   - **Ready** (green ring and check if it would have saved them, dimmed if not): every entry of `available` plus each consumable in `survival.consumables`. The verdict comes from `survival.wouldSave[name]`.
   - **On cooldown** (greyed, with seconds until ready): `cooldown` entries plus a used Healthstone or potion.
-  - **"all together ✓"** when no single ability saves them but `allTogetherWouldSave` is true, and **"?"** when the pull had no talent data (`frontend/src/DeathRow.js:439-448`).
-- **Ready-icon tooltip** verdicts, from `survival.details[name]` (`frontend/src/DeathRow.js:333-338`): "Saves them · N to spare", "Can't tell" (timeline unreadable), "Doesn't help" with a reason from `whyText` (`frontend/src/DeathRow.js:116-137`), or "Not enough · N short". Below that: amount prevented or healed, heal-over-time ticks that land in time, the press time, talents that changed it, and where a potion or Healthstone value came from (`frontend/src/DeathRow.js:171-185`).
+  - **"all together ✓"** when no single ability saves them but `allTogetherWouldSave` is true, and **"?"** when the pull had no talent data (`frontend/src/DeathRow.js:441-450`).
+- **Ready-icon tooltip** verdicts, from `survival.details[name]` (`frontend/src/DeathRow.js:335-340`): "Saves them · N to spare", "Can't tell" (timeline unreadable), "Doesn't help" with a reason from `whyText` (`frontend/src/DeathRow.js:116-137`), or "Not enough · N short". Below that: amount prevented or healed, heal-over-time ticks that land in time, the press time, talents that changed it, and where a potion or Healthstone value came from (`frontend/src/DeathRow.js:171-185`).
 
 ## Diagram
 
@@ -174,7 +174,7 @@ relied-on-by: [[feat-saved]] — an opened saved report renders through this sam
 
 - **MUST** count through `isCounted` / `countedDeaths` everywhere: the matrix (`frontend/src/App.js:1195`, `frontend/src/App.js:1228`), the player list (`frontend/src/App.js:1048`) and `killCounts` (`frontend/src/App.js:1279`). A second rule anywhere would make the tables disagree.
 - **NEVER** count a death with `inWipe`, whatever X is (`frontend/src/deathCounting.js:24`). Mass deaths at a wipe say nothing about who failed first.
-- **NEVER** recompute `slot`, `inWipe`, `deathType` or `wouldSave` in the browser. They come from the backend (`backend/analysis.py:188`, `backend/app.py:545-546`, `backend/defensives.py:2159`, `backend/defensives.py:2195`, `backend/defensives.py:2205`); the view only reads them.
+- **NEVER** recompute `slot`, `inWipe`, `deathType` or `wouldSave` in the browser. They come from the backend (`backend/analysis.py:188`, `backend/app.py:545-546`, `backend/defensives.py:2270`, `backend/defensives.py:2306`, `backend/defensives.py:2316`); the view only reads them.
 - **MUST** skip defensive data without the current shape (`active` and `available` arrays) so saves and shares from older versions still render (`frontend/src/DeathRow.js:23`, `frontend/src/DefensivePanel.js:17`).
 
 ## Gotchas
