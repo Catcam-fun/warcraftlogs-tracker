@@ -61,6 +61,26 @@ STANDARD_POTION = [("11.0.2", "Algari Healing Potion"), ("11.2.0", "Invigorating
                    ("12.0.0", "Silvermoon Health Potion"), ("12.1.0", "Concentrated Silvermoon Health Potion")]
 
 
+def _who_lists(terms):
+    """Every "entries" / "specs" holder in an aura's max-health terms and their modifiers."""
+    for t in terms:
+        yield t
+        yield from t.get("mods", ())
+
+
+# Talent entries that change any aura's max health, in any patch.
+MAX_HEALTH_ENTRIES = frozenset(e for h in MAX_HEALTH.values() for _, terms in h for w in _who_lists(terms)
+                               for e in w.get("entries", ()))
+# Auras whose max-health size depends on a loadout (talents or spec) in some patch: sized with their
+# CASTER's (a warrior's Battlefield Commander raises the Rallying Cry on everyone).
+LOADOUT_SIZED = frozenset(a for a, h in MAX_HEALTH.items() for _, terms in h for w in _who_lists(terms)
+                          if w.get("entries") or w.get("specs"))
+# Stacking auras that can change max health in some patch (a share, a flat amount, or talents that fill it).
+STACK_SIZED = frozenset(a for a in STACKING if any(t.get("flat") or (t.get("share") is not None and
+                                                                    (t.get("share") or t.get("mods")))
+                                                   for _, terms in MAX_HEALTH[a] for t in terms))
+
+
 def _patch_key(patch):
     return [int(x) for x in patch.split(".")]
 
@@ -108,6 +128,9 @@ class Catalog:
                 entries.update(m.get("entries", ()))
         for m in self.heal_talents:
             entries.update(m.get("entries", ()))
+        # And every talent that changes how much an aura raises max health (max_health_auras.py: Foul
+        # Bulwark on Bone Shield, Battlefield Commander on Rallying Cry), whoever cast the aura.
+        entries.update(MAX_HEALTH_ENTRIES)
         self.relevant_talent_entries = frozenset(entries)
         self.name_to_id = {}
         for sid, d in list(self.personal.items()) + list(self.external.items()):
@@ -167,7 +190,7 @@ def ability_info(cat, name):
 # Changes whenever what gets fetched or kept for defensives changes, so cached
 # data from an older catalog is never reused. Bump DATA_SHAPE when the
 # indexed layout changes.
-DATA_SHAPE = 4
+DATA_SHAPE = 5
 CATALOG_FINGERPRINT = hashlib.sha1(repr((DATA_SHAPE, [
     (c.patch, c.cast_ids, c.buff_names, sorted(c.relevant_talent_entries)) for c in _CATALOGS.values()
 ])).encode()).hexdigest()[:12]
@@ -286,14 +309,16 @@ def fetch_defensive_raw(token, report_code, fight_ids, start_time, end_time, cat
 
 
 def filter_defensive_raw(raw, player_ids, cat=None):
-    """fetch_defensive_raw's events for the given players only, indexed (index_defensive_events)."""
+    """fetch_defensive_raw's casts, buffs and heals of the given players and every player's loadout, indexed."""
     players = set(player_ids)
     if not players:
         return {"casts": {}, "buffs": {}, "talents": {}, "heals": {}}
     return index_defensive_events({
         "casts": [e for e in raw.get("casts", []) if e.get("sourceID") in players],
         "buffs": [e for e in raw.get("buffs", []) if e.get("targetID") in players],
-        "combatants": [e for e in raw.get("combatants", []) if e.get("sourceID") in players],
+        # Every player's loadout (trimmed to the entries read): an aura someone else cast on a player who
+        # died is sized with the caster's talents.
+        "combatants": raw.get("combatants", []),
         "heals": [e for e in raw.get("heals", []) if e.get("targetID") in players],
     }, cat or _LATEST)
 
@@ -774,6 +799,13 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
             if killing is not None and int(aid) in _auras(killing):
                 form_armor *= mult
 
+    def caster_loadout(caster):
+        # Another player's talents and spec in this pull (CombatantInfo), for an aura they cast.
+        talents = indexed["talents"].get((fight_id, caster))
+        if talents is None:
+            return None
+        return talents, (indexed.get("specs") or {}).get((fight_id, caster))
+
     if hits is not None:
         death_mult = _heal_taken_mult(_auras(killing), cat) if killing is not None else 1.0
         own_heals = (indexed.get("heals") or {}).get(player_id, [])
@@ -789,7 +821,7 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
                                              aura_ms={e["name"]: _talented_duration(e, talent_entries, spec) for e in ready_entries},
                                              forms=forms, armor_k=armor_k, form_armor=form_armor,
                                              aura_size=_aura_sizer(cat, player_class, spec, talent_entries,
-                                                                   ability_names))
+                                                                   ability_names, player_id, caster_loadout))
 
     for key in ("active", "available", "cooldown"):
         result[key].sort(key=lambda d: (not d.get("major", True), d["name"]))
@@ -843,12 +875,14 @@ WINDOW_BLOCKS_PER_REQUEST = 20
 
 # Everything the survival assessment reads from a hit (the rest, like
 # positions and stats, is dropped so cached reports stay small).
-# The heals (and Last Resort's absorb) the death windows read (fetch_death_windows); part of the
-# windows' cache key in app.py.
+# The heals a killing hit can set off and their cheat-death auras the death windows read
+# (fetch_death_windows).
 WINDOW_HEAL_IDS = frozenset(set(KILLING_HIT_HEALS) | {a for a in KILLING_HIT_HEALS.values() if a})
-# Stacking auras that change max health (game data, any patch): their stack events are read too.
-WINDOW_STACK_IDS = frozenset(a for a in STACKING if any(t.get("share") or t.get("flat")
-                                                        for _, terms in MAX_HEALTH[a] for t in terms))
+# What the windows' extras block reads besides: the aura events of stacking max-health auras (their
+# stacks) and of auras sized by a loadout (who cast them).
+WINDOW_EXTRAS_IDS = sorted(WINDOW_HEAL_IDS | STACK_SIZED | LOADOUT_SIZED)
+# For the windows' cache key in app.py.
+WINDOW_EXTRAS_KEY = hashlib.sha1(repr(WINDOW_EXTRAS_IDS).encode()).hexdigest()[:12]
 AURA_EVENTS = {"applybuff", "applybuffstack", "removebuffstack", "removebuff",
                "applydebuff", "applydebuffstack", "removedebuffstack", "removedebuff"}
 WINDOW_TYPES = {"damage", "heal", "absorbed"} | AURA_EVENTS
@@ -902,7 +936,7 @@ def _fetch_blocks(token, report_code, blocks, keep=None):
 
 def fetch_death_windows(token, report_code, pulls, heals=True):
     """Every hit the given players took in the seconds before their deaths, and the heals a
-    killing hit can set off with their absorbs (features.KILLING_HIT_HEALS).
+    killing hit can set off with their cheat-death auras (features.KILLING_HIT_HEALS).
 
     `pulls`: [(fightID, [(death_ts, log name)])], the deaths that can count.
     WCL charges about a point per page of events and at least one per block,
@@ -913,12 +947,17 @@ def fetch_death_windows(token, report_code, pulls, heals=True):
     11 -> 5 points for a night's reports, each block still one page. Only the
     hits inside a death's window are kept. Returns {targetID: [hits, by time]}.
     With `heals`, one more block over all those pulls, from WCL's All stream, reads on the players who
-    died the heals a killing hit can set off (and Last Resort's absorb) and the stack changes of the
-    stacking max-health auras, in the same lists (type "heal" / "absorbed" / aura events with "stack").
-    Measured on a live Mythic report (k9mC7RxjKPt1TgZW, 27 pulls, 86 deaths, 14 blocks), alternating
-    old and new on a warm cache: 15.0 -> 19.4 points (Healing alone: 16.7; Buffs and Debuffs blocks
-    beside it: 19.5; one Healing block per pull group: 29). The All stream can't replace DamageTaken
-    itself: it leaves the aura list off its damage events.
+    died (WINDOW_EXTRAS_IDS): the heals a killing hit can set off with their cheat-death auras' absorbs
+    and removals, and the aura events of stacking max-health auras (their stacks) and of auras sized
+    by a loadout (who cast them), in the same lists (type "heal" / "absorbed" / aura events with
+    "stack" and "sourceID"). Measured on a live Mythic report (k9mC7RxjKPt1TgZW, 27 pulls, 86 deaths,
+    14 blocks), alternating old and new on a warm cache: 15.0 -> 19.4 points with the block (Healing
+    alone: 16.7; Buffs and Debuffs blocks beside it: 19.5; one Healing block per pull group: 29).
+    The aura IDs are a small part of it: most of its events are heals (Embrace the Shadow, Defy
+    Fate's ticks). Reading only the auras the dying players' hits list, in a second request after the
+    hits, saved nothing (25 pulls, 116 deaths, warm: 16.5 / 16.9 / 16.6 points with every stacking
+    aura, 17.4 / 20.1 / 18.3 with the second request, 17.2 / 20.5 with this list). The All stream can't replace
+    DamageTaken itself: it leaves the aura list off its damage events.
     """
     pulls = sorted(((fid, sorted(d)) for fid, d in pulls if d and any(n for _, n in d)), key=lambda p: p[1][0][0])
     groups = []
@@ -941,14 +980,12 @@ def fetch_death_windows(token, report_code, pulls, heals=True):
     if not blocks:
         return {}
     windows.sort()
+
     if heals:
         every = [d for _, ds in pulls for d in ds]
         names = sorted({n for _, n in every if n})
-        # One block from the All stream: the heals a killing hit can set off (and Last Resort's absorb),
-        # and the stack changes of the stacking max-health auras (a hit lists an aura, not its stacks).
-        ids = sorted(WINDOW_HEAL_IDS | WINDOW_STACK_IDS)
         flt = ("target.name in (" + ", ".join(json.dumps(n, ensure_ascii=False) for n in names) + ")"
-               f" and ability.id in ({', '.join(map(str, ids))})")
+               f" and ability.id in ({', '.join(map(str, WINDOW_EXTRAS_IDS))})")
         blocks["extras"] = ([fid for fid, _ in pulls], max(min(t for t, _ in every) - LETHAL_WINDOW_MS, 0),
                             max(t for t, _ in every) + KILLING_BLOW_AFTER_MS + 1, "All", flt)
 
@@ -1740,15 +1777,28 @@ def max_health_size(aura_id, patch, talents=None, spec=None):
     return (round(mult - 1, 6), flat)
 
 
-def _aura_sizer(cat, player_class, spec, talent_entries, ability_names=None):
+def _aura_sizer(cat, player_class, spec, talent_entries, ability_names=None, player_id=None, loadout_of=None):
     """aura ID -> (share, flat) or None for this player, from game data with their talents and spec
     (max_health_size). Sized by aura ID, wherever the game data puts the effect: Havoc's
     Metamorphosis (162264) has none, Vengeance's (187827) +40%; Bear Form's +25% Stamina is on its
-    passive 1178 (any druid); Fount of Strength puts +10% on Frenzied Regeneration."""
+    passive 1178 (any druid); Fount of Strength puts +10% on Frenzied Regeneration.
+    `size.by_caster(aid, caster)`: sized with the loadout of whoever cast it (`loadout_of(caster)` ->
+    (talents, spec) or None): talents raise an aura from its caster (Battlefield Commander's +2% on a
+    warrior's Rallying Cry reads x1.12 on every player it lands on). None for an aura sized by a loadout
+    when its caster's isn't known."""
     patch = getattr(cat, "patch", None) or LATEST
 
     def size(aid):
         return max_health_size(aid, patch, talent_entries or {}, spec)
+
+    def by_caster(aid, caster):
+        if caster is None or player_id is None or caster == player_id or aid not in LOADOUT_SIZED:
+            return size(aid)
+        lo = loadout_of(caster) if loadout_of else None
+        if lo is None:
+            return None
+        return max_health_size(aid, patch, lo[0] or {}, lo[1])
+    size.by_caster = by_caster
 
     def stacks(aid):
         n = 1
@@ -1767,24 +1817,22 @@ def _own_health(h):
 
 def _set_off_heal(heals, prev_t, t1):
     """Health the killing hit itself healed (heals: the player's KILLING_HIT_HEALS heals and their
-    absorbs, from fetch_death_windows). A heal with an absorb of its own counts only with that absorb
-    logged after the hit before the killing hit: an absorb logged then took part of the killing hit (its
-    absorbs sum to the hit's `absorbed`). Live: Arzoker, Quel'Danas p89, Stretch Time absorbed at
-    13395294, Defy Fate healed at 13395295 and absorbed at 13395314, Terminate logged at 13395315 with
-    both absorbs; a Defy Fate heal 1 ms after the hit before and 31 ms before the killing hit, with no
-    Defy Fate absorb of it (Alemonk, Quel'Danas p32), was health they had. A heal with none (Guardian
-    Spirit, Ardent Defender) counts within DEATH_STRIP_MS before the killing hit."""
+    cheat-death auras' absorbs and removals, from fetch_death_windows). A heal counts only with its
+    aura's absorb, or its removal (used up), logged after the hit before the killing hit: an absorb
+    logged then took part of the killing hit (its absorbs sum to the hit's `absorbed`). Live: Arzoker,
+    Quel'Danas p89, Stretch Time absorbed at 13395294, Defy Fate healed at 13395295 and absorbed at
+    13395314, Terminate logged at 13395315 with both absorbs; a Defy Fate heal 1 ms after the hit
+    before and 31 ms before the killing hit, with no Defy Fate absorb of it (Alemonk, Quel'Danas p32),
+    was health they had. Guardian Spirit logs no absorb: its aura 47788 is removed 1 ms before its heal
+    48153 (Manaforge 2VtyDR4CF6PGLjbd p75, 25624450 / 25624451)."""
     window = [h for h in heals if prev_t < h["timestamp"] <= t1]
     total = 0
     for h in window:
         if h.get("type") != "heal" or h.get("abilityGameID") not in KILLING_HIT_HEALS:
             continue
-        absorb = KILLING_HIT_HEALS[h["abilityGameID"]]
-        if absorb is None:
-            ok = t1 - h["timestamp"] <= DEATH_STRIP_MS
-        else:
-            ok = any(a.get("type") == "absorbed" and a.get("abilityGameID") == absorb for a in window)
-        if ok:
+        aura = KILLING_HIT_HEALS[h["abilityGameID"]]
+        if any(a.get("abilityGameID") == aura and a.get("type") in ("absorbed", "removebuff", "removedebuff")
+               for a in window):
             total += h.get("amount") or 0
     return total
 
@@ -1838,8 +1886,11 @@ def _max_hp_before(window, kb_index, aura_size=None, heals=(), aura_events=()):
         leaves exactly the 2903317 of his hit before. An aura the killing hit brought (Metamorphosis)
         is not on its list, so its max health never counts either;
       - a stacking aura counts once per stack (game data: SpellAuraOptions.CumulativeAura; "increasing
-        your maximum health by $s11% ... per stack": Sentinel): its stacks on that hit and at the killing
-        blow come from its aura events (`aura_events`); when they can't be told, it is left as it was;
+        your maximum health by $s11% ... per stack": Sentinel; Bone Shield +1% a charge with Foul
+        Bulwark): its stacks on that hit and at the killing blow come from its aura events
+        (`aura_events`); when they can't be told, it is left as it was;
+      - an aura is sized with its caster's loadout (aura_size.by_caster, the caster from its aura
+        events): a warrior's Rallying Cry with Battlefield Commander is +12% on everyone;
       - never below the killing hit's own max (the death only takes max health away), nor below the
         health they had.
     """
@@ -1849,8 +1900,19 @@ def _max_hp_before(window, kb_index, aura_size=None, heals=(), aura_events=()):
     prev_t = window[kb_index - 1]["timestamp"] if kb_index else float("-inf")
     on_kb = _auras(kb)
     own = [h for h in window[:kb_index] if _own_health(h)]
-    size = aura_size or (lambda aid: (0.0, 0))
-    stacks = getattr(size, "stacks", lambda aid: 1)
+    stacks = getattr(aura_size, "stacks", lambda aid: 1)
+    by_caster = getattr(aura_size, "by_caster", None)
+
+    def size(aid):
+        if aura_size is None:
+            return (0.0, 0)
+        if by_caster is None:
+            return aura_size(aid)
+        # Who cast it: the last of its aura events up to the killing hit (fetch_death_windows reads them
+        # for an aura sized by a loadout that came or went in the window).
+        src = [e.get("sourceID") for e in aura_events
+               if e.get("abilityGameID") == aid and e["timestamp"] <= t1 and e.get("sourceID") is not None]
+        return by_caster(aid, src[-1] if src else None)
 
     def sized(aids):
         return [a for a in aids if size(a) not in ((0.0, 0), None)]
@@ -1900,7 +1962,8 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     (_max_hp_before). `hits` may hold the heals a killing hit can set off (fetch_death_windows,
     type "heal" / "absorbed"); they are read only for that.
     """
-    heal_events = [h for h in hits or () if h.get("type") in ("heal", "absorbed")]
+    heal_events = [h for h in hits or () if h.get("type") in ("heal", "absorbed")
+                   or (h.get("type") in AURA_EVENTS and h.get("abilityGameID") in WINDOW_HEAL_IDS)]
     aura_events = [h for h in hits or () if h.get("type") in AURA_EVENTS]
     hits = [h for h in hits or () if h.get("type") not in ("heal", "absorbed") and h.get("type") not in AURA_EVENTS]
     killing = _killing_blow(hits, death_ts)

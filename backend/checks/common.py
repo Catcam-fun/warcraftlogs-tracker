@@ -249,9 +249,12 @@ class Run:
                           lambda: self._events(rid, "Healing", "targetID", pid, start, end, resources=True))
 
     def aura_events(self, rid, pid, start, end):
-        """The player's buff and debuff events in [start, end], with stack counts."""
+        """The player's buff and debuff events in [start, end], with stack counts and who cast them
+        (sourceID). For Buffs, `sourceID` is the unit that gained the aura: `targetID` returns only the
+        auras the player cast on themselves (verified live, Manaforge g2R9GZcd1rP6JKpw actor 67: 87 events
+        against 124 with a shaman's Ancestral Vigor, sourceID 3)."""
         return self._memo(("auras", rid, pid, start, end), lambda: sorted(
-            self._events(rid, "Buffs", "targetID", pid, start, end) +
+            self._events(rid, "Buffs", "sourceID", pid, start, end) +
             self._events(rid, "Debuffs", "targetID", pid, start, end), key=lambda e: e["timestamp"]))
 
     def hits_before(self, rid, fid, pid, death_ts):

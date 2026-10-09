@@ -32,10 +32,16 @@ are kept as mods with who gets them (talent-tree entries, scaled by rank, or
 spec names). Effects of one aura aimed at different units (ImplicitTarget_0)
 land on different units: only the first such effect's target counts (Fortitude
 of the Bear: +20% on you, +20% on your pet). Base points 0 that nothing above
-explains: share None (not in the data). Flat Stamina auras (EffectAura 29 on
-Stamina: Seabed Leviathan's Citrine) have share None: health per Stamina point
-and item scaling are not in the data. Stacks are not in what a hit carries, so
-a stacking aura counts once.
+explains: share None (not in the data), unless talents or spec passives aim at
+that effect (EffectAura 107 / 108 / 219 / 220 on its index): then share 0.0 with
+those mods, so the aura changes max health only with them (Bone Shield 195181
+effect 2 with Foul Bulwark, +1% a charge; Ancestral Vigor 207400 with its talent
+207401, +5%; Grimoire of Sacrifice 196099 with Profane Bargain, +3% Stamina).
+Flat Stamina auras (EffectAura 29 on Stamina: Seabed Leviathan's Citrine) have
+share None: health per Stamina point and item scaling are not in the data.
+An aura that stacks (SpellAuraOptions.CumulativeAura, written to STACKING) has
+its terms per stack: the analysis counts them once per stack, from the aura's
+stack events.
 
     WAGO_CACHE=/tmp/wago python backend/scripts/build_max_health_auras.py
 """
@@ -191,7 +197,7 @@ def build_terms(build, problems):
 
     result = {}
     for sid, effs in d.effects.items():
-        terms, seen, target = [], set(), None
+        terms, seen, target, filled = [], set(), None, []
         own_unknown = False
         for i, r in sorted(effs.items()):
             k = kind(r)
@@ -208,6 +214,11 @@ def build_terms(build, problems):
                 terms.append(term(sid, i))
             else:
                 own_unknown = True        # computed: look below for where the value lives
+                # A percent effect whose base points 0 talents fill (Foul Bulwark on Bone Shield). Not a flat
+                # one: its value is computed (Fortifying Brew's health is a description variable, CURATED).
+                mods = d.mods(sid, i) if k[0] == "pct" else None
+                if mods:
+                    filled.append({"from": sid, "index": i, "share": 0.0, "mods": mods})
             seen.add((sid, i))
         text = d.texts.get(sid, "")
         # Spells the aura's own text names for its health, with the text's condition.
@@ -229,9 +240,17 @@ def build_terms(build, problems):
                     terms.append(term(sid, idx))
                     seen.add((sid, idx))
                     own_unknown = False
+        # Its own effect with base points 0 that talents or spec passives aim at: their value is the
+        # size (none without them).
+        if own_unknown and filled and sid not in curated:
+            terms += filled
+            own_unknown = False
         fam = d.family.get(sid, (None,))[0]
+        # A talent already counted as a modifier of the aura's own effect is the same increase (Improved
+        # Ardent Defender: "increases your maximum health by $s1%" is its +20% on Ardent Defender's effect 4).
+        modded = {m["by"] for t in terms for m in t.get("mods", ())}
         for t_spell, idx in talent_refs.get((fam, d.names.get(sid)), ()) if fam else ():
-            if (t_spell, idx) not in seen:
+            if (t_spell, idx) not in seen and t_spell not in modded:
                 t = term(t_spell, idx, d.who(t_spell))
                 if t:
                     terms.append(t)
