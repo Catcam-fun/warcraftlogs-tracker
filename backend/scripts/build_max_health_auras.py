@@ -62,7 +62,12 @@ CURATED = [
     (97463, "Rallying Cry", 97462, 0, "Rallying Cry"),            # "$s1% temporary and maximum health" (in a raid)
     (120954, "Fortifying Brew", 115203, 0, "Fortifying Brew"),   # $health = $115203s1 (SpellDescriptionVariables 261)
 ]
-HEALTH_WORDS = r"(?:[Mm]aximum health|Stamina)"
+# How an aura's text says it raises max health or Stamina, right before the value it names: "Maximum
+# health increased by", "Stamina increased by", "increasing (your) maximum health by". Only that phrasing:
+# Healing Elixir's "heal for $428439s1% of your maximum health if brought below $122280s1% health" is a
+# heal, not a max-health increase.
+HEALTH_WORDS = (r"(?:(?:[Mm]aximum health|Stamina)(?: is)? increased by|"
+                r"increas\w* (?:your )?(?:current and )?(?:maximum health|Stamina) by) ")
 
 
 class Data:
@@ -79,6 +84,8 @@ class Data:
             i = int(r["EffectIndex"])
             if i not in slot or r["DifficultyID"] == MYTHIC:
                 slot[i] = r
+        self.stacks = {int(r["SpellID"]): int(r["CumulativeAura"] or 0) for r in table("SpellAuraOptions", build)
+                       if r["DifficultyID"] == "0" and int(r["CumulativeAura"] or 0) > 1}
         self.passive = {int(r["SpellID"]) for r in table("SpellMisc", build)
                         if r["DifficultyID"] == "0" and int(r["Attributes_0"]) & PASSIVE}
         self.family = {int(r["SpellID"]): (int(r["SpellClassSet"]), [int(r[f"SpellClassMask_{i}"]) & 0xffffffff
@@ -204,7 +211,7 @@ def build_terms(build, problems):
             seen.add((sid, i))
         text = d.texts.get(sid, "")
         # Spells the aura's own text names for its health, with the text's condition.
-        for m in re.finditer(r"(\$\?a(\d+)\[[^\]]*?)?" + HEALTH_WORDS + r"[^$\]]*?\$(\d+)s(\d)%", text):
+        for m in re.finditer(r"(\$\?a(\d+)\[[^\]]*?)?" + HEALTH_WORDS + r"\$(\d+)s(\d)%", text):
             src, idx = int(m.group(3)), int(m.group(4)) - 1
             if (src, idx) in seen or idx not in d.effects.get(src, {}):
                 continue
@@ -216,7 +223,7 @@ def build_terms(build, problems):
         # The aura's own effect its text names for its health ("Maximum health increased by $s4%":
         # Vampiric Blood, whose max-health effect itself has base points 0).
         if own_unknown:
-            for m in re.finditer(HEALTH_WORDS + r"[^$\]]*?\$[sw](\d)%", text):
+            for m in re.finditer(HEALTH_WORDS + r"\$[sw](\d)%", text):
                 idx = int(m.group(1)) - 1
                 if (sid, idx) not in seen and idx in effs and float(effs[idx]["EffectBasePointsF"] or 0):
                     terms.append(term(sid, idx))
@@ -247,15 +254,22 @@ def build_terms(build, problems):
                 terms.append({"from": sid, "index": None, "share": None})
         if terms:
             result[sid] = sorted(terms, key=lambda t: (t["from"], t["index"] if t["index"] is not None else -1))
-    return result
+    # Auras that stack (SpellAuraOptions.CumulativeAura): each stack carries the effect, so the size is
+    # per stack ("increasing your maximum health by $s11% ... per stack": Sentinel, 15 stacks).
+    return result, {sid: d.stacks[sid] for sid in result if sid in d.stacks}
 
 
 def main():
     out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "max_health_auras.py")
-    history, problems = {}, []
+    history, stacking, problems = {}, {}, []
     for patch, first_day, build in patches():
         print(f"{patch} (build {build})...", flush=True)
-        found = build_terms(build, problems)
+        found, stacks = build_terms(build, problems)
+        for aura in set(stacks) | set(stacking):
+            h = stacking.setdefault(aura, [])
+            n = stacks.get(aura, 1)
+            if (not h and n > 1) or (h and h[-1][1] != n):
+                h.append((patch, n))
         for aura, value in found.items():
             h = history.setdefault(aura, [])
             if not h or repr(h[-1][1]) != repr(value):
@@ -273,7 +287,10 @@ def main():
                 '   "entries"? (talent-tree entries: only with one of them), "specs"? (only those specs),\n'
                 '   "mods"?: [{"add" (x rank) | "mult", "by": spell, "entries" | "specs"}]}.\n'
                 'An empty list: the aura no longer changes max health in that patch."""\n\n')
-        f.write("MAX_HEALTH = " + pprint.pformat(history, width=120, sort_dicts=True) + "\n")
+        f.write("MAX_HEALTH = " + pprint.pformat(history, width=120, sort_dicts=True) + "\n\n")
+        f.write("# Auras that stack, by patch: {aura ID: [(first patch, max stacks), ...]}. Their terms are per stack.\n")
+        f.write("STACKING = " + pprint.pformat({a: h for a, h in stacking.items() if h}, width=120, sort_dicts=True)
+                + "\n")
     print(f"Wrote {len(history)} auras to {os.path.normpath(out)}")
 
 

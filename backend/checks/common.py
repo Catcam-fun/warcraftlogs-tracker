@@ -248,6 +248,12 @@ class Run:
         return self._memo(("heals", rid, pid, start, end),
                           lambda: self._events(rid, "Healing", "targetID", pid, start, end, resources=True))
 
+    def aura_events(self, rid, pid, start, end):
+        """The player's buff and debuff events in [start, end], with stack counts."""
+        return self._memo(("auras", rid, pid, start, end), lambda: sorted(
+            self._events(rid, "Buffs", "targetID", pid, start, end) +
+            self._events(rid, "Debuffs", "targetID", pid, start, end), key=lambda e: e["timestamp"]))
+
     def hits_before(self, rid, fid, pid, death_ts):
         # For DamageTaken, sourceID is the unit that took the damage; targetID returns only the hits
         # the player dealt to themselves (verified live: 13 self-hits instead of 41).

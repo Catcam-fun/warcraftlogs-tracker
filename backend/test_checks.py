@@ -1242,6 +1242,19 @@ class StateTests(unittest.TestCase):
         self.assertEqual(rules_labels.max_hp_before(hits, 1, LO(latest, {117218: 1}, "Guardian"))[:2], (1100, 500))
         self.assertIn("needs the player's loadout", rules_labels.max_hp_before(hits, 1, LO(latest, None, "Guardian"))[2])
 
+    def test_a_stacking_aura_counts_per_stack(self):
+        # Sentinel (389539): +1% per stack, 15 stacks; stacks from the player's aura events.
+        latest = rules_labels.patch_of(1_790_000_000_000)
+        self.assertEqual(rules_labels.stacks_of(389539, latest), 15)
+        lo = LO(latest, {}, "Protection")
+        own = lambda ts, amount, mx, ok=0: dict(self.own(ts, amount, 1, mx, overkill=ok), buffs="389539.")
+        hits = [own(90_000, 10, 1_150_000), own(100_000, 900_000, 1_000_000, ok=1)]
+        ev = [{"timestamp": 89_000, "type": "applybuffstack", "abilityGameID": 389539, "stack": 15},
+              {"timestamp": 98_000, "type": "removebuffstack", "abilityGameID": 389539, "stack": 3}]
+        self.assertEqual(rules_labels.max_hp_before(hits, 1, lo, aura_events=ev)[0], round(1_150_000 * 1.03 / 1.15))
+        self.assertIn("aura events not read", rules_labels.max_hp_before(hits, 1, lo)[2])
+        self.assertIn("can't be told", rules_labels.max_hp_before(hits, 1, lo, aura_events=[])[2])
+
     def test_a_set_off_heal_that_leaves_them_below_max_is_read(self):
         # Cheat Death-like: the killing hit was partly absorbed and an aura it set off healed them, still
         # under max. The absorb is the trigger to read the heals, not health above max.
