@@ -287,6 +287,13 @@ TALENT_EFFECTS = {
     # "For 4 sec after shifting into Bear Form, your health and armor are increased by 15%."
     "Ursine Vigor": [("Bear Form", "hp", [("talent", 0)], {}), ("Bear Form", "armor", [("talent", 0)], {})],
     "Mantra of Tenacity": [("Fortifying Brew", "absorb_aura", [], {"aura": "Chi Cocoon"})],
+    # The War Within: "Your Prismatic Barrier / Blazing Barrier now grants 5% avoidance while active"
+    # (Sunfury: Arcane and Fire). The 5 is the talent's effect 0; the buff 449336 carries it as a rating
+    # (aura 189, filled by a script). Avoidance cuts area damage: measured 0.289 vs 0.249 on magic area
+    # hits with and without it (1 - 0.75 x 0.95 = 0.2875). Midnight rewrote the talent (its barrier
+    # bonuses linger 8 s after the barrier breaks; 449336 has no aura 189 there): "requires" drops it.
+    "Merely a Setback": [(b, "dr", [("talent", 0)], {"school": "aoe", "requires": (449336, "aura:189")})
+                         for b in ("Prismatic Barrier", "Blazing Barrier")],
 }
 
 # Every talent that names a defensive in its tooltip with a survival word has
@@ -875,6 +882,9 @@ def talent_component(gd, mods, talent, field, source, extra, problems):
     who, talent_spell = talent_who(gd, mods, talent)
     if who is None:
         return None                       # not in this patch's talent trees
+    need = extra.get("requires")
+    if need and not effect_indices(gd, *need):
+        return None                       # the talent does something else in this patch
     value = 1.0
     for spell, where in source:
         spell = talent_spell if spell == "talent" else spell
