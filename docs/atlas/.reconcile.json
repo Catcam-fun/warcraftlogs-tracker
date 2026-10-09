@@ -51,7 +51,7 @@
       "verdict": "gap",
       "docClaim": "No mention of how the frontend finds the backend.",
       "docSource": "frontend/README.md:1",
-      "codeTruth": "API_URL comes from REACT_APP_API_URL, else http://localhost:5000 locally, else https://deathwarcraftlogs-api.onrender.com (frontend/src/api.js:7-8).",
+      "codeTruth": "API_URL comes from REACT_APP_API_URL, else http://localhost:5000 locally, else the old Render host (frontend/src/api.js:7-8).",
       "id": "RC-014"
     },
     {
@@ -130,9 +130,9 @@
       "doc": "frontend/.project-snapshot.md",
       "topic": "Backend URL in embedded code",
       "verdict": "conflict",
-      "docClaim": "Embedded SaveReportDialog/SavedReports define API_BASE = 'https://floorpov-backend.onrender.com' and call fetch directly.",
+      "docClaim": "Embedded SaveReportDialog/SavedReports define API_BASE = an older Render host and call fetch directly.",
       "docSource": "frontend/.project-snapshot.md:384",
-      "codeTruth": "Single API_URL in frontend/src/api.js:7-8 points to https://deathwarcraftlogs-api.onrender.com; components use apiFetch (frontend/src/SaveReportDialog.js:3, frontend/src/SavedReports.js:3).",
+      "codeTruth": "Single API_URL in frontend/src/api.js:7-8 points to the old Render host; components use apiFetch (frontend/src/SaveReportDialog.js:3, frontend/src/SavedReports.js:3).",
       "id": "RC-003"
     },
     {

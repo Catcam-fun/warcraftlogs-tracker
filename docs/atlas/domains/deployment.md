@@ -16,10 +16,10 @@ anchors:
   gunicorn_threads: backend/gunicorn.conf.py:15
   gunicorn_timeout: backend/gunicorn.conf.py:18
   requirements: backend/requirements.txt:1
-  dev_server: backend/app.py:853
+  dev_server: backend/app.py:807
   load_dotenv: backend/app.py:20
   allowed_origins: backend/app.py:67
-  health: backend/app.py:843
+  health: backend/app.py:797
   supabase_env: backend/supabase_client.py:27
   api_url: frontend/src/api.js:9
   wake_message: frontend/src/api.js:105
@@ -53,7 +53,7 @@ invariants:
   - "MUST: migrations 001 and 002 be run in the Supabase SQL editor before the features that use them are expected to persist."
   - "NEVER: commit backend/.env; it is gitignored and holds the backend's secrets."
   - "NEVER: rely on in-process state (rate limits, memory shares, caches) across workers or restarts."
-content_hash: sha256:bb1b274fc40a37e7c0069e09d1fd4979fa8efcb19b498d85a273845d24641430
+content_hash: sha256:68b717a2b39ecee11e266c2f54b93f610bbcd4a4adb6ec379fad45892c6f4442
 ---
 # Deployment & Environments
 
@@ -63,7 +63,7 @@ content_hash: sha256:bb1b274fc40a37e7c0069e09d1fd4979fa8efcb19b498d85a273845d246
 - The site finds the API through one constant, `API_URL` (`frontend/src/api.js:9`): `REACT_APP_API_URL` if set at build time, else `http://localhost:5000` on localhost, else `''` (the page's own host, where CloudFront serves the API under `/api`).
 - Supabase is shared infrastructure, not deployed from here. Its schema changes live as hand-run SQL in `backend/migrations/` (`backend/migrations/001_shares_and_rls.sql:2`).
 - floorpov.gg and www.floorpov.gg are aliases of the CloudFront distribution in `infra/README.md`, so the site and API live entirely on AWS. The old Render web service is no longer used.
-- The AWS setup is code: `infra/template.yaml` puts the site in a private S3 bucket and the API on Lambda (started by `backend/run.sh` through the Lambda Web Adapter), both behind one CloudFront distribution, with `/api/*` going to Lambda. `.github/workflows/deploy-aws.yml` runs the tests, updates the hand-built Lambda (`floorpov-staging-api`, despite its name the live one) and site, and smoke-tests it; it runs on every push to `main` and when started by hand (`.github/workflows/deploy-aws.yml:14`). `template.yaml` is a reference for rebuilding the setup, not what is live (`infra/README.md`). One-time setup is in `infra/README.md`.
+- The AWS setup is code: `infra/template.yaml` puts the site in a private S3 bucket and the API on Lambda (started by `backend/run.sh` through the Lambda Web Adapter), both behind one CloudFront distribution, with `/api/*` going to Lambda. `.github/workflows/deploy-aws.yml` runs the tests, updates the hand-built Lambda and site (resource IDs come from repository secrets, never the repo; `infra/README.md`), and smoke-tests it; it runs on every push to `main` and when started by hand (`.github/workflows/deploy-aws.yml:14`). `template.yaml` is a reference for rebuilding the setup, not what is live (`infra/README.md`). One-time setup is in `infra/README.md`.
 
 ## Diagram
 
@@ -99,7 +99,7 @@ edge static -> supa color=process "anon key"
   body: Each file says to run it once in the Supabase dashboard SQL editor and that it is safe to re-run (backend/migrations/001_shares_and_rls.sql:2, backend/migrations/002_report_cache.sql:2). 001 creates shared_results and turns on RLS and credential policies; 002 creates report_cache. Both use create if not exists and drop policy if exists.
   gotcha: Missing tables fail soft. Without 001 shares fall back to process memory (backend/supabase_client.py:239); without 002 the shared report cache is skipped. The app looks healthy while not persisting.
 - title: Build the frontend | short: Static build | sub: react-scripts build
-  body: npm run build runs react-scripts build (frontend/package.json:21). REACT_APP_API_URL, if set, is baked into the bundle at this point (frontend/src/api.js:8). Everything in frontend/public, including art and _redirects.txt, is copied into build/. The Supabase URL and anon key are constants in the source (frontend/src/supabaseClient.js:3), not build variables.
+  body: npm run build runs react-scripts build (frontend/package.json:21). REACT_APP_API_URL, if set, is baked into the bundle at this point (frontend/src/api.js:8). Everything in frontend/public, including art and _redirects.txt, is copied into build/. The Supabase URL, anon key and Turnstile site key are build variables too (frontend/src/supabaseClient.js:7, frontend/src/Auth.js:6), filled from repository secrets by the deploy (.github/workflows/deploy-aws.yml).
 - title: Route every path to the app | short: SPA rewrite | sub: /* to /index.html 200
   body: The app uses BrowserRouter (frontend/src/index.js:11) with paths like /analyze, /results and /saved (frontend/src/App.js:1577, :1566, :2205). frontend/public/_redirects.txt holds one rule, /* /index.html 200, so a direct visit or refresh on those paths serves the app instead of a 404.
 - title: Point the site at the API | short: API base URL | sub: by hostname
@@ -115,10 +115,10 @@ edge static -> supa color=process "anon key"
 | Backend dependencies | `backend/requirements.txt` | pip |
 | Backend config | `PORT`, `WEB_CONCURRENCY`, `GUNICORN_THREADS`, `ALLOWED_ORIGINS`, `SUPABASE_URL` | host env; `backend/.env` locally |
 | Backend secrets | `SUPABASE_KEY` (anon), `SUPABASE_SERVICE_ROLE_KEY` | host env; `backend/.env` locally (gitignored, `.gitignore:2`) |
-| Health check | `GET /api/health` returns status and whether Supabase is configured | `backend/app.py:843` |
+| Health check | `GET /api/health` returns status and whether Supabase is configured | `backend/app.py:797` |
 | Frontend build | `react-scripts build` to `frontend/build/` (gitignored) | `frontend/package.json:21`, `frontend/.gitignore:12` |
 | Frontend config | `REACT_APP_API_URL` (optional, build time) | build env |
-| Frontend public values | Supabase URL and anon key | constants in `frontend/src/supabaseClient.js:3` |
+| Frontend public values | Supabase URL, anon key, Turnstile site key | `REACT_APP_*` build variables from repository secrets (`frontend/src/supabaseClient.js:7`, `frontend/src/Auth.js:6`); `frontend/.env.local` locally |
 | Database schema | `backend/migrations/*.sql` | pasted into the Supabase SQL editor by hand |
 | Generated data | `defensive_catalog.py`, `boss_spell_text.py`, `spell_icons.py` and others, committed | built offline by `backend/scripts/`, see [[game-data]] |
 | CI | `atlas-sync.yml`: runs `verify-atlas.mjs` on PRs touching `docs/atlas/**` | `.github/workflows/atlas-sync.yml:25` |
@@ -130,9 +130,9 @@ edge static -> supa color=process "anon key"
 | Frontend | `react-scripts start` (`frontend/package.json:20`) on localhost | the build in S3, served by CloudFront; a CloudFront Function serves `index.html` for React routes (`infra/template.yaml`) |
 | API the site calls | `http://localhost:5000` (`frontend/src/api.js:10`) | `''` (same host): built with `REACT_APP_API_URL=same-origin`, and `''` is also the default off localhost (`frontend/src/api.js:10`); API under `/api/*` |
 | Override | `REACT_APP_API_URL` | same, at build time |
-| Backend server | `python app.py`: Flask dev server, threaded, debug off (`backend/app.py:853`), or gunicorn | gunicorn on Lambda via the Lambda Web Adapter (`backend/run.sh`); the live function has 3008 MB (`infra/README.md`; `infra/template.yaml:120` says 1024 MB, a reference only), a 600-second timeout as configured in the console (`infra/README.md` says 15 minutes), response streaming; `run.sh` sets `MALLOC_ARENA_MAX=2` (`backend/run.sh:10`) and `PYTHONUNBUFFERED=1` so the app's log lines reach CloudWatch as they happen (`backend/run.sh:11`) |
+| Backend server | `python app.py`: Flask dev server, threaded, debug off (`backend/app.py:807`), or gunicorn | gunicorn on Lambda via the Lambda Web Adapter (`backend/run.sh`); the live function has 3008 MB (`infra/README.md`; `infra/template.yaml:120` says 1024 MB, a reference only), a 600-second timeout as configured in the console (`infra/README.md` says 15 minutes), response streaming; `run.sh` sets `MALLOC_ARENA_MAX=2` (`backend/run.sh:10`) and `PYTHONUNBUFFERED=1` so the app's log lines reach CloudWatch as they happen (`backend/run.sh:11`) |
 | Backend env | `backend/.env` via `load_dotenv()` | Lambda environment variables, set in the console |
-| Supabase | same project: the frontend URL and anon key are hard-coded (`frontend/src/supabaseClient.js:3`) | same |
+| Supabase | same project: the frontend URL and anon key come from `frontend/.env.local` (`frontend/src/supabaseClient.js:7`) | same, from repository secrets |
 | CORS | `ALLOWED_ORIGINS` usually unset, so `*` | not needed: site and API share one host |
 | Cold start | none | a schedule pings `POST /events` every 5 minutes to keep a copy warm (`backend/app.py:93`), and the site pings `/api/health` on load; a request that cannot connect tells users the server "may be waking up" (`frontend/src/api.js:105`) |
 
