@@ -255,6 +255,11 @@ class DurationsCheckTests(unittest.TestCase):
         self.assertEqual((o.status, o.reason), ("skip", "no duration-talent defensive uses measured"))
 
 
+def _healthy(e, missing=0.0, max_hp=1_000_000):
+    """Hit `e` with the player's own health on it (resourceActor 2), missing `missing` of max health just before it."""
+    return dict(e, resourceActor=2, maxHitPoints=max_hp, hitPoints=round(max_hp * (1 - missing)) - (e.get("amount") or 0))
+
+
 class MitigationCheckTests(unittest.TestCase):
     def test_compares_with_hits_carrying_the_same_other_auras(self):
         # Live 2026-10-07: Fade measured 0.16 against 0.10 because Protective Light (an untracked 10%)
@@ -273,9 +278,9 @@ class MitigationCheckTests(unittest.TestCase):
                                 "mitigation": [{"dr": 0.3}]}}
         run.cat.relevant_talent_entries = set()
         run.combatants.return_value = []
-        hit = lambda who, through, buffs, blocked=0: {"type": "damage", "targetID": who, "abilityGameID": 1, "fight": 1,
-                                                     "unmitigatedAmount": 1250, "mitigated": 1250 - through,
-                                                     "amount": through, "blocked": blocked, "buffs": buffs}
+        hit = lambda who, through, buffs, blocked=0: _healthy({"type": "damage", "targetID": who, "abilityGameID": 1, "fight": 1,
+                                                              "unmitigatedAmount": 1250, "mitigated": 1250 - through,
+                                                              "amount": through, "blocked": blocked, "buffs": buffs})
         hits = [hit(7, 1000, "")] * 20 + [hit(7, 900, "9.")] * 20      # Protective Light alone: 10% off
         hits += [hit(7, 900, "586.")] * 5 + [hit(7, 810, "586.9.")] * 20  # Fade, mostly with Protective Light
         hits += [hit(7, 500, "586.", blocked=400)] * 10
@@ -297,9 +302,9 @@ class MitigationCheckTests(unittest.TestCase):
                               "mitigation": [{"dr": 0.4, "school": "aoe"}]}}
         run.cat.relevant_talent_entries = set()
         run.combatants.return_value = []
-        hit = lambda through, buffs, aoe: {"type": "damage", "targetID": 2, "abilityGameID": 1, "fight": 1,
-                                           "unmitigatedAmount": 1250, "mitigated": 1250 - through,
-                                           "amount": through, "buffs": buffs, "isAoE": aoe}
+        hit = lambda through, buffs, aoe: _healthy({"type": "damage", "targetID": 2, "abilityGameID": 1, "fight": 1,
+                                                    "unmitigatedAmount": 1250, "mitigated": 1250 - through,
+                                                    "amount": through, "buffs": buffs, "isAoE": aoe})
         hits = [hit(1000, "", True)] * 10 + [hit(1000, "", False)] * 10
         hits += [hit(600, "1966.", True)] * 20 + [hit(1000, "1966.", False)] * 15 + [hit(600, "1966.", True)]
         with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
@@ -324,9 +329,9 @@ class MitigationCheckTests(unittest.TestCase):
         run.cat.all = {22812: {"name": "Barkskin", "kind": "personal", "class": "Druid", "mitigation": [{"dr": 0.2}]}}
         run.cat.relevant_talent_entries = set()
         run.combatants.return_value = []
-        hit = lambda through, buffs: {"type": "damage", "targetID": 3, "abilityGameID": 1, "fight": 1,
-                                      "unmitigatedAmount": 1250, "mitigated": 1250 - through,
-                                      "amount": through, "buffs": buffs}
+        hit = lambda through, buffs: _healthy({"type": "damage", "targetID": 3, "abilityGameID": 1, "fight": 1,
+                                               "unmitigatedAmount": 1250, "mitigated": 1250 - through,
+                                               "amount": through, "buffs": buffs})
         hits = [hit(1000, "9.")] * 10 + [hit(900, "22812.9.")] * 25
         with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
             o = source_mitigation.check(run)
@@ -356,9 +361,9 @@ class MitigationCheckTests(unittest.TestCase):
                           "specs": ["Balance", "Feral", "Restoration"], "mitigation": [{"dr": 0.06}]}}
         abilities = {115203: "Fortifying Brew", 5487: "Bear Form"}
         friendlies = [{"id": 2, "name": "Weavi", "type": "Monk"}, {"id": 3, "name": "Zef", "type": "Druid"}]
-        hit = lambda who, ability, through, buffs: {"type": "damage", "targetID": who, "abilityGameID": ability,
-                                                    "fight": 1, "unmitigatedAmount": 1000, "mitigated": 1000 - through,
-                                                    "amount": through, "buffs": buffs}
+        hit = lambda who, ability, through, buffs: _healthy({"type": "damage", "targetID": who, "abilityGameID": ability,
+                                                             "fight": 1, "unmitigatedAmount": 1000, "mitigated": 1000 - through,
+                                                             "amount": through, "buffs": buffs})
         hits = [hit(2, 124255, 600, "")] * 10 + [hit(2, 124255, 600, "115203.")] * 25   # Stagger ticks
         hits += [hit(3, 9, 900, "")] * 10 + [hit(3, 9, 900, "5487.")] * 25
         combatants = [{"fight": 1, "sourceID": 3, "specID": 104, "talentTree": []}]    # 104: Guardian
@@ -424,10 +429,11 @@ class MitigationCheckTests(unittest.TestCase):
                             "specs": ["Vengeance"], "mitigation": [{"dr": 0.4}]}}
         friendlies = [{"id": 1, "name": "Felv", "type": "DemonHunter"}]
         combatants = [{"fight": 1, "sourceID": 1, "specID": 581, "talentTree": []}]
-        hit = lambda through, buffs, unit: {"type": "damage", "targetID": 1, "sourceID": unit, "abilityGameID": 9,
-                                            "fight": 1, "timestamp": 0, "unmitigatedAmount": 1250,
-                                            "mitigated": 1250 - through, "amount": through, "buffs": buffs}
-        hits = [hit(1000, "", 50)] * 10 + [hit(600, "207771.", 50)] * 15 + [hit(600, "207771.", 51)] * 10
+        hit = lambda through, buffs, unit: _healthy({"type": "damage", "targetID": 1, "sourceID": unit, "abilityGameID": 9,
+                                                     "fight": 1, "timestamp": 0, "unmitigatedAmount": 1250,
+                                                     "mitigated": 1250 - through, "amount": through, "buffs": buffs})
+        hits = [hit(1000, "", 50)] * 10 + [hit(600, "207771.", 50)] * 15
+        hits += [hit(1000, "", 51)] * 3 + [hit(600, "207771.", 51)] * 10
         run = self._wave1_run(entries, friendlies, {207771: "Fiery Brand"}, combatants)
         with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
             self.assertEqual(source_mitigation.check(run).status, "pass")
@@ -504,9 +510,9 @@ class MitigationCheckTests(unittest.TestCase):
         from checks import source_mitigation
         entries = {22812: {"name": "Barkskin", "kind": "personal", "class": "Druid", "mitigation": [{"dr": 0.3}]}}
         run = self._wave1_run(entries, [{"id": 3, "name": "Pumps", "type": "Druid"}], {22812: "Barkskin"})
-        hit = lambda ability, through, buffs: {"type": "damage", "targetID": 3, "abilityGameID": ability, "fight": 1,
-                                               "unmitigatedAmount": 1000, "mitigated": 1000 - through,
-                                               "amount": through, "buffs": buffs}
+        hit = lambda ability, through, buffs: _healthy({"type": "damage", "targetID": 3, "abilityGameID": ability, "fight": 1,
+                                                        "unmitigatedAmount": 1000, "mitigated": 1000 - through,
+                                                        "amount": through, "buffs": buffs})
         hits = [hit(1, 900, "")] * 5 + [hit(1, 630, "22812.")] * 12
         hits += [hit(2, 800, "")] * 5 + [hit(2, 560, "22812.")] * 10
         hits += [hit(3, 800, "")] * 5 + [hit(3, 800, "22812.")] * 9                # reads 0.00
@@ -532,7 +538,8 @@ class MitigationCheckTests(unittest.TestCase):
              "mitigated": 1250 - through, "amount": through, "buffs": buffs},
             **({"resourceActor": 2, "hitPoints": before - through, "maxHitPoints": 10_000} if before else {}))
         # Half health missing: 1 - 0.7 x (1 - 0.2 x 0.5) = 0.37 off. Full health: 0.30.
-        hits = [hit(1000, "")] * 10 + [hit(630, "48792.", 5_000)] * 15 + [hit(700, "48792.", 10_000)] * 10
+        hits = [hit(1000, "", 10_000)] * 10 + [hit(1000, "", 5_000)] * 10
+        hits += [hit(630, "48792.", 5_000)] * 15 + [hit(700, "48792.", 10_000)] * 10
         combatants = [{"fight": 1, "sourceID": 5, "specID": 250, "talentTree": [{"id": 117891, "rank": 1}]}]
         run = self._wave1_run(entries, friendlies, {48792: "Icebound Fortitude"}, combatants)
         run.cat.relevant_talent_entries = {117891}
@@ -555,9 +562,80 @@ class MitigationCheckTests(unittest.TestCase):
         # With the talent but no health on the hits, the reduction can't be predicted: left out.
         run = self._wave1_run(entries, friendlies, {48792: "Icebound Fortitude"}, combatants)
         run.cat.relevant_talent_entries = {117891}
-        bare = [hit(1000, "")] * 10 + [hit(630, "48792.")] * 25
+        bare = [hit(1000, "")] * 10 + [hit(630, "48792.")] * 25         # no health on any hit
         with mock.patch.object(source_mitigation.defensives, "_paged", return_value=bare):
             self.assertEqual(source_mitigation.check(run).status, "skip")
+
+
+    def test_baseline_is_the_nearest_hit_from_the_same_unit(self):
+        # Live 2026-10-08 (Cauldron of Carnage pull 47): the share of a hit that got through drifted 0.865 ->
+        # 0.937 over the pull from an effect no hit lists, so Unending Resolve read 0.37 against the pull's
+        # median where back-to-back hits read 0.4000 (148 pairs, five Warlocks). Each hit with it up is
+        # compared with the nearest hit without it from the same unit and ability.
+        from checks import source_mitigation
+        entries = {104773: {"name": "Unending Resolve", "kind": "personal", "class": "Warlock",
+                            "mitigation": [{"dr": 0.25}]}}
+        run = self._wave1_run(entries, [{"id": 4, "name": "Bryon", "type": "Warlock"}], {104773: "Unending Resolve"})
+        hit = lambda t, through, buffs, unit=50: _healthy({
+            "type": "damage", "targetID": 4, "sourceID": unit, "sourceInstance": 1, "abilityGameID": 9, "fight": 1,
+            "timestamp": t, "unmitigatedAmount": 100_000, "mitigated": 100_000 - through, "amount": through,
+            "buffs": buffs})
+        share = lambda k: 0.80 + 0.15 * k / 59                 # drifts 0.80 -> 0.95 over a minute
+        hits = [hit(k * 1000, round(100_000 * share(k)), "") for k in range(60)]
+        # Pressed early, while the share is low: 25% off the hits around then.
+        hits += [hit(k * 1000 + 400, round(100_000 * share(k) * 0.75), "104773.") for k in range(25)]
+        # Another unit's same ability takes a different share (another debuff on it): never the baseline.
+        hits += [hit(k * 1000 + 300, 60_000, "", unit=51) for k in range(60)]
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
+            self.assertEqual(source_mitigation.check(run).status, "pass")
+        # Against the pull's median share (0.875) the same hits read 0.30 and were flagged; a catalog value
+        # that is really wrong is still flagged with the nearest hit as the baseline.
+        wrong = {104773: dict(entries[104773], mitigation=[{"dr": 0.40}])}
+        run = self._wave1_run(wrong, [{"id": 4, "name": "Bryon", "type": "Warlock"}], {104773: "Unending Resolve"})
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
+            o = source_mitigation.check(run)
+        self.assertEqual(o.items, ["Bryon Unending Resolve: measured 0.25, catalog 0.40 over 25 hits"])
+        # Hits without the defensive further than PAIR_MS away are not a baseline: nothing measured.
+        apart = [h if h["buffs"] else dict(h, timestamp=h["timestamp"] + 200_000) for h in hits]
+        run = self._wave1_run(entries, [{"id": 4, "name": "Bryon", "type": "Warlock"}], {104773: "Unending Resolve"})
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=apart):
+            self.assertEqual(source_mitigation.check(run).status, "skip")
+
+    def test_base_hits_are_matched_by_missing_health(self):
+        # Live 2026-10-08 (Deawina, Protection Paladin, Coiled Altar): Blessing of Dusk (1241945, up to 10%
+        # more as health drops, on no hit's aura list) lets 0.70 through at full health and 0.63 at half;
+        # Ardent Defender (0.30), pressed low, read 0.33 against hits at any health and 0.300 with the
+        # missing health matched within 0.05.
+        from checks import source_mitigation
+        entries = {31850: {"name": "Ardent Defender", "kind": "personal", "class": "Paladin",
+                           "mitigation": [{"dr": 0.30}]}}
+        friendlies = [{"id": 6, "name": "Deawina", "type": "Paladin"}]
+
+        def hit(t, through, buffs, missing):
+            e = {"type": "damage", "targetID": 6, "sourceID": 50, "abilityGameID": 9, "fight": 1, "timestamp": t,
+                 "unmitigatedAmount": 100_000, "mitigated": 100_000 - through, "amount": through, "buffs": buffs}
+            return _healthy(e, missing) if missing is not None else e
+        hits = []
+        for k in range(25):
+            t = k * 10_000
+            # Without it: at full health 1 s away, at half health 2 s away.
+            hits += [hit(t - 1000, 70_000, "", 0.0), hit(t + 2000, 63_000, "", 0.5)]
+            hits.append(hit(t, round(63_000 * 0.70), "31850.", 0.5))             # 0.441 through, half health
+            hits.append(hit(t + 500, 30_000, "31850.", None))                     # no health: left out
+        run = self._wave1_run(entries, friendlies, {31850: "Ardent Defender"})
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
+            self.assertEqual(source_mitigation.check(run).status, "pass")
+        # With only the full-health hits nearby, none is within the band: nothing measured (paired with
+        # them, the half-health hits would read 1 - 0.441 / 0.70 = 0.37).
+        no_band = [h for h in hits if h["buffs"] or h["amount"] == 70_000]
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=no_band):
+            self.assertEqual(source_mitigation.check(run).status, "skip")
+        # A wrong catalog value is still flagged with health matched.
+        wrong = {31850: dict(entries[31850], mitigation=[{"dr": 0.20}])}
+        run = self._wave1_run(wrong, friendlies, {31850: "Ardent Defender"})
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
+            o = source_mitigation.check(run)
+        self.assertEqual(o.items, ["Deawina Ardent Defender: measured 0.30, catalog 0.20 over 25 hits"])
 
 
 class SlotsRuleTests(unittest.TestCase):
