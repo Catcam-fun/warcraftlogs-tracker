@@ -19,6 +19,7 @@ ICONS = {'Algari Healing Potion': 'inv_flask_red',
  'Blur': 'ability_demonhunter_blur',
  "Cavedweller's Delight": 'inv_alchemy_elixir_06',
  'Celestial Brew': 'ability_monk_ironskinbrew',
+ 'Celestial Infusion': 'ability_monk_tigereyebrandy',
  'Cloak of Shadows': 'spell_shadow_nethercloak',
  'Concentrated Silvermoon Health Potion': 'inv_12_profession_alchemy_lightpotion_purple',
  'Crimson Vial': 'ability_rogue_crimsonvial',
@@ -124,6 +125,8 @@ DESCRIPTIONS = {'Algari Healing Potion': 'Restores health.',
  "Cavedweller's Delight": 'Restores health and mana.',
  'Celestial Brew': 'A swig of strong brew that coalesces purified chi escaping your body into a celestial '
                    'guard, absorbing damage.',
+ 'Celestial Infusion': 'A strong herbal brew that coalesces purified chi escaping your body into a celestial '
+                       'guard, absorbing 30% of incoming damage, up to a cap.',
  'Cloak of Shadows': 'Provides a moment of magic immunity, instantly removing all harmful spell effects. The '
                      'cloak lingers, causing you to resist harmful spells for 5 sec.',
  'Concentrated Silvermoon Health Potion': 'Restores health.',

@@ -15,10 +15,11 @@ class FakeData:
            "within $A2 yards. $?DIFF16[Mythic only.][] |cFF2959D3|Hspell:2|h[Soul Fragment]|h|r stacks $s3 times.",
         3: "$@spelldesc1",
         4: "Summons $@spellname2 every $s1 sec.",
+        5: "Absorbing $s2% of incoming damage, up to $<absorb> total.",
     }
     duration = {1: 6000}
     effects = {1: {1: {"points": 5000.0}, 2: {"period": 1500, "radius": 8.0}, 3: {"points": 4.0}},
-               3: {1: {"points": 25.0}}, 4: {1: {"points": 0.0}}}
+               3: {1: {"points": 25.0}}, 4: {1: {"points": 0.0}}, 5: {2: {"points": 30.0}}}
 
 
 class RenderTests(unittest.TestCase):
@@ -30,6 +31,9 @@ class RenderTests(unittest.TestCase):
     def test_linked_description_and_names(self):
         self.assertTrue(render(FakeData, 3).startswith("Inflicts Shadow damage every 1.5 sec"))
         self.assertEqual(render(FakeData, 4), "Summons Soul Fragment periodically.")
+
+    def test_a_scaled_cap_left_out(self):
+        self.assertEqual(render(FakeData, 5), "Absorbing 30% of incoming damage, up to a cap.")
 
     def test_generated_file(self):
         self.assertIn("frontal cone", text_for(1299684))       # Sever, The Coiled Altar
