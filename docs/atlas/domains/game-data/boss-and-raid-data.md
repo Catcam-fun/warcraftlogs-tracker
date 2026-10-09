@@ -20,12 +20,12 @@ anchors:
   raid_wide_shares: backend/scripts/build_raid_wide.py:49
   raid_wide_main: backend/scripts/build_raid_wide.py:78
   icons_main: backend/scripts/build_spell_icons.py:58
-  use_immunity: backend/defensives.py:1557
-  use_armor: backend/defensives.py:1269
-  use_rot: backend/defensives.py:2423
-  use_icons: backend/defensives.py:159
-  use_text: backend/app.py:705
-  icon_url: frontend/src/DeathRow.js:22
+  use_immunity: backend/defensives.py:1223
+  use_armor: backend/defensives.py:946
+  use_rot: backend/defensives.py:1716
+  use_icons: backend/defensives.py:131
+  use_text: backend/app.py:659
+  icon_url: frontend/src/DeathRow.js:20
 links:
   - game-data
   - game-data-defensive-catalog
@@ -42,13 +42,12 @@ invariants:
   - "NEVER: store boss damage amounts in boss spell text; the game scales them at run time, so the tooltip shows the real hit from the log."
 flows:
   - data-build-path
-content_hash: sha256:cbce7a08bb4af16aecd1ec5a3641de537c178b2083e8697f6029a4c9609049ed
+content_hash: sha256:d50ccaac00317c3ef1e38ef4c0b04e40088f8e8f0a03825a02d6e494a4e04119
 ---
 ## Summary
 
 - These five scripts produce the boss-side facts the analysis looks up, plus the icons and descriptions of the defensives. Each overwrites one module in `backend/` (see the inventory on [[game-data]]).
 - **wago.tools scripts** reuse `table()` and `patches()` from `build_defensive_catalog.py` (`backend/scripts/build_boss_spell_flags.py:23`, `backend/scripts/build_boss_spell_text.py:31`, `backend/scripts/build_spell_icons.py:24`), so `WAGO_CACHE` applies to them too.
-- **`build_max_health_auras.py`** writes `backend/max_health_auras.py`: how much each aura changes max health, per patch, as terms read from game data wherever the effect lives (the aura's own EffectAura 133, 137 or 80 on Stamina, 34/230 flat; a spell its text names, under the text's condition; a talent whose text raises it; the value a talent's proc puts on it; a two-entry curated list for description variables), each with the talents and spec passives that change it (EffectAura 107/108/219/220 aimed at that effect). An own percent effect with base points 0 that talents aim at is share 0.0 with those modifiers (Bone Shield's +1% a charge from Foul Bulwark, Ancestral Vigor's +5% from its talent, Grimoire of Sacrifice's +3% Stamina from Profane Bargain), unless a curated entry holds its value (Fortifying Brew); a talent already counted as such a modifier is not added again from its text (Improved Ardent Defender). Talents size an aura from its caster: the analysis and the checks use the caster's loadout. Stamina percent counts as max health percent (a Bear Form shift reads x1.3000 on logs: 25% + Ursoc's Spirit 5%). Its values match the defensive catalog's for every max-health button in all 14 patches, with and without talents, except Bear Form, where the catalog folds in Ursine Vigor (a separate 4 s aura, 393903, here). It also writes `STACKING` (SpellAuraOptions.CumulativeAura): those auras' terms are per stack. Only the effect-naming phrasing counts in an aura's text ("Maximum health increased by", "increasing maximum health by"), so a heal of max health (Healing Elixir) isn't read as an increase. The death analysis and the checks size the auras a killing hit's list differs by with it, each with its own code.
 - **WCL scripts** read the top of `fightRankings` for each boss and download those kills' damage taken, using the site's own client (`backend/scripts/build_armor_constants.py:33`, `backend/scripts/build_raid_wide.py:24`).
 
 ## How it works
@@ -62,7 +61,7 @@ Run as `python backend/scripts/build_boss_spell_flags.py`; needs wago.tools (`ba
 3. Keeps damaging spells whose `SpellMisc.Attributes_0` has the "no immunities" bit `0x20000000`, if their ID is 400,000 or higher (The War Within onward) or they were found in the journal walk (`backend/scripts/build_boss_spell_flags.py:25-26`, `backend/scripts/build_boss_spell_flags.py:54-58`).
 4. Writes the sorted IDs as the frozenset `IGNORES_IMMUNITY` (`backend/scripts/build_boss_spell_flags.py:60-68`).
 
-`defensives.py` uses it so an immunity never zeroes such a hit, and labels the verdict `pierces` (`backend/defensives.py:1556-1558`, `backend/defensives.py:1869-1870`, `backend/defensives.py:2451`).
+`defensives.py` uses it so an immunity never zeroes such a hit, and labels the verdict `pierces` (`backend/defensives.py:1222-1224`, `backend/defensives.py:1495-1496`, `backend/defensives.py:1742`).
 
 #### build_boss_spell_text.py: killing-blow descriptions
 
@@ -73,7 +72,7 @@ Run as `python backend/scripts/build_boss_spell_text.py` after the raid is in `R
 3. `render()` fills Blizzard's description template where the data is exact (durations, tick periods, radii, spell names, percentages), drops difficulty and class conditions, and removes damage amounts, which scale at run time (`backend/scripts/build_boss_spell_text.py:67-116`).
 4. Drops text written to "you" (player spells), dedupes identical texts into `TEXTS`, maps spell IDs to them in `SPELLS`, and writes a `text_for()` helper (`backend/scripts/build_boss_spell_text.py:151-167`).
 
-`app.py` sends `text_for(abilityId)` for each counted killing blow as `abilityText` (`backend/app.py:703-706`).
+`app.py` sends `text_for(abilityId)` for each counted killing blow as `abilityText` (`backend/app.py:657-660`).
 
 #### build_armor_constants.py: armor per boss
 
@@ -84,7 +83,7 @@ Run as `WCL_CLIENT_ID=... WCL_CLIENT_SECRET=... python backend/scripts/build_arm
 3. Stores the median K per boss, falling back to the raid's pooled median when a boss has fewer than 10 samples (`backend/scripts/build_armor_constants.py:37`, `backend/scripts/build_armor_constants.py:130-137`).
 4. Physical boss spells with at least 5 samples are sorted into `IGNORES_ARMOR` (median share at least 0.97) or `REDUCED_BY_ARMOR` (at most 0.9) (`backend/scripts/build_armor_constants.py:41-43`, `backend/scripts/build_armor_constants.py:141-149`).
 
-`armor_constant()` reads K with a Mythic, then Heroic, then Normal fallback, and `_armor_reduction()` uses the two spell lists (`backend/defensives.py:1269-1274`, `backend/defensives.py:1278-1291`). The docstring names the use: how much more a druid's Bear Form armor would have reduced a physical killing blow (`backend/scripts/build_armor_constants.py:18-19`).
+`armor_constant()` reads K with a Mythic, then Heroic, then Normal fallback, and `_armor_reduction()` uses the two spell lists (`backend/defensives.py:946-951`, `backend/defensives.py:955-968`). The docstring names the use: how much more a druid's Bear Form armor would have reduced a physical killing blow (`backend/scripts/build_armor_constants.py:18-19`).
 
 #### build_raid_wide.py: raid-wide abilities
 
@@ -95,7 +94,7 @@ Run as `WCL_CLIENT_ID=... WCL_CLIENT_SECRET=... python backend/scripts/build_rai
 3. An ability needs at least 3 occurrences in a kill; its per-kill median shares are medianed again, and it is raid-wide at 0.5 or more (`backend/scripts/build_raid_wide.py:27-29`, `backend/scripts/build_raid_wide.py:85-90`).
 4. Writes `RAID_WIDE = {abilityID: share}` with the ability and boss name as a comment (`backend/scripts/build_raid_wide.py:95-102`).
 
-The death description only calls a death "rot" when the dominant ability is in `RAID_WIDE`, hit at least 3 times, and no hit was a big chunk (`backend/defensives.py:868-873`, `backend/defensives.py:2423-2425`).
+The death description only calls a death "rot" when the dominant ability is in `RAID_WIDE`, hit at least 3 times, and no hit was a big chunk (`backend/defensives.py:744-749`, `backend/defensives.py:1716-1718`).
 
 #### build_spell_icons.py: defensive icons and descriptions
 
@@ -105,7 +104,7 @@ Run as `python backend/scripts/build_spell_icons.py` after rebuilding the catalo
 2. From the latest build, maps `SpellMisc.SpellIconFileDataID` to an icon file under `interface\icons` via `ManifestInterfaceData` (`backend/scripts/build_spell_icons.py:28-35`, `backend/scripts/build_spell_icons.py:65`). Potions use their item's icon instead of the spell's (`backend/scripts/build_spell_icons.py:38-55`).
 3. Fills each description with `render()` from the boss text script (`backend/scripts/build_spell_icons.py:23`, `backend/scripts/build_spell_icons.py:76`), prints names with no icon or no text, and writes `ICONS` and `DESCRIPTIONS` (`backend/scripts/build_spell_icons.py:81-93`).
 
-`icon_name()` prefers `ICONS` and falls back to the report's own icon for boss abilities (`backend/defensives.py:159-167`). The browser loads `render.worldofwarcraft.com/us/icons/56/<icon>.jpg`, falling back to `assets.rpglogs.com` (`frontend/src/DeathRow.js:22`, `frontend/src/DeathRow.js:221`).
+`icon_name()` prefers `ICONS` and falls back to the report's own icon for boss abilities (`backend/defensives.py:131-139`). The browser loads `render.worldofwarcraft.com/us/icons/56/<icon>.jpg`, falling back to `assets.rpglogs.com` (`frontend/src/DeathRow.js:20`, `frontend/src/DeathRow.js:213`).
 
 ## Reference
 
@@ -119,14 +118,14 @@ Run as `python backend/scripts/build_spell_icons.py` after rebuilding the catalo
 
 ## Invariants
 
-- **MUST** never credit an immunity against a spell in `IGNORES_IMMUNITY` (`backend/defensives.py:1556-1558`).
-- **MUST** only let abilities in `RAID_WIDE` make a death read as worn down (`backend/defensives.py:2423`).
+- **MUST** never credit an immunity against a spell in `IGNORES_IMMUNITY` (`backend/defensives.py:1222-1224`).
+- **MUST** only let abilities in `RAID_WIDE` make a death read as worn down (`backend/defensives.py:1716`).
 - **NEVER** store boss damage amounts in spell text; they scale by difficulty and item level, so the tooltip shows the log's real hit (`backend/scripts/build_boss_spell_text.py:11-14`).
 
 ## Gotchas
 
-- **The flags script reads live tables, the others a pinned build**: `build_boss_spell_flags.py` calls `table(name)` with no build (`backend/scripts/build_boss_spell_flags.py:33`, `backend/scripts/build_boss_spell_flags.py:55`), while the text and icon scripts pass `patches()[-1][2]` (`backend/scripts/build_boss_spell_text.py:120`, `backend/scripts/build_spell_icons.py:65`). Live tables are never cached, so the flags script always reads current data (`backend/scripts/build_defensive_catalog.py:424-428`).
-- **Armor events need the fight's endTime**: WCL answers a `fightIDs`-scoped events query without an `endTime` with an empty second page (`backend/defensives.py:951-952`). `_events` therefore looks up the fight's `endTime` first and sends it with every page (`backend/scripts/build_armor_constants.py:47-55`); before that fix, a pull with more than 10,000 DamageTaken events was measured from its first page only. `backend/test_armor_build.py` checks that every page is read. `build_raid_wide.py` goes through `_fetch_blocks`, which also sends one.
+- **The flags script reads live tables, the others a pinned build**: `build_boss_spell_flags.py` calls `table(name)` with no build (`backend/scripts/build_boss_spell_flags.py:33`, `backend/scripts/build_boss_spell_flags.py:55`), while the text and icon scripts pass `patches()[-1][2]` (`backend/scripts/build_boss_spell_text.py:120`, `backend/scripts/build_spell_icons.py:65`). Live tables are never cached, so the flags script always reads current data (`backend/scripts/build_defensive_catalog.py:418-422`).
+- **Armor events need the fight's endTime**: WCL answers a `fightIDs`-scoped events query without an `endTime` with an empty second page (`backend/defensives.py:779-780`). `_events` therefore looks up the fight's `endTime` first and sends it with every page (`backend/scripts/build_armor_constants.py:47-55`); before that fix, a pull with more than 10,000 DamageTaken events was measured from its first page only. `backend/test_armor_build.py` checks that every page is read. `build_raid_wide.py` goes through `_fetch_blocks`, which also sends one.
 - **Measured tables depend on public kills**: both WCL scripts read whatever `fightRankings` returns today. A boss with too few samples falls back to its raid's pooled K, or gets no entry at all (`backend/scripts/build_armor_constants.py:133-137`).
 - **The boss text is tested on a real spell**: `backend/test_boss_spell_text.py:34-36` checks that Sever's text mentions a frontal cone, so a regenerated file that loses it fails the suite.
 
