@@ -887,6 +887,17 @@ class PullSpecTests(unittest.TestCase):
         self.assertEqual(defensives.pull_spec(idx, 4, 1, "Demonology"), "Destruction")
         self.assertEqual(defensives.pull_spec(idx, 5, 1, "Demonology"), "Demonology")   # not recorded
 
+    def test_an_empty_talent_tree_is_an_unknown_loadout(self):
+        # Every loadout in the cached logs (6,096 pull loadouts over 8 raids' reports) lists 11 to 82 entries:
+        # a player always has some, so an empty tree means the log didn't record it. Unknown (no entry), as a
+        # missing tree is, never "known, no talents" (that would deny a Brewmaster every purify talent).
+        idx = defensives.index_defensive_events({"combatants": [
+            {"fight": 3, "sourceID": 1, "specID": 268, "talentTree": []},
+            {"fight": 4, "sourceID": 1, "specID": 268, "talentTree": [{"id": 124860, "rank": 1}]}]},
+            defensives._CATALOGS["11.1.0"])
+        self.assertNotIn((3, 1), idx["talents"])
+        self.assertEqual(idx["talents"][(4, 1)], {124860: 1})
+
     def test_spec_names_match_the_catalog(self):
         from defensive_catalog import CATALOGS
         used = {s for c in CATALOGS.values() for d in c.values() for s in d.get("specs") or ()}
@@ -1993,7 +2004,12 @@ class StaggerPoolTests(unittest.TestCase):
         bok = [(1_835, 205523)]
         self.assertEqual(self.pools(50_000, 1_000_000, casts=bok, purify=self.P11, talents={}), [3_400_000, 0])
         self.assertEqual(self.pools(50_000, 1_000_000, casts=bok, purify=self.P11, talents={self.STAGGERING_STRIKES: 1}), [0])
-        self.assertEqual(self.pools(50_000, 1_000_000, casts=bok, purify=self.P11), [0])            # loadout unknown: maybe
+        # With no loadout in the log the talent may be there: Blackout Kick makes its side fit but doesn't decide
+        # on its own (both readings); Touch of Death, every Brewmaster's, still does.
+        self.assertEqual(self.pools(50_000, 1_000_000, casts=bok, purify=self.P11), [3_400_000, 0])
+        self.assertEqual(self.pools(50_000, 1_000_000, casts=[(1_835, 322109)], purify=self.P11), [0])
+        # Unknown loadout, Blackout Kick after the hit and a Quick Sip that fits before it: both fit, both kept.
+        self.assertEqual(self.pools(191_500, 600_000, casts=[(2_100, 205523)], purify=self.P11), [3_400_000, 3_230_000])
 
     def test_a_purifying_brew_cast_says_which_side(self):
         # Pool 3.4M, 680k staggered, the tick after 102k: 20 x 102k - 680k = 1.36M. Read before the hit
@@ -2210,6 +2226,34 @@ class ShuffleGrantTests(unittest.TestCase):
                                    "Tiger Palm": 1.0})
         self.assertEqual(len(problems), 1)
         self.assertIn("Tiger Palm", problems[0])
+
+
+class MeasuredModsTests(unittest.TestCase):
+    """MEASURED_MODS (build script): Elusiveness' -4/35 on Feint's AoE effect, measured with that effect at 40%
+    and Elusiveness' own -20% on Feint's effect 1. Either moving fails the build."""
+
+    def run_it(self, base=0.4, own_add=0.2, in_tree=True):
+        build = ShuffleGrantTests.build()
+        gd = types.SimpleNamespace(names={79008: "Elusiveness"})
+        mods = types.SimpleNamespace(entries_for_spell={79008: {112632}} if in_tree else {},
+                                     effect=lambda s, i, f, t: [{"talent": "Elusiveness", "entries": [112632], "add": own_add}]
+                                     if (s, i) == (1966, 1) else [])
+        comp, problems = {"dr": base, "school": "aoe"}, []
+        build.measured_mods("Feint", 1966, 0, comp, "dr", "dr", 1, gd, mods, problems)
+        return comp, problems
+
+    def test_added_when_what_it_was_measured_with_holds(self):
+        comp, problems = self.run_it()
+        self.assertEqual(problems, [])
+        self.assertEqual(comp["mods"], [{"talent": "Elusiveness", "entries": [112632], "add": -0.114286}])
+
+    def test_a_moved_value_fails_the_build(self):
+        for kwargs, word in (({"base": 0.45}, "measured at 0.4"), ({"own_add": 0.25}, "own change"),
+                             ({"in_tree": False}, "no talent tree")):
+            comp, problems = self.run_it(**kwargs)
+            self.assertEqual(len(problems), 1, kwargs)
+            self.assertIn(word, problems[0])
+            self.assertNotIn("mods", comp)
 
 
 class AttackedUnitsTests(unittest.TestCase):
