@@ -66,7 +66,7 @@ test('a talent that takes some off reads with a minus sign, and two rows of one 
     talents: [{ talent: 'Elusiveness', field: 'dr', rank: 1, add: -4 / 35, school: 'aoe' },
       { talent: 'Elusiveness', field: 'dr', rank: 1, add: 0.2 }] };
   const t = text(a, feint);
-  expect(t).toContain('Elusiveness −11.4% vs area damage');
-  expect(t).toContain('Elusiveness +20%');
+  expect(t).toContain('Elusiveness −11.4% damage reduction vs area damage');
+  expect(t).toContain('Elusiveness +20% damage reduction');
   expect(t).toContain('Reduces area damage taken by 28.6%. Reduces damage taken by 20%');
 });

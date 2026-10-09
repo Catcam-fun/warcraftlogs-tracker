@@ -181,7 +181,8 @@ const TALENT_TEXT = (t) => {
   }
   // A talent can take some off as well as add (Elusiveness on Feint's area reduction: −11.4%, measured).
   const vs = t.school ? ` vs ${schoolScope(t.school)}` : '';
-  if ('add' in t) return `${t.add < 0 ? '−' : '+'}${pct(Math.abs(t.add * t.rank))}${vs}`;
+  const what = ADDS_WHAT[t.field] ? ` ${ADDS_WHAT[t.field]}` : '';
+  if ('add' in t) return `${t.add < 0 ? '−' : '+'}${pct(Math.abs(t.add * t.rank))}${what}${vs}`;
   return `×${Math.round((1 + (t.mult - 1) * t.rank) * 100) / 100}${vs}`;
 };
 // Talent rows, keyed by position: one talent can change two effects of the same kind (Elusiveness on both
