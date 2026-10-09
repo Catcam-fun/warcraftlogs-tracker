@@ -641,12 +641,6 @@ def _replay(casts, resets, at, loadout, inferred=None):
     return have, (back_at - at if back_at is not None else 0), since
 
 
-# Heals over time among the scored defensives, by tick count: their heal lands
-# over the aura's duration, not at once. Same tick counts as EFFECTS in
-# scripts/build_defensive_catalog.py (tested).
-HEAL_OVER_TIME = {"Frenzied Regeneration": 3, "Crimson Vial": 4}
-
-
 def _buffs_active_at(death_ts, buff_events, max_ms=None):
     """abilityGameID -> sourceID for auras that were up when the player died.
 
@@ -1689,6 +1683,13 @@ def _resolve(entry, talent_entries, observed_absorbs, spec=None, applied=None):
         extra = {k: c[k] for k in ("over_ms", "ticks", "current", "replaces_form", "from_target", "dr_hit", "share",
                                    "stacks", "decay_end_ms", "decay_after_ms", "tick_ms", "first_tick", "dur_ms")
                  if k in c}
+        if "tick_ms" in extra:
+            # Talents that change the tick period (Reinvigoration: Frenzied Regeneration's +33%).
+            for m in c.get("period_mods", ()):
+                rank = _mod_rank(m, talent_entries, spec)
+                if rank:
+                    extra["tick_ms"] = (extra["tick_ms"] + m["add_ms"] * rank if "add_ms" in m
+                                        else extra["tick_ms"] * (1 + (m["mult"] - 1) * rank))
         if "decay_after_ms" in extra:
             # The wait before the stacks drop shrinks with the talents that shorten the aura (Righteous
             # Protector: "$389539s14/1000*(1-$204074s2/100)"), not with those that lengthen it.
@@ -2013,20 +2014,20 @@ class _Window:
         return self._applies[key]
 
 
-def _option(entry_name, comps, dur_ms, legacy_ticks=None):
+def _option(entry_name, comps, dur_ms):
     """One button's effect, timed: {"name", "lasting": [(comp, ms or None)], "instant": [comp], "hots": [(comp, ticks, ms)]}.
 
     Effects last the aura's duration; without one (Bear Form) they're up until the death. An effect
     with its own `dur_ms` (Ursine Vigor's 4 s, Gorebound Fortitude's 12 s of max health) lasts no longer
-    than that. Heals land when pressed, or over time.
+    than that. Heals land when pressed, or over time (_hot).
     """
     opt = {"name": entry_name, "lasting": [], "instant": [], "hots": [],
-           "comps": comps, "dur_ms": dur_ms, "legacy_ticks": legacy_ticks, "extend": None}
+           "comps": comps, "dur_ms": dur_ms, "extend": None}
     for c in comps or ():
         if "heal" in c or "heal_amount" in c:
-            over = c.get("over_ms") or (dur_ms if legacy_ticks else None)
-            if over:
-                opt["hots"].append((c, c.get("ticks") or legacy_ticks or 1, over))
+            hot = _hot(c, dur_ms)
+            if hot:
+                opt["hots"].append(hot)
             else:
                 opt["instant"].append(c)
         elif c.get("stacks") and dur_ms:
@@ -2075,7 +2076,7 @@ def _at_press(opt, press):
     if not opt.get("extend") or not opt.get("dur_ms") or opt["dur_ms"] < 0:
         return opt
     dur = _extended_ms(opt["dur_ms"], *opt["extend"], press)
-    return opt if dur == opt["dur_ms"] else _option(opt["name"], opt["comps"], dur, opt["legacy_ticks"])
+    return opt if dur == opt["dur_ms"] else _option(opt["name"], opt["comps"], dur)
 
 
 def _extended_ms(dur_ms, ms, casts, press):
@@ -2085,6 +2086,26 @@ def _extended_ms(dur_ms, ms, casts, press):
         if press <= t < end:
             end += ms
     return end - press
+
+
+def _hot(c, dur_ms):
+    """A heal over time as it lands: (comp with its whole heal, ticks, ms it lasts), or None for a heal
+    that lands at once. A talent's heal over time is its own spell (`over_ms`); a button's own lasts the
+    aura (`dur_ms`, with the player's talents). The game ticks every `tick_ms` while the aura is up, plus
+    once as it is applied (`first_tick`): Frenzied Regeneration 4 times in 3 s; 4 in 4 s with
+    Reinvigoration (a period 33% longer). More ticks heal more: the catalog's heal is for its `ticks`."""
+    if not c.get("tick_ms"):
+        return (c, c["ticks"], c["over_ms"]) if c.get("over_ms") and c.get("ticks") else None
+    over = c.get("over_ms") or dur_ms
+    base = c.get("ticks")
+    if not over or over < 0:
+        if not base:
+            return None
+        return c, base, c["tick_ms"] * (base - (1 if c.get("first_tick") else 0))
+    n = int(over / c["tick_ms"] + 1e-9) + (1 if c.get("first_tick") else 0)
+    if base and n != base:
+        c = dict(c, **{k: c[k] * n / base for k in ("heal", "heal_amount") if k in c})
+    return c, n, over
 
 
 def _tick_times(c, ticks, over, press):
@@ -2734,8 +2755,7 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
             per_button[name] = None
             continue
         dur = (aura_ms or {}).get(name) if not entry.get("estimated") else None
-        legacy = HEAL_OVER_TIME.get(name) if dur else None
-        opts = [_option(name, comps, dur, legacy)]
+        opts = [_option(name, comps, dur)]
         ext = entry.get("extended_by")
         rank = _mod_rank(ext, talent_entries, spec) if ext else 0
         if rank:
