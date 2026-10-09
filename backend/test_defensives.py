@@ -1456,3 +1456,54 @@ class MaxHealthWhereTheGameDataPutsItTests(unittest.TestCase):
         idx = defensives.filter_defensive_raw(raw, {8})
         self.assertEqual(idx["talents"][(3, 24)], {134033: 1})
         self.assertEqual(idx["specs"][(3, 24)], "Fury")
+
+
+STAGGER_TICK, DAMPEN_HARM, DIFFUSE_MAGIC = 124255, 122278, 122783
+
+
+def stagger_tick(ts, amount, hp_after, overkill=0):
+    """A Brewmaster's own Stagger tick as WCL logs it: source and target are the Monk, and a
+    `mitigated` share is listed (0.600 through on every tick, defensives or not)."""
+    raw = (amount + overkill) / 0.6
+    return {"timestamp": ts, "type": "damage", "sourceID": 1, "targetID": 1, "abilityGameID": STAGGER_TICK,
+            "amount": amount, "overkill": overkill, "absorbed": 0, "mitigated": round(raw * 0.4),
+            "unmitigatedAmount": round(raw), "hitPoints": hp_after, "maxHitPoints": MAX, "resourceActor": 2}
+
+
+class StaggerTests(unittest.TestCase):
+    """Stagger (115069) is an absorb aura (aura 69): damage reductions cut the hit first, Stagger then
+    delays a share of what is left into ticks of 124255 every 0.5 s over 10 s. A tick is never reduced by
+    a defensive up while it ticks (Weavi, Undermine: 246 ticks under Fortifying Brew, 26 under Dampen
+    Harm, all 0.600 through as without), while shields absorb ticks (1194 of Weavi's ticks absorbed)."""
+
+    def assess(self, hits, available, spec="Brewmaster"):
+        durations = {CATALOG[s]["name"]: CATALOG[s].get("aura_ms") for s in available}
+        return defensives.assess_survival(hits, 100_000, ready(*available), [], NAMES, SCHOOLS,
+                                          aura_ms=durations, spec=spec)
+
+    def test_a_stagger_tick_is_never_reduced(self):
+        hits = [stagger_tick(99_500, 100_000, 300_000), stagger_tick(100_000, 300_000, 0, overkill=50_000)]
+        r = self.assess(hits, [DAMPEN_HARM])
+        self.assertFalse(r["wouldSave"]["Dampen Harm"])
+        self.assertEqual(r["details"]["Dampen Harm"]["amount"], 0)
+        self.assertEqual(r["details"]["Dampen Harm"]["why"], "stagger")
+        self.assertTrue(r["ignoresReduction"])
+
+    def test_shields_still_absorb_a_stagger_tick(self):
+        kb = stagger_tick(100_000, 300_000, 0, overkill=50_000)
+        self.assertAlmostEqual(defensives._prevented([{"absorb": 0.3}], kb, MAX, 700_000, SCHOOLS), 300_000)
+        self.assertEqual(defensives._prevented([{"dr": 0.5}], kb, MAX, 700_000, SCHOOLS), 0)
+
+    def test_a_reduction_counts_only_on_the_part_of_a_hit_that_was_not_staggered(self):
+        # A 800k Frost hit: 400k taken at once, 400k staggered (WCL logs it as absorbed) into ticks
+        # after it. Diffuse Magic (60% magic) pressed before it shrinks both parts, but the staggered
+        # part would only have ticked later, by an amount the log can't give (Purifying Brew, the pool's
+        # other hits): only the part taken at once counts, 240k, short of the 300k overkill.
+        hits = [hit(97_000, 400_000, 600_000, absorbed=400_000),
+                stagger_tick(100_000, 600_000, 0, overkill=300_000)]
+        brew = self.assess(hits, [DIFFUSE_MAGIC])
+        self.assertAlmostEqual(brew["details"]["Diffuse Magic"]["amount"], 240_000, delta=1)
+        self.assertFalse(brew["wouldSave"]["Diffuse Magic"])
+        # Anyone else's absorbed part is a shield's: the reduction saves it for later hits.
+        other = self.assess(hits, [DIFFUSE_MAGIC], spec="Frost")
+        self.assertAlmostEqual(other["details"]["Diffuse Magic"]["amount"], 400_000, delta=1)

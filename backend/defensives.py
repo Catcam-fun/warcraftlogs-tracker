@@ -1060,6 +1060,14 @@ def merge_hits(*indexes):
 
 
 MELEE_SWING = 1             # WCL's ability ID for auto-attacks ("Melee")
+# Stagger (115069, a Brewmaster passive) is an absorb aura (EffectAura 69): the game cuts a hit by the
+# player's damage reductions first, then Stagger delays a share of what is left (logged as `absorbed`
+# on the hit) into ticks of STAGGER_TICK every 0.5 s over 10 s (124255 EffectAuraPeriod 500, 124273-5
+# duration 10000). A tick is damage already reduced: defensives up while it ticks never change it (Weavi,
+# Undermine, 2026-10-08: 246 ticks under Fortifying Brew and 26 under Dampen Harm read 0.600 through, as
+# every tick does), while shields absorb ticks (1194 of Weavi's 6137 ticks were partly absorbed).
+STAGGER_TICK = 124255
+STAGGER_SPEC = "Brewmaster"
 
 
 def _school_applies(school, hit, ability_schools, immunity=False):
@@ -1091,11 +1099,19 @@ def _school_applies(school, hit, ability_schools, immunity=False):
     return True
 
 
+def _stagger_tick(hit):
+    """A Brewmaster's own Stagger tick (STAGGER_TICK)."""
+    return hit.get("abilityGameID") == STAGGER_TICK
+
+
 def _ignores_reduction(hit):
-    """Nothing at all was mitigated (not even versatility): the hit ignores damage reduction.
+    """The hit ignores damage reduction: nothing at all was mitigated (not even versatility), or it is
+    a Stagger tick (reduced when the hit it came from was staggered, never while it ticks).
 
     WCL leaves `mitigated` out when it's 0; `unmitigatedAmount` shows the log has the data.
     """
+    if _stagger_tick(hit):
+        return True
     return not hit.get("mitigated") and (hit.get("unmitigatedAmount") or 0) > 0
 
 
@@ -1430,13 +1446,22 @@ class _Points(list):
 
 
 class _Window:
-    """A death's replayed hits with what every replay reads from them, worked out once."""
+    """A death's replayed hits with what every replay reads from them, worked out once.
 
-    def __init__(self, hits, ability_schools):
+    `staggers`: the player is a Brewmaster, so what a hit logs as absorbed is (mostly) the share
+    Stagger delayed into later ticks. A reduction pressed before the hit shrinks that share too, but
+    how much of it would have ticked before the death the log can't give (the pool mixes every hit's
+    share, and Purifying Brew takes part of it off), so the replay counts only the part taken at once
+    (amount and overkill) and leaves the staggered part to the ticks, as they really landed. That never
+    credits more than the game would; it can credit less.
+    """
+
+    def __init__(self, hits, ability_schools, staggers=False):
         self.hits = hits
         self.schools = ability_schools
         self.points = _Points(_health_points(hits))
-        self.full = [_full_hit(h) for h in hits]
+        self.full = [(h.get("amount") or 0) + (h.get("overkill") or 0) if staggers and not _stagger_tick(h)
+                     else _full_hit(h) for h in hits]
         self.known = [h.get("resourceActor") == 2 and bool(h.get("maxHitPoints")) for h in hits]
         self.before = []
         for h, known in zip(hits, self.known):
@@ -1653,6 +1678,8 @@ def _explain(entry, comps, applied, hit, amount, max_hp, missing_hp, ability_sch
                 out["why"], out["school"] = "school", m.get("school")
             elif immune and hit.get("abilityGameID") in IGNORES_IMMUNITY:
                 out["why"] = "pierces"
+            elif (m.get("dr") or m.get("armor")) and _stagger_tick(hit):
+                out["why"] = "stagger"
             elif (m.get("dr") or m.get("armor")) and _ignores_reduction(hit):
                 out["why"] = "noReduction"
             elif ("heal" in m or "heal_amount" in m or "heal_taken" in m) and \
@@ -2001,7 +2028,7 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     max_hp, hp_before = _max_hp_before(window, kb_index, aura_size, heal_events, aura_events)
     window[kb_index]["maxHitPoints"] = max_hp
     killing = window[kb_index]
-    win = _Window(window, ability_schools)
+    win = _Window(window, ability_schools, staggers=spec == STAGGER_SPEC)
     if hp_before != (killing.get("amount") or 0):
         # Health before the blow, without what the blow itself set off (_max_hp_before).
         win.before[kb_index] = (hp_before, max_hp)

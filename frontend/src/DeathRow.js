@@ -120,6 +120,7 @@ function whyText(d, hitName) {
         : `${hitName} isn't physical damage`;
     case 'pierces': return `${hitName} goes through immunities`;
     case 'noReduction': return 'Nothing reduced this hit, so damage reduction doesn\'t work on it';
+    case 'stagger': return 'Stagger ticks are damage already reduced when it was staggered, so damage reduction doesn\'t work on them';
     case 'fullHealth': return 'They were at full health, so a heal can\'t help';
     case 'aoeUnknown': return 'This log doesn\'t mark area damage, so this can\'t be checked';
     case 'instakill': return 'it was an instant kill, with no damage to reduce, absorb or heal';
