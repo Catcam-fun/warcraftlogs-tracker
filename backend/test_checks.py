@@ -292,10 +292,10 @@ class MitigationCheckTests(unittest.TestCase):
     def test_aoe_reduction_applies_by_ability(self):
         # Live 2026-10-08: WCL marks isAoE only on hits that dealt damage; a hit absorbed whole is never
         # marked, of any ability, and the game counts it as AoE all the same (Feint took 0.400 off 54 such
-        # hits on Maar, Undermine, and 10 on Esra, Manaforge; 0.000 off abilities never marked). An ability
-        # is AoE when any hit of it in the report is. Hits absorbed whole carry no health and are left out
-        # here, so this fixture gives an unmarked hit health to show the rule: ability 1 is AoE (marked
-        # elsewhere), ability 2 never is.
+        # hits on Maar, Undermine, and 10 on Esra, Manaforge; 0.000 off abilities never marked). A hit that
+        # dealt damage keeps its own mark; a hit absorbed whole takes its ability's status, and is unknown
+        # when the ability never dealt damage in the report. Hits absorbed whole carry no health: they are
+        # paired by unit, ability and time only and judged in their own "(absorbed whole)" row.
         from checks import source_mitigation
         run = mock.Mock(); run.code = "X"
         run.pulls = [{"id": 1, "start_time": 0, "end_time": 100_000}]
@@ -309,14 +309,33 @@ class MitigationCheckTests(unittest.TestCase):
         hit = lambda ability, through, buffs, aoe: _healthy({
             "type": "damage", "targetID": 2, "abilityGameID": ability, "fight": 1, "unmitigatedAmount": 1250,
             "mitigated": 1250 - through, "amount": through, "buffs": buffs, "isAoE": aoe})
-        hits = [hit(1, 1000, "", True)] * 5 + [hit(1, 1000, "", False)] * 5
-        hits += [hit(1, 600, "1966.", True)] * 10 + [hit(1, 600, "1966.", False)] * 25
-        hits += [hit(2, 1000, "", False)] * 5 + [hit(2, 1000, "1966.", False)] * 10
+        absorbed = lambda ability, taken, buffs: {
+            "type": "damage", "targetID": 2, "abilityGameID": ability, "fight": 1, "unmitigatedAmount": 1250,
+            "mitigated": 1250 - taken, "amount": 0, "absorbed": taken, "buffs": buffs, "isAoE": False}
+        # Ability 1 is marked on the hits that dealt damage: 0.40 off with Feint (20 hits).
+        hits = [hit(1, 1000, "", True)] * 5 + [hit(1, 600, "1966.", True)] * 20
+        # Ability 2 dealt damage unmarked: Feint does nothing (20 hits), judged by those hits' own mark.
+        hits += [hit(2, 1000, "", False)] * 5 + [hit(2, 1000, "1966.", False)] * 20
+        # Ability 1 absorbed whole with Feint up: 600 of 1250 absorbed against 1000 through without it.
+        hits += [absorbed(1, 600, "1966.")] * 20
+        # Ability 3 only ever absorbed whole: whether it is AoE the report can't tell; left out.
+        hits += [absorbed(3, 1000, "")] * 5 + [absorbed(3, 1000, "1966.")] * 20
         with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
+            o = source_mitigation.check(run)
+        self.assertEqual((o.status, o.reason), ("pass", "2 defensives measured, 0 under 20 matched hits, "
+                                                        "0 hits with no baseline, 0 without health"))
+        self.assertEqual(source_mitigation.report_aoe(hits), ({1}, {1, 2}))
+        # Absorbed-whole hits of ability 1 that Feint didn't cut: their own row is flagged.
+        uncut = [h if h["amount"] or h["abilityGameID"] != 1 else dict(h, absorbed=1000, mitigated=250)
+                 for h in hits]
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=uncut):
+            o = source_mitigation.check(run)
+        self.assertEqual(o.items, ["Esra Feint (absorbed whole): measured 0.00, catalog 0.40 over 20 hits"])
+        # A hit that dealt damage keeps its own mark: an unmarked hit of ability 1 that Feint didn't cut is
+        # predicted 0, and passes; the safer rule.
+        own = hits + [hit(1, 1000, "", False)] * 5 + [hit(1, 1000, "1966.", False)] * 20
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=own):
             self.assertEqual(source_mitigation.check(run).status, "pass")
-        # Judged by each hit's own mark, the 25 unmarked hits of ability 1 would read 0.40 against 0 and
-        # the median gap 0.40: flagged.
-        self.assertEqual(source_mitigation.report_aoe(hits), {1})
         # A log that marks no hit AoE: the AoE-only reduction can't be predicted, so nothing is measured,
         # and that is a skip, never a pass.
         hits = [dict(h, isAoE=False) for h in hits]
@@ -380,7 +399,7 @@ class MitigationCheckTests(unittest.TestCase):
         with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
             o = source_mitigation.check(run)
         self.assertEqual(o.status, "skip")
-        self.assertIn("(0 rows compared)", o.reason)
+        self.assertIn("(0 defensives measured, 0 under 20 matched hits", o.reason)
         # The same Bear Form hits on a Feral (103) are measured and flagged: 0.00 against 0.06.
         run = self._wave1_run(entries, friendlies, abilities, [dict(combatants[0], specID=103)])
         with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
@@ -609,6 +628,30 @@ class MitigationCheckTests(unittest.TestCase):
         run = self._wave1_run(entries, [{"id": 4, "name": "Bryon", "type": "Warlock"}], {104773: "Unending Resolve"})
         with mock.patch.object(source_mitigation.defensives, "_paged", return_value=apart):
             self.assertEqual(source_mitigation.check(run).status, "skip")
+
+    def test_pair_distances_and_what_was_not_judged(self):
+        # Controller ruling 2026-10-08: a hit without the defensive up to 10 s away is a baseline (twice
+        # the rows of 3 s judged, none moved by more than FLAG_AT; 30 s let the drift back in). The War
+        # Within's Fiery Brand pairs stay at 3 s (Liquefy grows over its cast).
+        from checks import source_mitigation
+        self.assertEqual((source_mitigation.PAIR_MS, source_mitigation.BRAND_PAIR_MS), (10_000, 3000))
+        entries = {22812: {"name": "Barkskin", "kind": "personal", "class": "Druid", "mitigation": [{"dr": 0.2}]}}
+        run = self._wave1_run(entries, [{"id": 3, "name": "Oak", "type": "Druid"}], {22812: "Barkskin"})
+        hit = lambda t, through, buffs: _healthy({"type": "damage", "targetID": 3, "sourceID": 50, "abilityGameID": 1,
+                                                  "fight": 1, "timestamp": t, "unmitigatedAmount": 1250,
+                                                  "mitigated": 1250 - through, "amount": through, "buffs": buffs})
+        hits = []
+        for k in range(25):
+            hits += [hit(k * 60_000, 1000, ""), hit(k * 60_000 + 7000, 800, "22812.")]      # 7 s apart
+        hits += [hit(30_000_000 + k, 800, "22812.") for k in range(4)]                     # no baseline
+        hits += [{k: v for k, v in hit(40_000_000, 800, "22812.").items() if k != "resourceActor"}] * 2
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
+            o = source_mitigation.check(run)
+        self.assertEqual((o.status, o.reason), ("pass", "1 defensives measured, 0 under 20 matched hits, "
+                                                        "4 hits with no baseline, 2 without health"))
+        # The reason is printed beside a fail's count as well.
+        line = format_lines([Verdict("mitigation", "source", "R", fail(["x"], reason="1 defensives measured"))], 1)
+        self.assertIn("(1 mismatches; 1 defensives measured)", line)
 
     def test_base_hits_are_matched_by_missing_health(self):
         # Live 2026-10-08 (Deawina, Protection Paladin, Coiled Altar): Blessing of Dusk (1241945, up to 10%

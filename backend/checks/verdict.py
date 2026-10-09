@@ -45,7 +45,7 @@ def format_lines(verdicts, points):
         label = {"pass": "pass", "fail": "FAIL", "skip": "skip"}[o.status]
         line = f"{v.family:<7} {v.name:<15} {label:<5} {v.rule}"
         if o.status == "fail" and o.total:
-            line += f"  ({o.total} mismatches)"
+            line += f"  ({o.total} mismatches; {o.reason})" if o.reason else f"  ({o.total} mismatches)"
         elif o.reason:
             line += f"  ({o.reason})"
         lines.append(line)
