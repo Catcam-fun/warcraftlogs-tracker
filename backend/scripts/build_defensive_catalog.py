@@ -293,6 +293,17 @@ EFFECTS = {
 # a patch's trees adds nothing there. Options: "over": a heal over time with
 # that spell's duration and tick period ("per_tick": the value is per tick);
 # "aura": a shield scored from its real size in the log.
+# Talent changes the game data doesn't show, measured on real hits: {(ability, spell, effect index): [(talent,
+# add to that effect's value, the value it was measured at)]}. Elusiveness (79008: -20% on Feint's effect 1,
+# all damage) also cuts Feint's AoE reduction (effect 0, 40%) to 2/7, so Feint keeps 4/7 of an AoE hit,
+# not 0.6 x 0.8 = 0.48 (research FE, 2026-10-09, adjacent hit pairs on live logs 11.0.7 to 12.1.0): without
+# talents AoE 0.4000 on hundreds of hits; Elusiveness, hits not AoE 0.2000; Elusiveness, AoE 3/7 = 0.4286
+# on seven Rogues (Edude, Ezpi, Noobprint, Maar, Charrend, Nickledon, Kush); Elusiveness and Mirrors (+10%
+# on effect 0), AoE 0.5086 = 1 - 0.8 x (1 - (0.5 - 4/35)) on five. Exact to 4 decimals both ways: keep =
+# 0.8 x (1 - (A - 4/35)). The constant isn't in the game data (a script); if the effect's base value moves,
+# the build fails until it is measured again.
+MEASURED_MODS = {("Feint", 1966, 0): [("Elusiveness", -4 / 35, 0.4)]}
+
 TALENT_EFFECTS = {
     "Bloody Fortitude": [("Icebound Fortitude", "dr_missing", [("talent", 0)], {})],
     # The War Within: Lichborne's reduction (Midnight's talent only lengthens it).
@@ -959,6 +970,16 @@ def components(name, gd, mods, problems):
                 m = mods.effect(spell, index, field, ticks)
                 if m:
                     comp["mods"] = m
+                for talent, add, at in MEASURED_MODS.get((name, spell, index), ()):
+                    who, _ = talent_who(gd, mods, talent)
+                    if who is None:
+                        problems.append(f"{name}: {talent} (measured on effect {index} of {spell}) is in no talent tree: "
+                                        f"review MEASURED_MODS")
+                    elif abs((comp[out_field] or 0) - at) > 1e-9:
+                        problems.append(f"{name}: effect {index} of {spell} is {comp[out_field]}, {talent}'s change was "
+                                        f"measured at {at}: measure it again (MEASURED_MODS)")
+                    else:
+                        comp["mods"] = comp.get("mods", []) + [{**who, "add": round(add, 6)}]
             need = opts.get("needs")
             if need and comp[out_field] and not _talent_mods_reach(comp.get("mods"), need):
                 # A value in the data that a talent's script turns on (Translucent Image).
