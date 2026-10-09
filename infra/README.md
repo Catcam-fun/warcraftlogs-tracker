@@ -55,30 +55,43 @@ CloudFront distribution below. The domain stays registered at Porkbun.
 ## What's live now (built by hand in the console, Oct 2026)
 
 The site was built by hand rather than from `template.yaml` (first as
-staging, hence the `staging` in some names); these are the real resources (account REDACTED, us-east-1):
+staging, hence the `staging` in some names), in `us-east-1`. This repo is
+public, so it never names the resources themselves: their IDs are in the
+AWS console and in the repository secrets below.
 
-| Piece | Name / ID | Settings |
+| Piece | Where to find it | Settings |
 |---|---|---|
-| API | Lambda `REDACTED` | Python 3.12, x86_64, handler `run.sh`, layer `LambdaAdapterLayerX86:30`, 3008 MB, 15 min; env vars as in `template.yaml` plus the Supabase keys and `ORIGIN_VERIFY_SECRET` |
-| API URL | `REDACTED/` | auth NONE, RESPONSE_STREAM |
-| Site files | S3 bucket `REDACTED` | private, read by CloudFront only |
-| CDN | CloudFront `REDACTED`, `REDACTED`, aliases `floorpov.gg` and `www.floorpov.gg` | origins: the bucket, and `floorpov-api` (the Lambda URL, custom header `X-Origin-Verify`, response and keep-alive timeouts 60 s); behaviors: `/api/*` (CachingDisabled, AllViewerExceptHostHeader, no compression, viewer-request function `floorpov-viewer-ip`) and Default (`floorpov-spa-rewrite`) |
-| Warm-up | EventBridge schedule `REDACTED` | every 5 min, payload `{"source": "floorpov.warm"}` |
-| Budget | `REDACTED` | $10/month, email alerts at 50/80/100% |
+| API | Lambda function (secret `LAMBDA_FUNCTION`) | Python 3.12, x86_64, handler `run.sh`, layer `LambdaAdapterLayerX86:30`, 3008 MB, 15 min; env vars as in `template.yaml` plus the Supabase keys, `ORIGIN_VERIFY_SECRET` and `WCL_PROXY_URL` (the deploy sets this one) |
+| API URL | the function's URL, on an `api-*` alias of `$LATEST` | auth NONE, RESPONSE_STREAM. If it leaks, run Actions > *Rotate API URL* |
+| Site files | S3 bucket (secret `SITE_BUCKET`) | private, read by CloudFront only |
+| CDN | CloudFront distribution (secret `CF_DISTRIBUTION_ID`), aliases `floorpov.gg` and `www.floorpov.gg` | origins: the bucket, and `floorpov-api` (the Lambda URL, custom header `X-Origin-Verify`, response and keep-alive timeouts 60 s); behaviors: `/api/*` (CachingDisabled, AllViewerExceptHostHeader, no compression, viewer-request function `floorpov-viewer-ip`) and Default (`floorpov-spa-rewrite`) |
+| Warm-up | EventBridge schedule | every 5 min, payload `{"source": "floorpov.warm"}` |
+| Budget | AWS Budgets | $10/month, email alerts at 50/80/100% |
+
+Repository secrets (Settings > Secrets and variables > Actions), all read by
+`deploy-aws.yml`:
+
+| Secret | What |
+|---|---|
+| `AWS_DEPLOY_ROLE_ARN` | the deploy role (setup above) |
+| `LAMBDA_FUNCTION`, `SITE_BUCKET`, `CF_DISTRIBUTION_ID` | the resources above |
+| `WCL_PROXY_URL` | the WarcraftLogs proxy (Cloudflare Worker); the deploy copies it into the function's settings |
+| `REACT_APP_SUPABASE_URL`, `REACT_APP_SUPABASE_ANON_KEY`, `REACT_APP_TURNSTILE_SITE_KEY` | built into the site. The browser needs them, so they are readable in the live site's JavaScript; they stay out of the repo |
 
 The account is on AWS's Free account plan (credits; no charges until it is
 upgraded). Account-wide Lambda concurrency is 10, so reserved concurrency
-can't be set; a budget kill switch, once the account is upgraded, should
-switch the function URL's auth to AWS_IAM instead.
+can't be set (that 10 is itself the ceiling); a budget kill switch, once the
+account is upgraded, should switch the function URL's auth to AWS_IAM instead.
 
 ### Deploying an update by hand
 
 - API: `infra/build-api-zip.sh api.zip` (backend's tracked files, no
   tests/scripts/migrations, plus its dependencies built for Lambda), then
-  `aws lambda update-function-code --function-name REDACTED --zip-file fileb://api.zip`.
-- Site: `REACT_APP_API_URL=same-origin npm run build` in `frontend/`, drop
-  `build/_redirects.txt`, `aws s3 sync build s3://REDACTED --delete`,
-  then `aws cloudfront create-invalidation --distribution-id REDACTED --paths "/*"`.
+  `aws lambda update-function-code --function-name <function> --zip-file fileb://api.zip`.
+- Site: `npm run build` in `frontend/` with `REACT_APP_API_URL=same-origin`
+  and the three `REACT_APP_*` values above (`frontend/.env.local` locally),
+  drop `build/_redirects.txt`, `aws s3 sync build s3://<bucket> --delete`,
+  then `aws cloudfront create-invalidation --distribution-id <distribution> --paths "/*"`.
 - Sessions read the deploy key from `FLOORPOV_AWS_ACCESS_KEY_ID` /
   `FLOORPOV_AWS_SECRET_ACCESS_KEY` (environment variables; the plain
   `AWS_*` names are taken by the sandbox's proxy placeholders).

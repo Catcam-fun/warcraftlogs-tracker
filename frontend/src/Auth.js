@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase, setSessionOnly } from './supabaseClient';
 import { X } from 'lucide-react';
 
-const TURNSTILE_SITE_KEY = 'REDACTED';
+const TURNSTILE_SITE_KEY = process.env.REACT_APP_TURNSTILE_SITE_KEY || '';
 
 export default function Auth({ onClose }) {
   const navigate = useNavigate();
@@ -69,18 +69,6 @@ export default function Auth({ onClose }) {
     }
   };
 
-  const verifyCaptcha = async () => {
-    const verifyResponse = await fetch('REDACTED/verify-turnstile', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: captchaToken })
-    });
-    const verifyData = await verifyResponse.json().catch(() => ({}));
-    if (!verifyResponse.ok || !verifyData.success) {
-      throw new Error('CAPTCHA verification failed. Please try again.');
-    }
-  };
-
   const handleReset = async (e) => {
     e.preventDefault();
     if (!captchaToken) {
@@ -90,9 +78,11 @@ export default function Auth({ onClose }) {
     setLoading(true);
     setMessage('');
     try {
-      await verifyCaptcha();
+      // Supabase checks the CAPTCHA token itself (Attack Protection), so a
+      // bot calling Supabase directly can't skip it.
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo: window.location.origin,
+        captchaToken,
       });
       if (error) throw error;
       setMessage('Success! If that email has an account, a reset link is on its way.');
@@ -129,14 +119,12 @@ export default function Auth({ onClose }) {
     setMessage('');
 
     try {
-      await verifyCaptcha();
-
       if (isSignUp) {
-        const { error } = await supabase.auth.signUp({ email, password });
+        const { error } = await supabase.auth.signUp({ email, password, options: { captchaToken } });
         if (error) throw error;
         setMessage('Success! Check your email for confirmation link.');
       } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { error } = await supabase.auth.signInWithPassword({ email, password, options: { captchaToken } });
         if (error) throw error;
         setSessionOnly(!stayLoggedIn);
 

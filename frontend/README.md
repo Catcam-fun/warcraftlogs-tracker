@@ -18,7 +18,7 @@ Run these in `frontend/`:
 - `REACT_APP_API_URL`, if it was set when the site was built;
 - otherwise `http://localhost:5000` when the page is on `localhost` or `127.0.0.1`
   (run the backend locally from `backend/`);
-- otherwise the production API, `https://REDACTED`.
+- otherwise the page's own host: the site and API share one address (CloudFront serves the API under `/api`).
 
 ## More
 

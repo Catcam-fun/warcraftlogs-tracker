@@ -1,0 +1,108 @@
+# Replace the API's Lambda function URL with a new, unguessable one, and point
+# CloudFront at it. Run by hand when the current URL has leaked:
+# Actions > "Rotate API URL" > Run workflow.
+#
+# The new URL lives on a fresh alias of the function (aliased to $LATEST, so
+# deploys reach it unchanged). The new URL must answer health checks and
+# refuse requests without CloudFront's secret header before CloudFront moves
+# to it; the old URL is deleted only once floorpov.gg works through the new one.
+# Nothing identifying is printed: this repo's Actions logs are public.
+name: Rotate API URL
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-aws
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  FUNCTION: ${{ secrets.LAMBDA_FUNCTION }}
+  DISTRIBUTION: ${{ secrets.CF_DISTRIBUTION_ID }}
+  SITE_URL: https://floorpov.gg
+  ORIGIN_ID: floorpov-api
+
+jobs:
+  rotate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: New alias and function URL
+        run: |
+          echo "::add-mask::$(aws sts get-caller-identity --query Account --output text)"
+          alias="api-$(date -u +%Y%m%d%H%M%S)"
+          aws lambda create-alias --function-name "$FUNCTION" --name "$alias" \
+            --function-version '$LATEST' > /dev/null
+          url=$(aws lambda create-function-url-config --function-name "$FUNCTION" \
+            --qualifier "$alias" --auth-type NONE --invoke-mode RESPONSE_STREAM \
+            --query FunctionUrl --output text)
+          echo "::add-mask::$url"
+          aws lambda add-permission --function-name "$FUNCTION" --qualifier "$alias" \
+            --statement-id FunctionURLAllowPublicAccess --action lambda:InvokeFunctionUrl \
+            --principal '*' --function-url-auth-type NONE > /dev/null
+          aws lambda add-permission --function-name "$FUNCTION" --qualifier "$alias" \
+            --statement-id FunctionURLInvokeAllowPublicAccess --action lambda:InvokeFunction \
+            --principal '*' --invoked-via-function-url > /dev/null
+          echo "NEW_ALIAS=$alias" >> "$GITHUB_ENV"
+          echo "NEW_URL=$url" >> "$GITHUB_ENV"
+
+      - name: Check the new URL before switching
+        run: |
+          for i in 1 2 3 4 5 6; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "${NEW_URL}api/health") && [ "$code" = 200 ] && break
+            sleep 10
+          done
+          [ "$code" = 200 ] || { echo "new URL health returned $code"; exit 1; }
+          code=$(curl -s -o /dev/null -w '%{http_code}' "${NEW_URL}api/shared/abcdefghijkl")
+          [ "$code" = 403 ] || { echo "new URL origin lock returned $code"; exit 1; }
+          echo "new URL OK"
+
+      - name: Point CloudFront at the new URL
+        run: |
+          echo "::add-mask::$(aws sts get-caller-identity --query Account --output text)"
+          host="${NEW_URL#https://}"; host="${host%/}"
+          aws cloudfront get-distribution-config --id "$DISTRIBUTION" > dist.json
+          etag=$(jq -r .ETag dist.json)
+          jq --arg id "$ORIGIN_ID" --arg host "$host" \
+            '.DistributionConfig | (.Origins.Items[] | select(.Id == $id) | .DomainName) = $host' \
+            dist.json > config.json
+          aws cloudfront update-distribution --id "$DISTRIBUTION" --if-match "$etag" \
+            --distribution-config file://config.json > /dev/null
+          rm -f dist.json config.json
+          aws cloudfront wait distribution-deployed --id "$DISTRIBUTION"
+          for i in 1 2 3 4 5 6; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$SITE_URL/api/health") && [ "$code" = 200 ] && break
+            sleep 10
+          done
+          [ "$code" = 200 ] || { echo "site API returned $code"; exit 1; }
+          echo "floorpov.gg API OK through the new URL"
+
+      - name: Delete the old URLs
+        run: |
+          echo "::add-mask::$(aws sts get-caller-identity --query Account --output text)"
+          # Every other function URL (the unqualified one, or an older alias's).
+          for arn in $(aws lambda list-function-url-configs --function-name "$FUNCTION" \
+              --query 'FunctionUrlConfigs[].FunctionArn' --output text); do
+            qualifier="${arn##*:}"
+            [ "$qualifier" = "$NEW_ALIAS" ] && continue
+            if [ "$qualifier" = "$FUNCTION" ]; then
+              aws lambda delete-function-url-config --function-name "$FUNCTION"
+              for sid in FunctionURLAllowPublicAccess FunctionURLInvokeAllowPublicAccess; do
+                aws lambda remove-permission --function-name "$FUNCTION" --statement-id "$sid" 2>/dev/null || true
+              done
+            else
+              aws lambda delete-function-url-config --function-name "$FUNCTION" --qualifier "$qualifier"
+              aws lambda delete-alias --function-name "$FUNCTION" --name "$qualifier"
+            fi
+          done
+          echo "old URLs deleted"
+          echo "### API URL rotated" >> "$GITHUB_STEP_SUMMARY"
