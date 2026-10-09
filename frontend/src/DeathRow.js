@@ -12,7 +12,9 @@ import { createPortal } from 'react-dom';
        judged over the seconds before the death (survival.window), with the
        hit that set the death up in survival.biggestHit (only when it was neither
        a one-shot nor a burst) and, on a one-shot finished by a smaller hit, the
-       hit that took 80%+ in survival.oneShotHit.
+       hit that took 80%+ in survival.oneShotHit. Each active[] entry carries
+       {talentsKnown, effect?, auraMs?, cooldownMs?, charges?, talents?}: its
+       caster's talented numbers (defensives._active_detail; older results lack them).
      icons:       {defensive name: icon file name} for render.worldofwarcraft.com.
      abilityIcons: {spell ID: icon file name} for killing blows (death.abilityId).
      abilityInfo: {name: {kind, cooldownMs, auraMs, charges, effect, typicalHeal?, description?}}.
@@ -157,6 +159,11 @@ const ADDS_WHAT = {
   heal: 'heal', heal_taken: 'healing received', absorb: 'shield',
 };
 const TALENT_TEXT = (t) => {
+  if (t.field === 'charges') return `+${t.add * t.rank} charge${t.add * t.rank === 1 ? '' : 's'}`;
+  if ('add_ms' in t) return `${t.add_ms < 0 ? '−' : '+'}${secs(Math.abs(t.add_ms) * t.rank)} ${t.field}`;
+  if ((t.field === 'duration' || t.field === 'cooldown') && 'mult' in t) {
+    return `${t.field} ×${Math.round((1 + (t.mult - 1) * t.rank) * 100) / 100}`;
+  }
   if ('adds' in t) {
     if (t.field === 'absorb' && t.adds > 1) return `adds a ${fmt(t.adds)} shield`;
     const vs = t.school ? ` vs ${schoolScope(t.school)}` : '';
@@ -242,6 +249,33 @@ const TipHead = ({ name, icons, icon, sub, glyph, quality }) => (
     <div><b>{name}</b>{sub && <small>{sub}</small>}</div></div>
 );
 const Row = ({ a, b, cls }) => <div className="r"><span className={cls}>{a}</span><span>{b}</span></div>;
+
+/* An active defensive as its caster had it: their talented numbers and the talents that changed them
+   (analyze_death); results saved before these fields existed show the base text. */
+export const activeTip = (a, inf, icons) => () => {
+  const mine = a.talentsKnown ? {
+    ...inf,
+    ...(a.auraMs != null ? { auraMs: a.auraMs } : {}),
+    ...(a.cooldownMs != null ? { cooldownMs: a.cooldownMs } : {}),
+    ...(a.charges != null ? { charges: a.charges } : {}),
+  } : inf;
+  const talents = a.talents || [];
+  return (
+    <>
+      <TipHead name={a.name} icons={icons} sub={a.kind === 'external' ? `External${a.by ? ` from ${a.by}` : ''}` : null} />
+      <div className="vd gold">Active when they died</div>
+      {talents.length > 0 && (
+        <div className="kv">
+          {talents.map((t) => <Row key={`${t.talent}-${t.field}`} a={t.talent} b={TALENT_TEXT(t)} cls="tal" />)}
+        </div>
+      )}
+      <p className="desc">{effectText(a.effect || inf?.effect, mine)}</p>
+      {a.talentsKnown === false && (
+        <div className="note">{a.kind === 'external' ? `${a.by || 'The caster'}'s talents` : 'Talents'} unknown: base values shown.</div>
+      )}
+    </>
+  );
+};
 
 /* ---------- the row ---------- */
 
@@ -386,13 +420,9 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
   const strip = [];
   if (current) {
     d.active.forEach((a) => strip.push(
-      <Tip key={`a-${a.name}`} className="i act" content={() => (
-        <>
-          <TipHead name={a.name} icons={icons} sub={a.kind === 'external' ? `External${a.by ? ` from ${a.by}` : ''}` : null} />
-          <div className="vd gold">Active when they died</div>
-          <p className="desc">{effectText(info(a.name)?.effect, info(a.name))}</p>
-        </>
-      )}><Icon name={a.name} icons={icons} /></Tip>
+      <Tip key={`a-${a.name}`} className="i act" content={activeTip(a, info(a.name), icons)}>
+        <Icon name={a.name} icons={icons} />
+      </Tip>
     ));
     if (d.active.length) strip.push(<span key="s1" className="sep" />);
     const ready = [
