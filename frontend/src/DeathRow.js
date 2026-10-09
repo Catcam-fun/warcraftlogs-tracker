@@ -90,6 +90,7 @@ function effectText(effect, info) {
     const scope = typeof c.school === 'number' ? `${schoolScope(c.school)} ` : SCOPE[c.school] || '';
     const over = c.over_ms ? ` over ${secs(c.over_ms)}` : '';
     if (c.immune) return c.school === 'melee' ? 'Dodges all melee attacks' : `Immune to ${scope}damage`;
+    if (c.dr && c.from_target) return `Reduces damage taken from the branded enemy by ${pct(c.dr)}`;
     if (c.dr) return `Reduces ${scope}damage taken by ${pct(c.dr)}`;
     if (c.dr_missing) return `Reduces damage taken by up to ${pct(c.dr_missing)} more, the lower their health`;
     if (c.armor) return `Increases armor by ${pct(c.armor)}`;
@@ -120,6 +121,7 @@ function whyText(d, hitName) {
         : `${hitName} isn't physical damage`;
     case 'pierces': return `${hitName} goes through immunities`;
     case 'noReduction': return 'Nothing reduced this hit, so damage reduction doesn\'t work on it';
+    case 'notBranded': return `${hitName} didn't come from an enemy it could brand`;
     case 'stagger': return 'Stagger ticks are damage already reduced when it was staggered, so damage reduction doesn\'t work on them';
     case 'fullHealth': return 'They were at full health, so a heal can\'t help';
     case 'aoeUnknown': return 'This log doesn\'t mark area damage, so this can\'t be checked';

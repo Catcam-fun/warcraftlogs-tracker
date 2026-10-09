@@ -29,7 +29,7 @@ anchors:
   wcl_endpoints: backend/warcraftlogs.py:15
   report_failure: backend/app.py:440
   analyze_error_event: backend/app.py:683
-  catalog_build: backend/scripts/build_defensive_catalog.py:1107
+  catalog_build: backend/scripts/build_defensive_catalog.py:1116
   wago_cache: backend/scripts/build_defensive_catalog.py:411
 links:
   - testing
@@ -46,7 +46,7 @@ invariants:
   - "MUST: rebuild spell_icons.py after rebuilding defensive_catalog.py; the icon script reads every catalog ability."
   - "MUST: bump CACHE_VERSION in cache.py when what gets fetched or how it is indexed changes, so old shared-cache rows are never served to new code."
   - "NEVER: hand-edit the generated modules (defensive_catalog.py, boss_spell_flags.py, boss_spell_text.py, spell_icons.py, armor_constants.py, raid_wide_damage.py); edit the script and rerun it."
-content_hash: sha256:f401fe224ae568181fcadd1d9180a2ce97608b25c396c1036c47b4124f6552f5
+content_hash: sha256:cb09b1a13dbf119286c707bfa7e83dcc08a9309250b13d2d2dc821b96e2905f3
 ---
 ## Summary
 
@@ -72,8 +72,8 @@ Adding a raid tier, in the order the code's dependencies require. Click each ste
 - title: Landing page and art | short: Landing + art | sub: strip, backgrounds, loader
   body: Add the bosses to BOSS_STRIP with their zone label (frontend/src/LandingPage.js:11) and multi-boss slugs to its COUNCIL (frontend/src/LandingPage.js:64). Boss tiles are fetched by frontend/scripts/fetch-boss-renders.py into frontend/public/art/bosses; add the names to its BOSSES list (frontend/scripts/fetch-boss-renders.py:14), and its COUNCIL and DISPLAY_OVERRIDE if needed. Put the new tier's backgrounds in CURRENT_TIER_BACKGROUNDS and move the previous ones into BACKGROUNDS (frontend/src/LandingPage.js:84). The analysis loader video is referenced by path in App.js (frontend/src/App.js:1550). Add a line to UPDATES (frontend/src/LandingPage.js:97). See [[frontend-landing-and-art]].
 - title: Rebuild the defensive catalog | short: Catalog | sub: wago.tools, every patch
-  body: python backend/scripts/build_defensive_catalog.py builds one catalog per retail patch from 11.0.2 on, each from that patch's last build (backend/scripts/build_defensive_catalog.py:406). Set WAGO_CACHE to a folder to keep downloaded tables between runs (backend/scripts/build_defensive_catalog.py:411). Patch names as arguments do a dry run that writes nothing (backend/scripts/build_defensive_catalog.py:1128). New potions need a typical heal in POTION_TYPICAL (backend/scripts/build_defensive_catalog.py:345); the per-tier STANDARD_POTION and DEMONIC_HEALTHSTONE_MEASURED tables in backend/defensives.py:55 and backend/defensives.py:60 are maintained by hand from real logs.
-  gotcha: If the newest patch's spell data no longer matches the curated list, the script stops with "spell data changed; update CURATED / EFFECTS" (backend/scripts/build_defensive_catalog.py:1119). Older patches only print a note.
+  body: python backend/scripts/build_defensive_catalog.py builds one catalog per retail patch from 11.0.2 on, each from that patch's last build (backend/scripts/build_defensive_catalog.py:406). Set WAGO_CACHE to a folder to keep downloaded tables between runs (backend/scripts/build_defensive_catalog.py:411). Patch names as arguments do a dry run that writes nothing (backend/scripts/build_defensive_catalog.py:1137). New potions need a typical heal in POTION_TYPICAL (backend/scripts/build_defensive_catalog.py:345); the per-tier STANDARD_POTION and DEMONIC_HEALTHSTONE_MEASURED tables in backend/defensives.py:55 and backend/defensives.py:60 are maintained by hand from real logs.
+  gotcha: If the newest patch's spell data no longer matches the curated list, the script stops with "spell data changed; update CURATED / EFFECTS" (backend/scripts/build_defensive_catalog.py:1128). Older patches only print a note.
 - title: Rebuild the icons | short: Icons | sub: after the catalog
   body: python backend/scripts/build_spell_icons.py writes backend/spell_icons.py, the icon and description of every catalog ability. Its docstring says to rerun it after rebuilding the catalog (backend/scripts/build_spell_icons.py:10); it imports the catalog it just rebuilt.
 - title: Boss spell flags and text | short: Boss spells | sub: reads RAID_ENCOUNTERS

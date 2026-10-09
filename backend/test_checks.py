@@ -378,10 +378,11 @@ class MitigationCheckTests(unittest.TestCase):
         # already counts in unmitigatedAmount, so the share through read 0.02 against 0.40. The same unit's
         # same ability, a branded hit next to an unbranded one, read 0.400 (123 pairs; Lunchay, Undermine:
         # 288 pairs). All branded hits against all unbranded ones within 30 s read 0.374: Liquefy's ticks
-        # grow over its cast and players brand at its start.
+        # grow over its cast and players brand at its start. That is The War Within's Fiery Brand, an effect
+        # on the enemy in the game data (the catalog's `from_target`).
         from checks import source_mitigation
         entries = {204021: {"name": "Fiery Brand", "kind": "personal", "class": "DemonHunter",
-                            "specs": ["Vengeance"], "mitigation": [{"dr": 0.4}]}}
+                            "specs": ["Vengeance"], "mitigation": [{"dr": 0.4, "from_target": 207771}]}}
         friendlies = [{"id": 1, "name": "Laz", "type": "DemonHunter"}]
         combatants = [{"fight": 1, "sourceID": 1, "specID": 581, "talentTree": []}]      # 581: Vengeance
         hit = lambda t, raw, buffs, unit=50: {"type": "damage", "targetID": 1, "sourceID": unit, "abilityGameID": 9,
@@ -400,7 +401,7 @@ class MitigationCheckTests(unittest.TestCase):
         with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
             self.assertEqual(source_mitigation.check(run).status, "pass")
         # Pairs that read 0.41 against a catalog value of 0.30: flagged.
-        wrong = {204021: dict(entries[204021], mitigation=[{"dr": 0.3}])}
+        wrong = {204021: dict(entries[204021], mitigation=[{"dr": 0.3, "from_target": 207771}])}
         run = self._wave1_run(wrong, friendlies, {207771: "Fiery Brand"}, combatants)
         with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
             o = source_mitigation.check(run)
@@ -413,6 +414,27 @@ class MitigationCheckTests(unittest.TestCase):
         run = self._wave1_run(wrong, friendlies, {207771: "Fiery Brand"}, [dict(combatants[0], specID=577)])
         with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
             self.assertEqual(source_mitigation.check(run).status, "skip")
+
+    def test_midnights_fiery_brand_is_measured_like_any_buff(self):
+        # Midnight (12.0.0 on) put Fiery Brand on the Demon Hunter (207771 effect 0: aura 87, target the
+        # caster): a buff that cuts every hit, shown in the share through like any other (Felvix, Voidspire:
+        # every boss's hits 0.56-0.59 of unbranded). The catalog has no `from_target` there.
+        from checks import source_mitigation
+        entries = {204021: {"name": "Fiery Brand", "kind": "personal", "class": "DemonHunter",
+                            "specs": ["Vengeance"], "mitigation": [{"dr": 0.4}]}}
+        friendlies = [{"id": 1, "name": "Felv", "type": "DemonHunter"}]
+        combatants = [{"fight": 1, "sourceID": 1, "specID": 581, "talentTree": []}]
+        hit = lambda through, buffs, unit: {"type": "damage", "targetID": 1, "sourceID": unit, "abilityGameID": 9,
+                                            "fight": 1, "timestamp": 0, "unmitigatedAmount": 1250,
+                                            "mitigated": 1250 - through, "amount": through, "buffs": buffs}
+        hits = [hit(1000, "", 50)] * 10 + [hit(600, "207771.", 50)] * 15 + [hit(600, "207771.", 51)] * 10
+        run = self._wave1_run(entries, friendlies, {207771: "Fiery Brand"}, combatants)
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
+            self.assertEqual(source_mitigation.check(run).status, "pass")
+        wrong = {204021: dict(entries[204021], mitigation=[{"dr": 0.3}])}
+        run = self._wave1_run(wrong, friendlies, {207771: "Fiery Brand"}, combatants)
+        with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
+            self.assertEqual(source_mitigation.check(run).items, ["Felv Fiery Brand: measured 0.40, catalog 0.30 over 25 hits"])
 
     def test_dampen_harm_grows_with_the_hit(self):
         # Live 2026-10-08: Dampen Harm ("20% to 50%, larger attacks reduced by more") took 0.20 off small

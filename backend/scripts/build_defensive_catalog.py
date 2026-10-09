@@ -508,6 +508,12 @@ class GameData:
 # misc value (127 all, 126 magic, 1 physical); aura 229 is AoE damage only.
 AURA_AOE_REDUCTION = "229"
 AURA_DAMAGE_TAKEN_PCT = "87"
+# An aura on an enemy that cuts the damage it deals to the caster: The War Within's Fiery Brand (207771
+# effect 0, target the enemy: "dealing 40% less damage to $@auracaster"). Only the branded unit's hits
+# are cut (measured on adjacent hit pairs: 0.400 on the branded unit's, 0.00 on other units'), and WCL
+# lists the aura on exactly those hits. Midnight moved it onto the Demon Hunter (aura 87, target the
+# caster: every hit is cut), so this follows each patch's data.
+AURA_DAMAGE_DONE_TO_CASTER = "269"
 AURA_SHAPESHIFT = "36"
 SCHOOL_MASKS = {"127": None, "126": "magic", "1": "physical"}
 MAGIC_SCHOOLS = 126
@@ -818,6 +824,9 @@ def components(name, gd, mods, problems):
                     school = data_school
             if school:
                 comp["school"] = school
+            if field == "dr" and index is not None and                     gd.effects[spell][index]["EffectAura"] == AURA_DAMAGE_DONE_TO_CASTER:
+                # Only the hits of the unit it is cast on, which carry this aura in WCL's list.
+                comp["from_target"] = spell
             if field == "absorb":
                 comp["observed"] = True
             if opts.get("current"):
