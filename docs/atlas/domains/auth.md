@@ -22,7 +22,7 @@ anchors:
   verify_token: backend/auth.py:36
   cache_ttl: backend/auth.py:23
   require_user: backend/auth.py:79
-  delete_route: backend/app.py:817
+  delete_route: backend/app.py:829
   delete_impl: backend/supabase_client.py:417
   delete_client: frontend/src/Settings.js:187
 links:
@@ -41,7 +41,7 @@ invariants:
   - "MUST: verify_token return None on any non-200 or network failure, so the route answers 401."
   - "NEVER: store raw tokens in the verification cache; keys are SHA-256 hashes."
   - "NEVER: honor enableCheatDeath without a verified session."
-content_hash: sha256:1093aed90e2b9edbcbdea838350e777d65c8dc5d543c19dfb991ee6a7810e4ee
+content_hash: sha256:fa3630d19c813a4f9ebb165acddd428d7ca6c4369862b54567fdff77311cac72
 ---
 # Accounts & Auth
 
@@ -90,7 +90,7 @@ edge req -> apifetch color=never "401"
 - title: Guard the route | short: require_user | sub: 401 or g.user_id
   body: require_user lets OPTIONS through with 204, otherwise returns 401 "Please sign in again." or sets g.user_id and calls the handler (backend/auth.py:84).
 - title: Delete the account | short: Delete account | sub: DELETE /api/account
-  body: Settings asks the user to type DELETE, then calls DELETE /api/account with the session (frontend/src/Settings.js:199). The backend deletes saved_analyses, api_credentials and shares for g.user_id, then the auth user via the admin API (backend/supabase_client.py:392, :394), drops the token from the cache (backend/app.py:823), and the browser signs out locally and goes home (frontend/src/Settings.js:204).
+  body: Settings asks the user to type DELETE, then calls DELETE /api/account with the session (frontend/src/Settings.js:199). The backend deletes saved_analyses, api_credentials and shares for g.user_id, then the auth user via the admin API (backend/supabase_client.py:392, :394), drops the token from the cache (backend/app.py:835), and the browser signs out locally and goes home (frontend/src/Settings.js:204).
   gotcha: Only the token used for the delete is forgotten. Another tab's token for the same user stays cached for up to 60 seconds and would still pass require_user.
 ```
 
@@ -100,14 +100,14 @@ Which backend endpoints use a session (`backend/app.py`).
 
 | Endpoint {required} | Session | What the user id is used for |
 |---|---|---|
-| `GET /api/saved` {required} | required (`backend/app.py:768`) | list only this user's saves |
-| `POST /api/saved` {required} | required (`backend/app.py:774`) | owner of the new save |
-| `GET /api/saved/<id>` {required} | required (`backend/app.py:792`) | load only if owned |
-| `DELETE /api/saved/<id>` {required} | required (`backend/app.py:800`) | delete only if owned |
-| `DELETE /api/saved` {required} | required (`backend/app.py:808`) | delete all of this user's saves |
-| `DELETE /api/account` {required} | required (`backend/app.py:818`) | delete the account |
+| `GET /api/saved` {required} | required (`backend/app.py:780`) | list only this user's saves |
+| `POST /api/saved` {required} | required (`backend/app.py:786`) | owner of the new save |
+| `GET /api/saved/<id>` {required} | required (`backend/app.py:804`) | load only if owned |
+| `DELETE /api/saved/<id>` {required} | required (`backend/app.py:812`) | delete only if owned |
+| `DELETE /api/saved` {required} | required (`backend/app.py:820`) | delete all of this user's saves |
+| `DELETE /api/account` {required} | required (`backend/app.py:830`) | delete the account |
 | `POST /api/analyze` {optional} | optional (`backend/app.py:120`) | enables cheat-death detection (`backend/app.py:143`) |
-| `POST /api/share` {optional} | optional (`backend/app.py:734`) | sets `created_by` so account deletion removes the share |
+| `POST /api/share` {optional} | optional (`backend/app.py:746`) | sets `created_by` so account deletion removes the share |
 | `GET /api/shared/<id>` {public} | none | shares are public by link |
 | `GET /api/health`, `GET /` {public} | none | status only |
 

@@ -19,7 +19,7 @@ anchors:
   gunicorn_threads: backend/gunicorn.conf.py:15
   supabase_env: backend/supabase_client.py:27
   auth_env: backend/auth.py:20
-  dev_server: backend/app.py:841
+  dev_server: backend/app.py:853
   frontend_api_url: frontend/src/api.js:9
 links:
   - backend-api-endpoints
@@ -37,7 +37,7 @@ invariants:
   - "MUST: run under a threaded worker (gthread); a sync worker lets one analysis stream block every other request."
   - "MUST: keep WEB_CONCURRENCY at 1 unless shared state moves out of process; caches and rate limits live in process memory."
   - "NEVER: hard-code a WarcraftLogs API key on the server; each analysis brings the caller's own clientId and clientSecret."
-content_hash: sha256:ac4286b369df64695551a967e388d4b265785f224e169e588c88a1ab4b712f49
+content_hash: sha256:c530a897637d771f102a42ed7d33f06c9b6d941bbc539ee3117941fba1d763ca
 ---
 ## Summary
 
@@ -88,16 +88,16 @@ Every route, at a glance. Full request and response shapes are on [[backend-api-
 | Route {analysis} | Auth | Rate limit | Purpose |
 |---|---|---|---|
 | `POST /api/analyze` {analysis} | optional (unlocks cheat deaths) | 60 / hour / IP | Stream an analysis as SSE (`backend/app.py:109`) |
-| `POST /api/share` {sharing} | optional (links share to account) | 20 / hour / IP | Create a 72-hour share link (`backend/app.py:725`) |
-| `GET /api/shared/<share_id>` {sharing} | none | none | Read a share link (`backend/app.py:745`) |
-| `GET /api/saved` {saved} | required | none | List the user's saved analyses (`backend/app.py:767`) |
-| `POST /api/saved` {saved} | required | 30 / hour / IP | Save an analysis (`backend/app.py:773`) |
-| `GET /api/saved/<id>` {saved} | required | none | Load one saved analysis (`backend/app.py:791`) |
-| `DELETE /api/saved/<id>` {saved} | required | none | Delete one (`backend/app.py:799`) |
-| `DELETE /api/saved` {saved} | required | none | Delete all of the user's saves (`backend/app.py:807`) |
-| `DELETE /api/account` {account} | required | none | Delete the user's data and auth account (`backend/app.py:817`) |
-| `GET /api/health` {status} | none | none | Liveness plus whether Supabase is configured (`backend/app.py:831`) |
-| `GET /` {status} | none | none | Service banner (`backend/app.py:836`) |
+| `POST /api/share` {sharing} | optional (links share to account) | 20 / hour / IP | Create a 72-hour share link (`backend/app.py:737`) |
+| `GET /api/shared/<share_id>` {sharing} | none | none | Read a share link (`backend/app.py:757`) |
+| `GET /api/saved` {saved} | required | none | List the user's saved analyses (`backend/app.py:779`) |
+| `POST /api/saved` {saved} | required | 30 / hour / IP | Save an analysis (`backend/app.py:785`) |
+| `GET /api/saved/<id>` {saved} | required | none | Load one saved analysis (`backend/app.py:803`) |
+| `DELETE /api/saved/<id>` {saved} | required | none | Delete one (`backend/app.py:811`) |
+| `DELETE /api/saved` {saved} | required | none | Delete all of the user's saves (`backend/app.py:819`) |
+| `DELETE /api/account` {account} | required | none | Delete the user's data and auth account (`backend/app.py:829`) |
+| `GET /api/health` {status} | none | none | Liveness plus whether Supabase is configured (`backend/app.py:843`) |
+| `GET /` {status} | none | none | Service banner (`backend/app.py:848`) |
 
 The module map, for finding code:
 
@@ -133,7 +133,7 @@ In production the API runs on AWS Lambda: `backend/run.sh` starts gunicorn, and 
 
 | Aspect | Local | Production |
 |---|---|---|
-| Server | `python app.py`: Flask's threaded dev server on `PORT` or 5000 (`backend/app.py:841`) | gunicorn with `backend/gunicorn.conf.py` on AWS Lambda, started by `backend/run.sh` |
+| Server | `python app.py`: Flask's threaded dev server on `PORT` or 5000 (`backend/app.py:853`) | gunicorn with `backend/gunicorn.conf.py` on AWS Lambda, started by `backend/run.sh` |
 | URL the frontend uses | `http://localhost:5000` when the site runs on localhost (`frontend/src/api.js:10`) | `/api` on the site's own host (CloudFront sends it to Lambda) (`frontend/src/api.js:10`), unless `REACT_APP_API_URL` overrides it at build time (`frontend/src/api.js:9`) |
 | Env source | `backend/.env` loaded by `load_dotenv()` | Lambda environment variables |
 | Supabase | optional: without it, saves fail, shares fall back to process memory, the shared report cache is skipped | configured; service-role key preferred (`backend/supabase_client.py:38`) |

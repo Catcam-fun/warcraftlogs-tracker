@@ -23,7 +23,7 @@ anchors:
   no_counted_death: backend/app.py:390
   window_cache_key: backend/app.py:398
   one_at_a_time: backend/app.py:402
-  deaths_pool: backend/app.py:469
+  deaths_pool: backend/app.py:481
   get_report_fights: backend/warcraftlogs.py:333
   deaths_bulk: backend/analysis.py:357
   remaining_events: backend/analysis.py:329
@@ -60,7 +60,7 @@ invariants:
   - "NEVER: serve a cached defensive entry built with a different catalog; the key carries the catalog fingerprint."
 flows:
   - request-path
-content_hash: sha256:ea00a031f2a4e77f3b9417b78cfa72314db036df4928c0b9a02f43192e9fc452
+content_hash: sha256:1b8d1a4ad944b2908db225916907361b04ced3e1290468a819ad2cd125b443a2
 ---
 ## Summary
 
@@ -184,7 +184,7 @@ band structural "Officer's WCL key"
 | `WINDOW_BLOCKS_PER_REQUEST` = 20 {batch} | `backend/defensives.py:879` | many blocks in one request |
 | `REPORT_CACHE_MIN_AGE_MS` = 2 h {cache} | `backend/app.py:46` | finished reports read once |
 | `REPORT_FETCH_WORKERS` = 6 {concurrency} | `backend/app.py:50` | fight-list and full-read concurrency |
-| Report pool = 8 {concurrency} | `backend/app.py:469` | reports whose events are read at once |
+| Report pool = 8 {concurrency} | `backend/app.py:481` | reports whose events are read at once |
 
 ## Invariants
 
@@ -199,7 +199,7 @@ band structural "Officer's WCL key"
 
 ## Gotchas
 
-- **Concurrency is across reports, not within one**: the fight-list and full-read phases use `REPORT_FETCH_WORKERS = 6` (`backend/app.py:235`, `backend/app.py:273`), and the event phase reads 8 reports at once (`backend/app.py:469`). Inside one report the queries run one after another, so at most about 8 event requests are in flight on one key.
+- **Concurrency is across reports, not within one**: the fight-list and full-read phases use `REPORT_FETCH_WORKERS = 6` (`backend/app.py:235`, `backend/app.py:273`), and the event phase reads 8 reports at once (`backend/app.py:481`). Inside one report the queries run one after another, so at most about 8 event requests are in flight on one key.
 - **A report's first query is the expensive one**: the same query costs several times more on a report WCL hasn't read in the last 10-30 seconds, so a report's queries are sent back to back. Moving a different query ahead of `fetch_combatants` raises the cost of every cold report (`backend/app.py:376-378`).
 - **A failed loadout read skips defensives**: if `fetch_combatants` raises, the error is kept and the defensive query is not sent; deaths still count (`backend/app.py:379-382`, `backend/app.py:404`).
 - **Casts and Buffs cover more than the pulls**: buffs start 3 minutes (`ENCOUNTER_RESET_MS`) before the first pull and casts at `cast_lookback` (`backend/defensives.py:257`: as far back as the last boss encounter's end, at most the longest tracked cooldown, for presses that carry into a pull), and both run to the last pull's end, trash included (`backend/defensives.py:36`, `backend/defensives.py:288`). This costs more pages than a pull-scoped query but catches a defensive pressed just before a pull.

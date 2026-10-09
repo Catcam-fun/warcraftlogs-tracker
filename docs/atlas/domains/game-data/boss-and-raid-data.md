@@ -24,7 +24,7 @@ anchors:
   use_armor: backend/defensives.py:1269
   use_rot: backend/defensives.py:2423
   use_icons: backend/defensives.py:159
-  use_text: backend/app.py:693
+  use_text: backend/app.py:705
   icon_url: frontend/src/DeathRow.js:22
 links:
   - game-data
@@ -42,7 +42,7 @@ invariants:
   - "NEVER: store boss damage amounts in boss spell text; the game scales them at run time, so the tooltip shows the real hit from the log."
 flows:
   - data-build-path
-content_hash: sha256:8bd210f7222e310eb66f21d5d27d76141f3ca5d00de754bffc701a5c2d9190d1
+content_hash: sha256:cbce7a08bb4af16aecd1ec5a3641de537c178b2083e8697f6029a4c9609049ed
 ---
 ## Summary
 
@@ -73,7 +73,7 @@ Run as `python backend/scripts/build_boss_spell_text.py` after the raid is in `R
 3. `render()` fills Blizzard's description template where the data is exact (durations, tick periods, radii, spell names, percentages), drops difficulty and class conditions, and removes damage amounts, which scale at run time (`backend/scripts/build_boss_spell_text.py:67-116`).
 4. Drops text written to "you" (player spells), dedupes identical texts into `TEXTS`, maps spell IDs to them in `SPELLS`, and writes a `text_for()` helper (`backend/scripts/build_boss_spell_text.py:151-167`).
 
-`app.py` sends `text_for(abilityId)` for each counted killing blow as `abilityText` (`backend/app.py:691-694`).
+`app.py` sends `text_for(abilityId)` for each counted killing blow as `abilityText` (`backend/app.py:703-706`).
 
 #### build_armor_constants.py: armor per boss
 

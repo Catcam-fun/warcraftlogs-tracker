@@ -16,8 +16,8 @@ anchors:
   max_content_length: backend/app.py:62
   limiters: backend/app.py:52
   analyze_limit: backend/app.py:110
-  looks_like_analysis: backend/app.py:721
-  share_id_re: backend/app.py:717
+  looks_like_analysis: backend/app.py:733
+  share_id_re: backend/app.py:729
   cheat_death_gate: backend/app.py:143
   client_ip: backend/ratelimit.py:18
   rate_limiter: backend/ratelimit.py:32
@@ -51,7 +51,7 @@ invariants:
   - "MUST: share and save bodies pass _looks_like_analysis before anything is stored."
   - "NEVER: the browser reads saved_analyses, shared_results or report_cache; RLS is on and no policies grant it."
   - "NEVER: a WarcraftLogs secret is used as a cache key in plain form; the token cache keys on a SHA-256 of id and secret."
-content_hash: sha256:1d68b24b04fbcc22f4aaf2536343e72f8c9680ed2293bdd463bf2e666618ce0c
+content_hash: sha256:b754d4e54db9fbb542434e23387cd783ad33db0c11d4f043951836ae315456f7
 ---
 # Security & Trust Boundaries
 
@@ -108,7 +108,7 @@ A request crosses the same gates in the same order. The steps follow one analysi
 - title: Rate limit | short: Rate limit | sub: sliding window per IP
   body: Each write route is wrapped by limit(), which keys a RateLimiter on client_ip() and returns 429 when the window is full (backend/ratelimit.py:54). OPTIONS preflights are never counted. The limiter drops idle keys once it tracks more than 10,000 clients (backend/ratelimit.py:48).
 - title: Validate input | short: Validate | sub: shape checks, id patterns
-  body: /api/analyze rejects a non-object body with 400 (backend/app.py:116) and clamps maxCutoff to 1-10 (backend/app.py:134). Share and save bodies must have data.events as an object (_looks_like_analysis, backend/app.py:721). Share ids must match ^[A-Za-z0-9_-]{6,32}$ and saved ids a 36-character UUID pattern before any lookup (backend/app.py:717, :688).
+  body: /api/analyze rejects a non-object body with 400 (backend/app.py:116) and clamps maxCutoff to 1-10 (backend/app.py:134). Share and save bodies must have data.events as an object (_looks_like_analysis, backend/app.py:733). Share ids must match ^[A-Za-z0-9_-]{6,32}$ and saved ids a 36-character UUID pattern before any lookup (backend/app.py:729, :688).
 - title: Identify the caller | short: Auth | sub: Supabase decides
   body: require_user (backend/auth.py:79) verifies the bearer token with Supabase and exposes the id as g.user_id. Analyze and share check the token optionally. Cheat-death detection is ANDed with a verified session on the server (backend/app.py:143), so a crafted config cannot turn it on. Details are on the [[auth]] page.
 - title: Use WCL credentials | short: WCL token | sub: through the proxy
@@ -126,8 +126,8 @@ Rate limits and guards per endpoint (`backend/app.py`). Limits are per client IP
 | `POST /api/analyze` {write} | 60 / hour (`backend/app.py:53`, `:110`) | optional | body is an object; `maxCutoff` clamped 1-10 |
 | `POST /api/share` {write} | 20 / hour (`backend/app.py:52`, `:696`) | optional | `_looks_like_analysis`; 2 MB compressed cap (`backend/supabase_client.py:33`) |
 | `POST /api/saved` {write} | 30 / hour (`backend/app.py:54`, `:745`) | required | `_looks_like_analysis`; 3 MB compressed cap; 5 saves per user (`backend/supabase_client.py:31`) |
-| `GET /api/shared/<id>` {read} | none | none | `SHARE_ID_RE` (`backend/app.py:717`) |
-| `GET`/`DELETE /api/saved/<id>` {read} | none | required | `SAVED_ID_RE` (`backend/app.py:718`) |
+| `GET /api/shared/<id>` {read} | none | none | `SHARE_ID_RE` (`backend/app.py:729`) |
+| `GET`/`DELETE /api/saved/<id>` {read} | none | required | `SAVED_ID_RE` (`backend/app.py:730`) |
 | `GET`/`DELETE /api/saved`, `DELETE /api/account` {read} | none | required | none |
 | all routes {all} | 25 MB request body (`backend/app.py:62`) | - | Flask returns 413 |
 
@@ -145,7 +145,7 @@ Who holds which secret.
 
 - **MUST** configs pass through `stripSecrets` in the browser before any save, share or recent-run write (`frontend/src/api.js:43`), and through `strip_secrets` on the server before storage and on the way out (`backend/supabase_client.py:101`, `:154`, `:214`, `:250`). Tests check the secret never reaches the stored payload (`backend/test_api.py:112`, `:144`).
 - **MUST** saved-analysis and account routes take the user id only from `require_user` (`backend/auth.py:91`); the service-role key bypasses RLS, so this is the only thing separating users' saves.
-- **MUST** share and save bodies pass `_looks_like_analysis` before anything is stored (`backend/app.py:731`, `:749`).
+- **MUST** share and save bodies pass `_looks_like_analysis` before anything is stored (`backend/app.py:743`, `:749`).
 - **NEVER** the browser reads `saved_analyses`, `shared_results` or `report_cache`: RLS is on and no policy grants the anon or authenticated role (`backend/migrations/001_shares_and_rls.sql:27`, `backend/migrations/002_report_cache.sql:21`).
 - **NEVER** a WarcraftLogs secret is used as a cache key in plain form; the token cache keys on a SHA-256 of `id:secret` (`backend/warcraftlogs.py:93`).
 
@@ -154,11 +154,11 @@ Who holds which secret.
 - **Rate limits are per process**: each `RateLimiter` is an in-memory dict (`backend/ratelimit.py:36`). A restart clears it, and with `WEB_CONCURRENCY` above 1 every gunicorn worker keeps its own count, so the effective limit multiplies (see [[deployment]]).
 - **The limiter keys on an address the visitor can't fake**: `client_ip()` (`backend/ratelimit.py:18`) uses, in order: on AWS, `X-Viewer-Ip`, which a CloudFront Function sets from the connection and overwrites, trusted only on requests carrying the origin secret; otherwise the socket address. Headers a client can set (`X-Forwarded-For`, `CF-Connecting-IP`) are never used. `backend/test_ratelimit.py` checks that forged headers don't change the key.
 - **On AWS the Lambda URL is public but locked**: CloudFront adds `X-Origin-Verify` with the `ORIGIN_VERIFY_SECRET` value (`infra/template.yaml`), and the app refuses every request without it (`backend/origin.py`, `backend/app.py:80`), except the adapter's own `GET /api/health` and `POST /events`. Anyone calling the function URL directly gets 403, which the deploy workflow's smoke test checks.
-- **Reads and failed sign-ins are not rate-limited**: `GET /api/shared/<id>` and the `require_user` routes have no limiter, and `POST /api/saved` checks the session before the limiter (`backend/app.py:774`). Only successful token checks are cached (`backend/auth.py:68`), so each request with a bad bearer token costs one call to Supabase.
+- **Reads and failed sign-ins are not rate-limited**: `GET /api/shared/<id>` and the `require_user` routes have no limiter, and `POST /api/saved` checks the session before the limiter (`backend/app.py:786`). Only successful token checks are cached (`backend/auth.py:68`), so each request with a bad bearer token costs one call to Supabase.
 - **CORS defaults to any origin**: `ALLOWED_ORIGINS` falls back to `'*'` (`backend/app.py:67`). This is safe for session theft because auth is a bearer header, but any site can call the API from a visitor's browser and spend that visitor's IP's rate-limit budget.
 - **WarcraftLogs traffic goes through a Cloudflare Worker outside this repo**: both the OAuth exchange and every GraphQL query use `wcl-proxy.catcam-fun.workers.dev` (`backend/warcraftlogs.py:15`, `:16`), and the sign-in CAPTCHA check uses the same host (`frontend/src/Auth.js:73`). The Worker's code is not in this repo, so its behavior can't be reviewed here, and it sees every officer's client ID and secret.
 - **The server strips more keys than the browser**: the browser removes only `clientId` and `clientSecret` (`frontend/src/api.js:15`); the server also removes `password`, `token` and access-token keys (`backend/supabase_client.py:57`). Both strip only top-level keys of the config, not nested objects.
-- **Analysis errors are echoed to the client**: an unexpected exception in `/api/analyze` is sent as `str(e)` in the event stream (`backend/app.py:705`), and a failed WarcraftLogs login includes the request error text (`backend/app.py:160`).
+- **Analysis errors are echoed to the client**: an unexpected exception in `/api/analyze` is sent as `str(e)` in the event stream (`backend/app.py:717`), and a failed WarcraftLogs login includes the request error text (`backend/app.py:160`).
 - **The shared report cache is not scoped per API key**: finished reports' fight lists, fights and deaths are cached by report code for every caller (`backend/app.py:217`, `backend/app.py:227`). A caller only reaches a report that their own key listed through `get_guild_reports` (`backend/app.py:191`), which is what keeps one guild's private reports away from another key.
 
 ## Glossary
