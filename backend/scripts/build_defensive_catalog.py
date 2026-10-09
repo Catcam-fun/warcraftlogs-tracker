@@ -1122,6 +1122,27 @@ SHUFFLE_GRANT = re.compile(r"(?:grants?|granting) Shuffle for \$(\d*)s(\d)", re.
 # The Shuffle grants the purify fits were reviewed for (seconds; every patch from 11.0.2): a grant that
 # disappears, changes or is new fails the current patch's build until it is reviewed here.
 SHUFFLE_GRANTS_REVIEWED = {"Keg Smash": 5.0, "Blackout Kick": 3.0, "Spinning Crane Kick": 1.0}
+# Purifies of a flat amount (not a share of the pool), which the fits can't size: a stretch with one of
+# their buttons pressed can have lost any amount. {name: (the spell that purifies: a talent or a spec
+# passive, the button that sets it off, its spell ID in the logs)}. Touch of Death 325095 ("reduces
+# delayed Stagger damage by $s1% of damage dealt", a Brewmaster spec spell in every patch from 11.0.2):
+# Weavi, Undermine p24, cast 322109 165 ms before a staggered hit, the pool fell 2,144,052 -> 5.
+# Staggering Strikes 387625 (talent: "When you Blackout Kick, your Stagger is reduced by $<reduc>"); a
+# Brewmaster's Blackout Kick is 205523.
+FLAT_PURIFIES = {"Touch of Death": (325095, "Touch of Death", 322109),
+                 "Staggering Strikes": (387625, "Blackout Kick", 205523)}
+# Monk talents and Brewmaster spells whose tooltip says they take Stagger off or read what was purified,
+# reviewed for the fits (every patch from 11.0.2): the purifies above, and those that take nothing off
+# between two ticks. Mantra of Purity only adds to Purifying Brew's share; Gai Plin's Imperial Brew,
+# Celestial Brew and Celestial Infusion read the amount purified; Invoke Niuzao, the Black Ox moves a
+# share of new Stagger to Niuzao (its ticks: _tick_raw) and heals him by the purified amount; Blackout
+# Combo's Purifying Brew (The War Within) pauses the ticks, which takes nothing off the pool. A new one
+# fails the current patch's build until it is reviewed here.
+STAGGER_TEXT_REVIEWED = {"Purifying Brew", "Quick Sip", "Tranquil Spirit", "Mantra of Purity", *FLAT_PURIFIES,
+                         "Gai Plin's Imperial Brew", "Celestial Brew", "Celestial Infusion",
+                         "Invoke Niuzao, the Black Ox", "Blackout Combo"}
+STAGGER_TEXT = re.compile(r"(?:Stagger(?:ed)?\|?R?\s+(?:damage\s+|amount\s+)?(?:is\s+)?(?:reduced|lowered|cleared)"
+                          r"|(?:clears?|purif\w*|reduces?|lowered|removes?)\s[^.]{0,40}Stagger)", re.I)
 
 
 def stagger_purify(gd, mods, desc, problems):
@@ -1170,7 +1191,46 @@ def stagger_purify(gd, mods, desc, problems):
             problems.append(f"Shuffle grant {name}: {grants.get(name)} s in the data, reviewed "
                             f"{SHUFFLE_GRANTS_REVIEWED.get(name)} s: review it (SHUFFLE_GRANTS_REVIEWED)")
     out["shuffle_s"] = dict(sorted(grants.items()))
+    # Who has each purify: Quick Sip and Tranquil Spirit are talents (a Brewmaster without one never
+    # purifies with it); Tranquil Spirit fires for Expel Harm too where its tooltip says so (The War Within).
+    for key, talent in (("quick_sip", "Quick Sip"), ("tranquil_spirit", "Tranquil Spirit")):
+        who, _ = talent_who(gd, mods, talent)
+        if key not in out:
+            continue
+        if who is None:
+            problems.append(f"{talent} is in no talent tree: review the purify fits")
+            continue
+        out[key]["entries"] = who["entries"]
+    if "tranquil_spirit" in out:
+        out["tranquil_spirit"]["expel_harm"] = bool(re.search(r"\bExpel Harm\b", desc.get(TRANQUIL_SPIRIT) or ""))
+    out["flat"] = []
+    for name, (spell, button, cast) in sorted(FLAT_PURIFIES.items()):
+        if names.get(spell) != name or names.get(cast) != button:
+            problems.append(f"{name}: spell {spell} or its button {cast} ({button}) changed: review FLAT_PURIFIES")
+            continue
+        if not re.search(r"Stagger", desc.get(spell) or "") and not re.search(r"Stagger", desc.get(spell_root(desc, spell)) or ""):
+            problems.append(f"{name}: {spell}'s tooltip no longer mentions Stagger: review FLAT_PURIFIES")
+            continue
+        who = mods.who(spell) or (talent_who(gd, mods, name)[0] or {})
+        if not who.get("entries") and "Brewmaster" not in who.get("specs", ()):
+            problems.append(f"{name}: {spell} is neither a talent nor a Brewmaster spell: review FLAT_PURIFIES")
+            continue
+        out["flat"].append({"name": name, "casts": [cast], **({"entries": who["entries"]} if who.get("entries") else {})})
+    for sid, text in desc.items():
+        if gd.family.get(sid, (None,))[0] != MONK_FAMILY or not STAGGER_TEXT.search(text or ""):
+            continue
+        if sid not in mods.entries_for_spell and "Brewmaster" not in gd.spec_spells.get(sid, ()):
+            continue
+        if names.get(sid) not in STAGGER_TEXT_REVIEWED:
+            problems.append(f"{names.get(sid)} ({sid}) takes Stagger off: review it for the purify fits "
+                            f"(FLAT_PURIFIES / STAGGER_TEXT_REVIEWED)")
     return out
+
+
+def spell_root(desc, spell):
+    """The spell a tooltip of the form "$@spelldescN" points to, else the spell itself."""
+    m = re.fullmatch(r"\$@spelldesc(\d+)", (desc.get(spell) or "").strip())
+    return int(m.group(1)) if m else spell
 
 
 def build_catalog(build):

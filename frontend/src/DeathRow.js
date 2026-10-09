@@ -178,8 +178,18 @@ const TALENT_TEXT = (t) => {
     const vs = t.school ? ` vs ${schoolScope(t.school)}` : '';
     return `adds ${pct(t.adds * t.rank)}${t.field === 'absorb' ? ' of max health as a' : ''} ${ADDS_WHAT[t.field] || ''}${vs}`.trim();
   }
-  return 'add' in t ? `+${pct(t.add * t.rank)}` : `×${Math.round((1 + (t.mult - 1) * t.rank) * 100) / 100}`;
+  // A talent can take some off as well as add (Elusiveness on Feint's area reduction: −11.4%, measured).
+  const vs = t.school ? ` vs ${schoolScope(t.school)}` : '';
+  if ('add' in t) return `${t.add < 0 ? '−' : '+'}${pct(Math.abs(t.add * t.rank))}${vs}`;
+  return `×${Math.round((1 + (t.mult - 1) * t.rank) * 100) / 100}${vs}`;
 };
+// Talent rows, keyed by position: one talent can change two effects of the same kind (Elusiveness on both
+// of Feint's reductions).
+const TalentRows = ({ talents }) => (
+  <div className="kv">
+    {talents.map((t, i) => <Row key={`${t.talent}-${t.field}-${i}`} a={t.talent} b={TALENT_TEXT(t)} cls="tal" />)}
+  </div>
+);
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 // The game's own quality overlays for potions in the bags (UI atlas crops in
 // public/art/quality): The War Within's three ranks, Midnight's two.
@@ -269,19 +279,29 @@ export const activeTip = (a, inf, icons) => () => {
     ...(a.charges != null ? { charges: a.charges } : {}),
   } : inf;
   const talents = a.talents || [];
+  // With the caster's loadout, only their own numbers: never the base ones beside their talents.
+  const effect = a.talentsKnown ? (a.effect || []) : (a.effect || inf?.effect);
+  // Externals have no numbers in the catalog: the game's text (base numbers) is shown, so the talented
+  // duration, cooldown and charges follow it.
+  const fromText = !(effect || []).length && inf?.description && talents.length > 0;
+  const talented = fromText ? [
+    mine.auraMs ? `lasts ${secs(mine.auraMs)}` : null,
+    mine.cooldownMs ? `${secs(mine.cooldownMs)} cooldown` : null,
+    mine.charges > 1 ? `${mine.charges} charges` : null,
+  ].filter(Boolean).join(', ') : '';
+  const whose = a.by ? `${a.by}'s` : 'Their';
   return (
     <>
       <TipHead name={a.name} icons={icons} sub={a.kind === 'external' ? `External${a.by ? ` from ${a.by}` : ''}` : null} />
       <div className="vd gold">Active when they died</div>
-      {talents.length > 0 && (
-        <div className="kv">
-          {talents.map((t) => <Row key={`${t.talent}-${t.field}`} a={t.talent} b={TALENT_TEXT(t)} cls="tal" />)}
-        </div>
-      )}
-      <p className="desc">{effectText(a.effect || inf?.effect, mine)}</p>
+      {talents.length > 0 && <TalentRows talents={talents} />}
+      <p className="desc">{effectText(effect, mine)}</p>
+      {talented && <p className="desc">With these talents: {talented}.</p>}
       {a.talentsKnown === false && (
-        <div className="note">{a.kind === 'external' ? `${a.by || 'The caster'}'s talents` : 'Talents'} unknown: base values shown.</div>
+        <div className="note">{a.casterUnknown ? 'Caster unknown (the aura names no player): base values shown.'
+          : `${a.kind === 'external' && a.by ? `${a.by}'s talents` : 'Talents'} unknown: base values shown.`}</div>
       )}
+      {a.specKnown === false && <div className="note">{whose} spec isn't in the log: spec passives not included.</div>}
     </>
   );
 };
@@ -411,11 +431,7 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
             {det.pressAgo != null && <Row a="Press" b={`${det.pressAgo}s before death`} />}
           </div>
         )}
-        {talents.length > 0 && (
-          <div className="kv">
-            {talents.map((t) => <Row key={`${t.talent}-${t.field}`} a={t.talent} b={TALENT_TEXT(t)} cls="tal" />)}
-          </div>
-        )}
+        {talents.length > 0 && <TalentRows talents={talents} />}
         {det?.soulwell && <div className="note">Not used in this log, but a Warlock's Soulwell had one for them.</div>}
         {withForm[name] && <div className="note">Needs {withForm[name]}: checked as shifting into it first.</div>}
         <p className="desc">{det?.source === 'log' && det.samples
