@@ -580,14 +580,13 @@ class Modifiers:
                     entries_for_def.get(int(r["ID"]), ()))
 
     def who(self, spell):
-        """{"entries": [...]} or {"specs": [...]} for a modifier source, or None if nobody gets it."""
+        """{"entries": [...], "specs": [...]} (either or both) for a modifier source, or None if nobody
+        gets it. Both: a spec passive that is also a talent entry (Improved Prismatic Barrier, 11.0.2 to
+        11.2.7: every Arcane Mage has it, and the entry too); the analysis gives it to either, once."""
         entries = self.entries_for_spell.get(spell)
-        if entries:
-            return {"entries": sorted(entries)}
         specs = self.gd.spec_spells.get(spell)
-        if specs:
-            return {"specs": sorted(specs)}
-        return None
+        who = {**({"entries": sorted(entries)} if entries else {}), **({"specs": sorted(specs)} if specs else {})}
+        return who or None
 
     def _covers(self, row, spell):
         if row["EffectAura"] in (AURA_ADD_MOD_LABEL, AURA_PCT_MOD_LABEL):
