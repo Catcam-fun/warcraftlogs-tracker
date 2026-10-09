@@ -1024,6 +1024,22 @@ class VerdictRuleTests(unittest.TestCase):
         s["details"]["Healthstone"]["pressAgo"] = 14.0
         self.assertEqual(rules_verdicts.check(run).status, "pass")
 
+    def test_judged_consumable_still_on_cooldown_is_flagged(self):
+        run, s = self._press_run()
+        kb = 200_000
+        # Healthstone used 30s before the killing blow: cooldown (60s) runs 30s past it, yet the site judged it.
+        run.casts.return_value = [{"type": "cast", "abilityGameID": 4, "timestamp": kb - 30_000}]
+        s["details"] = {"Healthstone": {"amount": 100, "pressAgo": 2.0}}
+        s["wouldSave"] = {"Healthstone": True}
+        self.assertEqual(rules_verdicts.check(run).items, [
+            "Oak pull 1 100000: Healthstone: judged but still on cooldown at the killing blow (ready 30.0s after it)"])
+        # Used 65s before: ready again, pressed after that: passes.
+        run.casts.return_value = [{"type": "cast", "abilityGameID": 4, "timestamp": kb - 65_000}]
+        self.assertEqual(rules_verdicts.check(run).status, "pass")
+        # Never used in the pull: passes.
+        run.casts.return_value = []
+        self.assertEqual(rules_verdicts.check(run).status, "pass")
+
 
 class LabelRuleTests(unittest.TestCase):
     def hit(self, ts, amount, hp_after, aid=1, overkill=0):
