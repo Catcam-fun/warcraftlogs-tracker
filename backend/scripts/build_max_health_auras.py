@@ -121,13 +121,12 @@ class Data:
                          and int(r["SpellID"]) in self.passive and float(r["EffectBasePointsF"] or 0)]
 
     def who(self, spell):
-        """{"entries": [...]} (talent-tree entries), {"specs": [...]} (spec passive), or None (everyone
-        who has the aura)."""
-        if self.talent_entries.get(spell):
-            return {"entries": sorted(self.talent_entries[spell])}
-        if self.spec_spells.get(spell):
-            return {"specs": sorted(self.spec_spells[spell])}
-        return None
+        """{"entries": [...]} (talent-tree entries) and / or {"specs": [...]} (spec passive), or None
+        (everyone who has the aura). Both, as the catalog's Modifiers.who: a spec passive that is also a
+        talent entry (Improved Prismatic Barrier, 11.0.2 to 11.2.7); both_problems() fails the build on one."""
+        entries, specs = self.talent_entries.get(spell), self.spec_spells.get(spell)
+        who = {**({"entries": sorted(entries)} if entries else {}), **({"specs": sorted(specs)} if specs else {})}
+        return who or None
 
     def _covers(self, row, spell):
         if row["EffectAura"] in (MOD_FLAT_LABEL, MOD_PCT_LABEL):
@@ -168,6 +167,20 @@ def kind(r):
     if aura == FLAT_STAT and r["EffectMiscValue_0"] in STAMINA_STATS:
         return "stamina-points", v
     return None
+
+
+def both_problems(result):
+    """Terms and modifiers whose source is both a talent entry and a spec passive. defensives.max_health_size
+    reads a term's "entries" before its "specs", so a player of that spec without the entry would lose it:
+    none in any patch from 11.0.2 to 12.1.0; a new one fails the build until the reader handles it."""
+    out = []
+    for aura, terms in sorted(result.items()):
+        for t in terms:
+            for w in [t] + list(t.get("mods", ())):
+                if w.get("entries") and w.get("specs"):
+                    out.append(f"aura {aura}: spell {w.get('by', t['from'])} is a talent and a {'/'.join(w['specs'])} "
+                               f"spec passive: max_health_size reads only its entries, handle it")
+    return out
 
 
 def build_terms(build, problems):
@@ -281,6 +294,7 @@ def build_terms(build, problems):
                 terms.append({"from": sid, "index": None, "share": None})
         if terms:
             result[sid] = sorted(terms, key=lambda t: (t["from"], t["index"] if t["index"] is not None else -1))
+    problems += both_problems(result)
     # Auras that stack (SpellAuraOptions.CumulativeAura): each stack carries the effect, so the size is
     # per stack ("increasing your maximum health by $s11% ... per stack": Sentinel, 15 stacks).
     return result, {sid: d.stacks[sid] for sid in result if sid in d.stacks}
