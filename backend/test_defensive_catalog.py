@@ -196,13 +196,12 @@ class NewDefensivesTests(unittest.TestCase):
         # rotational resource cooldown; its real heal is in the log already.
         for patch in ALL:
             self.assertNotIn("Soul Immolation", defensives._CATALOGS[patch].name_to_id, patch)
-        self.assertNotIn("Soul Immolation", defensives.HEAL_OVER_TIME)
 
     def test_ticks_from_the_press_with_another_option_alongside(self):
         # A heal over time with the game's tick period and a tick on the press (6 ticks of a second, as Soul
         # Immolation logs): the schedule holds whatever else is pressed with it.
-        hot = {"heal": 0.24, "tick_ms": 1_000, "first_tick": True}
-        opt = defensives._option("HoT", [hot], 5_000, 6)
+        hot = {"heal": 0.24, "ticks": 6, "tick_ms": 1_000, "first_tick": True}
+        opt = defensives._option("HoT", [hot], 5_000)
         other = defensives._option("Other", [{"heal": 0.1, "over_ms": 3_000, "ticks": 3}], 3_000)
         for kb, ticks in ((10_500, 1), (11_500, 2), (15_500, 6)):
             win = defensives._Window([hit(9_000, 600_000, 400_000), hit(kb, 400_000, 0, overkill=10)], SCHOOLS)
@@ -536,3 +535,32 @@ class MaxHealthBuildWhoTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HealOverTimeScheduleBuildTests(unittest.TestCase):
+    """The build reads a heal over time's schedule from the game data: EffectAuraPeriod, the spell's
+    duration, a tick on application (SpellMisc Attributes_5 0x200), and fails on a period haste changes
+    (Attributes_5 0x2000: Rejuvenation, Renew, every haste-scaled DoT), which the replay doesn't model."""
+
+    class GD:
+        def __init__(self, attr5):
+            self.periods = {(1, 0): 1_000}
+            self.duration = {1: 3_000}
+            self.attr5 = {1: attr5}
+
+    def schedule(self, attr5):
+        import os, sys
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
+        import build_defensive_catalog as build
+        problems = []
+        return build.hot_schedule(self.GD(attr5), 1, 0, "x", problems), problems
+
+    def test_tick_on_application(self):
+        self.assertEqual(self.schedule(0x200), ((4, 1_000, True), []))
+
+    def test_first_tick_after_a_period(self):
+        self.assertEqual(self.schedule(0), ((3, 1_000, False), []))
+
+    def test_haste_is_a_problem(self):
+        got, problems = self.schedule(0x2200)
+        self.assertEqual(len(problems), 1)

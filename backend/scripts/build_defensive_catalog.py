@@ -183,7 +183,7 @@ MITIGATION = {
     # damage reduction on top (see EFFECTS).
     "Evasion": {"immune": True, "school": "melee", "dur": 10},
     "Greater Invisibility": {"dr": .60, "dur": 3},
-    "Frenzied Regeneration": {"heal": .24},        # 8% of max health per second for 3s
+    "Frenzied Regeneration": {"heal": .32},        # 8% of max health as applied and each second for 3s
     # +25% Stamina (max health, health share kept) and +220% armor; its magic
     # reductions come from the game data (Bear Form Passive 2 and the form itself).
     "Bear Form": {"hp": .25, "armor": 2.2},
@@ -205,7 +205,9 @@ MITIGATION = {
 }
 
 # Where each value lives in the game data: (field, spell carrying the effect,
-# effect index[, ticks]). Talents that modify exactly that effect (SpellEffect
+# effect index[, ticks]). A heal over time (a periodic effect: Frenzied Regeneration,
+# Crimson Vial) gets its ticks from the game data (hot_schedule) and stores its
+# whole heal. Talents that modify exactly that effect (SpellEffect
 # aura 107 flat / 108 percent modifiers whose class mask covers the spell) are
 # attached to the catalog entry and applied at analysis time to players who
 # have them (scaled by rank). A second component with a 0 base (Feint's and
@@ -224,7 +226,7 @@ EFFECTS = {
     "Barkskin": [("dr", 22812, 0), ("heal_taken", 22812, "aura:118", {"optional": True})],
     "Survival Instincts": [("dr", 50322, 0)],
     "Renewal": [("heal", 108238, 0)],
-    "Frenzied Regeneration": [("heal", 22842, 0, 3), ("heal_taken", 22842, "aura:118", {"optional": True})],
+    "Frenzied Regeneration": [("heal", 22842, 0), ("heal_taken", 22842, "aura:118", {"optional": True})],
     # Its own magic reductions only with Glistening Fur (a script); Bear Form
     # Passive 2's only with Empowered Shapeshifting (a modifier on a 0 base).
     "Bear Form": [("hp", 1178, "aura:137"), ("armor", 5487, "aura:142"),
@@ -267,7 +269,7 @@ EFFECTS = {
     "Dispersion": [("dr", 47585, 0)],
     # Fade reduces damage only with Translucent Image (a script in The War Within data).
     "Fade": [("dr", 586, "aura:87", {"needs": "Translucent Image"})],
-    "Crimson Vial": [("heal", 185311, 0, 4)],
+    "Crimson Vial": [("heal", 185311, 0)],
     "Feint": [("dr", 1966, 0), ("dr", 1966, 1)],
     # 1: all damage (Elusiveness); 2: magic, only with Bait and Switch (a script
     # in The War Within, a modifier on a 0 base in Midnight).
@@ -489,6 +491,7 @@ MOD_OP_EFFECT_INDEX = {3: 0, 12: 1, 23: 2, 32: 3, 33: 4}
 MOD_OP_ALL = 0          # percent modifier on all of a spell's healing / absorb amounts
 MOD_OP_DURATION = 1
 MOD_OP_COOLDOWN = 11
+MOD_OP_PERIOD = 19      # a periodic effect's tick period (Reinvigoration: +33%; Jagged Wounds: -20%)
 AURA_ADD_MOD, AURA_PCT_MOD = "107", "108"
 # The same, for every spell carrying a label (misc value 1) instead of a class
 # mask: how Improved Ardent Defender, Phantasmal Image and Empowered
@@ -501,6 +504,10 @@ AURA_CATEGORY_COOLDOWN = "341"      # +ms to a spell category's cooldown (Angel'
 AURA_HEALING_TAKEN_PCT = "118"      # healing taken +%
 ALL_SCHOOLS = "127"
 SPELL_ATTR0_PASSIVE = 0x40
+# SpellMisc Attributes_5: the aura ticks once as it is applied, then every period (Frenzied Regeneration,
+# Rejuvenation, Renew); and haste shortens the period (Rejuvenation, Renew, every haste-scaled DoT).
+SPELL_ATTR5_EXTRA_INITIAL_PERIOD = 0x200
+SPELL_ATTR5_HASTE_AFFECTS_PERIOD = 0x2000
 AURA_OVERRIDE_BUTTON = "332"        # base points = new spell, misc value = the button it replaces
 FIELDS = ("immune", "dr", "armor", "absorb", "hp", "heal", "heal_taken")
 
@@ -588,6 +595,7 @@ class GameData:
         misc = {int(r["SpellID"]): int(r["DurationIndex"]) for r in misc_rows}
         # Always-on spells (talents and passives, not buttons or temporary buffs).
         self.passive = {int(r["SpellID"]) for r in misc_rows if int(r["Attributes_0"]) & SPELL_ATTR0_PASSIVE}
+        self.attr5 = {int(r["SpellID"]): int(r["Attributes_5"] or 0) for r in misc_rows}
         length = {int(r["ID"]): int(r["MaxDuration"]) for r in table("SpellDuration", build)}
         self.duration = {sid: length.get(i, 0) for sid, i in misc.items()}
         self.labels = {}                          # spell -> label IDs
@@ -653,6 +661,27 @@ def data_value(field, gd, spell, index, ticks):
     if field == "vers":
         return round(bp / 200, 4), None
     return None, None
+
+
+def hot_schedule(gd, spell, index, name, problems):
+    """A periodic heal's schedule from the game data: (ticks, period ms, a tick as it is applied?), or
+    None when the effect isn't periodic. Ticks land every period while the aura lasts (its duration over
+    the period, whole ticks), plus one on application with SPELL_ATTR5_EXTRA_INITIAL_PERIOD: Frenzied
+    Regeneration, 3 s of 1 s ticks, ticks 4 times (+0, +1, +2, +3 s on every one of 161 full auras in two
+    logs, at every haste); Crimson Vial, 4 s, 4 times from +1 s. A period haste shortens is a problem:
+    the replay doesn't know the player's haste."""
+    period = gd.periods.get((spell, index))
+    if not period:
+        return None
+    dur = gd.duration.get(spell, 0)
+    attr5 = gd.attr5.get(spell, 0)
+    if dur <= 0:
+        problems.append(f"{name}: periodic heal {spell} has no duration")
+        return None
+    if attr5 & SPELL_ATTR5_HASTE_AFFECTS_PERIOD:
+        problems.append(f"{name}: haste changes the tick period of {spell}; the replay doesn't model haste")
+    first = bool(attr5 & SPELL_ATTR5_EXTRA_INITIAL_PERIOD)
+    return dur // period + first, period, first
 
 
 def effect_indices(gd, spell, where):
@@ -781,6 +810,22 @@ class Modifiers:
                     if mod.get("mastery"):
                         pass       # longer by the player's mastery: no fixed size, so no "mult"
                     elif aura in (AURA_PCT_MOD, AURA_PCT_MOD_LABEL):
+                        mod["mult"] = round(1 + value / 100, 4)
+                    else:
+                        mod["add_ms"] = int(value)
+                    found.append(mod)
+        return _dedupe(found)
+
+    def period(self, spells):
+        """Tick period modifiers of a heal over time (Reinvigoration: Frenzied Regeneration's +33%):
+        {"mult"} or {"add_ms"}."""
+        found = []
+        for aura in (AURA_ADD_MOD, AURA_PCT_MOD, AURA_ADD_MOD_LABEL, AURA_PCT_MOD_LABEL):
+            for r, who in self._source_rows(aura):
+                if int(r["EffectMiscValue_0"]) == MOD_OP_PERIOD and any(self._covers(r, s) for s in spells):
+                    value = float(r["EffectBasePointsF"])
+                    mod = {"talent": self.gd.names.get(int(r["SpellID"])), **who}
+                    if aura in (AURA_PCT_MOD, AURA_PCT_MOD_LABEL):
                         mod["mult"] = round(1 + value / 100, 4)
                     else:
                         mod["add_ms"] = int(value)
@@ -919,6 +964,9 @@ def components(name, gd, mods, problems):
                 used.add("dr" if field == "vers" else field)   # not in this patch: no listed fallback either
                 continue
         for index in indices:
+            schedule = hot_schedule(gd, spell, index, name, problems) if field == "heal" and index is not None else None
+            if schedule:
+                ticks = schedule[0]
             out_field = "dr" if field == "vers" else field
             first = out_field in values and out_field not in used     # the hand-listed value covers the first use only
             used.add(out_field)
@@ -947,6 +995,14 @@ def components(name, gd, mods, problems):
                 comp["from_target"] = spell
             if field == "absorb":
                 comp["observed"] = True
+            if schedule:
+                # Over the aura's duration (talents lengthen it: the analysis counts the ticks then).
+                comp["ticks"], comp["tick_ms"] = schedule[:2]
+                if schedule[2]:
+                    comp["first_tick"] = True
+                period_mods = mods.period([spell])
+                if period_mods:
+                    comp["period_mods"] = period_mods
             if opts.get("share") is not None and index is not None:
                 # A shield that takes only this share of each hit, until it runs out.
                 share = gd.value(spell, opts["share"])
@@ -1068,13 +1124,18 @@ def talent_component(gd, mods, talent, field, source, extra, problems):
     if over:
         # A heal over time: the listed value is per tick, spread over the spell's duration.
         dur = gd.duration.get(over, 0)
-        period = next((p for (s, _), p in gd.periods.items() if s == over), 0)
-        if not dur or not period:
+        index = next((i for (s, i) in sorted(gd.periods) if s == over), None)
+        schedule = hot_schedule(gd, over, index, talent, problems) if index is not None else None
+        if not dur or not schedule:
             problems.append(f"{talent}: no duration/tick period on spell {over}")
             return None
-        comp["ticks"] = dur // period
+        comp["ticks"], comp["tick_ms"] = schedule[:2]
+        if schedule[2]:
+            comp["first_tick"] = True
         comp[field] = round(value * comp["ticks"], 4) if extra.get("per_tick") else comp[field]
         comp["over_ms"] = dur
+        if mods.period([over]) or mods.duration([over]):
+            problems.append(f"{talent}: a talent changes the ticks of spell {over}: handle it")
     comp["needs"] = who
     return comp
 

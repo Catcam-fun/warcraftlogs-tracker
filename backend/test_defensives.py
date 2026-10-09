@@ -831,14 +831,11 @@ class InstakillTests(unittest.TestCase):
 
 
 class HealOverTimeTests(unittest.TestCase):
-    """Frenzied Regeneration / Crimson Vial heal over their duration, not at once."""
-
-    def test_tick_counts_match_the_catalog_build(self):
-        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
-        import build_defensive_catalog as build
-        ticks = {n: e[3] for n, effs in build.EFFECTS.items() for e in effs
-                 if len(e) > 3 and isinstance(e[3], int) and e[3] > 1}
-        self.assertEqual(ticks, defensives.HEAL_OVER_TIME)
+    """Heals over time land tick by tick, on the game's schedule (wago.tools SpellEffect EffectAuraPeriod,
+    SpellMisc Attributes_5). Frenzied Regeneration (22842: 8% a tick, period 1000 ms, 3 s, Attributes_5
+    0x200 "extra initial period") ticks as it is applied and then every second: 4 ticks, 32% (logs
+    natL8vxjNmGpy43F and 2VtyDR4CF6PGLjbd: 161 auras that ran their 3 s, 161 with 4 ticks at +0, +1, +2, +3 s,
+    at every haste). Crimson Vial (185311, no 0x200) ticks first a second after the press: 4 ticks."""
 
     frenzied = next(sid for sid, d in CATALOG.items() if d["name"] == "Frenzied Regeneration")
 
@@ -847,11 +844,12 @@ class HealOverTimeTests(unittest.TestCase):
                                           aura_ms={"Frenzied Regeneration": 3_000}, ready_since=ready_since)
 
     def test_ticks_land_while_they_are_low(self):
-        # Low for five seconds, then killed: 24% of 1M over 3 ticks lands in full (240k > 200k overkill).
+        # Low for five seconds, then killed: 32% of 1M over 4 ticks lands in full (320k > 200k overkill).
         r = self.assess([hit(95_000, 700_000, 300_000), hit(100_000, 300_000, 0, overkill=200_000)])
         self.assertTrue(r["wouldSave"]["Frenzied Regeneration"])
-        self.assertEqual(r["details"]["Frenzied Regeneration"]["hot"]["ticks"], 3)
-        self.assertAlmostEqual(r["details"]["Frenzied Regeneration"]["amount"], 240_000, delta=1)
+        self.assertEqual(r["details"]["Frenzied Regeneration"]["hot"]["ticks"], 4)
+        self.assertEqual(r["details"]["Frenzied Regeneration"]["hot"]["of"], 4)
+        self.assertAlmostEqual(r["details"]["Frenzied Regeneration"]["amount"], 320_000, delta=1)
 
     def test_real_heals_topping_them_up_waste_the_extra(self):
         # Low when it would tick, but a healer brought them back to full before they were hit from full.
@@ -861,12 +859,75 @@ class HealOverTimeTests(unittest.TestCase):
         self.assertLessEqual(r["details"]["Frenzied Regeneration"]["amount"], 10_000)
 
     def test_cannot_press_before_it_was_ready(self):
-        # Off cooldown 1.5s before the killing blow: only the first tick lands in time.
-        r = self.assess([hit(90_000, 900_000, 100_000), hit(100_000, 100_000, 0, overkill=150_000)],
+        # Off cooldown 1.5s before the killing blow: the tick on the press and the one a second later land.
+        r = self.assess([hit(90_000, 900_000, 100_000), hit(100_000, 100_000, 0, overkill=170_000)],
                         ready_since={"Frenzied Regeneration": 98_500})
+        self.assertEqual(r["details"]["Frenzied Regeneration"]["hot"]["ticks"], 2)
+        self.assertAlmostEqual(r["details"]["Frenzied Regeneration"]["amount"], 160_000, delta=1)
+        self.assertFalse(r["wouldSave"]["Frenzied Regeneration"])
+
+    def test_the_tick_on_the_press_lands_a_second_before_the_killing_blow(self):
+        r = self.assess([hit(90_000, 900_000, 100_000), hit(100_000, 100_000, 0, overkill=50_000)],
+                        ready_since={"Frenzied Regeneration": 99_000})
         self.assertEqual(r["details"]["Frenzied Regeneration"]["hot"]["ticks"], 1)
         self.assertAlmostEqual(r["details"]["Frenzied Regeneration"]["amount"], 80_000, delta=1)
-        self.assertFalse(r["wouldSave"]["Frenzied Regeneration"])
+        self.assertTrue(r["wouldSave"]["Frenzied Regeneration"])
+
+    def test_catalog_schedules(self):
+        import defensive_catalog
+        for patch, cat in defensive_catalog.CATALOGS.items():
+            by = {d["name"]: d for d in cat.values()}
+            fr = next(c for c in by["Frenzied Regeneration"]["mitigation"] if "heal" in c)
+            self.assertEqual((fr["heal"], fr["ticks"], fr["tick_ms"], fr.get("first_tick")), (0.32, 4, 1_000, True), patch)
+            self.assertNotIn("over_ms", fr, patch)           # it lasts the aura (talents lengthen it)
+            cv = next(c for c in by["Crimson Vial"]["mitigation"] if "heal" in c)
+            self.assertEqual((cv["heal"], cv["ticks"], cv["tick_ms"], cv.get("first_tick")), (0.2, 4, 1_000, None), patch)
+            # Talent heals over time (their own spell): no tick on application, every second.
+            talent_hots = {(c["needs"]["talent"], c["ticks"], c["over_ms"], c["tick_ms"], c.get("first_tick"))
+                           for d in by.values() for c in d["mitigation"] or ()
+                           if "heal" in c and c.get("needs") and "over_ms" in c}
+            expect = {("Infernal Vitality", 10, 10_000, 1_000, None), ("Rejuvenating Wind", 8, 8_000, 1_000, None)}
+            if patch.startswith("11.0."):
+                expect.add(("Den Recovery", 4, 4_000, 1_000, None))
+            self.assertEqual(talent_hots, expect, patch)
+
+    def test_reinvigoration_spreads_the_same_ticks_over_four_seconds(self):
+        # 372945 from 11.1.0: effect 0 aura 107 op 1 (duration) +1000 ms, effect 1 aura 108 op 19 (period)
+        # +33%: "heals over 1.0 additional sec". 4000 / 1330 is 3 ticks after the one on application.
+        import defensive_catalog
+        for patch, cat in defensive_catalog.CATALOGS.items():
+            fr = next(d for d in cat.values() if d["name"] == "Frenzied Regeneration")
+            heal = next(c for c in fr["mitigation"] if "heal" in c)
+            mods = heal.get("period_mods") or []
+            if patch.startswith("11.0."):
+                self.assertEqual(mods, [], patch)
+                continue
+            self.assertEqual([(m["talent"], m["mult"]) for m in mods], [("Reinvigoration", 1.33)], patch)
+            talents = {e: 1 for m in mods for e in m["entries"]}
+            dur = defensives._talented_duration(fr, talents, "Feral")
+            self.assertEqual(dur, 4_000, patch)
+            comps, _ = defensives._resolve(fr, talents, {}, "Feral")
+            opt = defensives._option("Frenzied Regeneration", comps, dur)
+            (c, n, over), = opt["hots"]
+            self.assertEqual((n, over), (4, 4_000), patch)
+            self.assertAlmostEqual(c["heal"], 0.32, places=6)
+            self.assertEqual([round(t) for t in defensives._tick_times(c, n, over, 10_000)],
+                             [10_000, 11_330, 12_660, 13_990], patch)
+            # Without it: 4 ticks in 3 s.
+            comps, _ = defensives._resolve(fr, {}, {}, "Feral")
+            (c, n, over), = defensives._option("Frenzied Regeneration", comps, 3_000)["hots"]
+            self.assertEqual([round(t) for t in defensives._tick_times(c, n, over, 10_000)],
+                             [10_000, 11_000, 12_000, 13_000], patch)
+
+    def test_a_longer_aura_adds_ticks(self):
+        # Ticks are the period's whole multiples within the aura, plus the one on application.
+        hot = {"heal": 0.32, "ticks": 4, "tick_ms": 1_000, "first_tick": True}
+        (c, n, over), = defensives._option("x", [hot], 5_000)["hots"]
+        self.assertEqual(n, 6)
+        self.assertAlmostEqual(c["heal"], 0.48)
+        (c, n, over), = defensives._option("x", [dict(hot, first_tick=None)], 4_000)["hots"]
+        self.assertEqual(n, 4)
+        self.assertAlmostEqual(c["heal"], 0.32)
 
     def test_ready_since(self):
         # One charge, 36s cooldown, pressed at 10s: ready again at 46s.
