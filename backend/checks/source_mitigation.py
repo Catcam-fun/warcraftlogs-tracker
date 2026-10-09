@@ -58,11 +58,16 @@ grouped by what the catalog predicts for them, so one effect can't hide inside a
 Elusiveness predicts 0.20 on hits that aren't AoE and another value on AoE hits, and judged together the
 AoE hits' error sat under the median (Nickledon 23, Noobprint 16, Maar 26 AoE hits 0.09 off inside rows
 that passed; research FE, 2026-10-09).
-A hit next to the defensive's edge is left out: one whose neighbour in its own sequence (the same player,
-ability, enemy unit and pull) carries the other label (the defensive listed on one, not on the other)
-within EDGE_MS. The aura list and the reduction don't switch on the same hit: on Molten Phlegm the first
-hit listing Feint was unreduced and the first one after it no longer listed it was still reduced, which
-read Feint 0.000 there (research FE); without those hits it read 0.400.
+A hit whose label is wrong at the defensive's edge is left out. The aura list and the reduction don't
+always switch on the same hit: on Molten Phlegm the first hit listing Feint was unreduced and the first one
+after it no longer listing it was still reduced, about 1 s from the other label's hit, which read Feint
+0.000 there (research FE). So at a switch of label in a hit's own sequence (the same player, ability, enemy
+unit and pull), within EDGE_MS, a hit is left out when its share through matches its neighbour of the other
+label (within SHARE_MATCH) and not its own label's neighbour: it took what the other label took. A hit that
+took what its own label takes is kept, so a defensive that is wrong is still seen at its edges. Skipping
+every hit at a switch hid the error this check exists for: with Elusiveness' measured change on Feint taken
+out, Nickledon's 22 AoE Feint hits (0.43 against 0.52) fell under MIN_FLAG_HITS; skipping only the first hit
+of each new label failed hits on Quel'Danas whose label was wrong on the other side.
 """
 import statistics
 from bisect import bisect_left
@@ -78,6 +83,12 @@ PAIR_MS = 10_000                      # a hit with and one without the defensive
 BRAND_PAIR_MS = 3000                  # The War Within's Fiery Brand pairs (Liquefy grows over its cast)
 HEALTH_BAND = 0.05                    # ... with missing health this close (share of max health)
 EDGE_MS = 1500                        # a hit this close to one with the other label is at the edge
+# Two hits under the same conditions let the same share through to this much: of 420,978 back-to-back hits
+# (within 3 s, same player, ability, unit, pull, defensives and other auras) on the 7 raids' logs, 76% read
+# within 0.0005, 80% within 0.002 and 83% within 0.005 (the rest differ for real: health-dependent passives,
+# a hit's size); at a switch of label 32% matched within 0.002 (mislabelled hits, and defensives that don't
+# cover that hit, which the own-label test keeps).
+SHARE_MATCH = 0.002
 STAGGER = 124255                      # a Brewmaster's Stagger ticks
 
 
@@ -161,9 +172,10 @@ def predicted_keep(comps, e, aoe, schools, size=None):
 
 
 def edge_hits(hits, players, names, tracked):
-    """Positions in `hits` of the hits next to a tracked defensive's edge: in a sequence of one player's hits
-    from one enemy unit's ability in one pull, a hit whose neighbour (before or after) lists other tracked
-    defensives and is at most EDGE_MS away."""
+    """Positions in `hits` of the hits mislabelled at a tracked defensive's edge: in a sequence of one player's
+    hits from one enemy unit's ability in one pull, a hit whose neighbour at most EDGE_MS away lists other
+    tracked defensives, whose share through matches that neighbour's within SHARE_MATCH, and is closer to it
+    than to its own label's neighbour on the other side (when there is one)."""
     seqs = defaultdict(list)
     for k, e in enumerate(hits):
         if e.get("type") != "damage" or e.get("targetID") not in players or e.get("abilityGameID") == STAGGER:
@@ -173,10 +185,28 @@ def edge_hits(hits, players, names, tracked):
     for seq in seqs.values():
         seq.sort(key=lambda k: hits[k].get("timestamp") or 0)
         labels = [frozenset({names.get(a) for a in defensives._auras(hits[k])} & tracked) for k in seq]
-        for a, b, la, lb in zip(seq, seq[1:], labels, labels[1:]):
-            if la != lb and (hits[b].get("timestamp") or 0) - (hits[a].get("timestamp") or 0) <= EDGE_MS:
-                out.update((a, b))
+        shares = [_share(hits[k]) for k in seq]
+        for i in range(len(seq) - 1):
+            if labels[i] == labels[i + 1] or \
+                    (hits[seq[i + 1]].get("timestamp") or 0) - (hits[seq[i]].get("timestamp") or 0) > EDGE_MS:
+                continue
+            for me, other, own in ((i, i + 1, i - 1), (i + 1, i, i + 2)):
+                if shares[me] is None or shares[other] is None:
+                    continue
+                gap = abs(shares[me] - shares[other])
+                if gap > SHARE_MATCH:
+                    continue
+                mine = shares[own] if 0 <= own < len(seq) and labels[own] == labels[me] else None
+                if mine is None or gap < abs(shares[me] - mine):
+                    out.add(seq[me])
     return out
+
+
+def _share(e):
+    """Share of a hit that got through (amount, overkill and absorbed over unmitigated), or None."""
+    if not e.get("unmitigatedAmount") or not e.get("mitigated") or e.get("blocked"):
+        return None
+    return defensives._full_hit(e) / e["unmitigatedAmount"] or None
 
 
 def enemy_side(hits, players, names, cat, loadout, spec, pull_spec, aoe, schools):

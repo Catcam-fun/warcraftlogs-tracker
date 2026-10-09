@@ -298,7 +298,7 @@ def loadout_of(run, rid, fid, pid):
     talents, spec = None, None
     for c in run.combatants(rid, fid):
         if c.get("sourceID") == pid and c.get("fight", fid) == fid:
-            if c.get("talentTree") is not None:
+            if c.get("talentTree"):            # an empty tree: not recorded, as the site reads it
                 talents = {t["id"]: t.get("rank") or 1 for t in c["talentTree"]}
             spec = SPEC_NAMES.get(c.get("specID"))
     return Loadout(patch_of(run.meta_for(rid)["report_start"]), talents, spec)

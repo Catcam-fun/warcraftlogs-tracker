@@ -435,7 +435,9 @@ def index_defensive_events(raw, cat=None):
             print(f"[WARN] Unknown specID {e['specID']}: add it to defensives.SPEC_NAMES")
     for e in raw.get("combatants", []):
         tree = e.get("talentTree")
-        if tree is None or e.get("sourceID") is None:
+        # An empty tree is a loadout the log didn't record, not one with no talents: every loadout in the
+        # cached logs (6,096 over 8 raids' reports) lists 11 to 82 entries. Unknown, like a missing one.
+        if not tree or e.get("sourceID") is None:
             continue
         talents[(e.get("fight"), e["sourceID"])] = {t["id"]: t.get("rank") or 1 for t in tree
                                                      if t.get("id") in cat.relevant_talent_entries}
@@ -1507,14 +1509,17 @@ def _stagger_pools(ticks, ins, purifies=None, purify=None, talents=None):
     purify = purify or STAGGER_PURIFY[LATEST]
     keeps = _purify_keeps(purify, talents)
     # A flat purify with talent entries only for players with the talent; without (Touch of Death's 325095)
-    # every Brewmaster has it.
-    flat_ids = {c for f in purify.get("flat", ()) if "entries" not in f or _has_talent(talents, f["entries"])
-                for c in f["casts"]}
+    # every Brewmaster has it. With no loadout in the log a talent's (Staggering Strikes on Blackout Kick) may
+    # be there: its button makes a side fit, but never decides a side on its own.
+    flat_ids = {c for f in purify.get("flat", ())
+                if "entries" not in f or (talents is not None and _has_talent(talents, f["entries"])) for c in f["casts"]}
+    maybe_ids = {c for f in purify.get("flat", ()) if "entries" in f and talents is None for c in f["casts"]}
     seq = sorted([(t["timestamp"], 1, "tick", t) for t in ticks] + [(e["timestamp"], 0, "in", e) for e in ins],
                  key=lambda x: (x[0], x[1]))
     casts = None if purifies is None else sorted(c["timestamp"] for c in purifies
                                                  if c.get("abilityGameID", PURIFYING_BREW) == PURIFYING_BREW)
     flats = None if purifies is None else sorted(c["timestamp"] for c in purifies if c.get("abilityGameID") in flat_ids)
+    maybes = None if purifies is None else sorted(c["timestamp"] for c in purifies if c.get("abilityGameID") in maybe_ids)
     out, pool, left, prev = {}, None, None, None
     for i, (ts, _, kind, e) in enumerate(seq):
         if kind == "tick":
@@ -1536,14 +1541,18 @@ def _stagger_pools(ticks, ins, purifies=None, purify=None, talents=None):
                 cast_before = None if casts is None else any(prev is not None and prev[0] < c <= ts for c in casts)
                 cast_after = None if casts is None else any(ts <= c < nxt[0] for c in casts)
                 # A flat purify's button pressed on a side: that side can have lost any amount.
-                flat_before = bool(flats) and any(prev is not None and prev[0] < c <= ts for c in flats)
-                flat_after = bool(flats) and any(ts <= c < nxt[0] for c in flats)
-                fit_before = flat_before or _purify_fits(pool, after, keeps, max_hp, cast_before)
-                fit_after = flat_after or _purify_fits(pool + amount, after + amount, keeps, max_hp, cast_after)
+                before_in = lambda times: bool(times) and any(prev is not None and prev[0] < c <= ts for c in times)
+                after_in = lambda times: bool(times) and any(ts <= c < nxt[0] for c in times)
+                sure_before = before_in(flats) or _purify_fits(pool, after, keeps, max_hp, cast_before)
+                sure_after = after_in(flats) or _purify_fits(pool + amount, after + amount, keeps, max_hp, cast_after)
+                fit_before = sure_before or before_in(maybes)
+                fit_after = sure_after or after_in(maybes)
                 # A Purifying Brew cast on the side that fits nothing: something the replay can't size
-                # (a flat purify) came with it, so the other side's fit doesn't settle it.
+                # (a flat purify) came with it, so the other side's fit doesn't settle it. Nor does a side
+                # that fits only by a flat purify the player may not have.
                 cast_unfit = cast_after if fit_before else cast_before
-                if fit_before != fit_after and not cast_unfit:
+                only_maybe = not (sure_before if fit_before else sure_after)
+                if fit_before != fit_after and not cast_unfit and not only_maybe:
                     guesses = [after] if fit_before else [pool]
                 else:
                     guesses = [pool, after]          # can't tell which side
