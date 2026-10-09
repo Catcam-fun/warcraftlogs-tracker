@@ -392,6 +392,25 @@ class AnalyzeFlowTests(unittest.TestCase):
             self._run()
         self.assertEqual((death.call_args.kwargs["aoe_abilities"], death.call_args.kwargs["aoe_unknown"]),
                          ({8}, frozenset({7})))
+        # No hit in the windows marked AoE: WCL marks every report (14 reports, Nerub-ar Palace to the
+        # Midnight raids, 2026-10-09), so an unmarked hit that dealt damage is still single-target and
+        # ability 7 is still read from the report's pulls.
+        unmarked = windows
+
+        def windows_unmarked(token, rid, pulls):
+            return {p: [dict(h, isAoE=False) for h in hs] for p, hs in unmarked(token, rid, pulls).items()}
+        self._windows = windows_unmarked
+        for c in (app_module.report_meta_cache, app_module.report_fights_cache, app_module.deaths_lru,
+                  app_module.defensive_lru, app_module.recap_lru):
+            c._data.clear()
+        with mock.patch.object(app_module.defensives, "fetch_aoe_abilities", autospec=True,
+                               return_value=({7}, {7})) as aoe, \
+                mock.patch.object(app_module.defensives, "analyze_death",
+                                  wraps=app_module.defensives.analyze_death) as death:
+            self._run()
+        self.assertEqual(aoe.call_count, 2)
+        self.assertEqual((death.call_args.kwargs["aoe_abilities"], death.call_args.kwargs["aoe_unknown"],
+                          death.call_args.kwargs.get("aoe_known", True)), ({7}, frozenset(), True))
 
     def test_talent_loadouts_are_read_first_and_not_twice(self):
         for c in (app_module.report_meta_cache, app_module.report_fights_cache, app_module.deaths_lru, app_module.defensive_lru, app_module.recap_lru):

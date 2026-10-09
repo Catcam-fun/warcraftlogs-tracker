@@ -703,7 +703,12 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
     instant kills: fetch_death_windows, fetch_instakills) it also estimates
     whether the defensives they had ready would have saved them.
     `cat`: the catalog of the patch the report was logged on (catalog_for).
-    `aoe_known`: whether this report marks AoE hits at all (logs_mark_aoe).
+    `aoe_known`: False for a log that marks no AoE hits at all (an effect limited to AoE is then unknown).
+    No report the site reads is one: WCL marks every report tried, The War Within's too (Nerub-ar Palace
+    11.0.7: 35,511 of 77,667 hits; Undermine 11.1.7: 57,859 of 103,268; 14 reports from Nerub-ar Palace to
+    the Midnight raids, 2026-10-09: 42 to 1,743 marked hits in each pull read, every ability's damaging hits
+    marked alike), so the analysis never infers it from a few deaths' windows, where no marked hit only
+    means which hits those deaths took.
     `aoe_abilities`: the abilities with a hit marked AoE in the report (aoe_abilities of the windows,
     plus fetch_aoe_abilities for those they can't tell); `aoe_unknown`: those whose status couldn't be
     fetched. None: each hit's own mark decides.
@@ -1252,14 +1257,6 @@ def fetch_instakills(token, report_code, fight_ids, start_time, end_time):
     return index_hits(_fetch_blocks(token, report_code, blocks)["k"])
 
 
-def logs_mark_aoe(hits_by_player):
-    """Does this report mark AoE hits? A report with no hit marked isAoE at all can't tell area damage
-    from the rest, and an effect limited to it is then unknown (_school_applies). Every log tried marks
-    them, The War Within's too (Nerub-ar Palace 11.0.7: 35,511 of 77,667 hits; Undermine 11.1.7: 57,859 of
-    103,268); this is the fallback for a log that doesn't."""
-    return any(h.get("isAoE") for hits in (hits_by_player or {}).values() for h in hits)
-
-
 # WCL marks isAoE only on hits that dealt damage. A hit an absorb took whole (amount 0, no health on it),
 # an immune or a missed one is never marked, even of an ability marked on every other hit (Uncontrolled
 # Burn, Undermine: 31,127 of 41,277 marked, every unmarked one amount 0), and the game treats those as
@@ -1364,7 +1361,7 @@ def _school_applies(school, hit, ability_schools, immunity=False):
     if school in (None, "all"):
         return True
     if school == "aoe":
-        # None: this log marks no hit AoE at all (logs_mark_aoe), so whether it applies is unknown.
+        # None: this log marks no hit AoE at all (aoe_known), so whether it applies is unknown.
         if not hit.get("aoeKnown", True):
             return None
         # The ability's status in the report (aoeAbility, from assess_survival): a hit absorbed whole
@@ -2842,11 +2839,25 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
             top = _health_at(points, h["timestamp"])[1] or max_hp
         return _full_hit(h) / top
 
-    high = [p for p in points if p[0] < kb_ts - 0.5 and p[1] >= FULL_HEALTH * p[2]]
+    # The last moment at high health, walking the hits in log order (hits on the same millisecond
+    # keep it: a player at 99% hit three times on one millisecond went from high to dead at once):
+    # just before each hit (a hit with their health: its own; one without: what the last one left,
+    # as only heals land between hits; the killing blow: hp_before), and just after each hit with
+    # their health. Either is at that hit's own time; the hits since start with that hit (before
+    # it) or the next one (after it).
+    high, start, last = [], None, None
+    for k, h in enumerate(window):
+        top = max_hp if k == kb_index else h.get("maxHitPoints")
+        hp = hp_before if k == kb_index else win.before[k][0] if win.known[k] else last
+        if hp is not None and top and hp >= FULL_HEALTH * top:
+            high, start = [(h["timestamp"], hp, top)], k
+        if k < kb_index and win.known[k]:
+            last = h.get("hitPoints") or 0
+            if last >= FULL_HEALTH * h["maxHitPoints"]:
+                high, start = [(h["timestamp"], last, h["maxHitPoints"])], k + 1
     since = high[-1][0] if high else float("-inf")
-    if hp_before >= FULL_HEALTH * max_hp:
-        since, high = kb_ts - 0.5, high + [(kb_ts - 0.5, hp_before, max_hp)]
-    run = [h for h in window if h["timestamp"] > since]
+    run = window[start:] if high else window
+    in_run = set(range(start if high else 0, len(window)))
     quick = bool(high) and kb_ts - since <= BURST_WINDOW_MS
     one_shot = quick and any(share(h) >= ONE_SHOT_SHARE for h in run)
     death_type = "oneShot" if one_shot else "burst" if quick else "wasLow"
@@ -2856,14 +2867,14 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     # a big hit, then a small one finishing them.
     one_shot_hit = None
     if one_shot:
-        top = max(range(len(window)), key=lambda i: (window[i]["timestamp"] > since, _full_hit(window[i])))
+        top = max(range(len(window)), key=lambda i: (i in in_run, _full_hit(window[i])))
         if top != kb_index and _full_hit(window[top]) > _full_hit(killing):
             one_shot_hit = window[top]
     # The hit that set the death up (only when it was neither a one-shot nor a
     # burst): the biggest one since they were last at high health (before
     # that, healers had already undone it).
-    biggest = None if quick else max((h for h in window[:kb_index] if h["timestamp"] > since
-                                      and share(h) >= SETUP_HIT_SHARE), key=_full_hit, default=None)
+    biggest = None if quick else max((h for h in run[:-1] if share(h) >= SETUP_HIT_SHARE),
+                                     key=_full_hit, default=None)
     # Rot: worn down by one raid-wide ability's repeated damage (what the
     # healers have to keep up with; raid_wide_damage.py, measured from Mythic
     # kills), not set up by a single hit. Soaks and mechanics a player walks
@@ -2941,8 +2952,7 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
             "ago": round((kb_ts - biggest["timestamp"]) / 1000, 1),
         }
         # The same ability hitting them again and again since they were last high (soaking on).
-        same = [h for h in window[:kb_index + 1] if h["timestamp"] > since
-                and h.get("abilityGameID") == biggest.get("abilityGameID")]
+        same = [h for h in run if h.get("abilityGameID") == biggest.get("abilityGameID")]
         if len(same) > 1:
             result["biggestHit"].update(times=len(same), total=sum(_full_hit(h) for h in same),
                                         over=round((kb_ts - same[0]["timestamp"]) / 1000, 1))
