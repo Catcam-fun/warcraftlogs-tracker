@@ -68,6 +68,10 @@ CURATED = [
     (97463, "Rallying Cry", 97462, 0, "Rallying Cry"),            # "$s1% temporary and maximum health" (in a raid)
     (120954, "Fortifying Brew", 115203, 0, "Fortifying Brew"),   # $health = $115203s1 (SpellDescriptionVariables 261)
 ]
+# Auras with a max-health effect whose base points are 0 and that nothing fills in (no talent, text, proc
+# or curated value): checked in the game data to change no max health. Moonkin Form's effect 3 (aura 133)
+# is 0 and no talent or passive aims at it (11.0.7); its text names no health.
+NO_HEALTH = {24858: "Moonkin Form"}
 # How an aura's text says it raises max health or Stamina, right before the value it names: "Maximum
 # health increased by", "Stamina increased by", "increasing (your) maximum health by". Only that phrasing:
 # Healing Elixir's "heal for $428439s1% of your maximum health if brought below $122280s1% health" is a
@@ -269,6 +273,10 @@ def build_terms(build, problems):
                 else:
                     terms.append(term(src, idx))
                     found = True
+            if not found and len(terms) == 0 and sid in NO_HEALTH:
+                if d.names.get(sid) != NO_HEALTH[sid]:
+                    problems.append(f"no-health {sid} {NO_HEALTH[sid]}: now {d.names.get(sid)}")
+                continue
             if not found and len(terms) == 0:
                 terms.append({"from": sid, "index": None, "share": None})
         if terms:
