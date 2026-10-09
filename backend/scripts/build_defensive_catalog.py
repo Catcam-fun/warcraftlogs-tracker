@@ -292,7 +292,8 @@ EFFECTS = {
 # Only players with the talent in that pull's loadout get them; a talent not in
 # a patch's trees adds nothing there. Options: "over": a heal over time with
 # that spell's duration and tick period ("per_tick": the value is per tick);
-# "aura": a shield scored from its real size in the log.
+# "aura": a shield scored from its real size in the log; "lasts": N: the effect
+# lasts as long as the buff the talent's effect N triggers ("dur_ms").
 # Talent changes the game data doesn't show, measured on real hits: {(ability, spell, effect index): [(talent,
 # add to that effect's value, the value it was measured at)]}. Elusiveness (79008: -20% on Feint's effect 1,
 # all damage) also cuts Feint's AoE reduction (effect 0, 40%) to 2/7, so Feint keeps 4/7 of an AoE hit,
@@ -325,8 +326,10 @@ TALENT_EFFECTS = {
     "Infernal Bulwark": [("Unending Resolve", "absorb", [("talent", 0)], {})],
     "Friends In Dark Places": [("Dark Pact", "absorb", [(108416, 1), ("talent", 0)], {})],
     "Phantasmal Image": [],               # reaches Mirror Image by label
-    # "For 4 sec after shifting into Bear Form, your health and armor are increased by 15%."
-    "Ursine Vigor": [("Bear Form", "hp", [("talent", 0)], {}), ("Bear Form", "armor", [("talent", 0)], {})],
+    # "For $340541d after shifting into Bear Form, your health and armor are increased by $s1%": the talent's
+    # effect 0 (aura 231, 15) puts its value on the buff it triggers (393903), which lasts 4 s ("lasts").
+    "Ursine Vigor": [("Bear Form", "hp", [("talent", 0)], {"lasts": 0}),
+                     ("Bear Form", "armor", [("talent", 0)], {"lasts": 0})],
     "Mantra of Tenacity": [("Fortifying Brew", "absorb_aura", [], {"aura": "Chi Cocoon"})],
     # The War Within: "Your Prismatic Barrier / Blazing Barrier now grants 5% avoidance while active"
     # (Sunfury: Arcane and Fire). The 5 is the talent's effect 0; the buff 449336 carries it as a rating
@@ -383,7 +386,8 @@ TALENTS_REVIEWED = {
     "Frequent Donor": "cooldown", "Zevrim's Resilience": "a flat heal the data doesn't size",
     "Anger Management": "cooldown from Rage spent", "Impenetrable Wall": "cooldown from Shield Slam",
     "Lifeblood": "Leech after a Healthstone", "Swift Artifice": "cast time",
-    "Soulburn": "handled", "Iron Stomach": "handled", "Glistening Fur": "handled", "Inspired Guard": "handled",
+    "Soulburn": "a button (a Soul Shard) whose Healthstone bonus needs a Soulburn cast first: not assumed for a"
+                " Healthstone press (Gorebound Fortitude's always-on copy is: SOULBURN_HEALTHSTONE)", "Iron Stomach": "handled", "Glistening Fur": "handled", "Inspired Guard": "handled",
     "Berserk": "a separate button",
     "Blood Mist": "parry chance", "Dance of Midnight": "automatic", "Demonsurge": "damage",
     "Elune's Favored": "heals from damage dealt", "Empyreal Ward": "armor after Lay on Hands, which already heals fully",
@@ -472,10 +476,13 @@ EXTENDED_BY = {"Sentinel": ("Zealot's Paragon", 385438, ("Judgment", "Hammer of 
 # talent -> catalog spell whose modifier it copies onto potions and Healthstones.
 ALSO_CONSUMABLES = {"Iron Stomach": 185311}
 
-# Healthstone extras that come from a talent rather than the item: Soulburn
-# makes a Warlock's Healthstone also raise max health (Soulburn: Healthstone).
-SOULBURN = (385899, 387636)       # talent spell, the buff it adds to a Healthstone
-GOREBOUND = ("Gorebound Fortitude", 1.3)   # its tooltip: "increasing its healing by 30%"
+# Healthstone extras from Soulburn (385899, a button costing a Soul Shard): its buff 387626 (20 s) makes the
+# next Healthstone heal more (effect 1: "Increases the healing of your Healthstone by $387626s2%") and raise
+# max health (387636 "Soulburn: Healthstone", aura 133, 12 s). The talent alone gives none of it (a Soulburn
+# cast must come first, which a Healthstone press doesn't imply). Gorebound Fortitude (449701, a passive
+# whose effect 0 triggers 387636): "You always gain the benefit of Soulburn when consuming a Healthstone".
+SOULBURN, SOULBURN_BUFF, SOULBURN_HEALTHSTONE = 385899, 387626, 387636
+GOREBOUND = "Gorebound Fortitude"
 
 # SpellModOp values that change one effect's value -> that effect's index.
 MOD_OP_EFFECT_INDEX = {3: 0, 12: 1, 23: 2, 32: 3, 33: 4}
@@ -1007,6 +1014,25 @@ def measured_mods(name, spell, index, comp, out_field, field, ticks, gd, mods, p
             comp["mods"] = comp.get("mods", []) + [{**who, "add": round(add, 6)}]
 
 
+def gorebound(gd, mods, desc, problems):
+    """Gorebound Fortitude's Soulburn benefit on every Healthstone, from this patch's data: (who, heal
+    multiplier, max health share, its duration ms), or None when the talent isn't in a tree."""
+    who, tsid = talent_who(gd, mods, GOREBOUND)
+    if who is None:
+        return None
+    heal = gd.value(SOULBURN_BUFF, 1)
+    hp = next((float(r["EffectBasePointsF"]) for r in gd.effects.get(SOULBURN_HEALTHSTONE, {}).values()
+               if r["EffectAura"] == "133"), None)
+    dur = gd.duration.get(SOULBURN_HEALTHSTONE, 0)
+    triggers = {int(r["EffectTriggerSpell"] or 0) for r in gd.effects.get(tsid, {}).values()}
+    if (SOULBURN_HEALTHSTONE not in triggers or not heal or not hp or dur <= 0
+            or not re.search(rf"Healthstone by \${SOULBURN_BUFF}s2%", desc.get(SOULBURN) or "")):
+        problems.append(f"{GOREBOUND}: Soulburn's Healthstone benefit ({SOULBURN_BUFF} effect 1, "
+                        f"{SOULBURN_HEALTHSTONE} aura 133 and its duration) moved: review SOULBURN_HEALTHSTONE")
+        return None
+    return who, round(1 + heal / 100, 4), round(hp / 100, 4), dur
+
+
 def talent_component(gd, mods, talent, field, source, extra, problems):
     """An effect a talent adds to a button, for players who have it (TALENT_EFFECTS)."""
     who, talent_spell = talent_who(gd, mods, talent)
@@ -1030,6 +1056,14 @@ def talent_component(gd, mods, talent, field, source, extra, problems):
         comp = {field: round(value, 4)}
     if extra.get("school"):
         comp["school"] = extra["school"]
+    if extra.get("lasts") is not None:
+        # Lasts as long as the buff the talent's effect triggers (Ursine Vigor: 393903, 4 s).
+        r = gd.effects.get(talent_spell, {}).get(extra["lasts"])
+        dur = gd.duration.get(int(r["EffectTriggerSpell"] or 0), 0) if r else 0
+        if dur <= 0:
+            problems.append(f"{talent}: effect {extra['lasts']} of spell {talent_spell} triggers no buff with a duration")
+            return None
+        comp["dur_ms"] = dur
     over = extra.get("over")
     if over:
         # A heal over time: the listed value is per tick, spread over the spell's duration.
@@ -1415,21 +1449,13 @@ def build_catalog(build):
                 if "heal" in comp or "heal_amount" in comp:
                     comp.setdefault("mods", []).append(dict(mod))
         if entry["kind"] == "healthstone":
-            talent, buff = SOULBURN
-            who, hp = mods.who(talent), None
-            for r in gd.effects.get(buff, {}).values():
-                if r["EffectAura"] == "133":          # max health +%
-                    hp = float(r["EffectBasePointsF"]) / 100
-            hp_mods = [{"talent": names.get(talent), **who, "add": hp}] if who and hp else []
-            # Gorebound Fortitude: the Soulburn benefit on every Healthstone (+30% heal, +20% max health).
-            gore, _ = talent_who(gd, mods, GOREBOUND[0])
-            if gore and hp:
-                hp_mods.append({**gore, "add": hp})
+            gore = gorebound(gd, mods, desc, problems)
+            if gore:
+                who, mult, hp, dur = gore
                 for comp in entry["mitigation"]:
                     if "heal" in comp:
-                        comp.setdefault("mods", []).append({**gore, "mult": GOREBOUND[1]})
-            if hp_mods:
-                entry["mitigation"].append({"hp": 0.0, "mods": hp_mods})
+                        comp.setdefault("mods", []).append({**who, "mult": mult})
+                entry["mitigation"].append({"hp": 0.0, "mods": [{**who, "add": hp}], "dur_ms": dur})
     heal = {"talents": mods.healing_taken(), "auras": healing_taken_auras(gd, mods)}
     reset_sources(gd, desc, catalog, problems)
     for talent in unreviewed_talents(gd, desc, catalog, mods):
