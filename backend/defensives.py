@@ -164,6 +164,14 @@ def aura_name(cat, aid, ability_names):
     return None if name in effect else name
 
 
+def effect_aura_ids(cat):
+    """{button: its effect auras' IDs} of a catalog (Earth Elemental: {381755}); empty for a stand-in."""
+    out = defaultdict(set)
+    for aid, name in effect_auras(cat)[0].items():
+        out[name].add(aid)
+    return dict(out)
+
+
 def effect_auras(cat):
     """(aura -> button, button -> names of its effect auras) of a catalog; empty for a stand-in without them."""
     owner, names = getattr(cat, "aura_owner", None), getattr(cat, "effect_aura_names", None)
@@ -439,14 +447,19 @@ def index_defensive_events(raw, cat=None):
 # PER-DEATH ANALYSIS
 # =============================================================================
 
-def _has_ability(sid, entry, player_class, spec, talent_entries, cast_ids_in_report, pressed_this_pull=()):
+def _has_ability(sid, entry, player_class, spec, talent_entries, cast_ids_in_report, pressed_this_pull=(),
+                 effect_seen=False):
+    """`effect_seen`: the aura carrying the button's effect was on them in this log (Earth Elemental's
+    381755), which proves the talent the button needs."""
     if talent_entries is not None:
         talent_entries = set(talent_entries)
     if entry["class"] != player_class:
         return False
-    if entry.get("needs") and not (talent_entries and _rank(talent_entries, entry["needs"]["entries"])):
+    if entry.get("needs") and not effect_seen and \
+            not (talent_entries and _rank(talent_entries, entry["needs"]["entries"])):
         # A defensive only with a talent (Midnight's Earth Elemental with Primordial Bond): pressing the
-        # button proves they have it, not the talent; unknown talents count as not having it.
+        # button proves they have it, not the talent; unknown talents with no effect aura seen count as
+        # not having it.
         return False
     if sid in pressed_this_pull:
         return True    # pressing it this pull proves they have it, whatever the talent record says
@@ -719,8 +732,11 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
     else:
         long_since = fight_start
         long_resets = sorted(set((pull_starts or {}).values()) | {fight_start})
+    owner, _ = effect_auras(cat)
+    effect_seen = {owner[e[2]] for e in own_events if e[2] in owner} | (active_names & set(owner.values()))
     for sid, entry in cat.tracked.items():
-        if not _has_ability(sid, entry, player_class, spec, talent_entries, casts_by_spell, pressed_this_pull):
+        if not _has_ability(sid, entry, player_class, spec, talent_entries, casts_by_spell, pressed_this_pull,
+                            entry["name"] in effect_seen):
             continue
         name = entry["name"]
         if name in active_names:
@@ -1342,7 +1358,7 @@ def _resolve(entry, talent_entries, observed_absorbs, spec=None, applied=None):
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 value = value * rank
         extra = {k: c[k] for k in ("over_ms", "ticks", "current", "replaces_form", "from_target", "dr_hit", "share",
-                                   "stacks", "decay_end_ms", "decay_after_ms") if k in c}
+                                   "stacks", "decay_end_ms", "decay_after_ms", "tick_ms", "first_tick") if k in c}
         if "decay_after_ms" in extra:
             # The wait before the stacks drop shrinks with the talents that shorten the aura (Righteous
             # Protector: "$389539s14/1000*(1-$204074s2/100)"), not with those that lengthen it.
@@ -1627,13 +1643,19 @@ class _Window:
         self.points = _Points(_health_points(hits))
         self.stagger = stagger
         self.full = []
+        # What the player's real shields absorbed of each hit as counted in `full` (Stagger's part left
+        # out): a shield that takes a share (Celestial Infusion) takes it of what they left.
+        self.shielded = []
         for k, h in enumerate(hits):
             if stagger is None or _stagger_tick(h):
                 self.full.append(_full_hit(h))
+                self.shielded.append(h.get("absorbed") or 0)
             elif k in stagger:
                 self.full.append(max(_full_hit(h) - stagger[k][0], 0))
+                self.shielded.append(max((h.get("absorbed") or 0) - stagger[k][0], 0))
             else:
                 self.full.append((h.get("amount") or 0) + (h.get("overkill") or 0))
+                self.shielded.append(0)
         self.known = [h.get("resourceActor") == 2 and bool(h.get("maxHitPoints")) for h in hits]
         self.before = []
         for h, known in zip(hits, self.known):
@@ -1712,6 +1734,16 @@ def _stack_layers(c, dur_ms):
     return layers
 
 
+def _tick_times(c, ticks, over, press):
+    """When a heal over time's ticks land: evenly over its duration, the last as it ends; or, with the
+    game's tick period (`tick_ms`) and a tick as it is pressed (`first_tick`: Soul Immolation, 6 ticks
+    in 5 s on every press in the logs), at the press and every period after."""
+    if c.get("tick_ms"):
+        first = 0 if c.get("first_tick") else 1
+        return [press + c["tick_ms"] * (k + first) for k in range(ticks)]
+    return [press + over / ticks * (k + 1) for k in range(ticks)]
+
+
 def _simulate(options, press, win, kb_index):
     """Health the player would have had on top of their real health right after the killing blow,
     with every option pressed at `press`. Returns (extra health, HoT ticks landed).
@@ -1773,11 +1805,11 @@ def _simulate(options, press, win, kb_index):
             heals.append((press, (c.get("heal", 0) * max_now + c.get("heal_amount", 0)), c.get("boosted")))
         for c, ticks, over in o["hots"]:
             total = c.get("heal", 0) * max_now + c.get("heal_amount", 0)
-            heals += [(press + over / ticks * (k + 1), total / ticks, c.get("boosted")) for k in range(ticks)]
+            heals += [(at, total / ticks, c.get("boosted")) for at in _tick_times(c, ticks, over, press)]
     heals.sort(key=lambda x: x[0])
     kb_ts = hits[kb_index]["timestamp"]
     hot_ticks = sum(1 for o in options for _, ticks, over in o["hots"]
-                    for k in range(ticks) if press + over / ticks * (k + 1) < kb_ts)
+                    for at in _tick_times(c, ticks, over, press) if at < kb_ts)
     hi = 0
 
     def land_heals(until_t):
@@ -1830,7 +1862,9 @@ def _simulate(options, press, win, kb_index):
             cut = min(mixes) if mixes else min(cut, 1 - keep)
         for sh in shields:
             if sh[0] > 0 and sh[2] >= t and left > 0 and win.applies(sh[1], k):
-                took = min(sh[0], left * sh[1].get("share", 1.0))
+                share = sh[1].get("share")
+                # A share shield takes its share of what the real shields (up to what they took) left too.
+                took = min(sh[0], left if share is None else max(left - win.shielded[k], 0) * share)
                 sh[0] -= took
                 left -= took
         extra += dmg - left

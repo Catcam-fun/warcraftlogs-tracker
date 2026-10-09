@@ -133,6 +133,21 @@ class CelestialInfusionTests(unittest.TestCase):
         r = t.die("Monk", "Brewmaster", casts + [(56_000, ci)], 60_000, talents=talents, fight_start=40_000)
         self.assertNotIn("Celestial Infusion", names(r["available"]))
 
+    def ci(self, hit_, stagger=None):
+        win = defensives._Window([hit_], SCHOOLS, stagger=stagger)
+        opt = defensives._option("Celestial Infusion", self.comps(1_000_000), 16_000)
+        return defensives._simulate([opt], hit_["timestamp"] - 1, win, 0)[0]
+
+    def test_after_the_real_shields_on_the_hit(self):
+        # A 500k hit, 100k of it absorbed by a shield the player had: 30% of the 400k left.
+        self.assertAlmostEqual(self.ci(hit(100_000, 300_000, 0, overkill=100_000, absorbed=100_000)), 120_000)
+        # A Brewmaster's: 200k staggered and 100k by a shield: 30% of the 200k left after both.
+        self.assertAlmostEqual(self.ci(hit(100_000, 150_000, 0, overkill=50_000, absorbed=300_000),
+                                       stagger={0: (200_000, [])}), 60_000)
+        # A Stagger tick partly absorbed by a shield: 30% of what the shield left.
+        tick = dict(hit(100_000, 60_000, 0, overkill=20_000, absorbed=20_000), abilityGameID=defensives.STAGGER_TICK)
+        self.assertAlmostEqual(self.ci(tick, stagger={}), 24_000)
+
     def test_after_a_full_shield(self):
         comps = self.comps(200_000) + [{"absorb_amount": 100_000, "school": None}]
         one = hit(100_000, 100_000, 0, overkill=400_000)              # a 500k hit
@@ -185,8 +200,18 @@ class NewDefensivesTests(unittest.TestCase):
                 continue
             si = entry(patch, "Soul Immolation")
             self.assertEqual((si["specs"], si["aura_ms"]), (["Devourer"], 5_000), patch)
-            self.assertEqual(fields(defensives._resolve(si, {}, {}, "Devourer")[0]), [{"heal": 0.24}], patch)
+            self.assertEqual(fields(defensives._resolve(si, {}, {}, "Devourer")[0]),
+                             [{"heal": 0.24, "tick_ms": 1_000, "first_tick": True}], patch)
         self.assertEqual(defensives.HEAL_OVER_TIME["Soul Immolation"], 6)
+
+    def test_soul_immolation_ticks_from_the_press(self):
+        # The log's schedule: a tick as it is pressed, then one a second (6 ticks in its 5 s).
+        si = entry("12.1.0", "Soul Immolation")
+        comps, _ = defensives._resolve(si, {}, {}, "Devourer")
+        opt = defensives._option("Soul Immolation", comps, 5_000, defensives.HEAL_OVER_TIME["Soul Immolation"])
+        for kb, ticks in ((10_500, 1), (11_500, 2), (15_500, 6)):
+            win = defensives._Window([hit(9_000, 600_000, 400_000), hit(kb, 400_000, 0, overkill=10)], SCHOOLS)
+            self.assertEqual(defensives._simulate([opt], 10_000, win, 1)[1], ticks, kb)
 
     def test_earth_elemental(self):
         # The War Within: +15% max health while it is out (60 s), for every Shaman with it. Midnight: only with
@@ -234,12 +259,32 @@ class EarthElementalAuraTests(unittest.TestCase):
         self.assertIn("Earth Elemental", names(r["cooldown"]))
 
     def test_the_state_check_reads_the_health_aura(self):
+        # By aura ID: in The War Within the lingering 198103 and the health aura 381755 share the name.
         from checks.source_state import active_mismatches
-        bands = lambda name: {"name": name, "bands": [{"startTime": 80_000, "endTime": 110_000}]}
-        effect = defensives._LATEST.effect_aura_names
-        self.assertEqual(active_mismatches(["Earth Elemental"], [bands("Primordial Bond")], 100_000, None, effect), [])
-        self.assertEqual(active_mismatches(["Earth Elemental"], [bands("Earth Elemental")], 100_000, None, effect),
-                         ["Earth Elemental"])
+        bands = lambda guid, name: {"guid": guid, "name": name, "bands": [{"startTime": 80_000, "endTime": 110_000}]}
+        for cat, name in ((defensives._LATEST, "Primordial Bond"), (defensives._CATALOGS["11.2.7"], "Earth Elemental")):
+            ids = defensives.effect_aura_ids(cat)
+            self.assertEqual(active_mismatches(["Earth Elemental"], [bands(381755, name)], 100_000, None, ids), [])
+            self.assertEqual(active_mismatches(["Earth Elemental"], [bands(198103, "Earth Elemental")], 100_000, None,
+                                               ids), ["Earth Elemental"])
+
+    def test_the_war_within_lingering_aura_is_not_the_button(self):
+        tww = defensives._CATALOGS["11.2.7"]
+        names_ = {381755: "Earth Elemental", 198103: "Earth Elemental"}
+        self.assertIsNone(defensives.aura_name(tww, 198103, names_))
+        self.assertEqual(defensives.aura_name(tww, 381755, names_), "Earth Elemental")
+
+    def test_the_health_aura_proves_the_talent(self):
+        # Midnight, no talent record: 381755 ("Primordial Bond") seen on them means they have Primordial Bond.
+        from test_defensives import names
+        ee = defensives._LATEST.name_to_id["Earth Elemental"]
+        ability_names = {381755: "Primordial Bond", ee: "Earth Elemental"}
+        def die(buffs):
+            indexed = {"casts": {1: [(50_000, ee)]}, "talents": {}, "buffs": {1: buffs}}
+            return defensives.analyze_death(1, "Shaman", "Elemental", 7, 0, 100_000, indexed, ability_names, {})
+        seen = [(50_100, "applybuff", 381755, 1, 0), (80_100, "removebuff", 381755, 1, 0)]
+        self.assertIn("Earth Elemental", names(die(seen)["cooldown"]))
+        self.assertNotIn("Earth Elemental", names(die([])["cooldown"] + die([])["available"]))
 
     def test_the_durations_check_allows_the_despawn(self):
         # 36.2-36.7 s against 36 s: the aura goes when the elemental despawns, a moment after its time.
@@ -253,8 +298,11 @@ class EarthElementalAuraTests(unittest.TestCase):
             buffs = [{"type": "applybuff", "abilityGameID": 381755, "targetID": 7, "timestamp": 1_000},
                      {"type": "removebuff", "abilityGameID": 381755, "targetID": 7, "timestamp": 1_000 + end}]
             raw = {"combatants": [{"sourceID": 7}], "casts": [], "buffs": buffs}
-            with mock.patch.object(source_durations.defensives, "fetch_defensive_raw", return_value=raw),                     mock.patch.object(source_durations.defensives, "filter_defensive_raw",
-                                      return_value={"talents": {(1, 7): {}}}),                     mock.patch.object(source_durations.defensives, "pull_spec", return_value="Elemental"),                     mock.patch.object(source_durations.defensives, "_talented_duration", return_value=36_000):
+            with mock.patch.object(source_durations.defensives, "fetch_defensive_raw", return_value=raw), \
+                    mock.patch.object(source_durations.defensives, "filter_defensive_raw",
+                                      return_value={"talents": {(1, 7): {}}}), \
+                    mock.patch.object(source_durations.defensives, "pull_spec", return_value="Elemental"), \
+                    mock.patch.object(source_durations.defensives, "_talented_duration", return_value=36_000):
                 return source_durations.check(run).status
         self.assertEqual(check(36_700), "pass")
         self.assertEqual(check(38_000), "fail")
@@ -306,6 +354,8 @@ class SentinelTests(unittest.TestCase):
         self.assertEqual([self.reduction_at(opt, t) for t in (0, 1_999, 2_000, 15_000, 16_000)], [0.30, 0.30, 0.28, 0.02, 0.0])
 
     def test_righteous_protector_shortens_the_wait(self):
+        # FaC4AgJ8vMTfP1VN (12.1.0), 16 Sentinels with Righteous Protector: the first stack went 3.99-7.01 s
+        # after the press (3 s wait, the first stack a second later), the aura lasted 16-25 s: never fewer stacks.
         rp = next(m for m in entry("12.1.0", "Sentinel")["duration_mods"] if m["talent"] == "Righteous Protector")
         opt = self.option("12.1.0", {e: 1 for e in rp["entries"]})          # 12 s, the drop from 3 s
         self.assertEqual([self.reduction_at(opt, t) for t in (3_999, 4_000, 11_999, 12_000)], [0.30, 0.28, 0.14, 0.0])
