@@ -19,9 +19,9 @@ anchors:
   rank_pull_deaths: "backend/analysis.py:188"
   is_in_mass_death: "backend/analysis.py:121"
   find_mass_death_start: "backend/analysis.py:213"
-  app_rank: "backend/app.py:558"
-  app_defensive_gate: "backend/app.py:599"
-  app_cutoffs: "backend/app.py:637"
+  app_rank: "backend/app.py:559"
+  app_defensive_gate: "backend/app.py:600"
+  app_cutoffs: "backend/app.py:638"
   frontend_is_counted: "frontend/src/deathCounting.js:22"
   tests: "backend/test_death_slots.py:14"
 links:
@@ -39,24 +39,24 @@ invariants:
   - "MUST: a player who dies, is battle-rezzed and dies again takes two slots."
   - "NEVER: let a cheat death take a slot from a real death, or count toward a wipe."
   - "NEVER: count anything inside a wipe, real or cheat."
-content_hash: sha256:d1b029b7fe0f2edf0c94d0ad58b7aef48d86f2c0d13acc02342bd60fd2160716
+content_hash: sha256:afd7ca9c9e04005233cb628de7bb3a06c1db532bbca75e17abe82f33d25b24f3
 ---
 ## Summary
 
-- The site's headline number is "first X deaths per pull": who tends to die early. The backend does not apply X itself for the stored events. It tags every death with `slot` and `inWipe` (`backend/app.py:591`), and the frontend's `isCounted` keeps a death when `slot <= X` and it is not in a wipe (`frontend/src/deathCounting.js:22`). See [[frontend-results-view]].
-- The ranking lives in one function, `rank_pull_deaths` (`backend/analysis.py:188`), applied per pull to every death in that pull: all players, guild members or not, cheat deaths included (`backend/app.py:558`). Non-members are filtered out only after ranking (`backend/app.py:563`), so a pug's death still takes its slot.
-- The backend does apply X in one place: only a counting death (real, `slot <= maxCutoff`, not in a wipe) gets defensive analysis and has its pre-death hits fetched (`backend/app.py:334`, `backend/app.py:599`). A report with no such death reads no defensive data or hits at all (`backend/app.py:390`).
+- The site's headline number is "first X deaths per pull": who tends to die early. The backend does not apply X itself for the stored events. It tags every death with `slot` and `inWipe` (`backend/app.py:592`), and the frontend's `isCounted` keeps a death when `slot <= X` and it is not in a wipe (`frontend/src/deathCounting.js:22`). See [[frontend-results-view]].
+- The ranking lives in one function, `rank_pull_deaths` (`backend/analysis.py:188`), applied per pull to every death in that pull: all players, guild members or not, cheat deaths included (`backend/app.py:559`). Non-members are filtered out only after ranking (`backend/app.py:564`), so a pug's death still takes its slot.
+- The backend does apply X in one place: only a counting death (real, `slot <= maxCutoff`, not in a wipe) gets defensive analysis and has its pre-death hits fetched (`backend/app.py:334`, `backend/app.py:600`). A report with no such death reads no defensive data or hits at all (`backend/app.py:390`).
 
 ## How it works
 
-Each pull's deaths go through three steps, in `backend/app.py:558` and `backend/app.py:559`.
+Each pull's deaths go through three steps, in `backend/app.py:559` and `backend/app.py:560`.
 
 ```steps
 - title: Drop saves that died | short: Drop failed saves | sub: drop_saves_that_died
   body: A cheat death is removed when the same player (by `targetID`) has a real death more than 0 and at most `CHEAT_DEATH_SURVIVE_MS` (5000 ms) after it (`backend/analysis.py:175`, `backend/analysis.py:178`). The comment at `backend/analysis.py:171` records why 5 seconds: on live Mythic logs, Purgatory that is not healed off kills 3-5 seconds after it triggers.
   gotcha: The check uses `targetID`, which is per report. That is fine because ranking always runs on one pull of one report.
 - title: Sort by time | short: Sort | sub: stable, log order kept
-  body: The remaining deaths are sorted by timestamp (`backend/app.py:558`). Python's sort is stable, so deaths on the same millisecond keep the order they arrived in. Real deaths are added to each fight's list in combat-log order, and cheat deaths are appended after them (`backend/analysis.py:626`, `backend/analysis.py:665`), so on a tie a real death ranks before a cheat death.
+  body: The remaining deaths are sorted by timestamp (`backend/app.py:559`). Python's sort is stable, so deaths on the same millisecond keep the order they arrived in. Real deaths are added to each fight's list in combat-log order, and cheat deaths are appended after them (`backend/analysis.py:626`, `backend/analysis.py:665`), so on a tie a real death ranks before a cheat death.
 - title: Rank | short: Rank | sub: rank_pull_deaths
   body: Walking the sorted list, each real death increments a counter and takes it as its slot; each cheat death takes the counter plus one without incrementing it (`backend/analysis.py:203`). Every death, real or cheat, is then checked against the wipe windows built from real deaths only (`backend/analysis.py:201`, `backend/analysis.py:209`). The function returns one `(slot, in_wipe)` pair per death, in the same order.
 ```
@@ -75,7 +75,7 @@ Because a window can end at the wipe's last death, a cheat death a few milliseco
 
 #### The legacy cutoff timestamps
 
-The result also carries `pullCutoffTimestamps`: for each pull and each X from 1 to the number of real deaths, a time in ms from pull start (`backend/app.py:637`). It is the X-th real death's time, or, when that death is in a mass death, one millisecond before the mass death began (`find_mass_death_start`, `backend/analysis.py:213`). The frontend uses it only for results saved before `slot` existed (`frontend/src/deathCounting.js:11`, `frontend/src/deathCounting.js:26`).
+The result also carries `pullCutoffTimestamps`: for each pull and each X from 1 to the number of real deaths, a time in ms from pull start (`backend/app.py:638`). It is the X-th real death's time, or, when that death is in a mass death, one millisecond before the mass death began (`find_mass_death_start`, `backend/analysis.py:213`). The frontend uses it only for results saved before `slot` existed (`frontend/src/deathCounting.js:11`, `frontend/src/deathCounting.js:26`).
 
 `find_mass_death_start` uses the older detector `is_in_mass_death` (`backend/analysis.py:121`), which tries only windows that start at a death and look forward. It is kept for the old format; new counting does not depend on it.
 
@@ -133,7 +133,7 @@ relied-on-by: [[data-model]] — saved and shared results store these fields
 
 ## Invariants
 
-- **MUST** count a death only when `slot <= X` and `inWipe` is false (`frontend/src/deathCounting.js:24`, `backend/app.py:599`).
+- **MUST** count a death only when `slot <= X` and `inWipe` is false (`frontend/src/deathCounting.js:24`, `backend/app.py:600`).
 - **MUST** give deaths on the same millisecond one slot each, in combat-log order (`backend/test_death_slots.py:24`).
 - **MUST** give a player who dies, is battle-rezzed and dies again two slots (`backend/test_death_slots.py:29`).
 - **NEVER** let a cheat death take a slot from a real death, or count toward a wipe (`backend/analysis.py:201`, `backend/analysis.py:204`).
@@ -141,7 +141,7 @@ relied-on-by: [[data-model]] — saved and shared results store these fields
 
 ## Gotchas
 
-- **Non-guild deaths still take slots**: ranking runs before the roster filter (`backend/app.py:559`, `backend/app.py:563`). A pug who dies first holds slot 1, and the guild's first death is slot 2. The docstring states the input is every death in the pull, all players (`backend/analysis.py:191`): "first X deaths" is about the pull, not the guild's share of it.
+- **Non-guild deaths still take slots**: ranking runs before the roster filter (`backend/app.py:560`, `backend/app.py:564`). A pug who dies first holds slot 1, and the guild's first death is slot 2. The docstring states the input is every death in the pull, all players (`backend/analysis.py:191`): "first X deaths" is about the pull, not the guild's share of it.
 - **X is applied twice, with different values**: the backend uses `maxCutoff` from the request to decide which deaths get defensives; the frontend uses whatever X the viewer picks. A death past `maxCutoff` can count in the UI but will have no `defensives` block.
 
 ## Glossary

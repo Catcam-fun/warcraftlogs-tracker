@@ -432,7 +432,8 @@ def analyze():
                     # The units the raid attacked, for an effect cast on an enemy (The War Within's Fiery
                     # Brand): only when this patch has one and a Demon Hunter's death can count.
                     friendly_types = {f.get("id"): f.get("type") for f in friendlies}
-                    if defensives.brands_enemies(cat) and                             any(friendly_types.get(p) == "DemonHunter" for p in dead_in(deaths)):
+                    if defensives.brands_enemies(cat) and \
+                            any(friendly_types.get(p) == "DemonHunter" for p in dead_in(deaths)):
                         at_key = (rid, tuple(fight_ids), "attacked-units")
                         attacked = recap_lru.get(at_key) if finished else None
                         if attacked is None:

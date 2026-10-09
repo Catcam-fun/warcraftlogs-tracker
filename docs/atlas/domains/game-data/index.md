@@ -36,7 +36,7 @@ invariants:
   - "MUST: a new raid is added to RAID_ENCOUNTERS before the boss-side scripts run, since all four read it."
 flows:
   - data-build-path
-content_hash: sha256:ff6224f6d13f69ed6911a50fd7570708793c6a2e01665a20e17e0d5cb7aeed4e
+content_hash: sha256:fcb9abf380d1d978c0839e78a957eacb2bb13953512ecaf876bf118af549b3c3
 ---
 ## Summary
 
@@ -54,7 +54,7 @@ The generated modules, what writes them, and who reads them.
 | `defensive_catalog.py` {wago} | `build_defensive_catalog.py` | wago.tools, one build per patch | `PATCHES`, `CATALOGS`, `HEALING_TAKEN`, `LATEST`, `CATALOG` (`backend/defensive_catalog.py:7`, `22`, `15865`, `22354-22355`) | `defensives.py` (`backend/defensives.py:28`); `build_spell_icons.py` (`backend/scripts/build_spell_icons.py:25`) |
 | `boss_spell_flags.py` {wago} | `build_boss_spell_flags.py` | wago.tools, live tables | `IGNORES_IMMUNITY` (`backend/boss_spell_flags.py:4`) | `defensives.py` (`backend/defensives.py:26`) |
 | `max_health_auras.py` {wago} | `build_max_health_auras.py` | wago.tools, last build of each patch | `MAX_HEALTH` (`backend/max_health_auras.py:10`) | `defensives.py` (`backend/defensives.py:29`), `checks/rules_labels.py` |
-| `boss_spell_text.py` {wago} | `build_boss_spell_text.py` | wago.tools, latest build | `TEXTS`, `SPELLS`, `text_for()` (`backend/boss_spell_text.py:5`, `3341`, `7853`) | `app.py` killing-blow text (`backend/app.py:692`) |
+| `boss_spell_text.py` {wago} | `build_boss_spell_text.py` | wago.tools, latest build | `TEXTS`, `SPELLS`, `text_for()` (`backend/boss_spell_text.py:5`, `3341`, `7853`) | `app.py` killing-blow text (`backend/app.py:693`) |
 | `spell_icons.py` {wago} | `build_spell_icons.py` | wago.tools, latest build, plus the catalog | `ICONS`, `DESCRIPTIONS` (`backend/spell_icons.py:5`, `90`) | `defensives.py` (`backend/defensives.py:31`); icons load from render.worldofwarcraft.com in `frontend/src/DeathRow.js:22` |
 | `armor_constants.py` {wcl} | `build_armor_constants.py` | WCL top-ranked kills, three difficulties | `ARMOR_K`, `IGNORES_ARMOR`, `REDUCED_BY_ARMOR` (`backend/armor_constants.py:6`, `134-135`) | `defensives.py` (`backend/defensives.py:25`) |
 | `raid_wide_damage.py` {wcl} | `build_raid_wide.py` | WCL top-ranked Mythic kills | `RAID_WIDE` (`backend/raid_wide_damage.py:5`) | `defensives.py` rot check (`backend/defensives.py:27`, `1676`) |

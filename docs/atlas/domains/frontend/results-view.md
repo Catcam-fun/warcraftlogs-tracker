@@ -46,7 +46,7 @@ links:
   - feat-analyze
   - feat-share
   - feat-saved
-content_hash: sha256:afd8ba6334f5bae81b30ed90de6457f88a27326003d622377f18d99cbc0016cd
+content_hash: sha256:7300e6a1bea80aab62cb4d72f09bd77c6cfb071cb299f0d1d7e4cc054ffb0a8f
 ---
 ## Summary
 
@@ -151,7 +151,7 @@ The pieces of the Results view. Filter by kind.
 
 ### Data fields the view reads
 
-From the backend's result (`backend/app.py:650-663`): `events` (deaths per player, each with `boss`, `pullNo`, `reportId`, `fightId`, `absTs`, `abilityName`, `abilityId`, `isCheatDeath`, `slot`, `inWipe`, `class`, `spec`, `defensives`), `pullParticipation`, `bossParticipation`, `pullCutoffTimestamps`, `icons`, `abilityIcons`, `abilityInfo`, `abilityText`, and `meta.maxCutoff`. The defensive shape is documented in the comment at `frontend/src/DefensivePanel.js:3-14`.
+From the backend's result (`backend/app.py:651-664`): `events` (deaths per player, each with `boss`, `pullNo`, `reportId`, `fightId`, `absTs`, `abilityName`, `abilityId`, `isCheatDeath`, `slot`, `inWipe`, `class`, `spec`, `defensives`), `pullParticipation`, `bossParticipation`, `pullCutoffTimestamps`, `icons`, `abilityIcons`, `abilityInfo`, `abilityText`, and `meta.maxCutoff`. The defensive shape is documented in the comment at `frontend/src/DefensivePanel.js:3-14`.
 
 ## Context map
 
@@ -174,14 +174,14 @@ relied-on-by: [[feat-saved]] — an opened saved report renders through this sam
 
 - **MUST** count through `isCounted` / `countedDeaths` everywhere: the matrix (`frontend/src/App.js:1195`, `frontend/src/App.js:1228`), the player list (`frontend/src/App.js:1048`) and `killCounts` (`frontend/src/App.js:1279`). A second rule anywhere would make the tables disagree.
 - **NEVER** count a death with `inWipe`, whatever X is (`frontend/src/deathCounting.js:24`). Mass deaths at a wipe say nothing about who failed first.
-- **NEVER** recompute `slot`, `inWipe`, `deathType` or `wouldSave` in the browser. They come from the backend (`backend/analysis.py:188`, `backend/app.py:561-562`, `backend/defensives.py:2329`, `backend/defensives.py:2365`, `backend/defensives.py:2375`); the view only reads them.
+- **NEVER** recompute `slot`, `inWipe`, `deathType` or `wouldSave` in the browser. They come from the backend (`backend/analysis.py:188`, `backend/app.py:562-563`, `backend/defensives.py:2332`, `backend/defensives.py:2368`, `backend/defensives.py:2378`); the view only reads them.
 - **MUST** skip defensive data without the current shape (`active` and `available` arrays) so saves and shares from older versions still render (`frontend/src/DeathRow.js:23`, `frontend/src/DefensivePanel.js:17`).
 
 ## Gotchas
 
 - **Merged alts count every character's pulls, everywhere**: the overall row, the matrix and the expanded player card's per-boss line all add up the pulls of the main and its merged alts; the card uses `groupPulls` (`frontend/src/App.js:2147`, `frontend/src/groupPulls.js`), so its per-boss rate matches the matrix.
 - **Filters survive a new result, fitted to it**: `hiddenPlayers`, `minPulls`, `searchQuery` and `characterGroups` carry over when another result loads, and only `expandedPlayers` and `sortConfig` are reset (`frontend/src/App.js:339-340`, `frontend/src/App.js:506-507`). `cutoff` is capped at the new result's maximum and boss chips the new result doesn't have are dropped (`frontend/src/App.js:252`, `frontend/src/resultFilters.js`), so a previous raid's chips can no longer empty the tables.
-- **"Analyzed" is when the analysis ran**: the header shows the result's `meta.generatedAt` (`frontend/src/App.js:1672`, `frontend/src/analyzedAt.js`), which the backend stamps in UTC (`backend/app.py:643`), so a saved or shared report keeps its original date. Older results stamped without a zone are read as UTC; a result with no stamp shows no date rather than today's.
+- **"Analyzed" is when the analysis ran**: the header shows the result's `meta.generatedAt` (`frontend/src/App.js:1672`, `frontend/src/analyzedAt.js`), which the backend stamps in UTC (`backend/app.py:644`), so a saved or shared report keeps its original date. Older results stamped without a zone are read as UTC; a result with no stamp shows no date rather than today's.
 - **Matrix sort only affects the matrix**: the player list is always ordered by real rate (`frontend/src/App.js:1140`). With no sort chosen, matrix rows are alphabetical (`frontend/src/App.js:1153`).
 - **Color scale ignores the search box**: matrix colors are computed over all visible players, not just the searched ones, so a cell keeps its color while you search (`frontend/src/App.js:1971-1982`).
 - **Cheat deaths in the player list are not gated by the toggle**: `computeFilteredStats` counts cheat deaths whatever `enableCheatDeath` says, and only hides them in the display (`frontend/src/App.js:1047-1052`, `frontend/src/App.js:2111`); the matrix gates them (`frontend/src/App.js:1198`). In practice the backend only sends cheat deaths when detection ran.
