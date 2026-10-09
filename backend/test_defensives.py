@@ -513,6 +513,22 @@ class OlderLogTests(unittest.TestCase):
         self.assertEqual(r["details"]["Feint"]["why"], "aoeUnknown")
         self.assertNotIn("whyHit", r["details"]["Feint"])
 
+    def test_armor_that_reduces_the_hit_but_whose_size_isnt_known_has_its_own_reason(self):
+        # A melee swing: armor surely reduces it. Without their armor on the hit, or without the boss's
+        # armor constant, how much more armor would take off can't be worked out: a reason of its own
+        # (armorValueUnknown, naming what is missing), not "isn't known whether armor reduces it".
+        hide = {"name": "Test Hide", "kind": "personal", "mitigation": [{"armor": 1.0}]}
+        swing = hit(100_000, 400_000, 0, overkill=900_000, ability=defensives.MELEE_SWING)
+        r = defensives.assess_survival([swing], 100_000, [hide], [], NAMES, SCHOOLS, talent_entries={},
+                                       armor_k=2_000)
+        self.assertEqual((r["details"]["Test Hide"]["why"], r["details"]["Test Hide"]["missing"]),
+                         ("armorValueUnknown", "armor"))
+        r = defensives.assess_survival([dict(swing, armor=2_000)], 100_000, [hide], [], NAMES, SCHOOLS,
+                                       talent_entries={})
+        self.assertEqual((r["details"]["Test Hide"]["why"], r["details"]["Test Hide"]["missing"]),
+                         ("armorValueUnknown", "constant"))
+        self.assertIsNone(r["wouldSave"]["Test Hide"])
+
     def test_report_marks_aoe_only_if_some_hit_is_aoe(self):
         self.assertFalse(defensives.logs_mark_aoe({1: [{"isAoE": False}], 2: [{"isAoE": False}]}))
         self.assertTrue(defensives.logs_mark_aoe({1: [{"isAoE": False}], 2: [{"isAoE": True}]}))

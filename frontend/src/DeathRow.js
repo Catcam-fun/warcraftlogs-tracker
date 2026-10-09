@@ -136,6 +136,9 @@ export function whyText(d, hitName) {
     case 'readyTooLate': return 'it came off cooldown less than a second before they died';
     case 'notArmor': return `armor doesn't reduce ${hitName}`;
     case 'armorUnknown': return `it isn't known whether armor reduces ${d.whyHit || hitName}`;
+    case 'armorValueUnknown': return d.missing === 'armor'
+      ? `their armor isn't in the log at ${d.whyHit || hitName}, so what more armor would take off it can't be worked out`
+      : `the boss's armor constant isn't known, so what more armor would take off ${d.whyHit || hitName} can't be worked out`;
     default: return null;
   }
 }

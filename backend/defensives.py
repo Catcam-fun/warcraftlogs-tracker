@@ -1451,6 +1451,15 @@ def _armor_reduction(hit, ability_schools):
     return True if ability in REDUCED_BY_ARMOR else None
 
 
+def _armor_unknown(hit, ability_schools):
+    """Why an armor increase can't be judged on this hit: {"why": "armorUnknown"} when it isn't known
+    whether armor reduces it, {"why": "armorValueUnknown", "missing": "armor" | "constant"} when armor
+    does but their armor on the hit or the boss's armor constant isn't known."""
+    if _armor_reduction(hit, ability_schools) is None:
+        return {"why": "armorUnknown"}
+    return {"why": "armorValueUnknown", "missing": "armor" if not hit.get("armor") else "constant"}
+
+
 def _armor_dr(extra, hit):
     """Extra damage reduction from raising the player's armor by `extra` (2.2 = +220%) against this hit.
 
@@ -2017,7 +2026,7 @@ def _explain(entry, comps, applied, hit, amount, max_hp, missing_hp, ability_sch
             immune = bool(m.get("immune"))
             applies = _effect_applies(m, hit, ability_schools)
             if applies is None and m.get("armor"):
-                out["why"] = "armorUnknown"
+                out.update(_armor_unknown(hit, ability_schools))
             elif applies is None:
                 out["why"] = "aoeUnknown"
             elif not applies and m.get("armor"):
@@ -2452,7 +2461,7 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
             for m in comps:
                 if "heal" in m or "heal_amount" in m or win.applies(m, k) is not None:
                     continue
-                cause = {"why": "armorUnknown" if m.get("armor") else "aoeUnknown"}
+                cause = _armor_unknown(window[k], ability_schools) if m.get("armor") else {"why": "aoeUnknown"}
                 if k != kb_index:
                     cause["whyHit"] = ability_names.get(window[k].get("abilityGameID"), "Unknown")
                 return cause
