@@ -465,12 +465,14 @@ def analyze():
                             hits, [p for p in hits if classes is None or friendly_types.get(p) in classes],
                             aoe) if aoe else set()
                         if need:
-                            aoe_key = (rid, tuple(fight_ids), "aoe-abilities", tuple(sorted(need)))
+                            # "decided": the abilities the report's pulls could tell (a hit that dealt damage).
+                            aoe_key = (rid, tuple(fight_ids), "aoe-abilities", "decided", tuple(sorted(need)))
                             got = recap_lru.get(aoe_key) if finished else None
                             if got is None:
                                 try:
-                                    got = sorted(defensives.fetch_aoe_abilities(token, rid, fight_ids, first_start,
-                                                                                last_end, need))
+                                    found, decided = defensives.fetch_aoe_abilities(token, rid, fight_ids, first_start,
+                                                                                    last_end, need)
+                                    got = {"aoe": sorted(found), "decided": sorted(decided)}
                                     if finished:
                                         recap_lru.set(aoe_key, got)
                                 except Exception as e:
@@ -478,7 +480,9 @@ def analyze():
                             if got is None:
                                 unknown = need
                             else:
-                                aoe |= set(got)
+                                aoe |= set(got["aoe"])
+                                # An ability that never dealt damage in the report: WCL never marked it.
+                                unknown = need - set(got["decided"])
                         report_aoe[rid] = (aoe, frozenset(unknown))
 
                     return rid, deaths, def_data, hits, None
