@@ -44,7 +44,7 @@ invariants:
   - "MUST: treat every shared-cache failure as a miss; an analysis never fails because Supabase is down."
   - "NEVER: make an analysis wait on a Supabase cache write; writes run on a background pool."
   - "NEVER: give the anon or authenticated roles access to report_cache; only the service role reads and writes it."
-content_hash: sha256:eb9cede6879496bc76542391ac6a516bfcea9c8c19a9787fd96742d7d4987b93
+content_hash: sha256:bb45ee63797e3dc8d10e70203ecefb4a2d0cf5fdfee23ee1756dd4e6249d21cc
 ---
 ## Summary
 
@@ -66,7 +66,7 @@ A cache read and write, for one finished report.
 - title: Fetch on a miss | short: WarcraftLogs | sub: only when both miss
   body: Only when both layers miss does the pipeline query WarcraftLogs (`backend/app.py:220`, `backend/app.py:230`, `backend/app.py:378`). See [[backend-analysis-pipeline]].
 - title: Write both layers | short: Store | sub: memory now, Supabase later
-  body: `SharedReportCache.set` writes memory at once and submits `cache_put` to a four-thread background pool (`backend/cache.py:77`, `backend/cache.py:89`), so the analysis never waits on Supabase. `cache_put` skips rows over 4 MB compressed (`backend/supabase_client.py:380`) and upserts the rest. At the end of an analysis, `flush_writes` waits for the queued writes, because Lambda freezes the function once the response ends (`backend/cache.py:99`, `backend/app.py:676`).
+  body: `SharedReportCache.set` writes memory at once and submits `cache_put` to a four-thread background pool (`backend/cache.py:77`, `backend/cache.py:89`), so the analysis never waits on Supabase. `cache_put` skips rows over 4 MB compressed (`backend/supabase_client.py:380`) and upserts the rest. At the end of an analysis, `flush_writes` waits for the queued writes, because Lambda freezes the function once the response ends (`backend/cache.py:99`, `backend/app.py:681`).
 - title: Evict | short: Evict | sub: every 20 writes
   body: Every 20th successful write in the process (`_EVICT_EVERY`) runs `evict_report_cache` (`backend/supabase_client.py:275`, `backend/supabase_client.py:391`). It reads every row's size, newest use first, and deletes rows past the 200 MB running total, in batches of 100 (`backend/supabase_client.py:395`).
 ```
@@ -78,8 +78,8 @@ A cache read and write, for one finished report.
 | `report_fights_cache` {cache} | `fights` | 400 | report code | light fight list: report start and fights, no players; only if it has fights | `backend/app.py:222` |
 | `report_meta_cache` {cache} | `meta` | 200 | report code | full fights, actors, abilities, icons; only reports that keep pulls; only if it has fights | `backend/app.py:232` |
 | `report_deaths_cache` {cache} | `deaths` | 400 | report, fight ids, cheat-deaths flag, cheat-death spell ids | deaths by fight | `backend/app.py:355`, `backend/app.py:384` |
-| `report_defensive_cache` {cache} | `defensives` | 200 | report, fight ids, dead players, catalog patch and fingerprint | filtered defensive events | `backend/app.py:364`, `backend/app.py:405` |
-| `report_recap_cache` {cache} | `killing-blows` | 400 | report, fight ids, `instakills`; or report, counted deaths, `lethal-window`, window length | instant kills; hits before deaths | `backend/app.py:414`, `backend/app.py:422` |
+| `report_defensive_cache` {cache} | `defensives` | 200 | report, fight ids, dead players, catalog patch and fingerprint | filtered defensive events | `backend/app.py:364`, `backend/app.py:410` |
+| `report_recap_cache` {cache} | `killing-blows` | 400 | report, fight ids, `instakills`; or report, counted deaths, `lethal-window`, window length | instant kills; hits before deaths | `backend/app.py:419`, `backend/app.py:427` |
 
 The keys carry everything that changes the answer. The deaths key includes the list of cheat-death spells when cheat deaths are on, so adding a spell refetches (`backend/app.py:354`). The defensive key includes the catalog's patch and `CATALOG_FINGERPRINT`, so a rebuilt catalog refetches. See [[backend-defensive-analysis]].
 

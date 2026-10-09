@@ -18,9 +18,9 @@ anchors:
   share_param_effect: "frontend/src/App.js:349"
   load_shared: "frontend/src/App.js:312"
   idb_restore_skip: "frontend/src/App.js:532"
-  share_endpoint: "backend/app.py:702"
-  shared_endpoint: "backend/app.py:722"
-  share_id_re: "backend/app.py:694"
+  share_endpoint: "backend/app.py:707"
+  shared_endpoint: "backend/app.py:727"
+  share_id_re: "backend/app.py:699"
   share_limiter: "backend/app.py:52"
   share_limits: "backend/supabase_client.py:33"
   store_share: "backend/supabase_client.py:222"
@@ -45,14 +45,14 @@ invariants:
   - "NEVER: put WarcraftLogs credentials in a share; they are stripped in the browser, on write and on read (frontend/src/App.js:635, backend/supabase_client.py:223, backend/supabase_client.py:259)."
   - "NEVER: let a shared config overwrite the viewer's own credentials (frontend/src/App.js:325)."
   - "MUST: serve a share only before its expires_at; Supabase rows are filtered on expires_at and memory entries on their own deadline (backend/supabase_client.py:250, backend/supabase_client.py:217)."
-  - "MUST: reject share ids outside [A-Za-z0-9_-]{6,32} before any lookup (backend/app.py:724)."
+  - "MUST: reject share ids outside [A-Za-z0-9_-]{6,32} before any lookup (backend/app.py:729)."
   - "MUST: try each ?share= id once per page; a failed load must not loop (frontend/src/App.js:351)."
-content_hash: sha256:49cbf90211dad40d30c432afdb74f8e144b2f4f9e121712d9908014e531f977a
+content_hash: sha256:081eb39237e1b763b7b6d177aa00d1b561e091f30dad0003115599ef0e5c86f3
 ---
 ## Summary
 
-- **What it is.** A short, unguessable link to one analysis result. The id is `secrets.token_urlsafe(9)`, 12 URL-safe characters (`backend/app.py:712`), and the link is `<origin>/results?share=<id>` (`frontend/src/App.js:641`).
-- **Who can use it.** Anyone. Creating a share needs no account (`frontend/src/App.js:632`); if a session is present the server records its user id as `created_by` so account deletion can remove it (`backend/app.py:711`).
+- **What it is.** A short, unguessable link to one analysis result. The id is `secrets.token_urlsafe(9)`, 12 URL-safe characters (`backend/app.py:717`), and the link is `<origin>/results?share=<id>` (`frontend/src/App.js:641`).
+- **Who can use it.** Anyone. Creating a share needs no account (`frontend/src/App.js:632`); if a session is present the server records its user id as `created_by` so account deletion can remove it (`backend/app.py:716`).
 - **How long.** 72 hours (`SHARE_TTL_HOURS`, `backend/supabase_client.py:34`).
 - **What it carries.** The result object and the analysis config with credentials removed, packed `br64:` (`backend/supabase_client.py:223`).
 
@@ -62,17 +62,17 @@ content_hash: sha256:49cbf90211dad40d30c432afdb74f8e144b2f4f9e121712d9908014e531
 - title: Press Share | short: Share | sub: Results header
   body: The Share button on /results calls handleShare (frontend/src/App.js:1647). It POSTs { data, config } to /api/share with config passed through stripSecrets; a signed-in user's token is attached as optional auth (frontend/src/App.js:630).
 - title: Server stores it | short: POST /api/share | sub: check, pack, insert
-  body: The route is limited to 20 per hour per client IP (backend/app.py:52, backend/app.py:703) and rejects a body without an events object (backend/app.py:708). store_share strips secrets, packs, refuses over 2 MB compressed, deletes every expired share in the table, then inserts id, payload, size_bytes, created_by and expires_at (backend/supabase_client.py:222). The response carries shareId and expiresAt (backend/app.py:718).
-  gotcha: A store error is answered through _storage_response (backend/app.py:715): too_large is 413, anything else 500.
+  body: The route is limited to 20 per hour per client IP (backend/app.py:52, backend/app.py:708) and rejects a body without an events object (backend/app.py:713). store_share strips secrets, packs, refuses over 2 MB compressed, deletes every expired share in the table, then inserts id, payload, size_bytes, created_by and expires_at (backend/supabase_client.py:222). The response carries shareId and expiresAt (backend/app.py:723).
+  gotcha: A store error is answered through _storage_response (backend/app.py:720): too_large is 413, anything else 500.
 - title: Fallback to memory | short: Memory fallback | sub: table missing or insert fails
-  body: If the insert throws (for example, the table was never created), the blob goes into the _mem_shares dict with the same 72-hour deadline, and the call still succeeds with ephemeral true (backend/supabase_client.py:241). The route passes ephemeral to the browser (backend/app.py:718), and the share dialog warns that this link stops working when the server restarts or sleeps (frontend/src/App.js:1467, frontend/src/shareNote.js).
+  body: If the insert throws (for example, the table was never created), the blob goes into the _mem_shares dict with the same 72-hour deadline, and the call still succeeds with ephemeral true (backend/supabase_client.py:241). The route passes ephemeral to the browser (backend/app.py:723), and the share dialog warns that this link stops working when the server restarts or sleeps (frontend/src/App.js:1467, frontend/src/shareNote.js).
   gotcha: Memory shares vanish on restart and are only visible to the process that stored them.
 - title: Copy the link | short: Share modal | sub: copy to clipboard
   body: The modal shows the link in a read-only field with a Copy button (frontend/src/App.js:1434, frontend/src/App.js:651). It does not show the expiry.
 - title: Open the link | short: ?share= | sub: once per id
   body: An effect on location.search reads the share param and calls loadSharedResults once per id, tracked by attemptedShareRef (frontend/src/App.js:349). The mount-time IndexedDB restore is skipped while a share param is present (frontend/src/App.js:532).
 - title: Server returns it | short: GET /api/shared/<id> | sub: memory, then Supabase
-  body: The id must match SHARE_ID_RE or the route answers 404 (backend/app.py:724). get_share checks memory first, then selects the row only if expires_at is still in the future, unpacks it and strips secrets from the config again (backend/supabase_client.py:245). A missing or expired share is 404 "links last 72 hours" (backend/app.py:728).
+  body: The id must match SHARE_ID_RE or the route answers 404 (backend/app.py:729). get_share checks memory first, then selects the row only if expires_at is still in the future, unpacks it and strips secrets from the config again (backend/supabase_client.py:245). A missing or expired share is 404 "links last 72 hours" (backend/app.py:733).
 - title: Render it | short: /results | sub: same page as any result
   body: loadSharedResults sets data, merges the shared config through stripSecrets so the viewer's own credentials stay, and moves to /results keeping the query string (frontend/src/App.js:322). From here the Results page works as usual, and the result is persisted to IndexedDB like any other (frontend/src/App.js:552).
 ```
@@ -119,9 +119,9 @@ relied-on-by: [[feat-account]] — account deletion removes shares the user crea
 
 | Item {kind} | Where | Meaning |
 |---|---|---|
-| `POST /api/share` {route} | `backend/app.py:702` | create a share; returns shareId, expiresAt |
-| `GET /api/shared/<id>` {route} | `backend/app.py:722` | read a share; returns data, config, timestamp |
-| `SHARE_ID_RE` {const} | `backend/app.py:694` | `^[A-Za-z0-9_-]{6,32}$` |
+| `POST /api/share` {route} | `backend/app.py:707` | create a share; returns shareId, expiresAt |
+| `GET /api/shared/<id>` {route} | `backend/app.py:727` | read a share; returns data, config, timestamp |
+| `SHARE_ID_RE` {const} | `backend/app.py:699` | `^[A-Za-z0-9_-]{6,32}$` |
 | `share_limiter` {const} | `backend/app.py:52` | 20 calls per 3600 s per client IP |
 | `MAX_SHARE_BYTES` {const} | `backend/supabase_client.py:33` | 2 MB, compressed |
 | `SHARE_TTL_HOURS` {const} | `backend/supabase_client.py:34` | 72 |
@@ -138,7 +138,7 @@ relied-on-by: [[feat-account]] — account deletion removes shares the user crea
 - **NEVER** put WarcraftLogs credentials in a share: the browser strips them (`frontend/src/App.js:635`), the server strips on write (`backend/supabase_client.py:223`) and again on read (`backend/supabase_client.py:259`). A test checks the secret never reaches the stored payload (`backend/test_api.py:116`).
 - **NEVER** let a shared config overwrite the viewer's own credentials (`frontend/src/App.js:325`).
 - **MUST** serve a share only before its deadline: rows are filtered with `expires_at > now` (`backend/supabase_client.py:250`), memory entries by their stored deadline (`backend/supabase_client.py:217`).
-- **MUST** reject ids that do not match `SHARE_ID_RE` before any lookup (`backend/app.py:724`).
+- **MUST** reject ids that do not match `SHARE_ID_RE` before any lookup (`backend/app.py:729`).
 - **MUST** try each `?share=` id once; a failed load must not loop (`frontend/src/App.js:351`).
 
 ## Gotchas

@@ -36,7 +36,7 @@ invariants:
   - "MUST: a new raid is added to RAID_ENCOUNTERS before the boss-side scripts run, since all four read it."
 flows:
   - data-build-path
-content_hash: sha256:3978200057723c82946634c4caf082ba3d0db53f26ad80a98f81dc784eddd08f
+content_hash: sha256:431abbe72b376885ec9c2f66d570c4d7a5b15fe7bb63be11a25a7ebf59f9aad6
 ---
 ## Summary
 
@@ -54,8 +54,8 @@ The generated modules, what writes them, and who reads them.
 | `defensive_catalog.py` {wago} | `build_defensive_catalog.py` | wago.tools, one build per patch | `PATCHES`, `CATALOGS`, `HEALING_TAKEN`, `LATEST`, `CATALOG` (`backend/defensive_catalog.py:7`, `22`, `15865`, `22354-22355`) | `defensives.py` (`backend/defensives.py:28`); `build_spell_icons.py` (`backend/scripts/build_spell_icons.py:25`) |
 | `boss_spell_flags.py` {wago} | `build_boss_spell_flags.py` | wago.tools, live tables | `IGNORES_IMMUNITY` (`backend/boss_spell_flags.py:4`) | `defensives.py` (`backend/defensives.py:26`) |
 | `max_health_auras.py` {wago} | `build_max_health_auras.py` | wago.tools, last build of each patch | `MAX_HEALTH` (`backend/max_health_auras.py:10`) | `defensives.py` (`backend/defensives.py:29`), `checks/rules_labels.py` |
-| `boss_spell_text.py` {wago} | `build_boss_spell_text.py` | wago.tools, latest build | `TEXTS`, `SPELLS`, `text_for()` (`backend/boss_spell_text.py:5`, `3341`, `7853`) | `app.py` killing-blow text (`backend/app.py:670`) |
-| `spell_icons.py` {wago} | `build_spell_icons.py` | wago.tools, latest build, plus the catalog | `ICONS`, `DESCRIPTIONS` (`backend/spell_icons.py:5`, `90`) | `defensives.py` (`backend/defensives.py:30`); icons load from render.worldofwarcraft.com in `frontend/src/DeathRow.js:22` |
+| `boss_spell_text.py` {wago} | `build_boss_spell_text.py` | wago.tools, latest build | `TEXTS`, `SPELLS`, `text_for()` (`backend/boss_spell_text.py:5`, `3341`, `7853`) | `app.py` killing-blow text (`backend/app.py:675`) |
+| `spell_icons.py` {wago} | `build_spell_icons.py` | wago.tools, latest build, plus the catalog | `ICONS`, `DESCRIPTIONS` (`backend/spell_icons.py:5`, `90`) | `defensives.py` (`backend/defensives.py:31`); icons load from render.worldofwarcraft.com in `frontend/src/DeathRow.js:22` |
 | `armor_constants.py` {wcl} | `build_armor_constants.py` | WCL top-ranked kills, three difficulties | `ARMOR_K`, `IGNORES_ARMOR`, `REDUCED_BY_ARMOR` (`backend/armor_constants.py:6`, `134-135`) | `defensives.py` (`backend/defensives.py:25`) |
 | `raid_wide_damage.py` {wcl} | `build_raid_wide.py` | WCL top-ranked Mythic kills | `RAID_WIDE` (`backend/raid_wide_damage.py:5`) | `defensives.py` rot check (`backend/defensives.py:27`, `1676`) |
 

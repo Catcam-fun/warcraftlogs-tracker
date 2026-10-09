@@ -24,8 +24,8 @@ anchors:
   fetch_report_deaths: "backend/app.py:338"
   no_counted_death: "backend/app.py:388"
   get_report_fights: "backend/warcraftlogs.py:333"
-  processing_loop: "backend/app.py:480"
-  result: "backend/app.py:642"
+  processing_loop: "backend/app.py:485"
+  result: "backend/app.py:647"
   raid_encounters: "backend/analysis.py:234"
   raid_date_windows: "backend/analysis.py:262"
   resolve_report_window: "backend/analysis.py:280"
@@ -51,7 +51,7 @@ invariants:
   - "MUST: drop duplicate pulls before fetching deaths, so a pull logged by three raiders is counted once."
   - "MUST: sort pulls by start time, then report code, then fight id, so the copy of a pull that is kept never depends on which report was read first."
   - "NEVER: cache the deaths of a report that failed to load; get_report_deaths_bulk re-raises so the caller records the failure instead."
-content_hash: sha256:3a863fb2889b045cdc2f1635386a5180332e4164e5947436dca61b7492fcaec3
+content_hash: sha256:f8c25a934ee25cd9f021a4b4454715e140a0ff927e54cf8918d787757cabe50a
 ---
 ## Summary
 
@@ -82,12 +82,12 @@ The generator yields a progress event at each stage. Click each step to see what
   body: `dedup_pulls` (`backend/analysis.py:84`, called at `backend/app.py:269`) groups every log's copies of a pull and keeps the earliest one, unless another raider's copy lasts more than `TRUNCATED_COPY_MS` (5 s) longer; then it keeps that longest copy, since the earliest logger stopped logging mid-pull. Only the reports that kept pulls are then read in full with `get_fights`: players, specs and ability names (`backend/app.py:225`, `backend/app.py:273`). Finished reports come from `report_meta_cache`. Each kept pull gets its report's actors, ability names, schools and icons (`backend/app.py:287`). No pulls left ends the stream with a difficulty message (`backend/app.py:281`).
   gotcha: A report that can't be read in full is marked unreadable and dedup runs again without it (`backend/app.py:278`, `backend/app.py:266`). Its pulls go to another log's copy, as if it were never listed.
 - title: Fetch deaths per report | short: Deaths | sub: eight reports at once
-  body: Kept pulls are grouped by report (`backend/app.py:317`) and `fetch_report_deaths` runs for up to eight reports at once (`backend/app.py:447`). Inside one report the queries run one at a time. When the deaths are not cached, talent loadouts come first and alone (`backend/app.py:378`), then the bulk death query (`backend/app.py:381`). If no death in the report can count, it stops there (`backend/app.py:388`). Otherwise it reads raw defensive events (`backend/app.py:400`), instant kills (`backend/app.py:412`), then the hits before each death that can count (`backend/app.py:420`). Finished reports read and write the deaths, defensive and recap caches.
-  gotcha: A report that throws is returned with empty death lists and its id is added to `failedReports` (`backend/app.py:438`, `backend/app.py:456`). Its pulls keep their pull numbers but are skipped by the processing loop (`backend/app.py:500`), so they count toward nobody's pulls or deaths.
+  body: Kept pulls are grouped by report (`backend/app.py:317`) and `fetch_report_deaths` runs for up to eight reports at once (`backend/app.py:452`). Inside one report the queries run one at a time. When the deaths are not cached, talent loadouts come first and alone (`backend/app.py:378`), then the bulk death query (`backend/app.py:381`). If no death in the report can count, it stops there (`backend/app.py:388`). Otherwise it reads raw defensive events (`backend/app.py:405`), instant kills (`backend/app.py:417`), then the hits before each death that can count (`backend/app.py:425`). Finished reports read and write the deaths, defensive and recap caches.
+  gotcha: A report that throws is returned with empty death lists and its id is added to `failedReports` (`backend/app.py:443`, `backend/app.py:461`). Its pulls keep their pull numbers but are skipped by the processing loop (`backend/app.py:505`), so they count toward nobody's pulls or deaths.
 - title: Rank and enrich each pull | short: Processing | sub: slots, defensives, cutoffs
-  body: For each pull, in time order, the pull number per boss goes up by one (`backend/app.py:495`), guild members present are added to `pullParticipation` and `bossParticipation` (`backend/app.py:525`), saves the player died from anyway are dropped, and `rank_pull_deaths` assigns `slot` and `inWipe` (`backend/app.py:537`). Each guild member's death becomes a death event (`backend/app.py:554`). A real death with `slot <= maxCutoff` outside a wipe also gets `defensives.analyze_death` (`backend/app.py:578`). The legacy `pullCutoffTimestamps` are computed last (`backend/app.py:625`).
+  body: For each pull, in time order, the pull number per boss goes up by one (`backend/app.py:500`), guild members present are added to `pullParticipation` and `bossParticipation` (`backend/app.py:530`), saves the player died from anyway are dropped, and `rank_pull_deaths` assigns `slot` and `inWipe` (`backend/app.py:542`). Each guild member's death becomes a death event (`backend/app.py:559`). A real death with `slot <= maxCutoff` outside a wipe also gets `defensives.analyze_death` (`backend/app.py:583`). The legacy `pullCutoffTimestamps` are computed last (`backend/app.py:630`).
 - title: Send the result | short: Result | sub: one final event
-  body: The generator builds `meta`, `events`, participation maps, cutoffs and the icon and text lookups (`backend/app.py:642`), then yields one `{"result": ...}` event (`backend/app.py:674`). Any exception anywhere becomes one `{"error": ...}` event instead (`backend/app.py:678`).
+  body: The generator builds `meta`, `events`, participation maps, cutoffs and the icon and text lookups (`backend/app.py:647`), then yields one `{"result": ...}` event (`backend/app.py:679`). Any exception anywhere becomes one `{"error": ...}` event instead (`backend/app.py:683`).
 ```
 
 #### Raid selection
@@ -107,10 +107,10 @@ When several raiders log the same night, each report contains the same pulls. `i
 1. **Talent loadouts** (`defensives.fetch_combatants`, `backend/app.py:378`). The first event query on a report pays a higher "cold" price. Loadouts are the cheapest way to pay it (about 2 points); Deaths or Casts sent first cost 4-17. The report then stays warm for only 10-30 seconds, so the queries that follow are sent right after.
 2. **Deaths** (`get_report_deaths_bulk`, `backend/app.py:381`).
 3. **Skip check**: `counted_by_fight` finds the deaths that can count (`backend/app.py:325`). With none, the report returns empty defensive data and no hits (`backend/app.py:390`); nothing would read them.
-4. **Defensive events**: casts, buffs and healing, with the loadouts from step 1 passed in so they are not read twice (`backend/app.py:400`).
-5. **Instant kills** (`backend/app.py:412`), then **death windows** (`backend/app.py:420`).
+4. **Defensive events**: casts, buffs and healing, with the loadouts from step 1 passed in so they are not read twice (`backend/app.py:405`).
+5. **Instant kills** (`backend/app.py:417`), then **death windows** (`backend/app.py:425`).
 
-After the first query, the rest cost about a quarter less sent one by one than all at once (comment at `backend/app.py:395`). A loadout read that fails is recorded as the report's defensive error, and the deaths are still read (`backend/app.py:379`).
+After the first query, the rest cost about a quarter less sent one by one than all at once (comment at `backend/app.py:400`). A loadout read that fails is recorded as the report's defensive error, and the deaths are still read (`backend/app.py:379`).
 
 #### The bulk death query
 
@@ -126,7 +126,7 @@ Two cleanup passes follow. First, only the earliest cheat death per player per f
 
 #### What the result carries
 
-The result shape is listed on [[backend-api-endpoints]]. Two parts come straight from this pipeline: `events` holds every guild member's death and cheat death with its `slot` and `inWipe`, counted or not, and `pullParticipation` holds every pull each main character was present for, keyed `"<reportId>_<fightId>"` (`backend/app.py:529`). The results page counts deaths against those pulls; see [[frontend-results-view]].
+The result shape is listed on [[backend-api-endpoints]]. Two parts come straight from this pipeline: `events` holds every guild member's death and cheat death with its `slot` and `inWipe`, counted or not, and `pullParticipation` holds every pull each main character was present for, keyed `"<reportId>_<fightId>"` (`backend/app.py:534`). The results page counts deaths against those pulls; see [[frontend-results-view]].
 
 ## Diagram
 
@@ -181,7 +181,7 @@ Pipeline constants:
 | Constant {const} | Value | Where |
 |---|---|---|
 | `REPORT_FETCH_WORKERS` {const} | 6 reports read at once for fights | `backend/app.py:50` |
-| death fetch pool {const} | 8 reports at once, queries one at a time inside each | `backend/app.py:447`, `backend/app.py:395` |
+| death fetch pool {const} | 8 reports at once, queries one at a time inside each | `backend/app.py:452`, `backend/app.py:400` |
 | `REPORT_CACHE_MIN_AGE_MS` {const} | 2 hours; older reports count as finished | `backend/app.py:46` |
 | `MIN_ABS_OVERLAP_MS` {dedup} | 15000 ms | `backend/analysis.py:57` |
 | `MIN_IOU_FOR_DUP` {dedup} | 0.50 | `backend/analysis.py:58` |
@@ -218,8 +218,8 @@ relied-on-by: [[feat-analyze]] — the Analyze button runs this pipeline
 - **A report with no death that can count reads no defensives**: it returns after the deaths query (`backend/app.py:388`), so its defensive data is empty, not missing, and it does not show in the "defensive details missing" warning.
 - **Cheat-death dedup works within one report**: `get_report_deaths_bulk` runs once per report, so its passes (first per player per fight, then same player and ability within 100ms, `backend/analysis.py:577`) only see that report's events; the same pull in another report was already dropped by `is_duplicate_pull`.
 - **One save per player per pull**: the first cleanup pass keeps only the earliest cheat death per player per fight (`backend/analysis.py:552`), so a player saved twice in one pull shows one cheat death.
-- **Failed reports are left out, not counted as deathless**: a report that throws returns empty death lists (`backend/app.py:438`), so the processing loop skips its pulls after numbering them (`backend/app.py:500`); otherwise they would add attended pulls with no deaths and lower everyone's death rate. `test_unreadable_report_adds_no_pulls` checks it.
-- **Unreadable defensive data is a warning, not an error**: deaths still count; the stream sends a progress message naming how many reports lack detail (`backend/app.py:467`).
+- **Failed reports are left out, not counted as deathless**: a report that throws returns empty death lists (`backend/app.py:443`), so the processing loop skips its pulls after numbering them (`backend/app.py:505`); otherwise they would add attended pulls with no deaths and lower everyone's death rate. `test_unreadable_report_adds_no_pulls` checks it.
+- **Unreadable defensive data is a warning, not an error**: deaths still count; the stream sends a progress message naming how many reports lack detail (`backend/app.py:472`).
 
 ## Glossary
 

@@ -18,10 +18,10 @@ anchors:
   light_fights: backend/warcraftlogs.py:333
   fights: backend/warcraftlogs.py:382
   deaths_bulk: backend/analysis.py:357
-  combatants: backend/defensives.py:222
-  defensive_raw: backend/defensives.py:233
-  death_windows: backend/defensives.py:893
-  instakills: backend/defensives.py:939
+  combatants: backend/defensives.py:223
+  defensive_raw: backend/defensives.py:234
+  death_windows: backend/defensives.py:903
+  instakills: backend/defensives.py:973
   analyze_credentials: backend/app.py:125
   analyze_token: backend/app.py:158
   report_fetch: backend/app.py:338
@@ -42,7 +42,7 @@ invariants:
   - "NEVER: a guild-reports query filters by zoneID; mixed raid and dungeon reports would be dropped."
 flows:
   - request-path
-content_hash: sha256:ea42f8f80d478fb0c3351492cb2d688cbc232be45e543eada5245cecf4288b7a
+content_hash: sha256:6d5c2696e549b3b3823f7a1f2d3f46314d8c263d326b412ff471d131cb0f8b22
 ---
 ## Summary
 
@@ -71,13 +71,13 @@ One Analyze request walks through the WCL reads below, in the order `generate()`
   body: get_fights reads fights, Player actors, ability names, school bitmasks and icons, and playerDetails (spec per player) in one GraphQL round trip (backend/warcraftlogs.py:390-426), only for the reports that pulls were kept from (backend/app.py:270-278).
   gotcha: A report whose full read comes back empty is dropped and dedup runs again, so its pulls go to another log's copy of the same pull (backend/app.py:262-278).
 - title: Talent loadouts | short: Loadouts | sub: first, alone
-  body: When a report's deaths aren't cached, fetch_combatants reads CombatantInfo for the kept pulls before anything else, because it is the cheapest first query on a report WCL hasn't read recently (backend/app.py:373-380, backend/defensives.py:222-230).
+  body: When a report's deaths aren't cached, fetch_combatants reads CombatantInfo for the kept pulls before anything else, because it is the cheapest first query on a report WCL hasn't read recently (backend/app.py:373-380, backend/defensives.py:223-231).
 - title: Deaths | short: Deaths | sub: whole report, one call
   body: get_report_deaths_bulk asks for Deaths events from the first kept pull's start to the last one's end, plus (signed-in, cheat-death on) Debuffs and Healing filtered to cheat-death ability IDs, all as aliases of one query (backend/analysis.py:395-470). Extra pages are followed with nextPageTimestamp (backend/analysis.py:475-484).
 - title: Defensive data | short: Defensives | sub: three queries, one at a time
-  body: Only when at least one death in the report can count (backend/app.py:387-390). fetch_defensive_raw then runs Casts, Buffs and Healing one after another, reusing the loadouts already read (backend/defensives.py:269-283). Casts cover the time range from cast_lookback (3 minutes before the first pull, or back to the last boss encounter's end for long cooldowns, at most the longest tracked cooldown), buffs from 3 minutes before it; heals are scoped to the boss pulls.
+  body: Only when at least one death in the report can count (backend/app.py:387-390). fetch_defensive_raw then runs Casts, Buffs and Healing one after another, reusing the loadouts already read (backend/defensives.py:270-284). Casts cover the time range from cast_lookback (3 minutes before the first pull, or back to the last boss encounter's end for long cooldowns, at most the longest tracked cooldown), buffs from 3 minutes before it; heals are scoped to the boss pulls.
 - title: Hits before deaths | short: Death windows | sub: DamageTaken by name
-  body: For the deaths that can count, fetch_death_windows asks for DamageTaken events filtered by target.name, one block per group of pulls within 15 minutes, many blocks per request (backend/defensives.py:893-936). fetch_instakills adds instant-kill events from the All stream (backend/defensives.py:939-944).
+  body: For the deaths that can count, fetch_death_windows asks for DamageTaken events filtered by target.name, one block per group of pulls within 15 minutes, many blocks per request (backend/defensives.py:903-964). fetch_instakills adds instant-kill events from the All stream (backend/defensives.py:973-978). One more block in the same request, from the All stream over all those pulls, reads on the players who died the heals a killing hit can set off (features.KILLING_HIT_HEAL_IDS: Defy Fate, Cauterize, Guardian Spirit, Ardent Defender, Embrace the Shadow, Void Reconstitution; Last Resort's absorb and Metamorphosis heal) and the stack changes of stacking max-health auras (Sentinel): measured 15.0 -> 19.4 points on a 27-pull report, warm cache. The All stream can't replace DamageTaken: it leaves the aura list off damage events. The windows' cache key (app.py) carries those ID lists, so windows cached without them are not reused; CACHE_VERSION is unchanged, so a report's other cached data stays valid.
 ```
 
 ## Diagram
@@ -120,10 +120,10 @@ What is read from WCL, and where.
 | Light fight list {query} | `reportData.report` (`startTime`, `fights`) | `get_report_fights` (`backend/warcraftlogs.py:333`) |
 | Fights, actors, abilities, specs {query} | `reportData.report` (`fights`, `masterData`, `playerDetails`) | `get_fights` (`backend/warcraftlogs.py:382`) |
 | Deaths and cheat deaths {events} | `report.events` (Deaths, Debuffs, Healing) | `get_report_deaths_bulk` (`backend/analysis.py:357`) |
-| Talent loadouts {events} | `report.events` (CombatantInfo) | `fetch_combatants` (`backend/defensives.py:222`) |
-| Defensive casts, buffs, heals {events} | `report.events` (Casts, Buffs, Healing) | `fetch_defensive_raw` (`backend/defensives.py:233`) |
-| Hits before deaths {events} | `report.events` (DamageTaken) | `fetch_death_windows` (`backend/defensives.py:893`) |
-| Instant kills {events} | `report.events` (All, `type = 'instakill'`) | `fetch_instakills` (`backend/defensives.py:939`) |
+| Talent loadouts {events} | `report.events` (CombatantInfo) | `fetch_combatants` (`backend/defensives.py:223`) |
+| Defensive casts, buffs, heals {events} | `report.events` (Casts, Buffs, Healing) | `fetch_defensive_raw` (`backend/defensives.py:234`) |
+| Hits before deaths {events} | `report.events` (DamageTaken; All for killing-hit heals and max-health stacks) | `fetch_death_windows` (`backend/defensives.py:903`) |
+| Instant kills {events} | `report.events` (All, `type = 'instakill'`) | `fetch_instakills` (`backend/defensives.py:973`) |
 | Top kills per boss {scripts} | `worldData.encounter.fightRankings` | `build_armor_constants.py:118`, `build_raid_wide.py:33` |
 
 ## Standing it up
@@ -146,7 +146,7 @@ What is read from WCL, and where.
 
 - **The endpoints are a proxy, not WCL**: `GRAPHQL_ENDPOINT` and `OAUTH_TOKEN_URL` both point at a Cloudflare Worker (`backend/warcraftlogs.py:15-16`). If that Worker is down, every analysis fails at the token step, even when warcraftlogs.com is up.
 - **Names are stored two ways**: `get_fights` keeps an accent-stripped `name` for matching and the raw `logName` for WCL filter expressions (`backend/warcraftlogs.py:449-454`). Filters need the raw spelling; matching uses the stripped one.
-- **Specs are read twice**: `playerDetails` gives a report-level spec (`backend/warcraftlogs.py:470-483`), while CombatantInfo gives the spec per pull, which the defensive analysis prefers (`backend/defensives.py:330-332`).
+- **Specs are read twice**: `playerDetails` gives a report-level spec (`backend/warcraftlogs.py:470-483`), while CombatantInfo gives the spec per pull, which the defensive analysis prefers (`backend/defensives.py:331-333`).
 
 ## Related
 

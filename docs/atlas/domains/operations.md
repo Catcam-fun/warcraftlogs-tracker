@@ -16,8 +16,8 @@ anchors:
   raid_cards_spread: frontend/src/AnalyzeConfig.js:21
   raid_zones_spread: frontend/src/App.js:31
   boss_order_spread: frontend/src/App.js:74
-  health_route: backend/app.py:808
-  dev_server: backend/app.py:818
+  health_route: backend/app.py:813
+  dev_server: backend/app.py:823
   supabase_client: backend/supabase_client.py:39
   supabase_startup_log: backend/supabase_client.py:40
   report_cache_budget: backend/supabase_client.py:273
@@ -27,8 +27,8 @@ anchors:
   cache_version: backend/cache.py:88
   wcl_retry: backend/warcraftlogs.py:30
   wcl_endpoints: backend/warcraftlogs.py:15
-  report_failure: backend/app.py:435
-  analyze_error_event: backend/app.py:678
+  report_failure: backend/app.py:440
+  analyze_error_event: backend/app.py:683
   catalog_build: backend/scripts/build_defensive_catalog.py:1107
   wago_cache: backend/scripts/build_defensive_catalog.py:411
 links:
@@ -46,12 +46,12 @@ invariants:
   - "MUST: rebuild spell_icons.py after rebuilding defensive_catalog.py; the icon script reads every catalog ability."
   - "MUST: bump CACHE_VERSION in cache.py when what gets fetched or how it is indexed changes, so old shared-cache rows are never served to new code."
   - "NEVER: hand-edit the generated modules (defensive_catalog.py, boss_spell_flags.py, boss_spell_text.py, spell_icons.py, armor_constants.py, raid_wide_damage.py); edit the script and rerun it."
-content_hash: sha256:b221d1c896e4e1d6f3f120e08b505ffbe881a96493aae4525dd5e1629cdf1818
+content_hash: sha256:17762dfef7e9b1f2f35b3f45bb49e919bccf756a8c2312c46d18f5659a704da3
 ---
 ## Summary
 
 - **Config is small.** The API reads seven environment variables; the build and check scripts read three more. No WarcraftLogs key lives on the server.
-- **Health** is `GET /api/health`, which returns `{"status": "healthy", "supabase": <bool>}` (`backend/app.py:808`). The site calls it as soon as it opens to start a cold Lambda copy (`frontend/src/App.js:263`).
+- **Health** is `GET /api/health`, which returns `{"status": "healthy", "supabase": <bool>}` (`backend/app.py:813`). The site calls it as soon as it opens to start a cold Lambda copy (`frontend/src/App.js:263`).
 - **Logging** is `print` to standard output with bracketed prefixes; there is no `logging` setup and no log levels.
 - **Caches evict themselves**: in-process LRUs drop the oldest entry, and the shared Supabase cache keeps itself under 200 MB.
 - **A new raid tier** is mostly data: encounter IDs and a date window in the backend, one raid entry in the frontend, art, then a fixed order of build scripts. The steps are below; `git show --stat 0e825bb` is the Season 2 example (backend raid tables, a raid-selection test, `seasonTwoRaids.js`, `AnalyzeConfig.js` and its test, `App.js`, `fp-design.css`).
@@ -72,7 +72,7 @@ Adding a raid tier, in the order the code's dependencies require. Click each ste
 - title: Landing page and art | short: Landing + art | sub: strip, backgrounds, loader
   body: Add the bosses to BOSS_STRIP with their zone label (frontend/src/LandingPage.js:11) and multi-boss slugs to its COUNCIL (frontend/src/LandingPage.js:64). Boss tiles are fetched by frontend/scripts/fetch-boss-renders.py into frontend/public/art/bosses; add the names to its BOSSES list (frontend/scripts/fetch-boss-renders.py:14), and its COUNCIL and DISPLAY_OVERRIDE if needed. Put the new tier's backgrounds in CURRENT_TIER_BACKGROUNDS and move the previous ones into BACKGROUNDS (frontend/src/LandingPage.js:84). The analysis loader video is referenced by path in App.js (frontend/src/App.js:1550). Add a line to UPDATES (frontend/src/LandingPage.js:97). See [[frontend-landing-and-art]].
 - title: Rebuild the defensive catalog | short: Catalog | sub: wago.tools, every patch
-  body: python backend/scripts/build_defensive_catalog.py builds one catalog per retail patch from 11.0.2 on, each from that patch's last build (backend/scripts/build_defensive_catalog.py:406). Set WAGO_CACHE to a folder to keep downloaded tables between runs (backend/scripts/build_defensive_catalog.py:411). Patch names as arguments do a dry run that writes nothing (backend/scripts/build_defensive_catalog.py:1128). New potions need a typical heal in POTION_TYPICAL (backend/scripts/build_defensive_catalog.py:345); the per-tier STANDARD_POTION and DEMONIC_HEALTHSTONE_MEASURED tables in backend/defensives.py:54 and backend/defensives.py:59 are maintained by hand from real logs.
+  body: python backend/scripts/build_defensive_catalog.py builds one catalog per retail patch from 11.0.2 on, each from that patch's last build (backend/scripts/build_defensive_catalog.py:406). Set WAGO_CACHE to a folder to keep downloaded tables between runs (backend/scripts/build_defensive_catalog.py:411). Patch names as arguments do a dry run that writes nothing (backend/scripts/build_defensive_catalog.py:1128). New potions need a typical heal in POTION_TYPICAL (backend/scripts/build_defensive_catalog.py:345); the per-tier STANDARD_POTION and DEMONIC_HEALTHSTONE_MEASURED tables in backend/defensives.py:55 and backend/defensives.py:60 are maintained by hand from real logs.
   gotcha: If the newest patch's spell data no longer matches the curated list, the script stops with "spell data changed; update CURATED / EFFECTS" (backend/scripts/build_defensive_catalog.py:1119). Older patches only print a note.
 - title: Rebuild the icons | short: Icons | sub: after the catalog
   body: python backend/scripts/build_spell_icons.py writes backend/spell_icons.py, the icon and description of every catalog ability. Its docstring says to rerun it after rebuilding the catalog (backend/scripts/build_spell_icons.py:10); it imports the catalog it just rebuilt.
@@ -83,7 +83,7 @@ Adding a raid tier, in the order the code's dependencies require. Click each ste
 - title: Raid-wide damage | short: Raid-wide | sub: WCL credentials
   body: WCL_CLIENT_ID=... WCL_CLIENT_SECRET=... python backend/scripts/build_raid_wide.py writes backend/raid_wide_damage.py, the boss abilities whose median occurrence hits at least half the raid (backend/scripts/build_raid_wide.py:29). Only those can make a death read as worn down by rot. It costs about 10 WarcraftLogs points per encounter (backend/scripts/build_raid_wide.py:12).
 - title: Check against real logs | short: Real-log checks | sub: every raid key
-  body: Run python -m checks all reportCode:raidKey (from backend/) on a Mythic log for each raid key, the new tier included (all runs the mitigation check too). Passing output is described on [[testing]]. If WarcraftLogs reports a spec the code does not know, the API prints "[WARN] Unknown specID" until it is added to SPEC_NAMES (backend/defensives.py:310, backend/defensives.py:363).
+  body: Run python -m checks all reportCode:raidKey (from backend/) on a Mythic log for each raid key, the new tier included (all runs the mitigation check too). Passing output is described on [[testing]]. If WarcraftLogs reports a spec the code does not know, the API prints "[WARN] Unknown specID" until it is added to SPEC_NAMES (backend/defensives.py:311, backend/defensives.py:364).
 ```
 
 ## Reference
@@ -96,7 +96,7 @@ Environment variables, from every `os.environ` lookup in the code.
 | `SUPABASE_KEY` {runtime} | `backend/supabase_client.py:28`, `backend/auth.py:21` | none | Supabase key; used for token checks, and for storage when no service-role key is set |
 | `SUPABASE_SERVICE_ROLE_KEY` {runtime} | `backend/supabase_client.py:29` | none | preferred storage key (`backend/supabase_client.py:38`); account deletion requires it (`backend/supabase_client.py:421`) |
 | `ALLOWED_ORIGINS` {runtime} | `backend/app.py:67` | `*` | comma list of site origins for CORS |
-| `PORT` {runtime} | `backend/gunicorn.conf.py:12`, `backend/app.py:819` | `5000` | listen port |
+| `PORT` {runtime} | `backend/gunicorn.conf.py:12`, `backend/app.py:824` | `5000` | listen port |
 | `WEB_CONCURRENCY` {runtime} | `backend/gunicorn.conf.py:13` | `1` | gunicorn worker processes |
 | `GUNICORN_THREADS` {runtime} | `backend/gunicorn.conf.py:15` | `16` | threads per worker |
 | `REACT_APP_API_URL` {build} | `frontend/src/api.js:9` | localhost:5000 on localhost, else the page's own host | API base URL baked in at build time |
@@ -113,11 +113,11 @@ Failure modes visible in the code, and what the user sees:
 | WarcraftLogs 429, 5xx or network error {wcl} | `backend/warcraftlogs.py:19`, `backend/warcraftlogs.py:51` | up to 3 retries with backoff 1, 2, 4 s (cap 10 s), or the `Retry-After` header capped at 30 s; token requests retry twice (`backend/warcraftlogs.py:120`) |
 | Roster query slow or failing {wcl} | `backend/warcraftlogs.py:290`, `backend/app.py:175` | 40 s timeout, one retry; on failure everyone in the reports counts and the stream says so |
 | A report's full fight data cannot be read {wcl} | `backend/app.py:262` | its pulls go to another log's copy of the same pull if one exists, else they are left out; the report is not listed as failed |
-| One report cannot be read {wcl} | `backend/app.py:435`, `backend/app.py:465` | its pulls get no deaths, its code goes in `meta.failedReports`, and a warning line is streamed |
-| Defensive or hit data fails {wcl} | `backend/app.py:406`, `backend/app.py:469` | deaths still count; a warning says WarcraftLogs may be rate-limiting the key |
+| One report cannot be read {wcl} | `backend/app.py:440`, `backend/app.py:470` | its pulls get no deaths, its code goes in `meta.failedReports`, and a warning line is streamed |
+| Defensive or hit data fails {wcl} | `backend/app.py:411`, `backend/app.py:474` | deaths still count; a warning says WarcraftLogs may be rate-limiting the key |
 | No reports, or no fights at that difficulty {wcl} | `backend/app.py:200`, `backend/app.py:282` | the stream ends with an error message |
-| Anything else inside the analysis {wcl} | `backend/app.py:678` | traceback printed; the stream ends with `{"error": ...}`, HTTP status stays 200 |
-| Supabase not configured {supabase} | `backend/supabase_client.py:39` | `db` is `None`; saves return "Database not configured" as HTTP 500 (`backend/app.py:740`); shares are kept in process memory for 72 h (`backend/supabase_client.py:222`); the report cache is skipped |
+| Anything else inside the analysis {wcl} | `backend/app.py:683` | traceback printed; the stream ends with `{"error": ...}`, HTTP status stays 200 |
+| Supabase not configured {supabase} | `backend/supabase_client.py:39` | `db` is `None`; saves return "Database not configured" as HTTP 500 (`backend/app.py:745`); shares are kept in process memory for 72 h (`backend/supabase_client.py:222`); the report cache is skipped |
 | Supabase insert for a share fails {supabase} | `backend/supabase_client.py:240` | falls back to memory; the response carries `ephemeral: true` |
 | Shared report cache errors {supabase} | `backend/supabase_client.py:315` | treated as a miss, and the shared cache is skipped for 5 minutes |
 | Sign-in check unreachable {supabase} | `backend/auth.py:38` | treated as signed out: cheat-death detection is off and signed-in routes refuse |
@@ -127,7 +127,7 @@ Failure modes visible in the code, and what the user sees:
 
 | Concern | This domain | Source |
 |---|---|---|
-| Health | `GET /api/health` returns status and whether Supabase is configured (`backend/app.py:808`) | code |
+| Health | `GET /api/health` returns status and whether Supabase is configured (`backend/app.py:813`) | code |
 | Startup log | `[Startup] Supabase storage configured: <bool> (service role: <bool>)` (`backend/supabase_client.py:40`) | stdout |
 | Log prefixes | `[Retry]`, `[WARN]`, `[ERROR]`, `[ReportCache]`, `[Share]`, `[Saved]`, `[Auth]`, `[Delete Account]` | stdout via `print` |
 | Finished reports | a report whose last event is over 2 hours old is treated as finished and cached (`backend/app.py:46`) | code |
