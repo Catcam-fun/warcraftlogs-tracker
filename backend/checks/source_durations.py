@@ -15,6 +15,10 @@ EXTENDED_BY = {"Survival of the Fittest": "Exhilaration"}
 # Auras the spec extends mid-fight by playing (the owner's rule: Dancing Rune Weapon and
 # Metamorphosis can read longer without affecting verdicts), so a longer use is not a missing talent.
 EXTENDED_MID_FIGHT = {"Dancing Rune Weapon", "Metamorphosis"}
+# Auras that last while a pet is out end when it despawns, a moment after its time: Earth Elemental's +15% max
+# health (381755) ran 30.2-30.6 s on a Shaman without Everlasting Elements and 36.2-36.7 s on one with it
+# (30 s, x1.2) in P6CwHkgFR9Krf1Bz (12.0.7). Extra ms allowed past the predicted end:
+DESPAWN_LAG_MS = {"Earth Elemental": 1_000}
 
 
 def carried_over(presses, want):
@@ -41,11 +45,22 @@ def check(run):
     casts = defaultdict(list)
     for e in raw["casts"]:
         casts[(e.get("sourceID"), meta["abilities"].get(e.get("abilityGameID")))].append(e["timestamp"])
+    # Casts that lengthen a defensive while it is up (Zealot's Paragon: Judgment and Hammer of Wrath on
+    # Sentinel), which the site reads only inside death windows: one more Casts query over the pulls.
+    lengthening = defaultdict(list)          # (player, spell) -> cast times
+    extend_ids = getattr(cat, "extend_ids", None)
+    extend_ids = sorted(extend_ids) if isinstance(extend_ids, (set, frozenset)) else []
+    if extend_ids:
+        for e in defensives._paged(run.token, run.code, "Casts",
+                                   f"type = \"cast\" and ability.id in ({', '.join(map(str, extend_ids))})",
+                                   fight_ids=ids, start_time=min(f["start_time"] for f in fights),
+                                   end_time=max(f["end_time"] for f in fights) + 1):
+            lengthening[(e.get("sourceID"), e.get("abilityGameID"))].append(e["timestamp"])
     res = defaultdict(lambda: {"n": 0, "exact": 0, "early": 0, "extended": 0, "longer": []})
     up = {}
     for e in sorted(raw["buffs"], key=lambda e: e["timestamp"]):
         aid = e.get("abilityGameID")
-        name = meta["abilities"].get(aid)
+        name = defensives.aura_name(cat, aid, meta["abilities"])      # the aura carrying the effect
         sid = cat.name_to_id.get(name)
         entry = cat.all.get(sid) if sid else None
         if not entry or entry["kind"] != "personal" or not entry.get("duration_mods"):
@@ -66,11 +81,16 @@ def check(run):
                 continue
             spec = defensives.pull_spec(idx, fid, pid, (meta["player_details"].get(pid) or {}).get("spec"))
             want = defensives._talented_duration(entry, talents, spec)
+            ext = entry.get("extended_by")
+            rank = defensives._mod_rank(ext, talents, spec) if ext else 0
+            if rank:
+                want = defensives._extended_ms(want, ext["ms"] * rank,
+                                               [t for c in ext["casts"] for t in lengthening[(pid, c)]], presses[-1])
             carried = carried_over(presses, want)
             got = e["timestamp"] - presses[-1]
             r = res[name]
             r["n"] += 1
-            if want - TOLERANCE_MS <= got <= want + carried + TOLERANCE_MS:
+            if want - TOLERANCE_MS <= got <= want + carried + TOLERANCE_MS + DESPAWN_LAG_MS.get(name, 0):
                 r["exact"] += 1
             elif got < want:
                 r["early"] += 1
