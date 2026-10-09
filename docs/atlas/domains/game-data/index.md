@@ -36,7 +36,7 @@ invariants:
   - "MUST: a new raid is added to RAID_ENCOUNTERS before the boss-side scripts run, since all four read it."
 flows:
   - data-build-path
-content_hash: sha256:431abbe72b376885ec9c2f66d570c4d7a5b15fe7bb63be11a25a7ebf59f9aad6
+content_hash: sha256:d05e502228841cfe418dc00ad90216df1360354cad404c894024d49dceeca8f0
 ---
 ## Summary
 
@@ -120,7 +120,7 @@ band structural "Committed to the repo"
 
 - **The files are huge**: `defensive_catalog.py` is over 22,000 lines and `boss_spell_text.py` nearly 8,000. Read the build script, or the header and top-level names, rather than the whole file.
 - **Every wago script shares one downloader**: `build_boss_spell_flags.py`, `build_boss_spell_text.py` and `build_spell_icons.py` import `table` (and `patches`) from `build_defensive_catalog.py` (`backend/scripts/build_boss_spell_flags.py:23`, `backend/scripts/build_boss_spell_text.py:31`, `backend/scripts/build_spell_icons.py:24`), so `WAGO_CACHE` speeds all of them.
-- **Icons are a wago fact served from Blizzard**: `build_spell_icons.py` reads icon file names from wago.tools only; the images are loaded by the browser from render.worldofwarcraft.com, with WCL's `assets.rpglogs.com` as the fallback (`frontend/src/DeathRow.js:22`, `frontend/src/DeathRow.js:215`).
+- **Icons are a wago fact served from Blizzard**: `build_spell_icons.py` reads icon file names from wago.tools only; the images are loaded by the browser from render.worldofwarcraft.com, with WCL's `assets.rpglogs.com` as the fallback (`frontend/src/DeathRow.js:22`, `frontend/src/DeathRow.js:216`).
 - **Tests pin some of the output**: every catalog ability must have an icon (`backend/test_defensives.py:547-550`), catalog specs must exist in `SPEC_NAMES` (`backend/test_defensives.py:642-645`), and the boss text renderer has its own tests (`backend/test_boss_spell_text.py:25-34`).
 
 ## Related
