@@ -138,6 +138,7 @@ export function whyText(d, hitName) {
     case 'notBranded': return 'no enemy it could brand (one the raid attacked) hit them in time for it to help';
     case 'brandUnknown': return 'the log didn\'t say which enemies the raid could attack, so this can\'t be checked';
     case 'staggerUnknown': return 'it depends on whether a purify came before or after a staggered hit, and the log doesn\'t say';
+    case 'soulburnUnknown': return 'only with Soulburn first, and the log doesn\'t show whether they had a Soul Shard for it';
     case 'stagger': return 'a reduction does nothing to a Stagger tick as it lands, and it couldn\'t have been up for the hits that filled the pool';
     case 'fullHealth': return 'They were at full health, so a heal can\'t help';
     case 'aoeUnknown': return 'This log doesn\'t mark area damage, so this can\'t be checked';
@@ -433,6 +434,7 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
         )}
         {talents.length > 0 && <TalentRows talents={talents} />}
         {det?.soulwell && <div className="note">Not used in this log, but a Warlock's Soulwell had one for them.</div>}
+        {det?.soulburn && <div className="note">With Soulburn pressed first: the log shows a Soul Shard and Soulburn ready then.</div>}
         {withForm[name] && <div className="note">Needs {withForm[name]}: checked as shifting into it first.</div>}
         <p className="desc">{det?.source === 'log' && det.samples
           ? (inf?.cooldownMs ? `${secs(inf.cooldownMs)} cooldown.` : '')
