@@ -125,6 +125,8 @@ def predicted_keep(comps, e, aoe, schools, size=None):
     for c in comps or []:
         if not (c.get("dr") or c.get("dr_missing")):
             continue
+        if c.get("stacks"):
+            return None, None            # a value per stack (Sentinel): a hit's aura list has no stack count
         if c.get("school") == "aoe":
             applies = hit_is_aoe(e, aoe)
         else:

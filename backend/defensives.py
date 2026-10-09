@@ -104,12 +104,20 @@ class Catalog:
         # Spells that bring a tracked defensive back early (Cold Snap, Black Ox Brew): their casts are read too.
         self.reset_ids = frozenset(r["spell"] for d in self.tracked.values() for r in d.get("reset_by", ()))
         self.cast_ids = sorted(set(self.tracked) | set(self.consumable) | self.reset_ids)
+        # Casts that lengthen a tracked defensive (Zealot's Paragon: Judgment and Hammer of Wrath on
+        # Sentinel), read from the death windows (fetch_death_windows), not the report-wide casts.
+        self.extend_ids = frozenset(c for d in self.tracked.values() for c in (d.get("extended_by") or {}).get("casts", ()))
         self.longest_cooldown_ms = max((d["cooldown_ms"] for d in self.tracked.values()), default=0)
         # Shields a talent adds to a button (Matted Fur): scored from their real size in the log.
         self.observed_auras = sorted({c["aura"] for d in self.all.values() for c in d.get("mitigation") or ()
                                       if isinstance(c, dict) and c.get("aura")})
+        # Buttons whose effect is an aura of its own (Earth Elemental: 381755): aura -> the button's name; only
+        # those auras say the button's effect is up, not the button's same-named aura.
+        self.aura_owner = {int(a): d["name"] for d in self.all.values() for a in d.get("auras") or {}}
+        self.effect_aura_names = {d["name"]: set((d.get("auras") or {}).values()) for d in self.all.values()
+                                  if d.get("auras")}
         self.buff_names = sorted({d["name"] for d in list(self.personal.values()) + list(self.external.values())}
-                                 | set(self.observed_auras))
+                                 | set(self.observed_auras) | {n for ns in self.effect_aura_names.values() for n in ns})
         heal = HEALING_TAKEN.get(patch, {})
         # A Brewmaster's purifies in this patch (the Stagger pool: _stagger_pools).
         self.stagger_purify = STAGGER_PURIFY.get(patch) or STAGGER_PURIFY[LATEST]
@@ -122,6 +130,8 @@ class Catalog:
         for d in self.all.values():
             entries.update(d["talent_entries"], d.get("replaced_by_entries", ()))
             entries.update(((d.get("needs_form") or {}).get("unless") or {}).get("entries", ()))
+            entries.update((d.get("needs") or {}).get("entries", ()))
+            entries.update((d.get("extended_by") or {}).get("entries", ()))
             for c in d.get("mitigation") or []:
                 if isinstance(c, dict) and c.get("needs"):
                     entries.update(c["needs"].get("entries", ()))
@@ -147,6 +157,31 @@ class Catalog:
 
 
 _CATALOGS = {p: Catalog(p) for p in CATALOGS}
+
+
+def aura_name(cat, aid, ability_names):
+    """The catalog name an aura in the log stands for: its own name, the button's for an aura that carries a
+    button's effect (Earth Elemental's 381755, "Primordial Bond" in Midnight), None for a button's
+    same-named aura that doesn't (Earth Elemental's 198103)."""
+    owner, effect = effect_auras(cat)
+    if aid in owner:
+        return owner[aid]
+    name = ability_names.get(aid)
+    return None if name in effect else name
+
+
+def effect_aura_ids(cat):
+    """{button: its effect auras' IDs} of a catalog (Earth Elemental: {381755}); empty for a stand-in."""
+    out = defaultdict(set)
+    for aid, name in effect_auras(cat)[0].items():
+        out[name].add(aid)
+    return dict(out)
+
+
+def effect_auras(cat):
+    """(aura -> button, button -> names of its effect auras) of a catalog; empty for a stand-in without them."""
+    owner, names = getattr(cat, "aura_owner", None), getattr(cat, "effect_aura_names", None)
+    return (owner if isinstance(owner, dict) else {}), (names if isinstance(names, dict) else {})
 
 
 def catalog_for(report_start_ms=None):
@@ -186,6 +221,7 @@ def ability_info(cat, name):
             "effect": [{k: (round(v, 3) if isinstance(v, float) else v) for k, v in c.items() if v is not None}
                        for c in comps or ()],
             **({"typicalHeal": typical} if typical else {}),
+            **({"needs": entry["needs"]["talent"]} if entry.get("needs") else {}),
             **({"description": CATALOG_DESCRIPTIONS[name]} if name in CATALOG_DESCRIPTIONS else {})}
 
 
@@ -417,10 +453,19 @@ def index_defensive_events(raw, cat=None):
 # PER-DEATH ANALYSIS
 # =============================================================================
 
-def _has_ability(sid, entry, player_class, spec, talent_entries, cast_ids_in_report, pressed_this_pull=()):
+def _has_ability(sid, entry, player_class, spec, talent_entries, cast_ids_in_report, pressed_this_pull=(),
+                 effect_seen=False):
+    """`effect_seen`: the aura carrying the button's effect was on them in this log (Earth Elemental's
+    381755), which proves the talent the button needs."""
     if talent_entries is not None:
         talent_entries = set(talent_entries)
     if entry["class"] != player_class:
+        return False
+    if entry.get("needs") and not effect_seen and \
+            not (talent_entries and _rank(talent_entries, entry["needs"]["entries"])):
+        # A defensive only with a talent (Midnight's Earth Elemental with Primordial Bond): pressing the
+        # button proves they have it, not the talent; unknown talents with no effect aura seen count as
+        # not having it.
         return False
     if sid in pressed_this_pull:
         return True    # pressing it this pull proves they have it, whatever the talent record says
@@ -443,9 +488,11 @@ def _spec_matches(spec, specs):
 
 
 def _mod_rank(mod, talent_entries, spec):
-    """How many times a modifier applies to this player: talent rank, or 1 for their spec's passive."""
-    if mod.get("specs"):
-        return 1 if spec and _spec_matches(spec, mod["specs"]) else 0
+    """How many times a modifier applies to this player: talent rank, or 1 for their spec's passive.
+    A modifier can be both (Improved Prismatic Barrier in The War Within: an Arcane spec passive and a
+    talent entry): either gives it, once."""
+    if mod.get("specs") and spec and _spec_matches(spec, mod["specs"]):
+        return max(1, _rank(talent_entries, mod.get("entries", ())))
     return _rank(talent_entries, mod.get("entries", ()))
 
 
@@ -666,7 +713,7 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
     own_events = (buff_events or {}).get(player_id, [])
 
     def max_ms(aid):
-        sid = cat.name_to_id.get(ability_names.get(aid))
+        sid = cat.name_to_id.get(aura_name(cat, aid, ability_names))
         return cat.all[sid].get("aura_ms") if sid else None
 
     if killing is not None:
@@ -675,15 +722,16 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
             if ts > death_ts:
                 break
             if typ in ("applybuff", "refreshbuff", "applybuffstack"):
-                casters[ability_names.get(aid)] = src
+                casters[aura_name(cat, aid, ability_names)] = src
         for aid in _auras(killing):
-            name = ability_names.get(aid)
+            name = aura_name(cat, aid, ability_names)
             if name in cat.name_to_id:
                 active[name] = casters.get(name)
     elif buff_events is not None:
         for aid, src in _buffs_active_at(death_ts, own_events, max_ms).items():
-            if ability_names.get(aid) in cat.name_to_id:
-                active[ability_names.get(aid)] = src
+            name = aura_name(cat, aid, ability_names)
+            if name in cat.name_to_id:
+                active[name] = src
     active_names = set(active)
 
     result = {"active": [], "available": [], "cooldown": [], "talentsKnown": talent_entries is not None,
@@ -719,8 +767,11 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
     else:
         long_since = fight_start
         long_resets = sorted(set((pull_starts or {}).values()) | {fight_start})
+    owner, _ = effect_auras(cat)
+    effect_seen = {owner[e[2]] for e in own_events if e[2] in owner} | (active_names & set(owner.values()))
     for sid, entry in cat.tracked.items():
-        if not _has_ability(sid, entry, player_class, spec, talent_entries, casts_by_spell, pressed_this_pull):
+        if not _has_ability(sid, entry, player_class, spec, talent_entries, casts_by_spell, pressed_this_pull,
+                            entry["name"] in effect_seen):
             continue
         name = entry["name"]
         if name in active_names:
@@ -974,9 +1025,13 @@ WINDOW_HEAL_IDS = frozenset(set(KILLING_HIT_HEALS) | {a for a in KILLING_HIT_HEA
 # And a Brewmaster's Stagger pool: their staggered amounts (STAGGER_AURA absorbs) and ticks, from up to
 # STAGGER_LOOKBACK_MS before each window (the ticks inside it come with the hits).
 WINDOW_EXTRAS_IDS = sorted(WINDOW_HEAL_IDS | STACK_SIZED | LOADOUT_SIZED | {STAGGER_AURA, STAGGER_TICK})
+# And the dying players' own casts of buttons that lengthen a defensive while it is up (Zealot's Paragon:
+# Judgment and Hammer of Wrath on Sentinel), in any patch's catalog: the replay presses inside the window,
+# so only the casts inside it matter.
+WINDOW_CAST_IDS = sorted({c for cat in _CATALOGS.values() for c in cat.extend_ids})
 AURA_EVENTS = {"applybuff", "applybuffstack", "removebuffstack", "removebuff",
                "applydebuff", "applydebuffstack", "removedebuffstack", "removedebuff"}
-WINDOW_TYPES = {"damage", "heal", "absorbed"} | AURA_EVENTS
+WINDOW_TYPES = {"damage", "heal", "absorbed", "cast"} | AURA_EVENTS
 # What is kept of a heal or aura event (fetch_death_windows).
 HEAL_FIELDS = ("timestamp", "type", "sourceID", "targetID", "abilityGameID", "fight", "amount", "stack",
                "attackerID", "extraAbilityGameID")
@@ -985,8 +1040,8 @@ HIT_FIELDS = ("timestamp", "type", "sourceID", "sourceInstance", "targetID", "ab
               "isAoE", "resourceActor", "hitPoints", "maxHitPoints", "armor")
 # For the windows' cache key in app.py: windows cached with other extras or without a field kept
 # here (sourceInstance, for Fiery Brand's unit) are not reused.
-WINDOW_EXTRAS_KEY = hashlib.sha1(repr((WINDOW_EXTRAS_IDS, HIT_FIELDS, HEAL_FIELDS, STAGGER_LOOKBACK_MS,
-                                       PURIFYING_BREW)).encode()).hexdigest()[:12]
+WINDOW_EXTRAS_KEY = hashlib.sha1(repr((WINDOW_EXTRAS_IDS, WINDOW_CAST_IDS, HIT_FIELDS, HEAL_FIELDS,
+                                       STAGGER_LOOKBACK_MS, PURIFYING_BREW)).encode()).hexdigest()[:12]
 
 
 def _events_query(blocks, resources=True):
@@ -1085,9 +1140,11 @@ def fetch_death_windows(token, report_code, pulls, heals=True):
         every = [d for _, ds in pulls for d in ds]
         names = sorted({n for _, n in every if n})
         who = ", ".join(json.dumps(n, ensure_ascii=False) for n in names)
-        # Purifying Brew casts have no target (-1): read by their caster.
+        # Casts have no target or the enemy's: read by their caster (a Brewmaster's Purifying Brew, and the
+        # buttons that lengthen a defensive: WINDOW_CAST_IDS).
+        casts = ", ".join(map(str, sorted({PURIFYING_BREW} | set(WINDOW_CAST_IDS))))
         flt = (f"(target.name in ({who}) and ability.id in ({', '.join(map(str, WINDOW_EXTRAS_IDS))}))"
-               f" or (source.name in ({who}) and type = 'cast' and ability.id = {PURIFYING_BREW})")
+               f" or (source.name in ({who}) and type = 'cast' and ability.id in ({casts}))")
         blocks["extras"] = ([fid for fid, _ in pulls],
                             max(min(t for t, _ in every) - LETHAL_WINDOW_MS - STAGGER_LOOKBACK_MS, 0),
                             max(t for t, _ in every) + KILLING_BLOW_AFTER_MS + 1, "All", flt)
@@ -1117,8 +1174,9 @@ def fetch_death_windows(token, report_code, pulls, heals=True):
                if e.get("type") != "damage" or (e.get("targetID"), e.get("timestamp")) not in seen]
     out = index_hits(events)
     for e in events:
-        if e.get("type") == "cast" and e.get("sourceID") is not None:      # Purifying Brew, by its caster
-            out.setdefault(e["sourceID"], []).append({k: e[k] for k in HEAL_FIELDS if k in e})
+        if e.get("type") == "cast":
+            if e.get("sourceID") is not None:        # the caster's own (Purifying Brew; Judgment on the enemy)
+                out.setdefault(e["sourceID"], []).append({k: e[k] for k in HEAL_FIELDS if k in e})
         elif e.get("type") in WINDOW_TYPES - {"damage"} and e.get("targetID") is not None:
             out.setdefault(e["targetID"], []).append({k: e[k] for k in HEAL_FIELDS if k in e})
     for hits in out.values():
@@ -1556,9 +1614,18 @@ def _resolve(entry, talent_entries, observed_absorbs, spec=None, applied=None):
                                 **({"school": c["school"]} if c.get("school") else {})})
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 value = value * rank
-        extra = {k: c[k] for k in ("over_ms", "ticks", "current", "replaces_form", "from_target", "dr_hit") if k in c}
+        extra = {k: c[k] for k in ("over_ms", "ticks", "current", "replaces_form", "from_target", "dr_hit", "share",
+                                   "stacks", "decay_end_ms", "decay_after_ms", "tick_ms", "first_tick") if k in c}
+        if "decay_after_ms" in extra:
+            # The wait before the stacks drop shrinks with the talents that shorten the aura (Righteous
+            # Protector: "$389539s14/1000*(1-$204074s2/100)"), not with those that lengthen it.
+            for m in entry.get("duration_mods", ()):
+                rank = _mod_rank(m, talent_entries, spec)
+                if rank and m.get("mult", 1) < 1:
+                    extra["decay_after_ms"] *= 1 + (m["mult"] - 1) * rank
         if seen:
-            out.append({"absorb_amount": seen, "school": c.get("school")})
+            out.append({"absorb_amount": seen, "school": c.get("school"),
+                        **({"share": c["share"]} if "share" in c else {})})
             continue
         if value is None:
             return None, []              # only scored from a real shield size, and none was seen
@@ -1833,13 +1900,19 @@ class _Window:
         self.points = _Points(_health_points(hits))
         self.stagger = stagger
         self.full = []
+        # What the player's real shields absorbed of each hit as counted in `full` (Stagger's part left
+        # out): a shield that takes a share (Celestial Infusion) takes it of what they left.
+        self.shielded = []
         for k, h in enumerate(hits):
             if stagger is None or _stagger_tick(h):
                 self.full.append(_full_hit(h))
+                self.shielded.append(h.get("absorbed") or 0)
             elif k in stagger:
                 self.full.append(max(_full_hit(h) - stagger[k][0], 0))
+                self.shielded.append(max((h.get("absorbed") or 0) - stagger[k][0], 0))
             else:
                 self.full.append((h.get("amount") or 0) + (h.get("overkill") or 0))
+                self.shielded.append(0)
         self.known = [h.get("resourceActor") == 2 and bool(h.get("maxHitPoints")) for h in hits]
         self.before = []
         for h, known in zip(hits, self.known):
@@ -1872,7 +1945,8 @@ def _option(entry_name, comps, dur_ms, legacy_ticks=None):
     Effects last the aura's duration; without one (Bear Form, Soulburn's health)
     they're up until the death. Heals land when pressed, or over time.
     """
-    opt = {"name": entry_name, "lasting": [], "instant": [], "hots": []}
+    opt = {"name": entry_name, "lasting": [], "instant": [], "hots": [],
+           "comps": comps, "dur_ms": dur_ms, "legacy_ticks": legacy_ticks, "extend": None}
     for c in comps or ():
         if "heal" in c or "heal_amount" in c:
             over = c.get("over_ms") or (dur_ms if legacy_ticks else None)
@@ -1880,9 +1954,71 @@ def _option(entry_name, comps, dur_ms, legacy_ticks=None):
                 opt["hots"].append((c, c.get("ticks") or legacy_ticks or 1, over))
             else:
                 opt["instant"].append(c)
+        elif c.get("stacks") and dur_ms:
+            opt["lasting"] += _stack_layers(c, dur_ms)
         else:
             opt["lasting"].append((c, dur_ms))
     return opt
+
+
+STACK_DROP_MS = 1_000            # Sentinel's stacks drop one a second
+
+
+def _stack_layers(c, dur_ms):
+    """A per-stack effect whose stacks drop one a second (Sentinel), as lasting effects that run out one
+    after another: [(comp, ms)]. "After X sec, you will begin to lose 1 stack per second": X is
+    `decay_after_ms` after the press, or `decay_end_ms` before the aura ends, and the k-th stack goes k
+    seconds after X, so the last one goes as the aura ends when X + 15 s is its duration (16 s and "After
+    ${$d-15} sec" in The War Within, 20 s and 5 s from 12.0.5); the aura's end takes every stack left. Holy
+    Power spent only delays the drop, so the real stacks were never fewer. Reductions are layered so the
+    ones up multiply to exactly the stacks' sum (n stacks of 2%: 1 - 0.02n); max health adds per stack
+    (each group runs out on its own)."""
+    n = c["stacks"]
+    start = c["decay_after_ms"] if "decay_after_ms" in c else dur_ms - c.get("decay_end_ms", 0)
+    start = max(start, 0)
+    drops = [min(start + k * STACK_DROP_MS, dur_ms) for k in range(1, n + 1)]
+    field = "dr" if "dr" in c else "hp" if "hp" in c else None
+    base = {k: v for k, v in c.items() if k not in ("stacks", "decay_after_ms", "decay_end_ms", "dr", "hp")}
+    layers, j = [], n
+    for ms in sorted(set(drops)):
+        count = drops.count(ms)              # stacks (from the top) that drop at this moment
+        lo, j = j - count, j - count         # layers lo+1 .. lo+count
+        v = c[field]
+        if field == "dr":
+            value = 1 - (1 - (lo + count) * v) / (1 - lo * v)
+        else:
+            value = count * v
+        layers.append((dict(base, **{field: value}), ms))
+    return layers
+
+
+def _at_press(opt, press):
+    """The option as pressed at `press`: an aura that each cast of some buttons lengthens (Zealot's Paragon:
+    Judgment and Hammer of Wrath on Sentinel; `extend` = (ms a cast, the player's cast times)) lasts its
+    duration plus that much for every such cast while it is up, a cast at or after the press counting."""
+    if not opt.get("extend") or not opt.get("dur_ms") or opt["dur_ms"] < 0:
+        return opt
+    dur = _extended_ms(opt["dur_ms"], *opt["extend"], press)
+    return opt if dur == opt["dur_ms"] else _option(opt["name"], opt["comps"], dur, opt["legacy_ticks"])
+
+
+def _extended_ms(dur_ms, ms, casts, press):
+    """How long an aura pressed at `press` lasts when each cast in `casts` while it is up adds `ms`."""
+    end = press + dur_ms
+    for t in sorted(casts):
+        if press <= t < end:
+            end += ms
+    return end - press
+
+
+def _tick_times(c, ticks, over, press):
+    """When a heal over time's ticks land: evenly over its duration, the last as it ends; or, with the
+    game's tick period (`tick_ms`) and a tick as it is pressed (`first_tick`: as Soul Immolation's 6 ticks
+    in 5 s on every press in the logs), at the press and every period after."""
+    if c.get("tick_ms"):
+        first = 0 if c.get("first_tick") else 1
+        return [press + c["tick_ms"] * (k + first) for k in range(ticks)]
+    return [press + over / ticks * (k + 1) for k in range(ticks)]
 
 
 def _simulate(options, press, win, kb_index, credit="least"):
@@ -1903,6 +2039,7 @@ def _simulate(options, press, win, kb_index, credit="least"):
     (_stagger_pools), the one that credits "least" or "most".
     """
     hits, points = win.hits, win.points
+    options = [_at_press(o, press) for o in options]
     stagger = win.stagger or {}
     cut = 0.0                 # share of the Stagger pool the presses cut off (ticks and purifies keep it)
     lasting = [(c, press + ms if ms else float("inf")) for o in options for c, ms in o["lasting"]]
@@ -1928,8 +2065,10 @@ def _simulate(options, press, win, kb_index, credit="least"):
         extra += gain
         dmax += grow
         expiries.append((until, gain, grow))
-    shields = [[c.get("absorb", 0) * max_now + c.get("absorb_amount", 0), c, until]
-               for c, until in lasting if c.get("absorb") or c.get("absorb_amount")]
+    # A shield with a "share" (Celestial Infusion) takes only that share of what the others left.
+    shields = sorted([[c.get("absorb", 0) * max_now + c.get("absorb_amount", 0), c, until]
+                      for c, until in lasting if c.get("absorb") or c.get("absorb_amount")],
+                     key=lambda sh: sh[1].get("share") is not None)
     # Reductions, immunities and armor up, dropped as they run out (in that order).
     covering = [c for c, _ in lasting if any(f in c for f in ("immune", "armor", "dr", "dr_missing"))]
     ends = sorted(((until, c) for c, until in lasting if c in covering and until != float("inf")),
@@ -1945,11 +2084,11 @@ def _simulate(options, press, win, kb_index, credit="least"):
             heals.append((press, (c.get("heal", 0) * max_now + c.get("heal_amount", 0)), c.get("boosted")))
         for c, ticks, over in o["hots"]:
             total = c.get("heal", 0) * max_now + c.get("heal_amount", 0)
-            heals += [(press + over / ticks * (k + 1), total / ticks, c.get("boosted")) for k in range(ticks)]
+            heals += [(at, total / ticks, c.get("boosted")) for at in _tick_times(c, ticks, over, press)]
     heals.sort(key=lambda x: x[0])
     kb_ts = hits[kb_index]["timestamp"]
-    hot_ticks = sum(1 for o in options for _, ticks, over in o["hots"]
-                    for k in range(ticks) if press + over / ticks * (k + 1) < kb_ts)
+    hot_ticks = sum(1 for o in options for c, ticks, over in o["hots"]
+                    for at in _tick_times(c, ticks, over, press) if at < kb_ts)
     hi = 0
 
     def land_heals(until_t):
@@ -2002,7 +2141,9 @@ def _simulate(options, press, win, kb_index, credit="least"):
             cut = (max(mixes) if credit == "most" else min(mixes)) if mixes else min(cut, 1 - keep)
         for sh in shields:
             if sh[0] > 0 and sh[2] >= t and left > 0 and win.applies(sh[1], k):
-                took = min(sh[0], left)
+                share = sh[1].get("share")
+                # A share shield takes its share of what the real shields (up to what they took) left too.
+                took = min(sh[0], left if share is None else max(left - win.shielded[k], 0) * share)
                 sh[0] -= took
                 left -= took
         extra += dmg - left
@@ -2421,6 +2562,8 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
                    or (h.get("type") in AURA_EVENTS and h.get("abilityGameID") in WINDOW_HEAL_IDS)]
     aura_events = [h for h in hits or () if h.get("type") in AURA_EVENTS]
     purifies = [h for h in hits or () if h.get("type") == "cast" and h.get("abilityGameID") == PURIFYING_BREW]
+    # The player's own casts that lengthen a defensive (fetch_death_windows: Judgment, Hammer of Wrath).
+    own_casts = [h for h in hits or () if h.get("type") == "cast"]
     hits = [h for h in hits or ()
             if h.get("type") not in ("heal", "absorbed", "cast") and h.get("type") not in AURA_EVENTS]
     killing = _killing_blow(hits, death_ts)
@@ -2517,6 +2660,11 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
         dur = (aura_ms or {}).get(name) if not entry.get("estimated") else None
         legacy = HEAL_OVER_TIME.get(name) if dur else None
         opts = [_option(name, comps, dur, legacy)]
+        ext = entry.get("extended_by")
+        rank = _mod_rank(ext, talent_entries, spec) if ext else 0
+        if rank:
+            opts[0]["extend"] = (ext["ms"] * rank, [c["timestamp"] for c in own_casts
+                                                    if c.get("abilityGameID") in ext["casts"]])
         if name in (forms or {}):
             # Needs a form first (Frenzied Regeneration needs Bear Form): judged with it.
             form_comps, _ = _resolve(forms[name], talent_entries, observed_absorbs or {}, spec, applied)

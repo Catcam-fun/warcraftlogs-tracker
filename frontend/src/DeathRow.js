@@ -88,7 +88,9 @@ function effectText(effect, info) {
       ? ` ${secs(info.cooldownMs)} cooldown${info.charges > 1 ? `, ${info.charges} charges` : ''}.` : '';
     return info.description + cd;
   }
-  const parts = (effect || []).map((c) => {
+  // Sentinel: a value per stack, the stacks dropping one a second (the per-stack values are listed once).
+  const stacked = (effect || []).filter((c) => c.stacks);
+  const parts = (effect || []).filter((c) => !c.stacks).map((c) => {
     const scope = typeof c.school === 'number' ? `${schoolScope(c.school)} ` : SCOPE[c.school] || '';
     const over = c.over_ms ? ` over ${secs(c.over_ms)}` : '';
     if (c.immune) return c.school === 'melee' ? 'Dodges all melee attacks' : `Immune to ${scope}damage`;
@@ -98,6 +100,7 @@ function effectText(effect, info) {
     if (c.dr_missing) return `Reduces damage taken by up to ${pct(c.dr_missing)} more, the lower their health`;
     if (c.armor) return `Increases armor by ${pct(c.armor)}`;
     if (c.absorb) return `Absorbs ${scope}damage equal to ${pct(c.absorb)} of max health`;
+    if (c.absorb_amount && c.share) return `Absorbs ${pct(c.share)} of each hit, up to ${fmt(c.absorb_amount)}`;
     if (c.absorb_amount) return `Absorbs ${fmt(c.absorb_amount)} ${scope}damage`;
     if (c.hp) return c.current ? `Increases current and max health by ${pct(c.hp)}` : `Increases max health by ${pct(c.hp)}`;
     if (c.heal) return `Heals ${pct(c.heal)} of max health${over}`;
@@ -105,8 +108,14 @@ function effectText(effect, info) {
     if (c.heal_taken) return `Increases healing received by ${pct(c.heal_taken)}`;
     return null;
   }).filter(Boolean);
+  if (stacked.length) {
+    const per = stacked.map((c) => (c.dr ? `${pct(c.dr)} less damage taken` : c.hp ? `${pct(c.hp)} max health` : null))
+      .filter(Boolean).join(' and ');
+    parts.push(`${stacked[0].stacks} stacks, each ${per}, dropping one a second near the end`);
+  }
   if (!parts.length && info?.typicalHeal) parts.push(`Heals about ${fmt(info.typicalHeal)}`);
   let text = parts.join('. ');
+  if (info?.needs && text) text = `With ${info.needs}: ${text.charAt(0).toLowerCase()}${text.slice(1)}`;
   if (info?.auraMs && text) text += ` for ${secs(info.auraMs)}`;
   if (info?.cooldownMs) {
     text += `${text ? '. ' : ''}${secs(info.cooldownMs)} cooldown`;

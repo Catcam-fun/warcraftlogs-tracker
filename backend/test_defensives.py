@@ -671,7 +671,8 @@ class AoeByAbilityTests(unittest.TestCase):
 
     def test_classes_with_an_aoe_only_effect(self):
         self.assertEqual(defensives.aoe_classes(defensives._CATALOGS["12.1.0"]), {"Rogue"})
-        self.assertEqual(defensives.aoe_classes(defensives._CATALOGS["11.1.7"]), {"Rogue"})
+        # The War Within's Merely a Setback (5% avoidance on a Mage barrier) brings Mages in there.
+        self.assertEqual(defensives.aoe_classes(defensives._CATALOGS["11.1.7"]), {"Rogue", "Mage"})
         # Merely a Setback (11.x: 5% avoidance, an AoE-only cut, while Prismatic or Blazing Barrier is up)
         # as a talent component on a Mage barrier brings Mages in; an external would reach anyone.
         from types import SimpleNamespace
@@ -2080,7 +2081,8 @@ class StaggerWindowFetchTests(unittest.TestCase):
             return {"reportData": {"report": report}}
         with __import__("unittest.mock").mock.patch.object(defensives, "graphql_query", side_effect=fake):
             hits = defensives.fetch_death_windows("t", "R", [(3, [(60_000, "A")])])
-        self.assertIn(f"type = 'cast' and ability.id = {defensives.PURIFYING_BREW}", queries[0])
+        casts = __import__("re").search(r"type = 'cast' and ability\.id in \(([\d, ]+)\)", queries[0])
+        self.assertIn(defensives.PURIFYING_BREW, {int(c) for c in casts.group(1).split(", ")})
         self.assertIn("startTime: 34500", queries[0])
         self.assertEqual([(h["type"], h["timestamp"]) for h in hits[1]],
                          [("damage", 40_000), ("absorbed", 41_000), ("cast", 42_000), ("damage", 50_000),
