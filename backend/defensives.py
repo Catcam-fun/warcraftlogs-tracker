@@ -1690,7 +1690,8 @@ def _resolve(entry, talent_entries, observed_absorbs, spec=None, applied=None):
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 value = value * rank
         extra = {k: c[k] for k in ("over_ms", "ticks", "current", "replaces_form", "from_target", "dr_hit", "share",
-                                   "stacks", "decay_end_ms", "decay_after_ms", "tick_ms", "first_tick") if k in c}
+                                   "stacks", "decay_end_ms", "decay_after_ms", "tick_ms", "first_tick", "dur_ms")
+                 if k in c}
         if "decay_after_ms" in extra:
             # The wait before the stacks drop shrinks with the talents that shorten the aura (Righteous
             # Protector: "$389539s14/1000*(1-$204074s2/100)"), not with those that lengthen it.
@@ -2018,8 +2019,9 @@ class _Window:
 def _option(entry_name, comps, dur_ms, legacy_ticks=None):
     """One button's effect, timed: {"name", "lasting": [(comp, ms or None)], "instant": [comp], "hots": [(comp, ticks, ms)]}.
 
-    Effects last the aura's duration; without one (Bear Form, Soulburn's health)
-    they're up until the death. Heals land when pressed, or over time.
+    Effects last the aura's duration; without one (Bear Form) they're up until the death. An effect
+    with its own `dur_ms` (Ursine Vigor's 4 s, Gorebound Fortitude's 12 s of max health) lasts no longer
+    than that. Heals land when pressed, or over time.
     """
     opt = {"name": entry_name, "lasting": [], "instant": [], "hots": [],
            "comps": comps, "dur_ms": dur_ms, "legacy_ticks": legacy_ticks, "extend": None}
@@ -2033,7 +2035,8 @@ def _option(entry_name, comps, dur_ms, legacy_ticks=None):
         elif c.get("stacks") and dur_ms:
             opt["lasting"] += _stack_layers(c, dur_ms)
         else:
-            opt["lasting"].append((c, dur_ms))
+            own = c.get("dur_ms")
+            opt["lasting"].append((c, min(own, dur_ms) if own and dur_ms and dur_ms > 0 else own or dur_ms))
     return opt
 
 
