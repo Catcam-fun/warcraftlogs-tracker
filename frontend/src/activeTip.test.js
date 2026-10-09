@@ -70,3 +70,11 @@ test('a talent that takes some off reads with a minus sign, and two rows of one 
   expect(t).toContain('Elusiveness +20% damage reduction');
   expect(t).toContain('Reduces area damage taken by 28.6%. Reduces damage taken by 20%');
 });
+
+test('a talent effect that lasts a few seconds says so', () => {
+  const bear = { kind: 'personal', cooldownMs: 0, charges: 1, effect: [{ hp: 0.25 }] };
+  const a = { name: 'Bear Form', kind: 'personal', talentsKnown: true, cooldownMs: 0, charges: 1,
+    effect: [{ hp: 0.25 }, { hp: 0.15, dur_ms: 4000 }],
+    talents: [{ talent: 'Ursine Vigor', field: 'hp', rank: 1, adds: 0.15, dur_ms: 4000 }] };
+  expect(text(a, bear)).toContain('Ursine Vigor adds 15% max health for 4s');
+});
