@@ -86,7 +86,9 @@ function effectText(effect, info) {
       ? ` ${secs(info.cooldownMs)} cooldown${info.charges > 1 ? `, ${info.charges} charges` : ''}.` : '';
     return info.description + cd;
   }
-  const parts = (effect || []).map((c) => {
+  // Sentinel: a value per stack, the stacks dropping one a second (the per-stack values are listed once).
+  const stacked = (effect || []).filter((c) => c.stacks);
+  const parts = (effect || []).filter((c) => !c.stacks).map((c) => {
     const scope = typeof c.school === 'number' ? `${schoolScope(c.school)} ` : SCOPE[c.school] || '';
     const over = c.over_ms ? ` over ${secs(c.over_ms)}` : '';
     if (c.immune) return c.school === 'melee' ? 'Dodges all melee attacks' : `Immune to ${scope}damage`;
@@ -104,8 +106,14 @@ function effectText(effect, info) {
     if (c.heal_taken) return `Increases healing received by ${pct(c.heal_taken)}`;
     return null;
   }).filter(Boolean);
+  if (stacked.length) {
+    const per = stacked.map((c) => (c.dr ? `${pct(c.dr)} less damage taken` : c.hp ? `${pct(c.hp)} max health` : null))
+      .filter(Boolean).join(' and ');
+    parts.push(`${stacked[0].stacks} stacks, each ${per}, dropping one a second near the end`);
+  }
   if (!parts.length && info?.typicalHeal) parts.push(`Heals about ${fmt(info.typicalHeal)}`);
   let text = parts.join('. ');
+  if (info?.needs && text) text = `With ${info.needs}: ${text.charAt(0).toLowerCase()}${text.slice(1)}`;
   if (info?.auraMs && text) text += ` for ${secs(info.auraMs)}`;
   if (info?.cooldownMs) {
     text += `${text ? '. ' : ''}${secs(info.cooldownMs)} cooldown`;

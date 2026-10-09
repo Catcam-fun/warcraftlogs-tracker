@@ -120,6 +120,7 @@ class Catalog:
         for d in self.all.values():
             entries.update(d["talent_entries"], d.get("replaced_by_entries", ()))
             entries.update(((d.get("needs_form") or {}).get("unless") or {}).get("entries", ()))
+            entries.update((d.get("needs") or {}).get("entries", ()))
             for c in d.get("mitigation") or []:
                 if isinstance(c, dict) and c.get("needs"):
                     entries.update(c["needs"].get("entries", ()))
@@ -184,6 +185,7 @@ def ability_info(cat, name):
             "effect": [{k: (round(v, 3) if isinstance(v, float) else v) for k, v in c.items() if v is not None}
                        for c in comps or ()],
             **({"typicalHeal": typical} if typical else {}),
+            **({"needs": entry["needs"]["talent"]} if entry.get("needs") else {}),
             **({"description": CATALOG_DESCRIPTIONS[name]} if name in CATALOG_DESCRIPTIONS else {})}
 
 
@@ -420,6 +422,10 @@ def _has_ability(sid, entry, player_class, spec, talent_entries, cast_ids_in_rep
         talent_entries = set(talent_entries)
     if entry["class"] != player_class:
         return False
+    if entry.get("needs") and not (talent_entries and _rank(talent_entries, entry["needs"]["entries"])):
+        # A defensive only with a talent (Midnight's Earth Elemental with Primordial Bond): pressing the
+        # button proves they have it, not the talent; unknown talents count as not having it.
+        return False
     if sid in pressed_this_pull:
         return True    # pressing it this pull proves they have it, whatever the talent record says
     if entry["specs"] and spec and spec not in entry["specs"]:
@@ -549,7 +555,7 @@ def _replay(casts, resets, at, loadout, inferred=None):
 # Heals over time among the scored defensives, by tick count: their heal lands
 # over the aura's duration, not at once. Same tick counts as EFFECTS in
 # scripts/build_defensive_catalog.py (tested).
-HEAL_OVER_TIME = {"Frenzied Regeneration": 3, "Crimson Vial": 4}
+HEAL_OVER_TIME = {"Frenzied Regeneration": 3, "Crimson Vial": 4, "Soul Immolation": 6}
 
 
 def _buffs_active_at(death_ts, buff_events, max_ms=None):
@@ -1312,8 +1318,15 @@ def _resolve(entry, talent_entries, observed_absorbs, spec=None, applied=None):
                                 **({"school": c["school"]} if c.get("school") else {})})
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 value = value * rank
-        extra = {k: c[k] for k in ("over_ms", "ticks", "current", "replaces_form", "from_target", "dr_hit", "share")
-                 if k in c}
+        extra = {k: c[k] for k in ("over_ms", "ticks", "current", "replaces_form", "from_target", "dr_hit", "share",
+                                   "stacks", "decay_end_ms", "decay_after_ms") if k in c}
+        if "decay_after_ms" in extra:
+            # The wait before the stacks drop shrinks with the talents that shorten the aura (Righteous
+            # Protector: "$389539s14/1000*(1-$204074s2/100)"), not with those that lengthen it.
+            for m in entry.get("duration_mods", ()):
+                rank = _mod_rank(m, talent_entries, spec)
+                if rank and m.get("mult", 1) < 1:
+                    extra["decay_after_ms"] *= 1 + (m["mult"] - 1) * rank
         if seen:
             out.append({"absorb_amount": seen, "school": c.get("school"),
                         **({"share": c["share"]} if "share" in c else {})})
@@ -1638,9 +1651,42 @@ def _option(entry_name, comps, dur_ms, legacy_ticks=None):
                 opt["hots"].append((c, c.get("ticks") or legacy_ticks or 1, over))
             else:
                 opt["instant"].append(c)
+        elif c.get("stacks") and dur_ms:
+            opt["lasting"] += _stack_layers(c, dur_ms)
         else:
             opt["lasting"].append((c, dur_ms))
     return opt
+
+
+STACK_DROP_MS = 1_000            # Sentinel's stacks drop one a second
+
+
+def _stack_layers(c, dur_ms):
+    """A per-stack effect whose stacks drop one a second (Sentinel), as lasting effects that run out one
+    after another: [(comp, ms)]. "After X sec, you will begin to lose 1 stack per second": X is
+    `decay_after_ms` after the press, or `decay_end_ms` before the aura ends, and the k-th stack goes k
+    seconds after X, so the last one goes as the aura ends when X + 15 s is its duration (16 s and "After
+    ${$d-15} sec" in The War Within, 20 s and 5 s from 12.0.5); the aura's end takes every stack left. Holy
+    Power spent only delays the drop, so the real stacks were never fewer. Reductions are layered so the
+    ones up multiply to exactly the stacks' sum (n stacks of 2%: 1 - 0.02n); max health adds per stack
+    (each group runs out on its own)."""
+    n = c["stacks"]
+    start = c["decay_after_ms"] if "decay_after_ms" in c else dur_ms - c.get("decay_end_ms", 0)
+    start = max(start, 0)
+    drops = [min(start + k * STACK_DROP_MS, dur_ms) for k in range(1, n + 1)]
+    field = "dr" if "dr" in c else "hp" if "hp" in c else None
+    base = {k: v for k, v in c.items() if k not in ("stacks", "decay_after_ms", "decay_end_ms", "dr", "hp")}
+    layers, j = [], n
+    for ms in sorted(set(drops)):
+        count = drops.count(ms)              # stacks (from the top) that drop at this moment
+        lo, j = j - count, j - count         # layers lo+1 .. lo+count
+        v = c[field]
+        if field == "dr":
+            value = 1 - (1 - (lo + count) * v) / (1 - lo * v)
+        else:
+            value = count * v
+        layers.append((dict(base, **{field: value}), ms))
+    return layers
 
 
 def _simulate(options, press, win, kb_index):
