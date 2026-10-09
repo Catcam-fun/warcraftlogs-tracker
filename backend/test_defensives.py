@@ -658,11 +658,10 @@ class DurationTalentTests(unittest.TestCase):
 
 
 class CheckDurationsTests(unittest.TestCase):
-    """scripts/check_durations.py: a press while the aura is up restarts it (pandemic carry-over)."""
+    """checks/source_durations.py: a press while the aura is up restarts it (pandemic carry-over)."""
 
     def test_refresh_keeps_up_to_thirty_percent_of_the_time_left(self):
-        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
-        from check_durations import carried_over
+        from checks.source_durations import carried_over
         self.assertEqual(carried_over([0], 3_000), 0)
         # Frenzied Regeneration pressed again 1.2s in: 1.8s left, 0.9s kept (seen: 3.8s after the press).
         self.assertAlmostEqual(carried_over([0, 1_200], 3_000), 900)
