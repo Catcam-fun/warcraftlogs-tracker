@@ -433,6 +433,13 @@ AURA_SPELLS = {"Fortifying Brew": [120954], "Rallying Cry": [97463]}
 # lasts while the elemental (188616) is out, its aura having no duration of its own.
 DURATION_FROM = {"Earth Elemental": 188616}
 
+# Buttons whose effect is an aura of its own, not the button's same-named aura: Earth Elemental's +15% max
+# health is 381755 ("Earth Elemental" in The War Within, "Primordial Bond" in Midnight), while the button's
+# aura 198103 has no duration in the data and lingers in logs long after the elemental is gone (12.0.7:
+# 381755 30.2-36.7 s, 198103 up to 7,103 s). Written per patch as "auras": {aura: its name there}; the
+# analysis reads only those as the defensive being up.
+EFFECT_AURAS = {"Earth Elemental": [381755]}
+
 # Curated buttons that are a defensive only in patches whose data has this effect: Soul Immolation burns
 # the Demon Hunter in 12.0.0-12.0.1 (aura 3) and heals from 12.0.5 (aura 20).
 ONLY_WITH = {"Soul Immolation": (1241937, "aura:20")}
@@ -1195,6 +1202,10 @@ def build_catalog(build):
             for comp in entry["mitigation"] or ():
                 if "armor" in comp and "needs" not in comp:
                     comp["replaces_form"] = True
+        if name in EFFECT_AURAS:
+            entry["auras"] = {a: gd.names[a] for a in EFFECT_AURAS[name] if a in gd.names}
+            if not entry["auras"]:
+                problems.append(f"{name}: none of its effect auras {EFFECT_AURAS[name]} is in the game data")
         need = BUTTON_NEEDS.get(name)
         if need and need in gd.names:
             # A defensive only for players with this talent: the button alone doesn't count.

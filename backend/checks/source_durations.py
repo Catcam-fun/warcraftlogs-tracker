@@ -15,6 +15,10 @@ EXTENDED_BY = {"Survival of the Fittest": "Exhilaration"}
 # Auras the spec extends mid-fight by playing (the owner's rule: Dancing Rune Weapon and
 # Metamorphosis can read longer without affecting verdicts), so a longer use is not a missing talent.
 EXTENDED_MID_FIGHT = {"Dancing Rune Weapon", "Metamorphosis"}
+# Auras that last while a pet is out end when it despawns, a moment after its time: Earth Elemental's +15% max
+# health (381755) ran 30.2-30.6 s on a Shaman without Everlasting Elements and 36.2-36.7 s on one with it
+# (30 s, x1.2) in P6CwHkgFR9Krf1Bz (12.0.7). Extra ms allowed past the predicted end:
+DESPAWN_LAG_MS = {"Earth Elemental": 1_000}
 
 
 def carried_over(presses, want):
@@ -45,7 +49,7 @@ def check(run):
     up = {}
     for e in sorted(raw["buffs"], key=lambda e: e["timestamp"]):
         aid = e.get("abilityGameID")
-        name = meta["abilities"].get(aid)
+        name = defensives.aura_name(cat, aid, meta["abilities"])      # the aura carrying the effect
         sid = cat.name_to_id.get(name)
         entry = cat.all.get(sid) if sid else None
         if not entry or entry["kind"] != "personal" or not entry.get("duration_mods"):
@@ -70,7 +74,7 @@ def check(run):
             got = e["timestamp"] - presses[-1]
             r = res[name]
             r["n"] += 1
-            if want - TOLERANCE_MS <= got <= want + carried + TOLERANCE_MS:
+            if want - TOLERANCE_MS <= got <= want + carried + TOLERANCE_MS + DESPAWN_LAG_MS.get(name, 0):
                 r["exact"] += 1
             elif got < want:
                 r["early"] += 1
