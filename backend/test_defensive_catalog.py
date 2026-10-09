@@ -38,5 +38,35 @@ class ImprovedPrismaticBarrierTests(unittest.TestCase):
         self.assertEqual(defensives._mod_rank(mod, {5: 1}, "Arcane"), 1)
 
 
+class MerelyASetbackTests(unittest.TestCase):
+    """Merely a Setback (449330, entry 117252; The War Within): "Your Prismatic Barrier / Blazing Barrier
+    now grants 5% avoidance while active" (449330 effect 0; 449336 is the avoidance rating, aura 189,
+    filled by a script). Avoidance cuts area damage. Midnight rewrote it (449336 has no aura 189): no
+    avoidance there."""
+
+    def comps(self, patch, name, talents):
+        return defensives._resolve(entry(patch, name), talents, {}, "Arcane" if name[0] == "P" else "Fire")[0]
+
+    def test_five_percent_against_area_damage_with_the_talent(self):
+        for name in ("Prismatic Barrier", "Blazing Barrier"):
+            comps = self.comps("11.1.7", name, {117252: 1})
+            self.assertIn({"dr": 0.05, "school": "aoe"}, [{k: c[k] for k in ("dr", "school")} for c in comps
+                                                          if "dr" in c], name)
+            self.assertNotIn(0.05, dr(self.comps("11.1.7", name, {})), name)
+
+    def test_with_the_barrier_on_an_area_hit(self):
+        comps = self.comps("11.1.7", "Prismatic Barrier", {117252: 1})
+        reductions = [c for c in comps if "dr" in c]
+        aoe_magic = hit(1, 100, 0, aoe=True)                 # frost, area: 25% and 5%
+        self.assertAlmostEqual(defensives._keep(reductions, aoe_magic, MAX, 0, SCHOOLS), 0.75 * 0.95)
+        self.assertAlmostEqual(defensives._keep(reductions, hit(1, 100, 0), MAX, 0, SCHOOLS), 0.75)
+        self.assertAlmostEqual(defensives._keep(reductions, hit(1, 100, 0, ability=600, aoe=True), MAX, 0, SCHOOLS),
+                               0.95)                         # physical area hit: avoidance only
+
+    def test_not_in_midnight(self):
+        for patch in ("12.0.0", "12.1.0"):
+            self.assertNotIn(0.05, dr(self.comps(patch, "Prismatic Barrier", {117252: 1})), patch)
+
+
 if __name__ == "__main__":
     unittest.main()
