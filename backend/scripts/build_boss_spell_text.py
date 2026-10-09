@@ -109,6 +109,7 @@ def render(data, sid, depth=0):
     text = re.sub(r"\bevery (sec|seconds?)\b", "periodically", text)
     text = re.sub(r"\s*\b(by|of|to) (%|sec|seconds?|yards?|yds)(?=\W|$)", "", text)   # value missing in the data
     text = re.sub(r"(^|\s)% ", r"\1", text)
+    text = re.sub(r"\bup to total\b", "up to a cap", text)       # "up to $<absorb> total": the amount scales
     text = re.sub(r"\b(for|by|of)\s*(?=[.,;]|$)", "", text)
     text = re.sub(r"\s+([.,;:])", r"\1", text).replace("( ", "(").replace(" )", ")").replace("()", "").strip()
     if text and text[-1] not in ".!?":
