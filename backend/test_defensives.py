@@ -517,6 +517,117 @@ class OlderLogTests(unittest.TestCase):
         self.assertTrue(defensives.logs_mark_aoe({1: [{"isAoE": False}], 2: [{"isAoE": True}]}))
 
 
+class AoeByAbilityTests(unittest.TestCase):
+    # Live 2026-10-08: WCL marks isAoE only on hits that dealt damage. A hit an absorb took whole (amount 0,
+    # no health on it), an immune or a missed one is never marked, even of an ability marked AoE on every
+    # other hit (Uncontrolled Burn: 31,127 of 41,277 marked, every unmarked one amount 0). The game treats
+    # those as AoE: Feint took 0.400 off 54 such hits on Maar (Undermine, 11.1.7) and 10 on Esra
+    # (Manaforge Omega), as off the marked ones, and 0.000 off hits of abilities
+    # never marked. Every hit that dealt damage of one ability is marked alike (Undermine, Manaforge
+    # Omega, Nerub-ar Palace, Voidspire, Coiled Altar logs). An ability is AoE when any hit of it is.
+    def absorbed(self, ts, ability, absorbed):
+        return {"timestamp": ts, "type": "damage", "targetID": 1, "abilityGameID": ability, "amount": 0,
+                "absorbed": absorbed, "overkill": 0, "isAoE": False}
+
+    def test_a_hit_absorbed_whole_counts_as_aoe_when_its_ability_is(self):
+        # A Cleave takes them to half health; a 500k hit of ability 500 is absorbed whole; then ability 500
+        # kills them with 500k overkill. Feint (40% off AoE) takes 400k off the killing blow alone (not
+        # enough), and 200k more off the absorbed hit when ability 500 counts as AoE (enough).
+        window = [hit(97_000, 500_000, 500_000, ability=600), self.absorbed(99_000, 500, 500_000),
+                  hit(100_000, 500_000, 0, overkill=500_000, aoe=True)]
+        args = (window, 100_000, ready(FEINT), [], NAMES, SCHOOLS)
+        by_hit = defensives.assess_survival(*args, talent_entries={})
+        self.assertFalse(by_hit["wouldSave"]["Feint"])
+        by_ability = defensives.assess_survival(*args, talent_entries={}, aoe_abilities={500})
+        self.assertTrue(by_ability["wouldSave"]["Feint"])
+        self.assertEqual(by_ability["details"]["Feint"]["amount"], 600_000)
+        # Its status unknown (the extra fetch failed): the verdict can't be told.
+        unknown = defensives.assess_survival(*args, talent_entries={}, aoe_abilities=set(), aoe_unknown={500})
+        self.assertIsNone(unknown["wouldSave"]["Feint"])
+        # Known not AoE (an ability never marked, whose hits the report could tell): as by hit.
+        never = defensives.assess_survival(*args, talent_entries={}, aoe_abilities=set())
+        self.assertFalse(never["wouldSave"]["Feint"])
+
+    def test_school_applies_reads_the_abilitys_status(self):
+        h = {"abilityGameID": 500, "isAoE": False}
+        self.assertFalse(defensives._school_applies("aoe", h, {}))
+        self.assertTrue(defensives._school_applies("aoe", dict(h, aoeAbility=True), {}))
+        self.assertIsNone(defensives._school_applies("aoe", dict(h, aoeAbility=None), {}))
+        self.assertFalse(defensives._school_applies("aoe", dict(h, aoeAbility=False, isAoE=False), {}))
+        # A report that marks no hit at all: unknown, whatever else is on the hit.
+        self.assertIsNone(defensives._school_applies("aoe", dict(h, aoeKnown=False, aoeAbility=True), {}))
+
+    def test_status_from_the_windows_and_what_they_cannot_tell(self):
+        dealt = lambda a, aoe: {"type": "damage", "abilityGameID": a, "amount": 5, "isAoE": aoe}
+        none = lambda a: {"type": "damage", "abilityGameID": a, "amount": 0, "absorbed": 9, "isAoE": False}
+        windows = {1: [dealt(10, True), none(10), none(20), none(30), {"type": "instakill", "abilityGameID": 40}],
+                   2: [dealt(30, False), none(50)]}
+        self.assertEqual(defensives.aoe_abilities(windows), {10})
+        # 10 is marked; 30 dealt damage unmarked (not AoE); 20 only absorbed whole: can't tell. Only the
+        # given players' hits are asked about (50 is player 2's).
+        self.assertEqual(defensives.aoe_undecided(windows, [1], {10}), {20})
+        self.assertEqual(defensives.aoe_undecided(windows, [1, 2], {10}), {20, 50})
+
+    def test_fetch_reads_the_abilities_hits_in_the_reports_pulls(self):
+        from unittest import mock
+        # 20 is marked on a hit that dealt damage; 50 dealt damage unmarked; 60 was only ever absorbed
+        # whole (WCL never marks those, so it stays unknown, not single-target), even on a hit marked.
+        page = {"reportData": {"report": {"a": {"data": [
+            {"type": "damage", "abilityGameID": 20, "amount": 5, "isAoE": True},
+            {"type": "damage", "abilityGameID": 50, "amount": 5, "isAoE": False},
+            {"type": "damage", "abilityGameID": 60, "amount": 0, "absorbed": 9, "isAoE": True}],
+            "nextPageTimestamp": None}}}}
+        with mock.patch.object(defensives, "graphql_query", return_value=page) as q:
+            self.assertEqual(defensives.fetch_aoe_abilities("t", "R", [3, 4], 100, 900, {50, 20, 60}),
+                             ({20}, {20, 50}))
+        query = q.call_args[0][1]
+        self.assertIn("dataType: DamageTaken", query)
+        self.assertIn("fightIDs: [3, 4]", query)
+        self.assertIn("endTime: 901", query)
+        self.assertIn('ability.id in (20, 50, 60)', query)
+        self.assertNotIn("includeResources", query)
+
+    def test_fetch_stops_once_every_ability_is_decided(self):
+        from unittest import mock
+        first = {"reportData": {"report": {"a": {"data": [
+            {"type": "damage", "abilityGameID": 20, "amount": 5, "isAoE": True}], "nextPageTimestamp": 500}}}}
+        second = {"reportData": {"report": {"a": {"data": [
+            {"type": "damage", "abilityGameID": 50, "amount": 5, "isAoE": False}], "nextPageTimestamp": 700}}}}
+        import copy
+        pages = lambda *ps: [copy.deepcopy(p) for p in ps]
+        with mock.patch.object(defensives, "graphql_query", side_effect=pages(first, second)) as q:
+            self.assertEqual(defensives.fetch_aoe_abilities("t", "R", [3], 100, 900, {20}), ({20}, {20}))
+        self.assertEqual(q.call_count, 1)
+        with mock.patch.object(defensives, "graphql_query", side_effect=pages(first, second, first)) as q:
+            self.assertEqual(defensives.fetch_aoe_abilities("t", "R", [3], 100, 900, {20, 50}), ({20}, {20, 50}))
+        self.assertEqual(q.call_count, 2)
+
+    def test_a_hit_that_dealt_damage_keeps_its_own_mark(self):
+        # Only hits that dealt no damage take their ability's status; a hit that dealt damage carries
+        # WCL's own mark (every one of an ability marked alike on the logs tried; the safer rule).
+        kb = hit(100_000, 1_000_000, 0, overkill=300_000, aoe=False)        # 40% of 1.3M would save
+        r = defensives.assess_survival([kb], 100_000, ready(FEINT), [], NAMES, SCHOOLS, talent_entries={},
+                                       aoe_abilities={500})
+        self.assertFalse(r["wouldSave"]["Feint"])
+        r = defensives.assess_survival([dict(kb, isAoE=True)], 100_000, ready(FEINT), [], NAMES, SCHOOLS,
+                                       talent_entries={}, aoe_abilities=set(), aoe_unknown={500})
+        self.assertTrue(r["wouldSave"]["Feint"])
+
+    def test_classes_with_an_aoe_only_effect(self):
+        self.assertEqual(defensives.aoe_classes(defensives._CATALOGS["12.1.0"]), {"Rogue"})
+        self.assertEqual(defensives.aoe_classes(defensives._CATALOGS["11.1.7"]), {"Rogue"})
+        # Merely a Setback (11.x: 5% avoidance, an AoE-only cut, while Prismatic or Blazing Barrier is up)
+        # as a talent component on a Mage barrier brings Mages in; an external would reach anyone.
+        from types import SimpleNamespace
+        setback = {"dr": 0.05, "school": "aoe", "needs": {"entries": [117252], "talent": "Merely a Setback"}}
+        cat = SimpleNamespace(all={1966: CATALOG[FEINT],
+                                   235450: {"name": "Prismatic Barrier", "kind": "personal", "class": "Mage",
+                                            "mitigation": [{"absorb": 0.3}, setback]}})
+        self.assertEqual(defensives.aoe_classes(cat), {"Rogue", "Mage"})
+        cat.all[1] = {"name": "Shared", "kind": "external", "class": "Priest", "mitigation": [setback]}
+        self.assertIsNone(defensives.aoe_classes(cat))
+
+
 class StandardPotionTests(unittest.TestCase):
     def test_potion_without_a_typical_heal_uses_the_tiers_standard_potion(self):
         cat = defensives.catalog_for(1_756_857_344_578)                      # Manaforge Omega, 11.2.0
@@ -959,6 +1070,17 @@ class TalentEffectTests(unittest.TestCase):
         # Improved Ardent Defender reaches Ardent Defender by spell label, not class mask.
         ad = self.by_name(self.tww, "Ardent Defender")
         self.assertIn("Improved Ardent Defender", [m["talent"] for c in ad["mitigation"] for m in c.get("mods", ())])
+
+    def test_strength_of_will_makes_unending_resolve_forty_percent_in_every_patch(self):
+        # Strength of Will (317138: aura 107, a flat -15 on Unending Resolve's -25 reduction) is 0.40 in
+        # every patch; live, back-to-back hits read 0.4000 with it (148 pairs, five Warlocks), 0.25 without.
+        import defensive_catalog
+        for patch in defensive_catalog.CATALOGS:
+            ur = defensive_catalog.CATALOGS[patch][104773]
+            comps, _ = defensives._resolve(ur, {91468: 1}, {})
+            self.assertEqual([c.get("dr") for c in comps if c.get("dr")], [0.4], patch)
+            comps, _ = defensives._resolve(ur, {}, {})
+            self.assertEqual([c.get("dr") for c in comps if c.get("dr")], [0.25], patch)
 
     def test_talent_heal_over_time_carries_its_duration(self):
         ur = self.by_name(defensives._LATEST, "Unending Resolve")

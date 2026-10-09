@@ -336,6 +336,7 @@ def analyze():
                 return out
 
             report_attacked = {}         # rid -> units the raid attacked (fetch_attacked_units)
+            report_aoe = {}              # rid -> (abilities AoE in the report, those it couldn't tell)
 
             def fetch_report_deaths(rid, report_fights):
                 """Deaths, defensive data (casts, buffs, talents) and the hits before the deaths that
@@ -464,6 +465,38 @@ def analyze():
                         hits = defensives.merge_hits(windows, instakills)
                     else:
                         print(f"[WARN] Hits before deaths unavailable for report {rid}: {hits_error}")
+
+                    # An ability is AoE when any hit of it in the report is: WCL never marks a hit absorbed
+                    # whole. The windows tell most; for an effect limited to AoE (Feint), the abilities a
+                    # dying player's windows can't tell are read from the report's pulls, one request.
+                    if hits is not None:
+                        aoe = defensives.aoe_abilities(hits)
+                        unknown = set()
+                        classes = defensives.aoe_classes(cat)
+                        friendly_types = {f.get("id"): f.get("type") for f in friendlies}
+                        need = defensives.aoe_undecided(
+                            hits, [p for p in hits if classes is None or friendly_types.get(p) in classes],
+                            aoe) if aoe else set()
+                        if need:
+                            # "decided": the abilities the report's pulls could tell (a hit that dealt damage).
+                            aoe_key = (rid, tuple(fight_ids), "aoe-abilities", "decided", tuple(sorted(need)))
+                            got = recap_lru.get(aoe_key) if finished else None
+                            if got is None:
+                                try:
+                                    found, decided = defensives.fetch_aoe_abilities(token, rid, fight_ids, first_start,
+                                                                                    last_end, need)
+                                    got = {"aoe": sorted(found), "decided": sorted(decided)}
+                                    if finished:
+                                        recap_lru.set(aoe_key, got)
+                                except Exception as e:
+                                    print(f"[WARN] AoE abilities unavailable for report {rid}: {e}")
+                            if got is None:
+                                unknown = need
+                            else:
+                                aoe |= set(got["aoe"])
+                                # An ability that never dealt damage in the report: WCL never marked it.
+                                unknown = need - set(got["decided"])
+                        report_aoe[rid] = (aoe, frozenset(unknown))
 
                     return rid, deaths, def_data, hits, None
                 except Exception as e:
@@ -634,6 +667,8 @@ def analyze():
                                          for fd in fights_by_report.get(rid, [])},
                             encounters=report_encounters.get(rid),
                             attackable=report_attacked.get(rid),
+                            aoe_abilities=report_aoe.get(rid, (None,))[0],
+                            aoe_unknown=report_aoe.get(rid, (None, frozenset()))[1],
                         )
                         death_event['defensives'] = defensives.analyze_death(**death_args)
                         cat = defensives.catalog_for(report_abs_start)

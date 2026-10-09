@@ -593,7 +593,7 @@ def _auras(hit):
 def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts,
                   indexed, ability_names, actor_names, hits=None, ability_schools=None, cat=None,
                   aoe_known=True, armor_k=None, soulwell=False, pull_starts=None, encounters=None,
-                  attackable=None):
+                  attackable=None, aoe_abilities=None, aoe_unknown=frozenset()):
     """Defensive picture for one death. All timestamps are report-relative ms.
 
     `pull_starts`: {fight ID: start} of the report's kept pulls, so presses in other pulls are
@@ -609,6 +609,9 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
     whether the defensives they had ready would have saved them.
     `cat`: the catalog of the patch the report was logged on (catalog_for).
     `aoe_known`: whether this report marks AoE hits at all (logs_mark_aoe).
+    `aoe_abilities`: the abilities with a hit marked AoE in the report (aoe_abilities of the windows,
+    plus fetch_aoe_abilities for those they can't tell); `aoe_unknown`: those whose status couldn't be
+    fetched. None: each hit's own mark decides.
     `armor_k`: the boss's armor constant (armor_constant), for armor increases.
     `soulwell`: a Warlock was in this pull, so a Soulwell's Healthstones were
     there for everyone, used in this log or not.
@@ -822,7 +825,8 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
         result["survival"] = assess_survival(hits, death_ts, ready_entries, consumables,
                                              ability_names, ability_schools or {},
                                              talent_entries=talent_entries, observed_absorbs=observed, spec=spec,
-                                             aoe_known=aoe_known, ready_since=ready_since,
+                                             aoe_known=aoe_known, aoe_abilities=aoe_abilities,
+                                             aoe_unknown=aoe_unknown, ready_since=ready_since,
                                              aura_ms={e["name"]: _talented_duration(e, talent_entries, spec) for e in ready_entries},
                                              forms=forms, armor_k=armor_k, form_armor=form_armor,
                                              aura_size=_aura_sizer(cat, player_class, spec, talent_entries,
@@ -946,20 +950,22 @@ WINDOW_EXTRAS_KEY = hashlib.sha1(repr((WINDOW_EXTRAS_IDS, HIT_FIELDS, HEAL_FIELD
                                        PURIFYING_BREW)).encode()).hexdigest()[:12]
 
 
-def _events_query(blocks):
+def _events_query(blocks, resources=True):
     """One request for several event blocks: {alias: (fightIDs, start, end, dataType, filter)}."""
     parts = []
+    res = "includeResources: true, " if resources else ""
     for alias, (ids, start, end, data_type, flt) in blocks.items():
         parts.append(f"{alias}: events(fightIDs: {json.dumps(list(ids))}, startTime: {start}, endTime: {end}, "
-                     f"dataType: {data_type}, filterExpression: {json.dumps(flt, ensure_ascii=False)}, includeResources: true, "
+                     f"dataType: {data_type}, filterExpression: {json.dumps(flt, ensure_ascii=False)}, {res}"
                      f"limit: 10000) {{ data nextPageTimestamp }}")
     return "query($c: String!) { reportData { report(code: $c) { " + " ".join(parts) + " } } }"
 
 
-def _fetch_blocks(token, report_code, blocks, keep=None):
+def _fetch_blocks(token, report_code, blocks, keep=None, resources=True, stop=None):
     """All events of several blocks, fetched together; blocks that don't fit one page are followed up.
     `keep(event)`, if given, picks the events kept as each block's page arrives, so the
-    others aren't held in memory while the rest download.
+    others aren't held in memory while the rest download. `stop(out)`, if given, ends the
+    following-up as soon as it is true of what was kept so far.
 
     Always with an endTime: WCL returns an empty second page for a block scoped
     by fightIDs without one (verified on a live log).
@@ -973,7 +979,7 @@ def _fetch_blocks(token, report_code, blocks, keep=None):
         items = list(pending.items())
         for i in range(0, len(items), WINDOW_BLOCKS_PER_REQUEST):
             chunk = dict(items[i:i + WINDOW_BLOCKS_PER_REQUEST])
-            data = graphql_query(token, _events_query(chunk), {"c": report_code})
+            data = graphql_query(token, _events_query(chunk, resources), {"c": report_code})
             report = (data.get("reportData") or {}).get("report") or {}
             del data
             for alias, spec in chunk.items():
@@ -984,6 +990,8 @@ def _fetch_blocks(token, report_code, blocks, keep=None):
                 if block.get("nextPageTimestamp"):
                     nxt[alias] = (spec[0], block["nextPageTimestamp"]) + tuple(spec[2:])
         pending = nxt
+        if stop is not None and stop(out):
+            break
     return out
 
 
@@ -1106,9 +1114,64 @@ def fetch_instakills(token, report_code, fight_ids, start_time, end_time):
 
 
 def logs_mark_aoe(hits_by_player):
-    """Does this report mark AoE hits? Older logs (The War Within) have isAoE
-    false on every hit, so a report with no AoE hit at all doesn't."""
+    """Does this report mark AoE hits? A report with no hit marked isAoE at all can't tell area damage
+    from the rest, and an effect limited to it is then unknown (_school_applies). Every log tried marks
+    them, The War Within's too (Nerub-ar Palace 11.0.7: 35,511 of 77,667 hits; Undermine 11.1.7: 57,859 of
+    103,268); this is the fallback for a log that doesn't."""
     return any(h.get("isAoE") for hits in (hits_by_player or {}).values() for h in hits)
+
+
+# WCL marks isAoE only on hits that dealt damage. A hit an absorb took whole (amount 0, no health on it),
+# an immune or a missed one is never marked, even of an ability marked on every other hit (Uncontrolled
+# Burn, Undermine: 31,127 of 41,277 marked, every unmarked one amount 0), and the game treats those as
+# area damage too: Feint (40% off AoE) took 0.400 off 54 such hits on Maar (AaM31gBWwFHmD7Rz) and 10 on
+# Esra (2VtyDR4CF6PGLjbd), as off the marked ones, and 0.000 off hits of abilities never marked. Every
+# hit of one ability that dealt damage is marked alike (Undermine, Manaforge Omega, Nerub-ar Palace,
+# Voidspire and Coiled Altar logs, 2026-10-08). So an ability is AoE in a report when any hit of it is.
+
+def aoe_abilities(hits_by_player):
+    """Abilities with a hit marked AoE among these hits ({targetID: [hits]})."""
+    return {h.get("abilityGameID") for hits in (hits_by_player or {}).values() for h in hits if h.get("isAoE")}
+
+
+def aoe_undecided(hits_by_player, players, known):
+    """Abilities in `players`' hits whose AoE status these hits can't tell: they have only hits that
+    dealt no damage (absorbed whole, immune, missed), which WCL never marks, and none marked (`known`)
+    or unmarked with damage dealt (not AoE) anywhere in these hits."""
+    every = [h for hits in (hits_by_player or {}).values() for h in hits if h.get("type") == "damage"]
+    decided = set(known) | {h.get("abilityGameID") for h in every if h.get("amount") and not h.get("isAoE")}
+    return {h.get("abilityGameID") for p in players for h in (hits_by_player or {}).get(p, ())
+            if h.get("type") == "damage" and not h.get("amount") and not h.get("isAoE")} - decided
+
+
+def aoe_classes(cat):
+    """Classes with an effect limited to area damage (school "aoe": Feint), whose hits' AoE status
+    matters; None when such an effect is an external, which could reach anyone."""
+    out = set()
+    for d in cat.all.values():
+        if any(c.get("school") == "aoe" for c in d.get("mitigation") or ()):
+            if d["kind"] == "external":
+                return None
+            out.add(d.get("class"))
+    return out
+
+
+def fetch_aoe_abilities(token, report_code, fight_ids, start_time, end_time, ability_ids):
+    """(AoE, decided): which of `ability_ids` (aoe_undecided) are AoE, and which the report's pulls could
+    tell at all. One block of WCL's DamageTaken for those abilities; only hits that dealt damage carry
+    WCL's mark, so an ability is decided by its first such hit, and one that never dealt damage in the
+    report stays unknown (not single-target). Pages stop once every ability is decided. Fetched only
+    when a death that can count, of a class with an AoE-only effect, has a hit the windows can't tell.
+    Measured on a warm report (AaM31gBWwFHmD7Rz, 26 pulls): 2 abilities, 3,366 events, 1 page: 3.4
+    points; 6 abilities, 26,149 events, 5 pages: 5.0 points (the first query on a cold report: 19)."""
+    need = set(ability_ids)
+    flt = f"ability.id in ({', '.join(str(a) for a in sorted(need))})"
+    blocks = {"a": (list(fight_ids), start_time, end_time + 1, "DamageTaken", flt)}
+    got = _fetch_blocks(token, report_code, blocks, resources=False,
+                        keep=lambda e: e.get("type") == "damage" and bool(e.get("amount")),
+                        stop=lambda out: need <= {e.get("abilityGameID") for e in out["a"]})["a"]
+    return ({e.get("abilityGameID") for e in got if e.get("isAoE")} & need,
+            {e.get("abilityGameID") for e in got} & need)
 
 
 def index_hits(events):
@@ -1162,9 +1225,14 @@ def _school_applies(school, hit, ability_schools, immunity=False):
     if school in (None, "all"):
         return True
     if school == "aoe":
-        # None: this log doesn't mark AoE hits (The War Within logs have
-        # isAoE false on every hit), so whether it applies is unknown.
-        return bool(hit.get("isAoE")) if hit.get("aoeKnown", True) else None
+        # None: this log marks no hit AoE at all (logs_mark_aoe), so whether it applies is unknown.
+        if not hit.get("aoeKnown", True):
+            return None
+        # The ability's status in the report (aoeAbility, from assess_survival): a hit absorbed whole
+        # is never marked, though its ability is AoE. None: the report couldn't tell.
+        if "aoeAbility" in hit:
+            return hit["aoeAbility"]
+        return bool(hit.get("isAoE"))
     if school == "melee":
         return hit.get("abilityGameID") == MELEE_SWING
     mask = ability_schools.get(hit.get("abilityGameID"), 0)
@@ -2254,7 +2322,7 @@ def _brand(win, unit):
 
 def assess_survival(hits, death_ts, available, consumables, ability_names, ability_schools,
                     talent_entries=None, observed_absorbs=None, spec=None, aoe_known=True,
-                    ready_since=None, aura_ms=None, forms=None, armor_k=None, form_armor=None,
+                    aoe_abilities=None, aoe_unknown=frozenset(), ready_since=None, aura_ms=None, forms=None, armor_k=None, form_armor=None,
                     aura_size=None, friendly_ids=None, attackable=None, stagger_purify=None):
     """How they died, and whether the defensives they had ready would have saved them.
 
@@ -2306,7 +2374,18 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     hit_size = _full_hit(killing)
 
     tag = {"armorK": armor_k, "formArmor": form_armor, **({} if aoe_known else {"aoeKnown": False})}
-    window = [dict(h, **tag, fromTarget=False) for h in _lethal_hits(hits, killing)]
+
+    def aoe(h):
+        # WCL marks only hits that dealt damage: such a hit keeps its own mark, and a hit that dealt
+        # none (absorbed whole) takes its ability's status in the report (aoe_abilities), which the
+        # game gives it; unknown when the report couldn't tell (aoe_unknown).
+        if not aoe_known or aoe_abilities is None or h.get("amount"):
+            return {}
+        a = h.get("abilityGameID")
+        if h.get("isAoE") or a in aoe_abilities:
+            return {"aoeAbility": True}
+        return {"aoeAbility": None if a in aoe_unknown else False}
+    window = [dict(h, **tag, **aoe(h), fromTarget=False) for h in _lethal_hits(hits, killing)]
     kb_index = len(window) - 1
     # The killing blow's own max health is logged after the death stripped their auras; every
     # figure below (and the replay's health points) uses the max they had just before it.
