@@ -3003,7 +3003,7 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
             # Soulburn pressed first (instant, off the global cooldown): only where the log shows it could
             # have been; the moments it can't tell are tried apart, for a "can't tell".
             timeline = soulburn if soulburn is not None else SoulburnTimeline(None, None)
-            alt = ([_option(name, entry["withSoulburn"]["mitigation"], dur, legacy)], timeline)
+            alt = ([_option(name, entry["withSoulburn"]["mitigation"], dur)], timeline)
             marks = timeline.marks()
             yes = _best_press(alt[0], earliest, win, kb_index, allowed=lambda t: timeline.state(t) is True,
                               extra=marks)
