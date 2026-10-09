@@ -443,5 +443,96 @@ class ZealotsParagonTests(unittest.TestCase):
         self.assertEqual(check(2), "fail")
 
 
+class HealthstoneSoulburnTests(unittest.TestCase):
+    """Soulburn (385899, a button costing a Soul Shard) buffs the next spell (387626, 20 s): on a Healthstone,
+    +30% healing (387626 effect 1) and Soulburn: Healthstone (387636: aura 133 +20% max health, 12 s). Without
+    a Soulburn cast none of it happens, so the talent alone adds nothing. Gorebound Fortitude (449701, passive):
+    "You always gain the benefit of Soulburn when consuming a Healthstone" (effect 0 triggers 387636). Same
+    data in every patch from 11.0.2 to 12.1.0."""
+    SOULBURN, GOREBOUND = 91469, 117447
+
+    def test_catalog(self):
+        for patch in ALL:
+            for name in ("Healthstone", "Demonic Healthstone"):
+                comps = entry(patch, name)["mitigation"]
+                talents = {m["talent"] for c in comps for m in c.get("mods", ())}
+                self.assertNotIn("Soulburn", talents, (patch, name))
+                hp = [c for c in comps if "hp" in c]
+                self.assertEqual(len(hp), 1, (patch, name))
+                self.assertEqual([(m["talent"], m["add"]) for m in hp[0]["mods"]], [("Gorebound Fortitude", 0.2)])
+                self.assertEqual(hp[0]["dur_ms"], 12_000, (patch, name))
+                heal = next(c for c in comps if "heal" in c)
+                self.assertIn(("Gorebound Fortitude", 1.3),
+                              [(m["talent"], m.get("mult")) for m in heal["mods"]], (patch, name))
+
+    def test_soulburn_alone_adds_no_health(self):
+        hs = entry("12.1.0", "Healthstone")
+        comps, _ = defensives._resolve(hs, {self.SOULBURN: 1}, {}, "Affliction")
+        self.assertFalse([c for c in comps if c.get("hp")])
+        comps, _ = defensives._resolve(hs, {self.GOREBOUND: 1}, {}, "Affliction")
+        self.assertEqual([(c["hp"], c["dur_ms"]) for c in comps if c.get("hp")], [(0.2, 12_000)])
+
+
+class UrsineVigorTests(unittest.TestCase):
+    """Ursine Vigor (377842, effect 0: aura 231, 15, triggers 393903): "For $340541d after shifting into Bear
+    Form, your health and armor are increased by $s1%"; the buff 393903 lasts 4 s (SpellMisc) in every patch."""
+
+    def test_catalog(self):
+        for patch in ALL:
+            vigor = [c for c in entry(patch, "Bear Form")["mitigation"]
+                     if (c.get("needs") or {}).get("talent") == "Ursine Vigor"]
+            self.assertEqual(sorted(k for c in vigor for k in ("hp", "armor") if k in c), ["armor", "hp"], patch)
+            self.assertEqual({c["dur_ms"] for c in vigor}, {4_000}, patch)
+
+    def test_it_runs_out_after_four_seconds(self):
+        bear = entry("12.1.0", "Bear Form")
+        has = {e: 1 for c in bear["mitigation"] if (c.get("needs") or {}).get("talent") == "Ursine Vigor"
+               for e in c["needs"]["entries"]}
+        comps, _ = defensives._resolve(bear, has, {}, "Balance")
+        vigor = [c for c in comps if c.get("dur_ms")]
+        self.assertEqual(len(vigor), 2)
+        lasting = dict((id(c), ms) for c, ms in defensives._option("Bear Form", comps, None)["lasting"])
+        self.assertEqual({lasting[id(c)] for c in vigor}, {4_000})
+        self.assertEqual({ms for c, ms in defensives._option("Bear Form", vigor, 3_000)["lasting"]}, {3_000})
+
+    def test_max_health_comes_off_when_it_runs_out(self):
+        hits = [hit(9_000, 600_000, 400_000), hit(15_000, 400_000, 0, overkill=10)]
+        win = defensives._Window(hits, SCHOOLS)
+        up = defensives._simulate([defensives._option("x", [{"hp": 0.5}], None)], 10_000, win, 1)[0]
+        gone = defensives._simulate([defensives._option("x", [{"hp": 0.5, "dur_ms": 4_000}], None)], 10_000, win, 1)[0]
+        self.assertGreater(up, 0)
+        self.assertEqual(gone, 0)
+
+
+class MaxHealthBuildWhoTests(unittest.TestCase):
+    """build_max_health_auras.Data.who: like the catalog's Modifiers.who, a spec passive that is also a talent
+    entry carries both; max_health_size reads a term's entries first, so a term with both fails the build."""
+
+    @staticmethod
+    def build():
+        import os, sys
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
+        import build_max_health_auras as build
+        return build
+
+    def test_both(self):
+        build = self.build()
+        d = build.Data.__new__(build.Data)
+        d.talent_entries, d.spec_spells = {5: {9}, 6: {8}}, {5: {"Arcane"}, 7: {"Fire"}}
+        self.assertEqual(d.who(5), {"entries": [9], "specs": ["Arcane"]})
+        self.assertEqual(d.who(6), {"entries": [8]})
+        self.assertEqual(d.who(7), {"specs": ["Fire"]})
+        self.assertIsNone(d.who(4))
+
+    def test_a_term_with_both_is_a_problem(self):
+        build = self.build()
+        both = {"entries": [9], "specs": ["Arcane"]}
+        self.assertTrue(build.both_problems({1: [{"from": 5, "index": 0, "share": 0.1, **both}]}))
+        self.assertTrue(build.both_problems({1: [{"from": 5, "index": 0, "share": 0.1,
+                                                  "mods": [{"add": 0.1, "by": 6, **both}]}]}))
+        self.assertFalse(build.both_problems({1: [{"from": 5, "index": 0, "share": 0.1, "entries": [9],
+                                                   "mods": [{"mult": 1.1, "by": 6, "specs": ["Arcane"]}]}]}))
+
+
 if __name__ == "__main__":
     unittest.main()
