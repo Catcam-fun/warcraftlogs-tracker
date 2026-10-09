@@ -388,8 +388,8 @@ TALENTS_REVIEWED = {
     "Frequent Donor": "cooldown", "Zevrim's Resilience": "a flat heal the data doesn't size",
     "Anger Management": "cooldown from Rage spent", "Impenetrable Wall": "cooldown from Shield Slam",
     "Lifeblood": "Leech after a Healthstone", "Swift Artifice": "cast time",
-    "Soulburn": "a button (a Soul Shard) whose Healthstone bonus needs a Soulburn cast first: not assumed for a"
-                " Healthstone press (Gorebound Fortitude's always-on copy is: SOULBURN_HEALTHSTONE)", "Iron Stomach": "handled", "Glistening Fur": "handled", "Inspired Guard": "handled",
+    "Soulburn": "a button (a Soul Shard) whose Healthstone bonus needs a Soulburn cast first: the Healthstones'"
+                " \"soulburn\" (credited only when the log shows it could have been cast: soulburn())", "Iron Stomach": "handled", "Glistening Fur": "handled", "Inspired Guard": "handled",
     "Berserk": "a separate button",
     "Blood Mist": "parry chance", "Dance of Midnight": "automatic", "Demonsurge": "damage",
     "Elune's Favored": "heals from damage dealt", "Empyreal Ward": "armor after Lay on Hands, which already heals fully",
@@ -483,8 +483,14 @@ ALSO_CONSUMABLES = {"Iron Stomach": 185311}
 # max health (387636 "Soulburn: Healthstone", aura 133, 12 s). The talent alone gives none of it (a Soulburn
 # cast must come first, which a Healthstone press doesn't imply). Gorebound Fortitude (449701, a passive
 # whose effect 0 triggers 387636): "You always gain the benefit of Soulburn when consuming a Healthstone".
+# The heal bonus ADDS $387626s2% of max health to the Healthstone's share, it doesn't multiply it: measured
+# on 222 Demonic Healthstone heals of Warlocks with Soulburn in seven Mythic logs (Nerub-ar Palace to the
+# Midnight raids, 2026-10-09), every heal 0.30 (0.35 with Sweet Souls) of max health without a Soulburn cast
+# in the 20 s before it and 0.60 (0.65) with one, and 0.60 for a Warlock with Gorebound Fortitude
+# (x1.3 would be 0.39 / 0.455).
 SOULBURN, SOULBURN_BUFF, SOULBURN_HEALTHSTONE = 385899, 387626, 387636
 GOREBOUND = "Gorebound Fortitude"
+POWER_SOUL_SHARDS = "7"     # SpellPower PowerType; costs in tenths of a shard, as WCL's classResources
 
 # SpellModOp values that change one effect's value -> that effect's index.
 MOD_OP_EFFECT_INDEX = {3: 0, 12: 1, 23: 2, 32: 3, 33: 4}
@@ -579,9 +585,19 @@ class GameData:
             self.by_aura.setdefault(r["EffectAura"], []).append(r)
             if int(r["EffectTriggerSpell"] or 0):
                 self.triggers.setdefault(sid, set()).add(int(r["EffectTriggerSpell"]))
+        cooldown_rows = [r for r in table("SpellCooldowns", build) if r["DifficultyID"] == "0"]
         self.cooldowns = {int(r["SpellID"]): max(int(r["RecoveryTime"]), int(r["CategoryRecoveryTime"]))
-                          for r in table("SpellCooldowns", build) if r["DifficultyID"] == "0"}
+                          for r in cooldown_rows}
         categories = [r for r in table("SpellCategories", build) if r["DifficultyID"] == "0"]
+        # Does a spell trigger the global cooldown (ms, or 1 for a GCD category; 0: off it)?
+        self.gcd = {int(r["SpellID"]): int(r["StartRecoveryTime"] or 0) for r in cooldown_rows}
+        for r in categories:
+            if int(r["StartRecoveryCategory"] or 0):
+                self.gcd[int(r["SpellID"])] = self.gcd.get(int(r["SpellID"])) or 1
+        # Each spell's power cost: (PowerType, ManaCost) of its first cost row.
+        self.power = {}
+        for r in sorted(table("SpellPower", build), key=lambda r: int(r["OrderIndex"] or 0)):
+            self.power.setdefault(int(r["SpellID"]), (r["PowerType"], int(r["ManaCost"] or 0)))
         self.charge_cat = {int(r["SpellID"]): int(r["ChargeCategory"]) for r in categories}
         self.category = {int(r["SpellID"]): int(r["Category"]) for r in categories}
         self.charges = {int(r["ID"]): (int(r["MaxCharges"]), int(r["ChargeRecoveryTime"]))
@@ -593,6 +609,7 @@ class GameData:
                        for r in table("SpellClassOptions", build)}
         misc_rows = [r for r in table("SpellMisc", build) if r["DifficultyID"] == "0"]
         misc = {int(r["SpellID"]): int(r["DurationIndex"]) for r in misc_rows}
+        self.cast_time = {int(r["SpellID"]): int(r["CastingTimeIndex"]) for r in misc_rows}   # 1: instant
         # Always-on spells (talents and passives, not buttons or temporary buffs).
         self.passive = {int(r["SpellID"]) for r in misc_rows if int(r["Attributes_0"]) & SPELL_ATTR0_PASSIVE}
         self.attr5 = {int(r["SpellID"]): int(r["Attributes_5"] or 0) for r in misc_rows}
@@ -1070,23 +1087,61 @@ def measured_mods(name, spell, index, comp, out_field, field, ticks, gd, mods, p
             comp["mods"] = comp.get("mods", []) + [{**who, "add": round(add, 6)}]
 
 
-def gorebound(gd, mods, desc, problems):
-    """Gorebound Fortitude's Soulburn benefit on every Healthstone, from this patch's data: (who, heal
-    multiplier, max health share, its duration ms), or None when the talent isn't in a tree."""
-    who, tsid = talent_who(gd, mods, GOREBOUND)
-    if who is None:
-        return None
+def soulburn_benefit(gd, desc, problems):
+    """Soulburn's benefit on a Healthstone, from this patch's data: (heal share added, max health share,
+    its duration ms), or None (a problem) when it moved."""
     heal = gd.value(SOULBURN_BUFF, 1)
     hp = next((float(r["EffectBasePointsF"]) for r in gd.effects.get(SOULBURN_HEALTHSTONE, {}).values()
                if r["EffectAura"] == "133"), None)
     dur = gd.duration.get(SOULBURN_HEALTHSTONE, 0)
-    triggers = {int(r["EffectTriggerSpell"] or 0) for r in gd.effects.get(tsid, {}).values()}
-    if (SOULBURN_HEALTHSTONE not in triggers or not heal or not hp or dur <= 0
-            or not re.search(rf"Healthstone by \${SOULBURN_BUFF}s2%", desc.get(SOULBURN) or "")):
-        problems.append(f"{GOREBOUND}: Soulburn's Healthstone benefit ({SOULBURN_BUFF} effect 1, "
-                        f"{SOULBURN_HEALTHSTONE} aura 133 and its duration) moved: review SOULBURN_HEALTHSTONE")
+    if not heal or not hp or dur <= 0 or not re.search(rf"Healthstone by \${SOULBURN_BUFF}s2%", desc.get(SOULBURN) or ""):
+        problems.append(f"Soulburn's Healthstone benefit ({SOULBURN_BUFF} effect 1, {SOULBURN_HEALTHSTONE} aura 133 "
+                        f"and its duration) moved: review SOULBURN_HEALTHSTONE")
         return None
-    return who, round(1 + heal / 100, 4), round(hp / 100, 4), dur
+    return round(heal / 100, 4), round(hp / 100, 4), dur
+
+
+def gorebound(gd, mods, desc, problems):
+    """Gorebound Fortitude's Soulburn benefit on every Healthstone, from this patch's data: (who, heal
+    share added, max health share, its duration ms), or None when the talent isn't in a tree."""
+    who, tsid = talent_who(gd, mods, GOREBOUND)
+    if who is None:
+        return None
+    benefit = soulburn_benefit(gd, desc, problems)
+    triggers = {int(r["EffectTriggerSpell"] or 0) for r in gd.effects.get(tsid, {}).values()}
+    if benefit is None:
+        return None
+    if SOULBURN_HEALTHSTONE not in triggers:
+        problems.append(f"{GOREBOUND}: no longer triggers {SOULBURN_HEALTHSTONE}: review SOULBURN_HEALTHSTONE")
+        return None
+    return (who,) + benefit
+
+
+def soulburn(gd, mods, desc, problems):
+    """What a Warlock with the Soulburn talent gets on a Healthstone by casting Soulburn first, from this
+    patch's data, or None when the talent isn't in a tree: {"talent", "entries", "spell", "buff",
+    "buff_ms", "cooldown_ms", "cost" (Soul Shards, in tenths as WCL logs them), "heal" (share of max
+    health added), "hp", "dur_ms"}. The replay credits it only at moments the log shows Soulburn could
+    have been cast (defensives.SoulburnTimeline). Soulburn is instant and off the global cooldown (in the
+    logs it is pressed on the same millisecond as the Healthstone), which the build checks."""
+    who, _ = talent_who(gd, mods, "Soulburn")
+    if who is None:
+        return None
+    benefit = soulburn_benefit(gd, desc, problems)
+    cost = gd.power.get(SOULBURN)
+    gcd = gd.gcd.get(SOULBURN, 0)
+    buff_ms = gd.duration.get(SOULBURN_BUFF, 0)
+    cooldown = gd.cooldowns.get(SOULBURN, 0)
+    if benefit is None or not cost or cost[0] != POWER_SOUL_SHARDS or cost[1] <= 0 or gcd \
+            or gd.cast_time.get(SOULBURN, 1) != 1 or buff_ms <= 0 or cooldown <= 0 \
+            or SOULBURN_BUFF not in gd.triggers.get(SOULBURN, ()):
+        problems.append(f"Soulburn ({SOULBURN}): its Soul Shard cost {cost}, global cooldown {gcd} ms, cast time "
+                        f"index {gd.cast_time.get(SOULBURN)}, cooldown {cooldown} ms or buff {SOULBURN_BUFF} "
+                        f"({buff_ms} ms) moved: review soulburn()")
+        return None
+    heal, hp, dur = benefit
+    return {**who, "spell": SOULBURN, "buff": SOULBURN_BUFF, "buff_ms": buff_ms, "cooldown_ms": cooldown,
+            "cost": cost[1], "heal": heal, "hp": hp, "dur_ms": dur}
 
 
 def talent_component(gd, mods, talent, field, source, extra, problems):
@@ -1512,11 +1567,14 @@ def build_catalog(build):
         if entry["kind"] == "healthstone":
             gore = gorebound(gd, mods, desc, problems)
             if gore:
-                who, mult, hp, dur = gore
+                who, heal, hp, dur = gore
                 for comp in entry["mitigation"]:
                     if "heal" in comp:
-                        comp.setdefault("mods", []).append({**who, "mult": mult})
+                        comp.setdefault("mods", []).append({**who, "add": heal})
                 entry["mitigation"].append({"hp": 0.0, "mods": [{**who, "add": hp}], "dur_ms": dur})
+            burn = soulburn(gd, mods, desc, problems)
+            if burn:
+                entry["soulburn"] = burn
     heal = {"talents": mods.healing_taken(), "auras": healing_taken_auras(gd, mods)}
     reset_sources(gd, desc, catalog, problems)
     for talent in unreviewed_talents(gd, desc, catalog, mods):
