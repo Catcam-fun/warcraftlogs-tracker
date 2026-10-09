@@ -984,6 +984,63 @@ def unreviewed_talents(gd, desc, catalog, mods):
     return sorted(found)
 
 
+# A Brewmaster's purifies: what can take a share of the Stagger pool off between two ticks (the replay
+# reads the pool from the ticks around a staggered hit and tells which side a purify came on from the
+# share it took: defensives._purify_fits).
+PURIFYING_BREW = 119582      # effect 0: clears this % of the pool; effect 1 (Midnight on): at least this % of max hp
+QUICK_SIP = 388505           # effect 0: purifies this % each time effect 1 seconds of Shuffle are gained
+TRANQUIL_SPIRIT = 393357     # effect 0: a Healing Sphere (and, in The War Within, Expel Harm) clears this %
+MONK_FAMILY = 53
+SHUFFLE_GRANT = re.compile(r"(?:grants?|granting) Shuffle for \$(\d*)s(\d)", re.I)
+
+
+def stagger_purify(gd, mods, desc, problems):
+    """The purifies' sizes in this patch, from the game data:
+    {"brew": {"share", "mods": [talents adding to it], "min_max_health"?}, "quick_sip": {"share", "per_s"},
+     "shuffle_s": {ability: Shuffle seconds it grants}, "tranquil_spirit": {"share"}}.
+    A talent that changes any of these but Purifying Brew's share is a problem to handle."""
+    names = gd.names
+    out = {}
+    share = gd.value(PURIFYING_BREW, 0)
+    if share is None:
+        problems.append(f"Purifying Brew {PURIFYING_BREW}: effect 0 is missing")
+        return None
+    brew = {"share": round(share / 100, 4),
+            "mods": [m for m in mods.effect(PURIFYING_BREW, 0, "purify", 1) if "add" in m]}
+    if len(brew["mods"]) != len(mods.effect(PURIFYING_BREW, 0, "purify", 1)):
+        problems.append("Purifying Brew: a talent scales its share: handle it")
+    if gd.value(PURIFYING_BREW, 1) is not None:
+        brew["min_max_health"] = round(gd.value(PURIFYING_BREW, 1) / 100, 4)
+    out["brew"] = brew
+    for key, spell, idxs in (("quick_sip", QUICK_SIP, (0, 1)), ("tranquil_spirit", TRANQUIL_SPIRIT, (0,))):
+        values = [gd.value(spell, i) for i in idxs]
+        if None in values:
+            problems.append(f"{key}: effects {idxs} of spell {spell} are missing")
+            continue
+        if any(mods.effect(spell, i, "purify", 1) for i in idxs):
+            problems.append(f"{names.get(spell)}: a talent changes it: handle it")
+        out[key] = {"share": round(values[0] / 100, 4), **({"per_s": values[1]} if len(values) > 1 else {})}
+    # What grants Shuffle, and for how long (Quick Sip counts the seconds gained): every Monk spell whose
+    # tooltip says "grants Shuffle for $sN sec" (Keg Smash, Blackout Kick, Spinning Crane Kick).
+    grants = {}
+    for sid, text in desc.items():
+        if gd.family.get(sid, (None,))[0] != MONK_FAMILY:
+            continue
+        for other, n in SHUFFLE_GRANT.findall(text or ""):
+            spell, index = int(other) if other else sid, int(n) - 1
+            value = gd.value(spell, index)
+            if value is None:
+                problems.append(f"{names.get(sid)}: Shuffle effect {index} of spell {spell} is missing")
+                continue
+            if mods.effect(spell, index, "purify", 1):
+                problems.append(f"{names.get(spell)}: a talent changes the Shuffle it grants: handle it")
+            grants[names.get(sid)] = value
+    if not grants:
+        problems.append("no spell grants Shuffle: Quick Sip can't be sized")
+    out["shuffle_s"] = dict(sorted(grants.items()))
+    return out
+
+
 def build_catalog(build):
     """The catalog for one game build. Returns (catalog, healing-taken info, problems)."""
     gd = GameData(build)
@@ -1122,19 +1179,20 @@ def build_catalog(build):
     reset_sources(gd, desc, catalog, problems)
     for talent in unreviewed_talents(gd, desc, catalog, mods):
         problems.append(f"talent {talent!r} names a defensive: review it (TALENT_EFFECTS / TALENTS_REVIEWED)")
-    return catalog, heal, problems, missing
+    purify = stagger_purify(gd, mods, desc, problems)
+    return catalog, heal, purify, problems, missing
 
 
 def main():
     only = sys.argv[1:]
     all_patches = patches()
     out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "defensive_catalog.py")
-    catalogs, healing, starts = {}, {}, []
+    catalogs, healing, purifies, starts = {}, {}, {}, []
     for patch, first_day, build in all_patches:
         if only and patch not in only:
             continue
         print(f"{patch} (live {first_day}, build {build})...", flush=True)
-        catalog, heal, problems, missing = build_catalog(build)
+        catalog, heal, purify, problems, missing = build_catalog(build)
         latest = patch == all_patches[-1][0]
         if problems and latest:
             raise SystemExit(f"{patch}: spell data changed; update CURATED / EFFECTS:\n  " + "\n  ".join(problems))
@@ -1144,6 +1202,7 @@ def main():
             print(f"  not in this patch: {', '.join(missing)}")
         catalogs[patch] = catalog
         healing[patch] = heal
+        purifies[patch] = purify
         starts.append((first_day, patch))
     if only:
         raise SystemExit("Built " + ", ".join(catalogs) + " (dry run: the catalog file is only written for all patches).")
@@ -1156,6 +1215,8 @@ def main():
         f.write("CATALOGS = " + pprint.pformat(catalogs, width=150, sort_dicts=True) + "\n\n")
         f.write("# Healing-taken modifiers per patch: talents / spec passives, and buffs or debuffs by aura ID.\n")
         f.write("HEALING_TAKEN = " + pprint.pformat(healing, width=150, sort_dicts=True) + "\n\n")
+        f.write("# A Brewmaster's purifies per patch: what can take a share of the Stagger pool off between ticks.\n")
+        f.write("STAGGER_PURIFY = " + pprint.pformat(purifies, width=150, sort_dicts=True) + "\n\n")
         f.write("LATEST = PATCHES[-1][1]\nCATALOG = CATALOGS[LATEST]\n")
     print(f"Wrote {len(catalogs)} patches to {os.path.normpath(out)}")
 

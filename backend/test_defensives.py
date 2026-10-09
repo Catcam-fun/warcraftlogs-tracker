@@ -493,6 +493,25 @@ class OlderLogTests(unittest.TestCase):
                                               aoe_known=False)
         self.assertIsNone(unmarked["wouldSave"]["Feint"])
 
+    def test_cant_tell_gives_the_reason_it_cant_tell(self):
+        # An armor increase can't be judged when an earlier hit's armor rule isn't known (Cleave: physical,
+        # not measured), though it plainly doesn't reduce the Frost Bolt that killed them. The verdict is
+        # "can't tell", and the reason is the earlier hit's, not "armor doesn't reduce Frost Bolt".
+        hide = {"name": "Test Hide", "kind": "personal", "mitigation": [{"armor": 1.0}]}
+        hits = [dict(hit(95_000, 300_000, 400_000, ability=600), armor=2_000),
+                dict(hit(100_000, 400_000, 0, overkill=900_000), armor=2_000)]
+        r = defensives.assess_survival(hits, 100_000, [hide], [], NAMES, SCHOOLS, talent_entries={},
+                                       armor_k=2_000)
+        self.assertIsNone(r["wouldSave"]["Test Hide"])
+        self.assertEqual(r["details"]["Test Hide"]["why"], "armorUnknown")
+        self.assertEqual(r["details"]["Test Hide"]["whyHit"], "Cleave")
+        # The same on unmarked AoE: the reason says area damage isn't marked.
+        kb = dict(hit(100_000, 1_000_000, 0, overkill=300_000), isAoE=False)
+        r = defensives.assess_survival([kb], 100_000, ready(FEINT), [], NAMES, SCHOOLS, talent_entries={},
+                                       aoe_known=False)
+        self.assertEqual(r["details"]["Feint"]["why"], "aoeUnknown")
+        self.assertNotIn("whyHit", r["details"]["Feint"])
+
     def test_report_marks_aoe_only_if_some_hit_is_aoe(self):
         self.assertFalse(defensives.logs_mark_aoe({1: [{"isAoE": False}], 2: [{"isAoE": False}]}))
         self.assertTrue(defensives.logs_mark_aoe({1: [{"isAoE": False}], 2: [{"isAoE": True}]}))
@@ -1666,15 +1685,57 @@ class StaggerPoolTests(unittest.TestCase):
         # 1 - 2.7M / 4.4M = 0.386 if after: Purifying Brew's 50%, before. The tick after is right.
         self.assertEqual(pools[id(second)], [1_700_000])
 
-    def test_a_purifying_brew_cast_says_which_side(self):
-        ticks = [pool_tick(500, 200_000, 0), pool_tick(1_000, 200_000, 0), pool_tick(1_500, 200_000, 0),
-                 pool_tick(2_500, 120_000, 0)]
-        first, second = staggered(0, 4_000_000), staggered(2_000, 1_000_000)
-        # 20 x 120k - 1M = 1.4M: 0.588 before, 0.4545 after, neither a known share: can't tell.
-        self.assertEqual(defensives._stagger_pools(ticks, [first, second])[id(second)], [3_400_000, 1_400_000])
+    @staticmethod
+    def pools(tick, second_amount, casts=None, purify=None, tick_before=200_000, first=4_000_000):
+        """The pool estimates before a second staggered hit at 2 s: the first (at 0) staggered `first`,
+        three ticks of `tick_before` (the pool then: 17 x tick_before), and `tick` the tick after it."""
+        ticks = [pool_tick(500, tick_before, 0), pool_tick(1_000, tick_before, 0),
+                 pool_tick(1_500, tick_before, 0), pool_tick(2_500, tick, 0)]
+        ins = [staggered(0, first), staggered(2_000, second_amount)]
         cast = lambda t: {"timestamp": t, "type": "cast", "abilityGameID": defensives.PURIFYING_BREW}
-        self.assertEqual(defensives._stagger_pools(ticks, [first, second], [cast(1_800)])[id(second)], [1_400_000])
-        self.assertEqual(defensives._stagger_pools(ticks, [first, second], [cast(2_200)])[id(second)], [3_400_000])
+        out = defensives._stagger_pools(ticks, ins, None if casts is None else [cast(t) for t in casts], purify)
+        return out[id(ins[1])]
+
+    def test_a_purifying_brew_cast_says_which_side(self):
+        # Pool 3.4M, 680k staggered, the tick after 102k: 20 x 102k - 680k = 1.36M. Read before the hit
+        # the purify took 0.6 (Purifying Brew with Mantra of Purity), read after it 0.5 (without): both
+        # fit, so without the casts it can't be told. A cast on one side says which.
+        self.assertEqual(self.pools(102_000, 680_000), [3_400_000, 1_360_000])
+        self.assertEqual(self.pools(102_000, 680_000, casts=[1_800]), [1_360_000])
+        self.assertEqual(self.pools(102_000, 680_000, casts=[2_200]), [3_400_000])
+        # 20 x 120k - 1M = 1.4M: 0.588 before, 0.4545 after, neither a purify the game has; a cast on
+        # one side doesn't settle it either (the other could have had a flat one): both are kept.
+        self.assertEqual(self.pools(120_000, 1_000_000), [3_400_000, 1_400_000])
+        self.assertEqual(self.pools(120_000, 1_000_000, casts=[1_800]), [3_400_000, 1_400_000])
+
+    def test_one_quick_sip_purifies_ten_percent_at_once(self):
+        # Quick Sip purifies 5% for each 3 s of Shuffle gained, in one event: Keg Smash's 5 s can cross
+        # two thresholds (Weavi, Quel'Danas p104: 0.1000 on 10 hits). Pool 3.4M, 37,820 staggered, the
+        # tick after 154,891: 3.06M, 0.1000 read before the hit, 0.0989 after. Only the first is a share
+        # the game has (two separate 5% would be 0.0975).
+        self.assertEqual(self.pools(154_891, 37_820), [3_060_000])
+        keeps = defensives._purify_keeps(defensives.STAGGER_PURIFY["11.1.0"])
+        self.assertEqual(keeps[0], [0.4, 0.5])                       # Purifying Brew, with Mantra of Purity
+        self.assertEqual(keeps[2], [0.855, 0.9, 0.9025, 0.95])       # Quick Sip 10% / 5%, Tranquil Spirit
+
+    def test_a_cast_on_one_side_and_a_quick_sip_on_the_other_is_undecided(self):
+        # Pool 340k (17 x 20k), 3.06M staggered, the tick after 161.5k: 170k. Read before the hit the
+        # purify took 0.5 (the brew, cast there), read after it 0.05: a Quick Sip could have come after
+        # the hit as well, so the truth lies between: both are kept. Without passive purifies in the
+        # game data the cast settles it.
+        args = dict(casts=[1_800], tick_before=20_000, first=400_000)
+        self.assertEqual(self.pools(161_500, 3_060_000, **args), [340_000, 170_000])
+        brew_only = {"brew": {"share": 0.5}}
+        self.assertEqual(self.pools(161_500, 3_060_000, purify=brew_only, **args), [170_000])
+
+    def test_midnights_purifying_brew_clears_at_least_8_percent_of_max_health(self):
+        # Pool 136k (17 x 8k): half is 68k, but Midnight's brew clears at least 8% of max health (1M):
+        # 80k, leaving 56k; 1M staggered, the tick after 52.8k. Read before the hit 0.588: a purify
+        # only with the minimum, so the tick after is right; The War Within's brew has none.
+        args = dict(tick_before=8_000, first=160_000)
+        self.assertEqual(self.pools(52_800, 1_000_000, purify=defensives.STAGGER_PURIFY["12.0.0"], **args), [56_000])
+        self.assertEqual(self.pools(52_800, 1_000_000, purify=defensives.STAGGER_PURIFY["11.1.0"], **args),
+                         [136_000, 56_000])
 
     def test_undecided_pool_that_decides_the_verdict_is_cant_tell(self):
         # Before the second (fully staggered) hit the pool was 665k (tick before) or 350k (tick after:
