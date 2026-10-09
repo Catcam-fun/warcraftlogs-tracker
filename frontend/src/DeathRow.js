@@ -113,7 +113,9 @@ function effectText(effect, info) {
   return text ? `${text}.` : '';
 }
 
-function whyText(d, hitName) {
+// Why a defensive doesn't help, or why it can't be told. `whyHit`: the earlier hit a can't-tell is about
+// (assess_survival), when it isn't the killing blow.
+export function whyText(d, hitName) {
   switch (d.why) {
     case 'school':
       return d.school === 'melee' ? `${hitName} isn't a melee attack`
@@ -133,7 +135,7 @@ function whyText(d, hitName) {
     case 'tooFast': return 'their health only dropped in the last second, too fast to react';
     case 'readyTooLate': return 'it came off cooldown less than a second before they died';
     case 'notArmor': return `armor doesn't reduce ${hitName}`;
-    case 'armorUnknown': return `it isn't known whether armor reduces ${hitName}`;
+    case 'armorUnknown': return `it isn't known whether armor reduces ${d.whyHit || hitName}`;
     default: return null;
   }
 }
