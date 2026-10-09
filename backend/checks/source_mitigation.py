@@ -51,9 +51,18 @@ depend on health or on the hit's size, such hits are paired by unit, ability, ot
 (nearest hit without the defensive within PAIR_MS) and judged in a row of their own, "(absorbed whole)".
 Their share through is the absorbed amount over the unmitigated one; a hit with nothing taken at all
 (immune, missed) is left out.
-Each (player, defensive) is judged by the median of its hits' gaps (measured minus predicted), not the
-mean: a wrong catalog value is off on every ability, while one boss ability with an untracked modifier
-(Sonic Ba-Boom's amplifiers, Entropic Barrage ticks) can pull a mean far off by itself.
+Each (player, defensive, prediction) is judged by the median of its hits' gaps (measured minus predicted),
+not the mean: a wrong catalog value is off on every ability, while one boss ability with an untracked
+modifier (Sonic Ba-Boom's amplifiers, Entropic Barrage ticks) can pull a mean far off by itself. Hits are
+grouped by what the catalog predicts for them, so one effect can't hide inside another: Feint with
+Elusiveness predicts 0.20 on hits that aren't AoE and another value on AoE hits, and judged together the
+AoE hits' error sat under the median (Nickledon 23, Noobprint 16, Maar 26 AoE hits 0.09 off inside rows
+that passed; research FE, 2026-10-09).
+A hit next to the defensive's edge is left out: one whose neighbour in its own sequence (the same player,
+ability, enemy unit and pull) carries the other label (the defensive listed on one, not on the other)
+within EDGE_MS. The aura list and the reduction don't switch on the same hit: on Molten Phlegm the first
+hit listing Feint was unreduced and the first one after it no longer listed it was still reduced, which
+read Feint 0.000 there (research FE); without those hits it read 0.400.
 """
 import statistics
 from bisect import bisect_left
@@ -68,6 +77,7 @@ MIN_FLAG_HITS = 20            # fewer hits than this are too noisy to flag
 PAIR_MS = 10_000                      # a hit with and one without the defensive this close are compared
 BRAND_PAIR_MS = 3000                  # The War Within's Fiery Brand pairs (Liquefy grows over its cast)
 HEALTH_BAND = 0.05                    # ... with missing health this close (share of max health)
+EDGE_MS = 1500                        # a hit this close to one with the other label is at the edge
 STAGGER = 124255                      # a Brewmaster's Stagger ticks
 
 
@@ -150,6 +160,25 @@ def predicted_keep(comps, e, aoe, schools, size=None):
     return keep, ("by hit" if by_hit else round(1 - keep, 4))
 
 
+def edge_hits(hits, players, names, tracked):
+    """Positions in `hits` of the hits next to a tracked defensive's edge: in a sequence of one player's hits
+    from one enemy unit's ability in one pull, a hit whose neighbour (before or after) lists other tracked
+    defensives and is at most EDGE_MS away."""
+    seqs = defaultdict(list)
+    for k, e in enumerate(hits):
+        if e.get("type") != "damage" or e.get("targetID") not in players or e.get("abilityGameID") == STAGGER:
+            continue
+        seqs[(e["targetID"], e.get("abilityGameID"), e.get("sourceID"), e.get("sourceInstance"), e.get("fight"))].append(k)
+    out = set()
+    for seq in seqs.values():
+        seq.sort(key=lambda k: hits[k].get("timestamp") or 0)
+        labels = [frozenset({names.get(a) for a in defensives._auras(hits[k])} & tracked) for k in seq]
+        for a, b, la, lb in zip(seq, seq[1:], labels, labels[1:]):
+            if la != lb and (hits[b].get("timestamp") or 0) - (hits[a].get("timestamp") or 0) <= EDGE_MS:
+                out.update((a, b))
+    return out
+
+
 def enemy_side(hits, players, names, cat, loadout, spec, pull_spec, aoe, schools):
     """(player, defensive) -> [(measured, predicted)] for reductions on the enemy (on_the_enemy).
 
@@ -229,8 +258,13 @@ def check(run):
     whole = defaultdict(lambda: defaultdict(list))   # the same, for hits absorbed whole (no health on them)
     no_health = 0                           # hits with a defensive up that dealt damage without health
     aoe = report_aoe(hits)
-    for e in hits:
+    edges = edge_hits(hits, players, names, tracked)
+    at_edge = 0                             # hits left out next to a defensive's edge
+    for k, e in enumerate(hits):
         if e.get("type") != "damage" or e.get("targetID") not in players or not e.get("unmitigatedAmount"):
+            continue
+        if k in edges:
+            at_edge += 1
             continue
         if not e.get("mitigated"):
             continue                       # ignored reductions entirely
@@ -298,8 +332,9 @@ def check(run):
         return best[1] if best else None
 
     schools = meta.get("ability_schools", {})
-    # (player, defensive, row label) -> [(measured, predicted)] per hit, from boss abilities with
-    # MIN_HITS or more; the label is "" or " (absorbed whole)"
+    # (player, defensive, row label, prediction group) -> [(measured, predicted)] per hit, from boss
+    # abilities with MIN_HITS or more; the label is "" or " (absorbed whole)", the group the predicted
+    # reduction rounded to 3 places, or "by hit" (each hit predicted on its own), or "pairs"
     rows = defaultdict(list)
     per_hit_base = defaultdict(list)       # row -> the catalog's flat value, where each hit is predicted
     pairs = set()                          # rows made of back-to-back hit pairs
@@ -323,26 +358,28 @@ def check(run):
                         size = e["unmitigatedAmount"] * usual / e["maxHitPoints"]
                     keep, group = predicted_keep(comps, e, aoe, schools, size)
                     if keep is not None:
+                        group = group if group == "by hit" else round(group, 3)
                         by_predicted[group].append((1 - through / usual, 1 - keep))
                         if group == "by hit":
                             flat = 1.0
                             for c in comps or []:
                                 flat *= 1 - (c.get("dr") or 0)
-                            per_hit_base[(pid, name, label)].append(1 - flat)
-                for got in by_predicted.values():
+                            per_hit_base[(pid, name, label, group)].append(1 - flat)
+                for group, got in by_predicted.items():
                     if len(got) >= MIN_HITS:
-                        rows[(pid, name, label)] += got
+                        rows[(pid, name, label, group)] += got
 
     # A reduction on the enemy: raw sizes of the same unit's same ability, branded next to unbranded.
     for (pid, name), got in enemy_side(hits, players, names, cat, loadout, spec, pull_spec,
                                        aoe, schools).items():
-        rows[(pid, name, "")] += got
-        pairs.add((pid, name, ""))
+        rows[(pid, name, "", "pairs")] += got
+        pairs.add((pid, name, "", "pairs"))
 
     # The median gap between measured and predicted over every hit: a wrong catalog value shows on
     # every ability, while one boss ability with an untracked modifier doesn't move the median.
     items, measured, under = [], 0, 0
-    for (pid, name, label), per in sorted(rows.items(), key=lambda kv: (kv[0][1], players[kv[0][0]]["name"], kv[0][2])):
+    for (pid, name, label, group), per in sorted(rows.items(), key=lambda kv: (kv[0][1], players[kv[0][0]]["name"],
+                                                                              kv[0][2], str(kv[0][3]))):
         n = len(per)
         if n < MIN_FLAG_HITS:
             under += 1
@@ -351,7 +388,7 @@ def check(run):
         predicted = sum(p for _, p in per) / n
         real = predicted + statistics.median(m - p for m, p in per)
         if abs(real - predicted) > FLAG_AT:
-            row = (pid, name, label)
+            row = (pid, name, label, group)
             who = f"{players[pid]['name']} {name}{label}"
             if row in pairs:
                 items.append(f"{who}: measured {real:.2f}, catalog {predicted:.2f} over {n} pairs")
@@ -362,8 +399,9 @@ def check(run):
             else:
                 items.append(f"{who}: measured {real:.2f}, catalog {predicted:.2f} over {n} hits")
     # What was and wasn't judged, so a pass is never read as more than it is.
-    reason = (f"{measured} defensives measured, {under} under {MIN_FLAG_HITS} matched hits, "
-              f"{no_base} hits with no baseline, {no_health} without health")
+    # Counted by group: a player's defensive, one row label and one prediction.
+    reason = (f"{measured} groups measured, {under} under {MIN_FLAG_HITS} matched hits, "
+              f"{no_base} hits with no baseline, {no_health} without health, {at_edge} at a defensive's edge")
     if not measured:
         return skip(f"no defensive had enough matched hits to measure ({reason})")
     return fail(items, reason=reason) if items else Outcome("pass", reason=reason)

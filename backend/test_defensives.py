@@ -407,6 +407,31 @@ class SurvivalTests(unittest.TestCase):
         r = defensives.assess_survival([kb], 100_000, ready(FEINT), [], NAMES, SCHOOLS, talent_entries=talented)
         self.assertTrue(r["wouldSave"]["Feint"])                      # 20% of 1.15M = 230k
 
+    def test_elusiveness_takes_part_of_feints_area_reduction(self):
+        # Measured on real hits (research FE, 11.0.7 to 12.1.0): with Elusiveness, Feint keeps 4/7 of an AoE
+        # hit (3/7 = 0.4286 off on seven Rogues), not 0.6 x 0.8 = 0.48; with Mirrors too, 0.491429 (0.5086 off
+        # on five). Elusiveness takes 4/35 off the AoE effect (40% -> 2/7) on top of its 20% on every hit. The
+        # catalog carries it in every patch (the build script's MEASURED_MODS).
+        from defensive_catalog import CATALOGS
+        elusiveness = set(self.talent(FEINT, "Elusiveness"))
+        mirrors = set(self.talent(FEINT, "Mirrors"))
+        for patch, cat in CATALOGS.items():
+            feint = next(d for d in cat.values() if d["name"] == "Feint")
+            keep = lambda talents: (lambda comps: (1 - comps[0]["dr"]) * (1 - (comps[1]["dr"] if len(comps) > 1 else 0)))(
+                defensives._resolve(feint, {e: 1 for e in talents}, {})[0])
+            comps, _ = defensives._resolve(feint, {e: 1 for e in elusiveness}, {})
+            self.assertAlmostEqual(comps[0]["dr"], 2 / 7, places=6, msg=patch)
+            self.assertAlmostEqual(keep(elusiveness), 4 / 7, places=6, msg=patch)
+            self.assertAlmostEqual(keep(elusiveness | mirrors), 0.491429, places=6, msg=patch)
+            self.assertAlmostEqual(keep(set()), 0.6, places=6, msg=patch)
+            self.assertAlmostEqual(keep(mirrors), 0.5, places=6, msg=patch)
+        # A 1M AoE killing blow with 450k overkill: 3/7 of it (428,571) is too little, where 0.52 would have saved.
+        kb = hit(100_000, 550_000, 0, overkill=450_000, aoe=True)
+        r = defensives.assess_survival([kb], 100_000, ready(FEINT), [], NAMES, SCHOOLS,
+                                       talent_entries={e: 1 for e in elusiveness})
+        self.assertFalse(r["wouldSave"]["Feint"])
+        self.assertAlmostEqual(r["details"]["Feint"]["amount"], 428_571, delta=1)
+
     def test_evasion_dodges_melee_only(self):
         melee = self.assess(hit(100_000, 1_000_000, 0, overkill=500_000, ability=1), available=[EVASION])
         self.assertTrue(melee["wouldSave"]["Evasion"])
