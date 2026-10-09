@@ -384,10 +384,10 @@ class ZealotsParagonTests(unittest.TestCase):
             ext = entry(patch, "Sentinel")["extended_by"]
             self.assertEqual((ext["talent"], ext["ms"]), ("Zealot's Paragon", 500), patch)
             self.assertIn(self.JUDGMENT, ext["casts"], patch)
+            # Loadouts are trimmed to the entries the catalog reads: Zealot's Paragon's must survive that.
+            self.assertTrue(set(ext["entries"]) <= defensives._CATALOGS[patch].relevant_talent_entries, patch)
         self.assertIn(self.HAMMER, entry("12.1.0", "Sentinel")["extended_by"]["casts"])
         self.assertTrue({self.JUDGMENT, self.HAMMER} <= defensives._LATEST.extend_ids)
-        # Loadouts are trimmed to the entries the catalog reads: Zealot's Paragon's must survive that.
-        self.assertTrue(set(ext["entries"]) <= defensives._CATALOGS[patch].relevant_talent_entries)
         self.assertIn(102433, defensives._LATEST.relevant_talent_entries)
 
     def test_each_cast_while_up_extends_it(self):
