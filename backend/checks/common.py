@@ -254,6 +254,11 @@ class Run:
         return self._memo(("casts", rid, pid, start, end),
                           lambda: self._events(rid, "Casts", "sourceID", pid, start, end))
 
+    def resource_casts(self, rid, pid, start, end):
+        """The player's casts in [start, end] with their class resources (a Warlock's Soul Shards)."""
+        return self._memo(("resource-casts", rid, pid, start, end),
+                          lambda: self._events(rid, "Casts", "sourceID", pid, start, end, resources=True))
+
     def heals_taken(self, rid, pid, start, end):
         """Healing the player received in [start, end], with resources (for health around a killing hit)."""
         return self._memo(("heals", rid, pid, start, end),

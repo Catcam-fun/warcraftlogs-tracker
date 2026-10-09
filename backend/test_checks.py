@@ -968,6 +968,23 @@ class VerdictRuleTests(unittest.TestCase):
         run.meta_for.return_value = {"abilities": {5: "Sever"}}
         self.assertEqual(rules_verdicts.check(run).status, "pass")
 
+    def test_soulburn_credit_needs_a_shard_and_soulburn_ready(self):
+        sb = {"spell": 385899, "buff": 387626, "buff_ms": 20_000, "cooldown_ms": 6_000, "cost": 10}
+        spend = lambda t, amount, cost=10, sid=105174: {"type": "cast", "timestamp": t, "abilityGameID": sid,
+                                                         "classResources": [{"type": 0, "amount": 9},
+                                                                            {"type": 7, "amount": amount, "cost": cost}]}
+        details = {"Healthstone": {"pressAgo": 2.0, "soulburn": True}, "Barkskin": {"pressAgo": 2.0}}
+        ok = rules_verdicts.soulburn_presses(details, 10_000, [spend(5_000, 30)], [], sb)
+        self.assertEqual(ok, [])
+        none_left = rules_verdicts.soulburn_presses(details, 10_000, [spend(5_000, 10)], [], sb)
+        self.assertEqual(len(none_left), 1)
+        self.assertTrue(none_left[0].startswith("Healthstone: credited with Soulburn 2.0s"))
+        cooling = [spend(5_000, 40), spend(7_000, 30, sid=385899)]
+        self.assertEqual(len(rules_verdicts.soulburn_presses(details, 10_000, cooling, [], sb)), 1)
+        buffed = [{"type": "applybuff", "timestamp": 7_000, "abilityGameID": 387626}]
+        self.assertEqual(rules_verdicts.soulburn_presses(details, 10_000, cooling, buffed, sb), [])
+        self.assertEqual(rules_verdicts.soulburn_presses(details, 10_000, [], [], sb)[0][:12], "Healthstone:")
+
     def test_early_presses(self):
         details = {"A": {"pressAgo": 3.0}, "B": {"pressAgo": 2.0}, "C": {"amount": 0, "why": "readyTooLate"}}
         # A ready 2.0s before the killing blow at 10000, pressed 3.0s before: flagged. B pressed within
