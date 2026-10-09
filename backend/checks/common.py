@@ -250,12 +250,12 @@ class Run:
 
     def aura_events(self, rid, pid, start, end):
         """The player's buff and debuff events in [start, end], with stack counts and who cast them
-        (sourceID). For Buffs, `sourceID` is the unit that gained the aura: `targetID` returns only the
-        auras the player cast on themselves (verified live, Manaforge g2R9GZcd1rP6JKpw actor 67: 87 events
-        against 124 with a shaman's Ancestral Vigor, sourceID 3)."""
+        (sourceID). For Buffs and Debuffs, `sourceID` is the unit that has the aura; `targetID` returns
+        the player's own casts on anyone (verified live, Manaforge g2R9GZcd1rP6JKpw actor 67: 87 events, all
+        self-cast, against 124 with `sourceID`, a shaman's Ancestral Vigor among them, sourceID 3)."""
         return self._memo(("auras", rid, pid, start, end), lambda: sorted(
             self._events(rid, "Buffs", "sourceID", pid, start, end) +
-            self._events(rid, "Debuffs", "targetID", pid, start, end), key=lambda e: e["timestamp"]))
+            self._events(rid, "Debuffs", "sourceID", pid, start, end), key=lambda e: e["timestamp"]))
 
     def hits_before(self, rid, fid, pid, death_ts):
         # For DamageTaken, sourceID is the unit that took the damage; targetID returns only the hits
