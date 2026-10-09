@@ -1835,7 +1835,8 @@ def _resolve(entry, talent_entries, observed_absorbs, spec=None, applied=None):
             if applied is not None:
                 applied.append({"talent": needs["talent"], "field": field, "rank": rank,
                                 "adds": seen if value is None else value,
-                                **({"school": c["school"]} if c.get("school") else {})})
+                                **({"school": c["school"]} if c.get("school") else {}),
+                                **({"dur_ms": c["dur_ms"]} if c.get("dur_ms") else {})})
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 value = value * rank
         extra = {k: c[k] for k in ("over_ms", "ticks", "current", "replaces_form", "from_target", "dr_hit", "share",
