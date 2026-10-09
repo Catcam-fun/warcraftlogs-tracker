@@ -2,7 +2,7 @@
 defensives.py - What defensive options a player had when they died.
 
 For every death this answers, per defensive the player actually had:
-  - active:     its aura was on them when they died
+  - active:     its aura was on them when they died (with its caster's talented numbers)
   - available:  they had it and it was off cooldown, but it wasn't pressed
   - cooldown:   it was pressed earlier and hadn't come back yet
 plus whether they used a Healthstone / health potion this pull, and which raid
@@ -25,7 +25,9 @@ from datetime import datetime, timezone
 from armor_constants import ARMOR_K, IGNORES_ARMOR, REDUCED_BY_ARMOR
 from boss_spell_flags import IGNORES_IMMUNITY
 from raid_wide_damage import RAID_WIDE
-from defensive_catalog import CATALOGS, HEALING_TAKEN, LATEST, PATCHES
+from defensive_catalog import CATALOGS, HEALING_TAKEN, LATEST, PATCHES, STAGGER_PURIFY
+from max_health_auras import MAX_HEALTH, STACKING
+from features import KILLING_HIT_HEALS
 from spell_icons import DESCRIPTIONS as CATALOG_DESCRIPTIONS, ICONS as CATALOG_ICONS
 from warcraftlogs import graphql_query
 
@@ -48,15 +50,40 @@ DEATH_AURA_GRACE_MS = 250
 AURA_DURATION_HEADROOM = 1.5
 
 # Demonic Healthstone heals more in the logs than the game data says (a
-# server-side change the data files don't carry). Measured medians per tier,
-# used only for Warlocks who didn't use one in the report: (first patch, share of max health).
-DEMONIC_HEALTHSTONE_MEASURED = [("11.0.2", 0.35), ("11.1.0", 0.65), ("12.0.0", 0.60)]
+# server-side change the data files don't carry). Measured per tier without a
+# Soulburn cast first (which adds its own share: catalog "soulburn"), used only
+# for Warlocks who didn't use one in the report: (first patch, share of max health).
+# Seven Mythic logs, Nerub-ar Palace to the Midnight raids (2026-10-09): every one of
+# 166 heals with no Soulburn cast in the 20 s before it healed 0.35 in The War Within
+# (all of those Warlocks had Sweet Souls) and 0.30 in Midnight; the 0.65 / 0.60 measured
+# before were heals after a Soulburn cast.
+DEMONIC_HEALTHSTONE_MEASURED = [("11.0.2", 0.35), ("12.0.0", 0.30)]
 
 # The potion most raiders drank on bosses in each tier (from real logs). When a
 # player's own potion heals aren't in the boss pulls (they drank only on trash,
 # or one without a typical heal), this one stands in: (first patch, potion).
 STANDARD_POTION = [("11.0.2", "Algari Healing Potion"), ("11.2.0", "Invigorating Healing Potion"),
                    ("12.0.0", "Silvermoon Health Potion"), ("12.1.0", "Concentrated Silvermoon Health Potion")]
+
+
+def _who_lists(terms):
+    """Every "entries" / "specs" holder in an aura's max-health terms and their modifiers."""
+    for t in terms:
+        yield t
+        yield from t.get("mods", ())
+
+
+# Talent entries that change any aura's max health, in any patch.
+MAX_HEALTH_ENTRIES = frozenset(e for h in MAX_HEALTH.values() for _, terms in h for w in _who_lists(terms)
+                               for e in w.get("entries", ()))
+# Auras whose max-health size depends on a loadout (talents or spec) in some patch: sized with their
+# CASTER's (a warrior's Battlefield Commander raises the Rallying Cry on everyone).
+LOADOUT_SIZED = frozenset(a for a, h in MAX_HEALTH.items() for _, terms in h for w in _who_lists(terms)
+                          if w.get("entries") or w.get("specs"))
+# Stacking auras that can change max health in some patch (a share, a flat amount, or talents that fill it).
+STACK_SIZED = frozenset(a for a in STACKING if any(t.get("flat") or (t.get("share") is not None and
+                                                                    (t.get("share") or t.get("mods")))
+                                                   for _, terms in MAX_HEALTH[a] for t in terms))
 
 
 def _patch_key(patch):
@@ -79,13 +106,33 @@ class Catalog:
         # Every personal defensive is tracked (accuracy over API cost, the
         # owner's call); the per-player summary counts only major (60s+) ones.
         self.tracked = self.personal
-        self.cast_ids = sorted(set(self.tracked) | set(self.consumable))
+        # Spells that bring a tracked defensive back early (Cold Snap, Black Ox Brew): their casts are read too.
+        self.reset_ids = frozenset(r["spell"] for d in self.tracked.values() for r in d.get("reset_by", ()))
+        # Soulburn's benefit on a Healthstone (the Healthstones' "soulburn": build_defensive_catalog.soulburn):
+        # its casts are read too, for its cooldown and to tell which Healthstones had it, and the casts of the
+        # other spells its buff empowers (Demonic Circle: Teleport, Demonic Gateway...), which use it up.
+        self.soulburn = next((d["soulburn"] for d in self.consumable.values() if d.get("soulburn")), None)
+        self.soulburn_spent_ids = frozenset((self.soulburn or {}).get("consumed_by", ()))
+        self.soulburn_ids = (frozenset({self.soulburn["spell"]}) | self.soulburn_spent_ids if self.soulburn
+                             else frozenset())
+        self.cast_ids = sorted(set(self.tracked) | set(self.consumable) | self.reset_ids | self.soulburn_ids)
+        # Casts that lengthen a tracked defensive (Zealot's Paragon: Judgment and Hammer of Wrath on
+        # Sentinel), read from the death windows (fetch_death_windows), not the report-wide casts.
+        self.extend_ids = frozenset(c for d in self.tracked.values() for c in (d.get("extended_by") or {}).get("casts", ()))
+        self.longest_cooldown_ms = max((d["cooldown_ms"] for d in self.tracked.values()), default=0)
         # Shields a talent adds to a button (Matted Fur): scored from their real size in the log.
         self.observed_auras = sorted({c["aura"] for d in self.all.values() for c in d.get("mitigation") or ()
                                       if isinstance(c, dict) and c.get("aura")})
+        # Buttons whose effect is an aura of its own (Earth Elemental: 381755): aura -> the button's name; only
+        # those auras say the button's effect is up, not the button's same-named aura.
+        self.aura_owner = {int(a): d["name"] for d in self.all.values() for a in d.get("auras") or {}}
+        self.effect_aura_names = {d["name"]: set((d.get("auras") or {}).values()) for d in self.all.values()
+                                  if d.get("auras")}
         self.buff_names = sorted({d["name"] for d in list(self.personal.values()) + list(self.external.values())}
-                                 | set(self.observed_auras))
+                                 | set(self.observed_auras) | {n for ns in self.effect_aura_names.values() for n in ns})
         heal = HEALING_TAKEN.get(patch, {})
+        # A Brewmaster's purifies in this patch (the Stagger pool: _stagger_pools).
+        self.stagger_purify = STAGGER_PURIFY.get(patch) or STAGGER_PURIFY[LATEST]
         self.heal_talents = heal.get("talents", [])
         self.heal_auras = {int(k): v for k, v in heal.get("auras", {}).items()}
         # Talent entries the analysis ever looks at: granting, replacing or
@@ -95,6 +142,9 @@ class Catalog:
         for d in self.all.values():
             entries.update(d["talent_entries"], d.get("replaced_by_entries", ()))
             entries.update(((d.get("needs_form") or {}).get("unless") or {}).get("entries", ()))
+            entries.update((d.get("needs") or {}).get("entries", ()))
+            entries.update((d.get("extended_by") or {}).get("entries", ()))
+            entries.update((d.get("soulburn") or {}).get("entries", ()))
             for c in d.get("mitigation") or []:
                 if isinstance(c, dict) and c.get("needs"):
                     entries.update(c["needs"].get("entries", ()))
@@ -103,6 +153,17 @@ class Catalog:
                 entries.update(m.get("entries", ()))
         for m in self.heal_talents:
             entries.update(m.get("entries", ()))
+        # The talents that decide a Brewmaster's purifies (_purify_keeps, _stagger_pools).
+        sp = self.stagger_purify or {}
+        for m in (sp.get("brew") or {}).get("mods", ()):
+            entries.update(m.get("entries", ()))
+        for key in ("quick_sip", "tranquil_spirit"):
+            entries.update((sp.get(key) or {}).get("entries", ()))
+        for f in sp.get("flat", ()):
+            entries.update(f.get("entries", ()))
+        # And every talent that changes how much an aura raises max health (max_health_auras.py: Foul
+        # Bulwark on Bone Shield, Battlefield Commander on Rallying Cry), whoever cast the aura.
+        entries.update(MAX_HEALTH_ENTRIES)
         self.relevant_talent_entries = frozenset(entries)
         self.name_to_id = {}
         for sid, d in list(self.personal.items()) + list(self.external.items()):
@@ -117,6 +178,31 @@ class Catalog:
 
 
 _CATALOGS = {p: Catalog(p) for p in CATALOGS}
+
+
+def aura_name(cat, aid, ability_names):
+    """The catalog name an aura in the log stands for: its own name, the button's for an aura that carries a
+    button's effect (Earth Elemental's 381755, "Primordial Bond" in Midnight), None for a button's
+    same-named aura that doesn't (Earth Elemental's 198103)."""
+    owner, effect = effect_auras(cat)
+    if aid in owner:
+        return owner[aid]
+    name = ability_names.get(aid)
+    return None if name in effect else name
+
+
+def effect_aura_ids(cat):
+    """{button: its effect auras' IDs} of a catalog (Earth Elemental: {381755}); empty for a stand-in."""
+    out = defaultdict(set)
+    for aid, name in effect_auras(cat)[0].items():
+        out[name].add(aid)
+    return dict(out)
+
+
+def effect_auras(cat):
+    """(aura -> button, button -> names of its effect auras) of a catalog; empty for a stand-in without them."""
+    owner, names = getattr(cat, "aura_owner", None), getattr(cat, "effect_aura_names", None)
+    return (owner if isinstance(owner, dict) else {}), (names if isinstance(names, dict) else {})
 
 
 def catalog_for(report_start_ms=None):
@@ -156,13 +242,14 @@ def ability_info(cat, name):
             "effect": [{k: (round(v, 3) if isinstance(v, float) else v) for k, v in c.items() if v is not None}
                        for c in comps or ()],
             **({"typicalHeal": typical} if typical else {}),
+            **({"needs": entry["needs"]["talent"]} if entry.get("needs") else {}),
             **({"description": CATALOG_DESCRIPTIONS[name]} if name in CATALOG_DESCRIPTIONS else {})}
 
 
 # Changes whenever what gets fetched or kept for defensives changes, so cached
 # data from an older catalog is never reused. Bump DATA_SHAPE when the
 # indexed layout changes.
-DATA_SHAPE = 4
+DATA_SHAPE = 5
 CATALOG_FINGERPRINT = hashlib.sha1(repr((DATA_SHAPE, [
     (c.patch, c.cast_ids, c.buff_names, sorted(c.relevant_talent_entries)) for c in _CATALOGS.values()
 ])).encode()).hexdigest()[:12]
@@ -226,14 +313,26 @@ def fetch_combatants(token, report_code, fight_ids, start_time, end_time):
                   end_time=end_time + 1, shape=_loadout)
 
 
-def fetch_defensive_raw(token, report_code, fight_ids, start_time, end_time, cat=None, combatants=None):
+def cast_lookback(cat, first_start, prev_end=0):
+    """How far back a report's casts are read: 3 minutes before the first kept pull for short
+    cooldowns (ENCOUNTER_RESET_MS: they carry over), and for long ones back to the end of the last
+    boss encounter before it (they reset when an encounter ends, so a press after that carries into
+    the pull), but never more than the longest tracked cooldown back."""
+    long_from = max(prev_end or 0, first_start - cat.longest_cooldown_ms)
+    return max(0, min(first_start - ENCOUNTER_RESET_MS, long_from))
+
+
+def fetch_defensive_raw(token, report_code, fight_ids, start_time, end_time, cat=None, combatants=None,
+                        prev_end=0):
     """Defensive casts, defensive auras, talent loadouts and consumable heals for one report,
     for every player (the queries run one after another). Keep only the players who
     died with filter_defensive_raw.
 
-    - Casts and auras cover the whole time range (trash and time between pulls
-      included, from 3 minutes before the first pull) so a defensive pressed
-      just before a pull counts. They're filtered to the players who died
+    - Casts cover the whole time range (trash and time between pulls included)
+      from cast_lookback: 3 minutes before the first pull, or back to the end
+      of the last boss encounter before it (`prev_end`, report-relative ms)
+      for long cooldowns, at most the longest tracked cooldown. Auras cover it
+      from 3 minutes before the first pull. Both are filtered to the players who died
       afterwards, not in the query: WCL returns nothing for `source.id in (...)`
       / `target.id in (...)` on Casts and Buffs (verified on a live log), and
       the unfiltered query costs fewer points anyway.
@@ -246,11 +345,12 @@ def fetch_defensive_raw(token, report_code, fight_ids, start_time, end_time, cat
     """
     cat = cat or _LATEST
     lookback = max(0, start_time - ENCOUNTER_RESET_MS)
+    casts_from = cast_lookback(cat, start_time, prev_end)
     cast_filter = f"type = \"cast\" and ability.id in ({', '.join(map(str, cat.cast_ids))})"
     buff_filter = "ability.name in (" + ", ".join(f'"{n}"' for n in cat.buff_names) + ")"
     heal_filter = f"ability.id in ({', '.join(map(str, sorted(cat.consumable)))})"
     jobs = {
-        "casts": ("Casts", cast_filter, None, lookback, False),
+        "casts": ("Casts", cast_filter, None, casts_from, False),
         "buffs": ("Buffs", buff_filter, None, lookback, False),
         "heals": ("Healing", heal_filter, fight_ids, start_time, True),
     }
@@ -268,14 +368,16 @@ def fetch_defensive_raw(token, report_code, fight_ids, start_time, end_time, cat
 
 
 def filter_defensive_raw(raw, player_ids, cat=None):
-    """fetch_defensive_raw's events for the given players only, indexed (index_defensive_events)."""
+    """fetch_defensive_raw's casts, buffs and heals of the given players and every player's loadout, indexed."""
     players = set(player_ids)
     if not players:
         return {"casts": {}, "buffs": {}, "talents": {}, "heals": {}}
     return index_defensive_events({
         "casts": [e for e in raw.get("casts", []) if e.get("sourceID") in players],
         "buffs": [e for e in raw.get("buffs", []) if e.get("targetID") in players],
-        "combatants": [e for e in raw.get("combatants", []) if e.get("sourceID") in players],
+        # Every player's loadout (trimmed to the entries read): an aura someone else cast on a player who
+        # died is sized with the caster's talents.
+        "combatants": raw.get("combatants", []),
         "heals": [e for e in raw.get("heals", []) if e.get("targetID") in players],
     }, cat or _LATEST)
 
@@ -329,7 +431,8 @@ def index_defensive_events(raw, cat=None):
     casts = defaultdict(list)           # sourceID -> [(ts, spellID)]
     for e in raw.get("casts", []):
         sid = e.get("abilityGameID")
-        if e.get("type") == "cast" and sid in cat.all and e.get("sourceID") is not None:
+        if e.get("type") == "cast" and (sid in cat.all or sid in cat.reset_ids or sid in cat.soulburn_ids) \
+                and e.get("sourceID") is not None:
             casts[e["sourceID"]].append((e["timestamp"], sid))
     buffs = defaultdict(list)           # targetID -> [(ts, type, abilityGameID, sourceID, shield size)]
     for e in raw.get("buffs", []):
@@ -346,7 +449,9 @@ def index_defensive_events(raw, cat=None):
             print(f"[WARN] Unknown specID {e['specID']}: add it to defensives.SPEC_NAMES")
     for e in raw.get("combatants", []):
         tree = e.get("talentTree")
-        if tree is None or e.get("sourceID") is None:
+        # An empty tree is a loadout the log didn't record, not one with no talents: every loadout in the
+        # cached logs (6,096 over 8 raids' reports) lists 11 to 82 entries. Unknown, like a missing one.
+        if not tree or e.get("sourceID") is None:
             continue
         talents[(e.get("fight"), e["sourceID"])] = {t["id"]: t.get("rank") or 1 for t in tree
                                                      if t.get("id") in cat.relevant_talent_entries}
@@ -372,10 +477,19 @@ def index_defensive_events(raw, cat=None):
 # PER-DEATH ANALYSIS
 # =============================================================================
 
-def _has_ability(sid, entry, player_class, spec, talent_entries, cast_ids_in_report, pressed_this_pull=()):
+def _has_ability(sid, entry, player_class, spec, talent_entries, cast_ids_in_report, pressed_this_pull=(),
+                 effect_seen=False):
+    """`effect_seen`: the aura carrying the button's effect was on them in this log (Earth Elemental's
+    381755), which proves the talent the button needs."""
     if talent_entries is not None:
         talent_entries = set(talent_entries)
     if entry["class"] != player_class:
+        return False
+    if entry.get("needs") and not effect_seen and \
+            not (talent_entries and _rank(talent_entries, entry["needs"]["entries"])):
+        # A defensive only with a talent (Midnight's Earth Elemental with Primordial Bond): pressing the
+        # button proves they have it, not the talent; unknown talents with no effect aura seen count as
+        # not having it.
         return False
     if sid in pressed_this_pull:
         return True    # pressing it this pull proves they have it, whatever the talent record says
@@ -398,9 +512,11 @@ def _spec_matches(spec, specs):
 
 
 def _mod_rank(mod, talent_entries, spec):
-    """How many times a modifier applies to this player: talent rank, or 1 for their spec's passive."""
-    if mod.get("specs"):
-        return 1 if spec and _spec_matches(spec, mod["specs"]) else 0
+    """How many times a modifier applies to this player: talent rank, or 1 for their spec's passive.
+    A modifier can be both (Improved Prismatic Barrier in The War Within: an Arcane spec passive and a
+    talent entry): either gives it, once."""
+    if mod.get("specs") and spec and _spec_matches(spec, mod["specs"]):
+        return max(1, _rank(talent_entries, mod.get("entries", ())))
     return _rank(talent_entries, mod.get("entries", ()))
 
 
@@ -441,54 +557,102 @@ def _talented_charges(entry, talent_entries, spec):
                                   for m in entry.get("charge_mods", ()))
 
 
-def _effective_cooldown(entry, own_casts_of_spell, cd=None, charges=None):
-    cd = entry["cooldown_ms"] if cd is None else cd
-    charges = entry["charges"] if charges is None else charges
-    if charges == 1 and len(own_casts_of_spell) > 1:
-        gaps = [b - a for a, b in zip(own_casts_of_spell, own_casts_of_spell[1:])]
-        shortest = min(gaps)
-        if shortest < cd - CDR_TOLERANCE_MS:
-            cd = shortest
-    return cd
+def _spec_mods(entry):
+    """Does a spec passive change this entry (a modifier given by spec; a mastery's stretch isn't counted)?"""
+    mods = [m for c in entry.get("mitigation") or () if isinstance(c, dict) for m in _mods(c)]
+    mods += [c["needs"] for c in entry.get("mitigation") or () if isinstance(c, dict) and c.get("needs")]
+    mods += list(entry.get("cooldown_mods", ())) + list(entry.get("charge_mods", ())) + list(entry.get("duration_mods", ()))
+    return any(m.get("specs") and not m.get("mastery") for m in mods)
 
 
-def _charges_at(death_ts, casts_in_window, charges, recharge_ms):
-    """Simulate charges up to the death. Returns (charges_left, ms_until_next)."""
-    have, recharge_done = charges, None
-    for t in casts_in_window:
-        while recharge_done is not None and recharge_done <= t:
-            have += 1
-            recharge_done = recharge_done + recharge_ms if have < charges else None
-        have = max(have - 1, 0)
-        if recharge_done is None:
-            recharge_done = t + recharge_ms
-    while recharge_done is not None and recharge_done <= death_ts:
-        have += 1
-        recharge_done = recharge_done + recharge_ms if have < charges else None
-    return have, (recharge_done - death_ts if recharge_done is not None else 0)
+def _active_detail(entry, loadout, observed_absorbs):
+    """An active defensive as its caster had it: {"talentsKnown"} and, with their loadout (talents,
+    spec), the talented "effect" (as the ready buttons resolve it), "auraMs", "cooldownMs", "charges"
+    and "talents" (every talent that changed one of them). "specKnown": False when the caster's spec
+    isn't in the log and a spec passive would change the entry (those aren't in the numbers)."""
+    if loadout is None or loadout[0] is None:
+        return {"talentsKnown": False}
+    talents, spec = loadout
+    applied = []
+    comps, _ = _resolve(entry, talents, observed_absorbs, spec, applied)
+    for field, key in (("duration", "duration_mods"), ("cooldown", "cooldown_mods"), ("charges", "charge_mods")):
+        for m in entry.get(key, ()):
+            rank = 0 if m.get("mastery") else _mod_rank(m, talents, spec)
+            if rank:
+                applied.append({"talent": m["talent"], "field": field, "rank": rank,
+                                **{k: m[k] for k in ("add_ms", "add", "mult") if k in m}})
+    aura_ms = _talented_duration(entry, talents, spec)
+    out = {"talentsKnown": True, "auraMs": round(aura_ms) if aura_ms else aura_ms,
+           "cooldownMs": round(_talented_cooldown(entry, talents, spec)),
+           "charges": _talented_charges(entry, talents, spec)}
+    if spec is None and _spec_mods(entry):
+        out["specKnown"] = False
+    if comps:
+        out["effect"] = [{k: (round(v, 3) if isinstance(v, float) else v) for k, v in c.items() if v is not None}
+                         for c in comps]
+    if applied:
+        out["talents"] = applied
+    return out
 
 
-def _ready_since(death_ts, casts_in_window, charges, recharge_ms):
-    """When an ability that is ready at the death last came off cooldown (None: ready all along)."""
-    have, recharge_done, since = charges, None, None
-    for t in list(casts_in_window) + [death_ts]:
-        while recharge_done is not None and recharge_done <= t:
+def _inferred_cooldown(own_casts_of_spell, reset_times, loadout):
+    """The cooldown a player's presses prove they have when it is shorter than their talents allow
+    (cooldown reduction the catalog can't see), or None: their shortest gap between two presses of a
+    one-charge ability, leaving out gaps a reset falls in, since the reset, not the cooldown, ended
+    those. `reset_times`: casts of a spell that resets it (Cold Snap, Black Ox Brew) and, for a long
+    cooldown, the end of every boss encounter (the encounter reset). `loadout(t)` ->
+    (cooldown, charges) at a press."""
+    best = None
+    for a, b in zip(own_casts_of_spell, own_casts_of_spell[1:]):
+        cd, charges = loadout(a)
+        if charges != 1 or any(a < r <= b for r in reset_times):
+            continue
+        if b - a < cd - CDR_TOLERANCE_MS and (best is None or b - a < best):
+            best = b - a
+    return best
+
+
+def _replay(casts, resets, at, loadout, inferred=None):
+    """(charges left at `at`, ms until the next one comes back, when it last came back after none
+    were left or None if it never ran out), replayed the way the game counts charges.
+
+    Each press spends a charge; charges come back one at a time, the recharge starting at the first
+    spend and lasting the cooldown of the talents the player had then (`loadout(t)` -> (cooldown,
+    charges)), or `inferred` when that is shorter (_inferred_cooldown). `resets`: [(time, "all" |
+    "one")] presses of a spell that brings it back: "all" = every charge back at once, "one" = one
+    charge back (the running recharge goes on)."""
+    def cd_at(t):
+        cd = loadout(t)[0]
+        return min(cd, inferred) if inferred is not None else cd
+
+    events = sorted([(t, 1, None) for t in casts if t <= at] + [(t, 0, how) for t, how in resets if t <= at])
+    have = loadout(events[0][0] if events else at)[1]
+    back_at, since = None, None
+
+    def refill(until):
+        nonlocal have, back_at, since
+        while back_at is not None and back_at <= until:
             if have == 0:
-                since = recharge_done
+                since = back_at
             have += 1
-            recharge_done = recharge_done + recharge_ms if have < charges else None
-        if t == death_ts:
-            break
+            back_at = back_at + cd_at(back_at) if have < loadout(back_at)[1] else None
+
+    for t, is_press, how in events:
+        refill(t)
+        most = loadout(t)[1]
+        have = min(have, most)
+        if not is_press:
+            if have == 0:
+                since = t
+            have = most if how == "all" else min(have + 1, most)
+            if have >= most:
+                back_at = None
+            continue
         have = max(have - 1, 0)
-        if recharge_done is None:
-            recharge_done = t + recharge_ms
-    return since
-
-
-# Heals over time among the scored defensives, by tick count: their heal lands
-# over the aura's duration, not at once. Same tick counts as EFFECTS in
-# scripts/build_defensive_catalog.py (tested).
-HEAL_OVER_TIME = {"Frenzied Regeneration": 3, "Crimson Vial": 4}
+        if back_at is None:
+            back_at = t + cd_at(t)
+    refill(at)
+    return have, (back_at - at if back_at is not None else 0), since
 
 
 def _buffs_active_at(death_ts, buff_events, max_ms=None):
@@ -531,17 +695,38 @@ def _auras(hit):
 
 def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts,
                   indexed, ability_names, actor_names, hits=None, ability_schools=None, cat=None,
-                  aoe_known=True, armor_k=None, soulwell=False):
+                  aoe_known=True, armor_k=None, soulwell=False, pull_starts=None, encounters=None,
+                  attackable=None, aoe_abilities=None, aoe_unknown=frozenset(), soulburn_events=None):
     """Defensive picture for one death. All timestamps are report-relative ms.
+
+    `pull_starts`: {fight ID: start} of the report's kept pulls, so presses in other pulls are
+    replayed with the talents the player had in them: those of the latest KEPT pull that had
+    started by then (a press in a pull the site didn't keep, or between pulls, uses the previous
+    kept pull's talents; before the first kept pull, the first one's).
+    `encounters`: [(start, end)] of every boss encounter in the report, kept or not. Long cooldowns
+    reset when each one ends (wipe or kill): a press after the previous encounter ended carries into
+    this pull, and a gap between presses that spans an encounter's end is not cooldown reduction.
 
     With `hits` (the player's hits in the seconds before their deaths, and
     instant kills: fetch_death_windows, fetch_instakills) it also estimates
     whether the defensives they had ready would have saved them.
     `cat`: the catalog of the patch the report was logged on (catalog_for).
-    `aoe_known`: whether this report marks AoE hits at all (logs_mark_aoe).
+    `aoe_known`: False for a log that marks no AoE hits at all (an effect limited to AoE is then unknown).
+    No report the site reads is one: WCL marks every report tried, The War Within's too (Nerub-ar Palace
+    11.0.7: 35,511 of 77,667 hits; Undermine 11.1.7: 57,859 of 103,268; 14 reports from Nerub-ar Palace to
+    the Midnight raids, 2026-10-09: 42 to 1,743 marked hits in each pull read, every ability's damaging hits
+    marked alike), so the analysis never infers it from a few deaths' windows, where no marked hit only
+    means which hits those deaths took.
+    `aoe_abilities`: the abilities with a hit marked AoE in the report (aoe_abilities of the windows,
+    plus fetch_aoe_abilities for those they can't tell); `aoe_unknown`: those whose status couldn't be
+    fetched. None: each hit's own mark decides.
     `armor_k`: the boss's armor constant (armor_constant), for armor increases.
     `soulwell`: a Warlock was in this pull, so a Soulwell's Healthstones were
     there for everyone, used in this log or not.
+    `attackable`: the units the raid damaged in the report's pulls (fetch_attacked_units), for an
+    effect cast on an enemy (The War Within's Fiery Brand); None when not fetched.
+    `soulburn_events`: a Warlock's casts and Soulburn buff before this death (fetch_soulburn_windows),
+    for a Healthstone with Soulburn first (needs_soulburn); None when not fetched (can't tell).
     """
     cat = cat or _LATEST
     own_casts = indexed["casts"].get(player_id, [])
@@ -565,7 +750,7 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
     own_events = (buff_events or {}).get(player_id, [])
 
     def max_ms(aid):
-        sid = cat.name_to_id.get(ability_names.get(aid))
+        sid = cat.name_to_id.get(aura_name(cat, aid, ability_names))
         return cat.all[sid].get("aura_ms") if sid else None
 
     if killing is not None:
@@ -574,15 +759,16 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
             if ts > death_ts:
                 break
             if typ in ("applybuff", "refreshbuff", "applybuffstack"):
-                casters[ability_names.get(aid)] = src
+                casters[aura_name(cat, aid, ability_names)] = src
         for aid in _auras(killing):
-            name = ability_names.get(aid)
+            name = aura_name(cat, aid, ability_names)
             if name in cat.name_to_id:
                 active[name] = casters.get(name)
     elif buff_events is not None:
         for aid, src in _buffs_active_at(death_ts, own_events, max_ms).items():
-            if ability_names.get(aid) in cat.name_to_id:
-                active[ability_names.get(aid)] = src
+            name = aura_name(cat, aid, ability_names)
+            if name in cat.name_to_id:
+                active[name] = src
     active_names = set(active)
 
     result = {"active": [], "available": [], "cooldown": [], "talentsKnown": talent_entries is not None,
@@ -590,23 +776,65 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
     ready_entries, ready_since = [], {}
 
     pressed_this_pull = {sid for t, sid in own_casts if fight_start <= t <= death_ts}
+    # The talents (and spec) the player had at a moment: those of the latest KEPT pull that started
+    # by then (talents change only out of combat, so a press between pulls, or in a pull the site
+    # didn't keep, was made with the last loadout the log recorded), else the first kept pull's.
+    # Without pull starts or any recorded loadout: this pull's.
+    loadouts = sorted(((start, indexed["talents"][(f, player_id)],
+                        (indexed.get("specs") or {}).get((f, player_id)) or spec)
+                       for f, start in (pull_starts or {}).items() if (f, player_id) in indexed["talents"]),
+                      key=lambda lo: lo[0])
+
+    def loadout_at(t):
+        if not loadouts:
+            return talent_entries, spec
+        before = [lo for lo in loadouts if lo[0] <= t]
+        _, talents, pull_spec_ = before[-1] if before else loadouts[0]
+        return talents, pull_spec_
+    # Long cooldowns reset when a boss encounter ends (wipe or kill): presses since the last one that
+    # ended before this pull count (a press between pulls carries into this one), and a gap between
+    # presses that spans an encounter's end is the reset, not cooldown reduction. Without the
+    # report's encounters (their ends unknown): from this pull's start, and gaps across any kept
+    # pull's start are dropped instead. A gap that spans an encounter's end in the report also spans
+    # the next pull's start, so this drops every gap the end rule drops, plus gaps from a press
+    # between pulls into the next pull (safe: it only loses evidence of cooldown reduction).
+    if encounters:
+        long_since = max([end for _, end in encounters if end <= fight_start], default=0)
+        long_resets = sorted(end for _, end in encounters)
+    else:
+        long_since = fight_start
+        long_resets = sorted(set((pull_starts or {}).values()) | {fight_start})
+    owner, _ = effect_auras(cat)
+    effect_seen = {owner[e[2]] for e in own_events if e[2] in owner} | (active_names & set(owner.values()))
     for sid, entry in cat.tracked.items():
-        if not _has_ability(sid, entry, player_class, spec, talent_entries, casts_by_spell, pressed_this_pull):
+        if not _has_ability(sid, entry, player_class, spec, talent_entries, casts_by_spell, pressed_this_pull,
+                            entry["name"] in effect_seen):
             continue
         name = entry["name"]
         if name in active_names:
             result["active"].append({"name": name, "kind": "personal", "major": entry["major"]})
             continue
         all_casts = casts_by_spell.get(sid, [])
-        charges = _talented_charges(entry, talent_entries, spec)
-        recharge = _effective_cooldown(entry, all_casts, _talented_cooldown(entry, talent_entries, spec), charges)
-        lookback = fight_start if entry["cooldown_ms"] >= ENCOUNTER_RESET_MS else death_ts - recharge * charges
-        window = [t for t in all_casts if max(lookback, 0) <= t <= death_ts]
-        left, ready_in = _charges_at(death_ts, window, charges, recharge)
+        # Long cooldowns reset when an encounter ends (above). Short ones carry over, and charges come
+        # back one at a time from the first spend, so every earlier cast in the report counts:
+        # the cast that put a one-charge ability on cooldown is always more than one cooldown back
+        # when it is ready again, and it decides when it came back. Each press counts with the
+        # talents the player had then (loadout_at), and a reset (Cold Snap) brings it back at once.
+        long = entry["cooldown_ms"] >= ENCOUNTER_RESET_MS
+        lookback = long_since if long else 0
+        how = {r["spell"]: r["restores"] for r in entry.get("reset_by", ())}
+        resets = [(t, how[s]) for t, s in own_casts if s in how and lookback <= t <= death_ts]
+
+        def per_press(t, entry=entry):
+            talents, pull_spec_ = loadout_at(t)
+            return _talented_cooldown(entry, talents, pull_spec_), _talented_charges(entry, talents, pull_spec_)
+        ended = [t for t, s in own_casts if s in how] + (long_resets if long else [])
+        inferred = _inferred_cooldown(all_casts, ended, per_press)
+        window = [t for t in all_casts if lookback <= t <= death_ts]
+        left, ready_in, since = _replay(window, resets, death_ts, per_press, inferred)
         if left > 0:
             result["available"].append({"name": name, "major": entry["major"]})
             ready_entries.append(entry)
-            since = _ready_since(death_ts, window, charges, recharge)
             ready_since[name] = max(fight_start, since if since is not None else fight_start)
         else:
             result["cooldown"].append({
@@ -693,10 +921,35 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
             if killing is not None and int(aid) in _auras(killing):
                 form_armor *= mult
 
+    def caster_loadout(caster):
+        # Another player's talents and spec in this pull (CombatantInfo), for an aura they cast.
+        talents = indexed["talents"].get((fight_id, caster))
+        if talents is None:
+            return None
+        return talents, (indexed.get("specs") or {}).get((fight_id, caster))
+
+    # What each active defensive did as its caster had it: this pull's loadout, the caster's for an
+    # external another player cast (unknown when the log has no loadout for them). An aura whose source
+    # isn't a player (a totem's: Spirit Link Totem, Earthen Wall Totem name the totem) or isn't known
+    # has no caster to read: "casterUnknown".
+    for a in result["active"]:
+        entry = cat.all[cat.name_to_id[a["name"]]]
+        src = active.get(a["name"])
+        if a["kind"] == "external" and src != player_id:
+            player = src is not None and src in (actor_names or {})
+            a.update(_active_detail(entry, caster_loadout(src) if player else None, {}))
+            if not player:
+                a["casterUnknown"] = True
+        else:
+            a.update(_active_detail(entry, (talent_entries, spec), observed))
+
     if hits is not None:
         death_mult = _heal_taken_mult(_auras(killing), cat) if killing is not None else 1.0
         own_heals = (indexed.get("heals") or {}).get(player_id, [])
-        consumables = [consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec, talents_by_fight)
+        burns = casts_by_spell.get(cat.soulburn["spell"], []) if cat.soulburn else []
+        spent = sorted(t for s in cat.soulburn_spent_ids for t in casts_by_spell.get(s, ()))
+        consumables = [consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec, talents_by_fight,
+                                           soulburn_casts=burns, soulburn_spent=spent)
                        for sid in unused_consumables]
         for sid, c in zip(unused_consumables, consumables):
             if sid == from_soulwell:
@@ -704,9 +957,16 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
         result["survival"] = assess_survival(hits, death_ts, ready_entries, consumables,
                                              ability_names, ability_schools or {},
                                              talent_entries=talent_entries, observed_absorbs=observed, spec=spec,
-                                             aoe_known=aoe_known, ready_since=ready_since,
+                                             aoe_known=aoe_known, aoe_abilities=aoe_abilities,
+                                             aoe_unknown=aoe_unknown, ready_since=ready_since,
                                              aura_ms={e["name"]: _talented_duration(e, talent_entries, spec) for e in ready_entries},
-                                             forms=forms, armor_k=armor_k, form_armor=form_armor)
+                                             forms=forms, armor_k=armor_k, form_armor=form_armor,
+                                             aura_size=_aura_sizer(cat, player_class, spec, talent_entries,
+                                                                   ability_names, player_id, caster_loadout),
+                                             friendly_ids=set(actor_names or ()) | {player_id},
+                                             attackable=attackable, stagger_purify=cat.stagger_purify,
+                                             soulburn=SoulburnTimeline(soulburn_events, cat.soulburn)
+                                             if any(c.get("withSoulburn") for c in consumables) else None)
 
     for key in ("active", "available", "cooldown"):
         result[key].sort(key=lambda d: (not d.get("major", True), d["name"]))
@@ -736,6 +996,10 @@ LETHAL_WINDOW_MS = 15_000
 # react to a hit faster, so a heal can't land between a big hit and a tick that
 # follows it within a second.
 REACTION_MS = 1_000
+# A death is a one-shot or a burst when they were at high health no more than
+# this long before the killing blow (owner's rule, 2026-10-08). Otherwise they
+# had been low for a while (set up, or worn down).
+BURST_WINDOW_MS = 1_500
 # A one-shot: a single hit of at least this share of max health, from high health.
 ONE_SHOT_SHARE = 0.80
 # A hit before the killing blow is named with the death (biggestHit) when it's
@@ -756,25 +1020,108 @@ WINDOW_BLOCKS_PER_REQUEST = 20
 
 # Everything the survival assessment reads from a hit (the rest, like
 # positions and stats, is dropped so cached reports stay small).
-HIT_FIELDS = ("timestamp", "type", "sourceID", "targetID", "abilityGameID", "fight", "buffs",
+# Stagger (115069, a Brewmaster passive) is an absorb aura (EffectAura 69): the game cuts a hit by the
+# player's damage reductions first, then Stagger delays a share of what is left (logged as `absorbed`
+# on the hit) into ticks of STAGGER_TICK every 0.5 s over 10 s (124255 EffectAuraPeriod 500, 124273-5
+# duration 10000). A tick is damage already reduced: no defensive the site judges changes it as it lands
+# (Weavi, Undermine, 2026-10-08: under Fortifying Brew 1458 ticks read 1.000 through and 457 read 0.600,
+# under Dampen Harm 302 and 113, exactly as without them), while shields absorb ticks (1194 of his 6137).
+# In The War Within the one thing that cuts a tick is Invoke Niuzao, the Black Ox (132578, and 358520):
+# "while active, 40% of damage delayed by Stagger is instead Staggered by Niuzao" (an absorb, aura 69,
+# logged as mitigated): every one of his 1873 ticks at 0.600 had one Niuzao up, all 47 at 0.36 both, none
+# of the 4216 at 1.000. It is an offensive cooldown, not in the catalog, so the replay never presses it.
+# In Midnight (Weavi, Quel'Danas pulls 102 and 104) 105 of 544 ticks also show a 5% cut (0.95, or 0.57 with
+# Niuzao) in runs of 0.5 to 8 s, mostly at full health; no aura on him (every buff and debuff event of pull
+# 104 read), no talent or label modifier of 124255 in the game data and no absorb event lines up with it,
+# so its source is unknown. It comes from no catalog defensive (Fortifying Brew was up on 7 of those ticks
+# and 23 uncut ones). Either way the real ticks are in the log, and the pool drains by a tick's
+# unmitigated size (_tick_raw), so the replay doesn't depend on it.
+STAGGER_TICK = 124255
+STAGGER_SPEC = "Brewmaster"
+# The pool, as the logs show it (Weavi, Undermine p24 and Quel'Danas p104, 2026-10-08): WCL logs each
+# hit's staggered amount as an `absorbed` event of STAGGER_AURA (attackerID and extraAbilityGameID: the
+# hit's source and ability); every staggered hit restarts the pool's STAGGER_TICKS ticks (124273-5:
+# 10000 ms, 124255 period 500 ms, in every patch), and each tick deals the pool over the ticks left
+# (pool / tick read 20.00, 19.00, ... exactly, 116 of 130 staggered hits on Undermine p24). Purifies
+# (Purifying Brew, Quick Sip, Staggering Strikes ...) take part of the pool off in between.
+STAGGER_AURA = 115069
+STAGGER_TICKS = 20
+# How far before a death window the pool's ticks and staggered hits are read: the last staggered hit
+# before a tick is at most STAGGER_TICKS ticks back.
+STAGGER_LOOKBACK_MS = 10_500
+# Purifies take part of the pool off between ticks. Their sizes come from each patch's game data
+# (STAGGER_PURIFY, built by scripts/build_defensive_catalog.py): Purifying Brew 119582 clears 50% (Mantra of
+# Purity +10%; from Midnight at least 8% of max health); Quick Sip 388505 purifies 5% each time 3 s of Shuffle
+# are gained, in ONE event (Keg Smash's 5 s can cross two: 10%; Weavi, Quel'Danas p104: 0.1000 on 10 hits,
+# and 0.5500 = 1 - 0.5 x 0.9 with a brew); Tranquil Spirit 393357 clears 5% for every Healing Sphere consumed
+# (and, in The War Within, every Expel Harm), several at once when Expel Harm or Spinning Crane Kick draws
+# them in (Atlai, Undermine p32: 0.0975, 0.1426, 0.2649 with 1, 2, 5 spheres and Expel Harm). Quick Sip and
+# Tranquil Spirit are talents, and the fits read the player's loadout for the pull: a Brewmaster without one
+# never purifies with it (Weavi, Undermine p24, has neither; Weavi, Quel'Danas p104 and Obimonk only Quick
+# Sip), and with the loadout known the brew clears only its own share (Mantra of Purity or not). Without a
+# loadout in the log, every one is allowed. Purifying Brew is a cast; Quick Sip and Tranquil Spirit show
+# only in the ticks. The flat purifies (Touch of Death, every Brewmaster: 325095; Staggering Strikes on
+# Blackout Kick, a talent) can't be sized, so a stretch where one of their buttons was pressed can have
+# lost any amount (STAGGER_PURIFY "flat"; their casts are read with the brew's).
+PURIFYING_BREW = 119582
+# The most Healing Spheres one stretch between two ticks (under 0.5 s) consumes: the most read in any
+# 500 ms of sphere heals (124507) over 33 pulls, 961 bursts (Atlai, Undermine, 22 pulls: 3 bursts of 6,
+# none more; Weavi, Manaforge, 9 pulls: one of 7; Weavi, Quel'Danas, 2 pulls: 5). Spheres last 30 s and
+# Expel Harm draws in every one up, so the count is bounded by how many a fight leaves up at once, which
+# the game data doesn't cap. With The War Within's Expel Harm on top, a stretch's Tranquil Spirits are
+# at most 8: one Quick Sip event of 10% and 8 of 5% leave 0.9 x 0.95^8 = 0.597 of the pool.
+MAX_SPHERES_AT_ONCE = 7
+# A purify's share read from the ticks lands this close (real ones read within 0.0001: Undermine p24 0.5000,
+# Quel'Danas p104 0.0500, 0.1000, 0.5500), plus the ticks' rounding: each tick is a whole number, and the
+# pool is up to STAGGER_TICKS of them.
+PURIFY_MATCH = 0.0005
+# The heals a killing hit can set off and their cheat-death auras the death windows read
+# (fetch_death_windows).
+WINDOW_HEAL_IDS = frozenset(set(KILLING_HIT_HEALS) | {a for a in KILLING_HIT_HEALS.values() if a})
+# What the windows' extras block reads besides: the aura events of stacking max-health auras (their
+# stacks) and of auras sized by a loadout (who cast them).
+# And a Brewmaster's Stagger pool: their staggered amounts (STAGGER_AURA absorbs) and ticks, from up to
+# STAGGER_LOOKBACK_MS before each window (the ticks inside it come with the hits).
+WINDOW_EXTRAS_IDS = sorted(WINDOW_HEAL_IDS | STACK_SIZED | LOADOUT_SIZED | {STAGGER_AURA, STAGGER_TICK})
+# And the dying players' own casts of buttons that lengthen a defensive while it is up (Zealot's Paragon:
+# Judgment and Hammer of Wrath on Sentinel), in any patch's catalog: the replay presses inside the window,
+# so only the casts inside it matter.
+WINDOW_CAST_IDS = sorted({c for cat in _CATALOGS.values() for c in cat.extend_ids})
+# A Brewmaster's casts that purify: Purifying Brew, and the buttons of the flat purifies in any patch
+# (Touch of Death, Blackout Kick for Staggering Strikes), read from up to STAGGER_LOOKBACK_MS before a window.
+STAGGER_CAST_IDS = frozenset({PURIFYING_BREW} | {c for p in STAGGER_PURIFY.values() for f in p.get("flat", ())
+                                                 for c in f["casts"]})
+AURA_EVENTS = {"applybuff", "applybuffstack", "removebuffstack", "removebuff",
+               "applydebuff", "applydebuffstack", "removedebuffstack", "removedebuff"}
+WINDOW_TYPES = {"damage", "heal", "absorbed", "cast"} | AURA_EVENTS
+# What is kept of a heal or aura event (fetch_death_windows).
+HEAL_FIELDS = ("timestamp", "type", "sourceID", "targetID", "abilityGameID", "fight", "amount", "stack",
+               "attackerID", "extraAbilityGameID")
+HIT_FIELDS = ("timestamp", "type", "sourceID", "sourceInstance", "targetID", "abilityGameID", "fight", "buffs",
               "hitType", "amount", "overkill", "absorbed", "mitigated", "unmitigatedAmount",
               "isAoE", "resourceActor", "hitPoints", "maxHitPoints", "armor")
+# For the windows' cache key in app.py: windows cached with other extras or without a field kept
+# here (sourceInstance, for Fiery Brand's unit) are not reused.
+WINDOW_EXTRAS_KEY = hashlib.sha1(repr((WINDOW_EXTRAS_IDS, WINDOW_CAST_IDS, HIT_FIELDS, HEAL_FIELDS,
+                                       STAGGER_LOOKBACK_MS, sorted(STAGGER_CAST_IDS))).encode()).hexdigest()[:12]
 
 
-def _events_query(blocks):
+def _events_query(blocks, resources=True):
     """One request for several event blocks: {alias: (fightIDs, start, end, dataType, filter)}."""
     parts = []
+    res = "includeResources: true, " if resources else ""
     for alias, (ids, start, end, data_type, flt) in blocks.items():
         parts.append(f"{alias}: events(fightIDs: {json.dumps(list(ids))}, startTime: {start}, endTime: {end}, "
-                     f"dataType: {data_type}, filterExpression: {json.dumps(flt, ensure_ascii=False)}, includeResources: true, "
+                     f"dataType: {data_type}, filterExpression: {json.dumps(flt, ensure_ascii=False)}, {res}"
                      f"limit: 10000) {{ data nextPageTimestamp }}")
     return "query($c: String!) { reportData { report(code: $c) { " + " ".join(parts) + " } } }"
 
 
-def _fetch_blocks(token, report_code, blocks, keep=None):
+def _fetch_blocks(token, report_code, blocks, keep=None, resources=True, stop=None):
     """All events of several blocks, fetched together; blocks that don't fit one page are followed up.
     `keep(event)`, if given, picks the events kept as each block's page arrives, so the
-    others aren't held in memory while the rest download.
+    others aren't held in memory while the rest download. `stop(out)`, if given, ends the
+    following-up as soon as it is true of what was kept so far.
 
     Always with an endTime: WCL returns an empty second page for a block scoped
     by fightIDs without one (verified on a live log).
@@ -788,7 +1135,7 @@ def _fetch_blocks(token, report_code, blocks, keep=None):
         items = list(pending.items())
         for i in range(0, len(items), WINDOW_BLOCKS_PER_REQUEST):
             chunk = dict(items[i:i + WINDOW_BLOCKS_PER_REQUEST])
-            data = graphql_query(token, _events_query(chunk), {"c": report_code})
+            data = graphql_query(token, _events_query(chunk, resources), {"c": report_code})
             report = (data.get("reportData") or {}).get("report") or {}
             del data
             for alias, spec in chunk.items():
@@ -799,11 +1146,14 @@ def _fetch_blocks(token, report_code, blocks, keep=None):
                 if block.get("nextPageTimestamp"):
                     nxt[alias] = (spec[0], block["nextPageTimestamp"]) + tuple(spec[2:])
         pending = nxt
+        if stop is not None and stop(out):
+            break
     return out
 
 
-def fetch_death_windows(token, report_code, pulls):
-    """Every hit the given players took in the seconds before their deaths.
+def fetch_death_windows(token, report_code, pulls, heals=True):
+    """Every hit the given players took in the seconds before their deaths, and the heals a
+    killing hit can set off with their cheat-death auras (features.KILLING_HIT_HEALS).
 
     `pulls`: [(fightID, [(death_ts, log name)])], the deaths that can count.
     WCL charges about a point per page of events and at least one per block,
@@ -813,6 +1163,18 @@ def fetch_death_windows(token, report_code, pulls):
     filter), scoped to those pulls. Measured on live Mythic logs: 19 -> 8 and
     11 -> 5 points for a night's reports, each block still one page. Only the
     hits inside a death's window are kept. Returns {targetID: [hits, by time]}.
+    With `heals`, one more block over all those pulls, from WCL's All stream, reads on the players who
+    died (WINDOW_EXTRAS_IDS): the heals a killing hit can set off with their cheat-death auras' absorbs
+    and removals, and the aura events of stacking max-health auras (their stacks) and of auras sized
+    by a loadout (who cast them), in the same lists (type "heal" / "absorbed" / aura events with
+    "stack" and "sourceID"). Measured on a live Mythic report (k9mC7RxjKPt1TgZW, 27 pulls, 86 deaths,
+    14 blocks), alternating old and new on a warm cache: 15.0 -> 19.4 points with the block (Healing
+    alone: 16.7; Buffs and Debuffs blocks beside it: 19.5; one Healing block per pull group: 29).
+    The aura IDs are a small part of it: most of its events are heals (Embrace the Shadow, Defy
+    Fate's ticks). Reading only the auras the dying players' hits list, in a second request after the
+    hits, saved nothing (25 pulls, 116 deaths, warm: 16.5 / 16.9 / 16.6 points with every stacking
+    aura, 17.4 / 20.1 / 18.3 with the second request, 17.2 / 20.5 with this list). The All stream can't replace
+    DamageTaken itself: it leaves the aura list off its damage events.
     """
     pulls = sorted(((fid, sorted(d)) for fid, d in pulls if d and any(n for _, n in d)), key=lambda p: p[1][0][0])
     groups = []
@@ -836,16 +1198,211 @@ def fetch_death_windows(token, report_code, pulls):
         return {}
     windows.sort()
 
-    def in_a_window(ts):
+    if heals:
+        every = [d for _, ds in pulls for d in ds]
+        names = sorted({n for _, n in every if n})
+        who = ", ".join(json.dumps(n, ensure_ascii=False) for n in names)
+        # Casts have no target or the enemy's: read by their caster (a Brewmaster's purifies:
+        # STAGGER_CAST_IDS, and the buttons that lengthen a defensive: WINDOW_CAST_IDS).
+        casts = ", ".join(map(str, sorted(STAGGER_CAST_IDS | set(WINDOW_CAST_IDS))))
+        flt = (f"(target.name in ({who}) and ability.id in ({', '.join(map(str, WINDOW_EXTRAS_IDS))}))"
+               f" or (source.name in ({who}) and type = 'cast' and ability.id in ({casts}))")
+        blocks["extras"] = ([fid for fid, _ in pulls],
+                            max(min(t for t, _ in every) - LETHAL_WINDOW_MS - STAGGER_LOOKBACK_MS, 0),
+                            max(t for t, _ in every) + KILLING_BLOW_AFTER_MS + 1, "All", flt)
+
+    def in_a_window(ts, before=0):
         # Windows are all as long: the one starting last at or before ts ends last too.
-        i = bisect_right(windows, (ts, float("inf"))) - 1
+        i = bisect_right(windows, (ts + before, float("inf"))) - 1
         return i >= 0 and ts <= windows[i][1]
 
-    def keep(e):
-        return e.get("type") == "damage" and in_a_window(e.get("timestamp", 0))
+    def stagger_pool(e):
+        return (e.get("type") == "absorbed" and e.get("abilityGameID") == STAGGER_AURA) or \
+            (e.get("type") == "damage" and e.get("abilityGameID") == STAGGER_TICK) or \
+            (e.get("type") == "cast" and e.get("abilityGameID") in STAGGER_CAST_IDS)
 
-    events = [e for evs in _fetch_blocks(token, report_code, blocks, keep).values() for e in evs]
-    return index_hits(events)
+    def keep(e):
+        if stagger_pool(e):
+            return in_a_window(e.get("timestamp", 0), STAGGER_LOOKBACK_MS)
+        if e.get("abilityGameID") in (STAGGER_AURA, STAGGER_TICK) and e.get("type") != "damage":
+            return False                 # Stagger's own aura events
+        return e.get("type") in WINDOW_TYPES and in_a_window(e.get("timestamp", 0))
+
+    fetched = _fetch_blocks(token, report_code, blocks, keep)
+    events = [e for alias, evs in fetched.items() if alias != "extras" for e in evs]
+    # The extras block's Stagger ticks add those before the hits' blocks start (the rest are in them).
+    seen = {(e.get("targetID"), e.get("timestamp")) for e in events if stagger_pool(e)}
+    events += [e for e in fetched.get("extras", ())
+               if e.get("type") != "damage" or (e.get("targetID"), e.get("timestamp")) not in seen]
+    out = index_hits(events)
+    for e in events:
+        if e.get("type") == "cast":
+            if e.get("sourceID") is not None:        # the caster's own (Purifying Brew; Judgment on the enemy)
+                out.setdefault(e["sourceID"], []).append({k: e[k] for k in HEAL_FIELDS if k in e})
+        elif e.get("type") in WINDOW_TYPES - {"damage"} and e.get("targetID") is not None:
+            out.setdefault(e["targetID"], []).append({k: e[k] for k in HEAL_FIELDS if k in e})
+    for hits in out.values():
+        hits.sort(key=lambda e: e["timestamp"])
+    return out
+
+
+# WCL's classResources type for Soul Shards; amounts and costs in tenths of a shard (Destruction's fragments).
+SOUL_SHARDS = 7
+
+
+def needs_soulburn(cat, talents, spec=None):
+    """Could Soulburn first have added to this player's Healthstone (consumable_estimate's
+    "withSoulburn")? With the Soulburn talent and without Gorebound Fortitude (which always gives it),
+    in a loadout the log recorded."""
+    sb = cat.soulburn
+    if not sb or talents is None or not _mod_rank(sb, talents, spec):
+        return False
+    stone = next(d for d in cat.consumable.values() if d.get("soulburn"))
+    return not _gorebound_rank(stone, talents, spec)
+
+
+def soulburn_pulls(indexed, counted, friendlies, cat):
+    """The counted deaths (counted_by_fight: {fightID: [(death_ts, log name)]}) of Warlocks for whom
+    needs_soulburn holds in that pull, as fetch_soulburn_windows takes them."""
+    if not cat.soulburn or not indexed:
+        return []
+    by_name = {f.get("logName") or f.get("name"): f for f in friendlies or ()}
+    out = []
+    for fid, deaths in sorted((counted or {}).items()):
+        keep = []
+        for ts, name in deaths:
+            f = by_name.get(name) or {}
+            if f.get("type") == "Warlock" and needs_soulburn(
+                    cat, indexed["talents"].get((fid, f.get("id"))), pull_spec(indexed, fid, f.get("id"))):
+                keep.append((ts, name))
+        if keep:
+            out.append((fid, keep))
+    return out
+
+
+def fetch_soulburn_windows(token, report_code, pulls, sb):
+    """For Warlocks whose Healthstone Soulburn could have improved (catalog "soulburn"): their casts and
+    Soulburn buff events (387626) before their deaths, for SoulburnTimeline.
+
+    `pulls`: [(fightID, [(death_ts, log name)])]. Each death's span: from its replay window less
+    Soulburn's buff (20 s, longer than its 6 s cooldown) up to the death, read by name like the hits.
+    Pulls within WINDOW_BLOCK_SPAN_MS of each other share a block (WCL charges at least a point a
+    block: measured on 2VtyDR4CF6PGLjbd, 7 Warlock deaths in 7 pulls, 7.0 points with one block a
+    pull, 5.0 with them shared, the same events kept), and only the events inside a death's span are kept.
+    A cast that spent Soul Shards carries them as WCL logs them (classResources type 7: the amount
+    before the cost, and the cost), kept as "shards": [amount, cost]; WCL logs no shard total on any
+    other event, and Destruction's fragment gains not at all, so the spends are what tells the shards.
+    Returns {playerID: [events, by time]}.
+    """
+    pulls = sorted(((fid, sorted(d)) for fid, d in pulls if any(n for _, n in d)), key=lambda p: p[1][0][0])
+    lead = LETHAL_WINDOW_MS + sb["buff_ms"]
+    groups = []
+    for fid, deaths in pulls:
+        if groups and deaths[-1][0] - (groups[-1][0][1][0][0] - lead) <= WINDOW_BLOCK_SPAN_MS:
+            groups[-1].append((fid, deaths))
+        else:
+            groups.append([(fid, deaths)])
+    blocks, spans = {}, []
+    for group in groups:
+        deaths = [d for _, ds in group for d in ds]
+        who = ", ".join(json.dumps(n, ensure_ascii=False) for n in sorted({n for _, n in deaths if n}))
+        flt = (f"(source.name in ({who}) and type = 'cast')"
+               f" or (target.name in ({who}) and ability.id = {sb['buff']})")
+        start = max(min(t for t, _ in deaths) - lead, 0)
+        end = max(t for t, _ in deaths) + KILLING_BLOW_AFTER_MS + 1
+        blocks[f"s{group[0][0]}"] = ([fid for fid, _ in group], start, end, "All", flt)
+        spans += [(t - lead, t + KILLING_BLOW_AFTER_MS) for t, _ in deaths]
+    if not blocks:
+        return {}
+
+    def keep(e):
+        return any(a <= e.get("timestamp", 0) <= b for a, b in spans)
+    out = defaultdict(list)
+    for events in _fetch_blocks(token, report_code, blocks, keep).values():
+        for e in events:
+            kept = {k: e[k] for k in ("timestamp", "type", "abilityGameID", "sourceID", "targetID") if k in e}
+            if e.get("type") == "cast":
+                shard = next((c for c in e.get("classResources") or () if c.get("type") == SOUL_SHARDS), None)
+                if shard is not None:
+                    kept["shards"] = [shard.get("amount") or 0, shard.get("cost") or 0]
+                who = e.get("sourceID")
+            else:
+                who = e.get("targetID")
+            if who is not None:
+                out[who].append(kept)
+    return {p: sorted(evs, key=lambda e: e["timestamp"]) for p, evs in out.items()}
+
+
+class SoulburnTimeline:
+    """Could a Warlock have cast Soulburn at a moment? state(t): True, False, or None (the log can't tell).
+
+    True while its buff (387626) is up (it was cast; the Healthstone gets it with no shard). Otherwise
+    False within its cooldown after a cast; else it needs a Soul Shard (the catalog's cost, in tenths).
+    Shards only go up between two casts that spend them (no other event takes any), so the amount left
+    after the last spend at or before t is a floor and the amount before the next spend after t a
+    ceiling: at least one shard at the floor is True, under one at the ceiling is False, anything else
+    None. Nothing known (`events` None: not fetched) is None. Built from fetch_soulburn_windows' events.
+    """
+
+    def __init__(self, events, sb):
+        self.known = events is not None and sb is not None
+        events = sorted(events or (), key=lambda e: e["timestamp"]) if self.known else []
+        self.cost = sb["cost"] if sb else 0
+        self.cooldown = sb["cooldown_ms"] if sb else 0
+        self.spends = [(e["timestamp"], e["shards"][0], e["shards"][1]) for e in events
+                       if e.get("type") == "cast" and e.get("shards")]
+        self.casts = [e["timestamp"] for e in events if e.get("type") == "cast" and e.get("abilityGameID") == sb["spell"]]
+        self.buff, since, last = [], None, None
+        for e in events:
+            if e.get("abilityGameID") != (sb or {}).get("buff") or e.get("type") == "cast":
+                continue
+            if e["type"] in ("applybuff", "refreshbuff"):
+                since = e["timestamp"] if since is None else since
+                last = e["timestamp"]
+            elif e["type"] == "removebuff" and since is not None:
+                self.buff.append((since, e["timestamp"]))
+                since = None
+        if since is not None:
+            self.buff.append((since, last + sb["buff_ms"]))
+        self.changes = sorted({t for t, _, _ in self.spends} | {x for c in self.casts for x in (c, c + self.cooldown)}
+                              | {x for a, b in self.buff for x in (a, b)})
+
+    def marks(self):
+        """The moments worth trying a press at: each change, and just before it."""
+        return {x for c in self.changes for x in (c - 1, c)}
+
+    def state(self, t):
+        if not self.known:
+            return None
+        if any(a <= t < b for a, b in self.buff):
+            return True
+        if any(c <= t < c + self.cooldown for c in self.casts):
+            return False
+        before = [sp for sp in self.spends if sp[0] <= t]
+        after = [sp for sp in self.spends if sp[0] > t]
+        if before and before[-1][1] - before[-1][2] >= self.cost:
+            return True
+        if after and after[0][1] < self.cost:
+            return False
+        return None
+
+
+def brands_enemies(cat):
+    """Does this patch's catalog have an effect cast on an enemy (`from_target`: The War Within's
+    Fiery Brand)? Only then are the attacked units fetched (fetch_attacked_units)."""
+    return any(c.get("from_target") for d in cat.all.values() for c in d.get("mitigation") or [])
+
+
+def fetch_attacked_units(token, report_code, fight_ids, start_time, end_time):
+    """IDs of the units the raid damaged in the given pulls: WCL's DamageDone table by target, one
+    request. A unit nobody damaged (a rocket, a bomb, a cloud) can't be targeted, so it can't be
+    branded (_brand_targets)."""
+    query = ("query($c: String!, $ids: [Int], $s: Float, $e: Float) { reportData { report(code: $c) { "
+             "table(dataType: DamageDone, fightIDs: $ids, startTime: $s, endTime: $e, viewBy: Target) } } }")
+    data = graphql_query(token, query, {"c": report_code, "ids": list(fight_ids), "s": start_time, "e": end_time})
+    table = ((data.get("reportData") or {}).get("report") or {}).get("table") or {}
+    entries = (table.get("data") or {}).get("entries") or []
+    return sorted({e["id"] for e in entries if e.get("id") is not None and (e.get("total") or 0) > 0})
 
 
 def fetch_instakills(token, report_code, fight_ids, start_time, end_time):
@@ -856,10 +1413,57 @@ def fetch_instakills(token, report_code, fight_ids, start_time, end_time):
     return index_hits(_fetch_blocks(token, report_code, blocks)["k"])
 
 
-def logs_mark_aoe(hits_by_player):
-    """Does this report mark AoE hits? Older logs (The War Within) have isAoE
-    false on every hit, so a report with no AoE hit at all doesn't."""
-    return any(h.get("isAoE") for hits in (hits_by_player or {}).values() for h in hits)
+# WCL marks isAoE only on hits that dealt damage. A hit an absorb took whole (amount 0, no health on it),
+# an immune or a missed one is never marked, even of an ability marked on every other hit (Uncontrolled
+# Burn, Undermine: 31,127 of 41,277 marked, every unmarked one amount 0), and the game treats those as
+# area damage too: Feint (40% off AoE) took 0.400 off 54 such hits on Maar (AaM31gBWwFHmD7Rz) and 10 on
+# Esra (2VtyDR4CF6PGLjbd), as off the marked ones, and 0.000 off hits of abilities never marked. Every
+# hit of one ability that dealt damage is marked alike (Undermine, Manaforge Omega, Nerub-ar Palace,
+# Voidspire and Coiled Altar logs, 2026-10-08). So an ability is AoE in a report when any hit of it is.
+
+def aoe_abilities(hits_by_player):
+    """Abilities with a hit marked AoE among these hits ({targetID: [hits]})."""
+    return {h.get("abilityGameID") for hits in (hits_by_player or {}).values() for h in hits if h.get("isAoE")}
+
+
+def aoe_undecided(hits_by_player, players, known):
+    """Abilities in `players`' hits whose AoE status these hits can't tell: they have only hits that
+    dealt no damage (absorbed whole, immune, missed), which WCL never marks, and none marked (`known`)
+    or unmarked with damage dealt (not AoE) anywhere in these hits."""
+    every = [h for hits in (hits_by_player or {}).values() for h in hits if h.get("type") == "damage"]
+    decided = set(known) | {h.get("abilityGameID") for h in every if h.get("amount") and not h.get("isAoE")}
+    return {h.get("abilityGameID") for p in players for h in (hits_by_player or {}).get(p, ())
+            if h.get("type") == "damage" and not h.get("amount") and not h.get("isAoE")} - decided
+
+
+def aoe_classes(cat):
+    """Classes with an effect limited to area damage (school "aoe": Feint), whose hits' AoE status
+    matters; None when such an effect is an external, which could reach anyone."""
+    out = set()
+    for d in cat.all.values():
+        if any(c.get("school") == "aoe" for c in d.get("mitigation") or ()):
+            if d["kind"] == "external":
+                return None
+            out.add(d.get("class"))
+    return out
+
+
+def fetch_aoe_abilities(token, report_code, fight_ids, start_time, end_time, ability_ids):
+    """(AoE, decided): which of `ability_ids` (aoe_undecided) are AoE, and which the report's pulls could
+    tell at all. One block of WCL's DamageTaken for those abilities; only hits that dealt damage carry
+    WCL's mark, so an ability is decided by its first such hit, and one that never dealt damage in the
+    report stays unknown (not single-target). Pages stop once every ability is decided. Fetched only
+    when a death that can count, of a class with an AoE-only effect, has a hit the windows can't tell.
+    Measured on a warm report (AaM31gBWwFHmD7Rz, 26 pulls): 2 abilities, 3,366 events, 1 page: 3.4
+    points; 6 abilities, 26,149 events, 5 pages: 5.0 points (the first query on a cold report: 19)."""
+    need = set(ability_ids)
+    flt = f"ability.id in ({', '.join(str(a) for a in sorted(need))})"
+    blocks = {"a": (list(fight_ids), start_time, end_time + 1, "DamageTaken", flt)}
+    got = _fetch_blocks(token, report_code, blocks, resources=False,
+                        keep=lambda e: e.get("type") == "damage" and bool(e.get("amount")),
+                        stop=lambda out: need <= {e.get("abilityGameID") for e in out["a"]})["a"]
+    return ({e.get("abilityGameID") for e in got if e.get("isAoE")} & need,
+            {e.get("abilityGameID") for e in got} & need)
 
 
 def index_hits(events):
@@ -913,9 +1517,14 @@ def _school_applies(school, hit, ability_schools, immunity=False):
     if school in (None, "all"):
         return True
     if school == "aoe":
-        # None: this log doesn't mark AoE hits (The War Within logs have
-        # isAoE false on every hit), so whether it applies is unknown.
-        return bool(hit.get("isAoE")) if hit.get("aoeKnown", True) else None
+        # None: this log marks no hit AoE at all (aoe_known), so whether it applies is unknown.
+        if not hit.get("aoeKnown", True):
+            return None
+        # The ability's status in the report (aoeAbility, from assess_survival): a hit absorbed whole
+        # is never marked, though its ability is AoE. None: the report couldn't tell.
+        if "aoeAbility" in hit:
+            return hit["aoeAbility"]
+        return bool(hit.get("isAoE"))
     if school == "melee":
         return hit.get("abilityGameID") == MELEE_SWING
     mask = ability_schools.get(hit.get("abilityGameID"), 0)
@@ -932,11 +1541,207 @@ def _school_applies(school, hit, ability_schools, immunity=False):
     return True
 
 
+def _stagger_tick(hit):
+    """A Brewmaster's own Stagger tick (STAGGER_TICK)."""
+    return hit.get("abilityGameID") == STAGGER_TICK and hit.get("type", "damage") == "damage"
+
+
+def _tick_raw(tick):
+    """What a Stagger tick took off the pool: its unmitigated size (a share of some ticks is
+    mitigated: 40% while Invoke Niuzao is up, and in Midnight sometimes 5% from a source not yet known;
+    shields absorb ticks too)."""
+    return tick.get("unmitigatedAmount") or _full_hit(tick)
+
+
+def _has_talent(talents, entries):
+    """Has the player a talent (by its entries)? True when the loadout isn't known (None): it may be there."""
+    return talents is None or bool(_rank(talents, entries or ()))
+
+
+def _purify_keeps(purify, talents=None):
+    """What one stretch between two ticks can leave of the pool, from a patch's STAGGER_PURIFY and the
+    player's loadout for the pull (`talents`; None: not in the log, every talent allowed):
+    (Purifying Brew's keep factors, its minimum as a share of max health or None, one Quick Sip event's
+    keep factors, Tranquil Spirit's keep factor or None, the most Tranquil Spirits one stretch can have).
+    Quick Sip purifies once per Shuffle gain, by 5%
+    for every 3 s threshold the gain crosses (a gain of g crosses up to (g + 3 - e) // 3 of them, with the
+    seconds left over before it); within one stretch (under 0.5 s, less than a global cooldown) at most
+    one gain that crosses two (one Keg Smash; Press the Advantage's bonus strike, The War Within only,
+    "can trigger effects on behalf of Tiger Palm", which grants no Shuffle). Whether Spinning Crane
+    Kick's 1 s of Shuffle is granted per enemy hit or per tick isn't settled; the fits allow one Quick
+    Sip event per stretch either way. Tranquil Spirit clears 5% for every Healing Sphere consumed (and,
+    in The War Within, every Expel Harm), and Expel Harm or Spinning Crane Kick draws several in at once:
+    up to MAX_SPHERES_AT_ONCE (and Expel Harm where it counts) can share a stretch (Atlai, Undermine:
+    Expel Harm with 5 spheres read 1 - 0.95^6). Purifying Brew with or without each talent that adds to
+    it, unless the loadout says which."""
+    from itertools import combinations
+    brew = purify["brew"]
+    mods = brew.get("mods", ())
+    if talents is not None:
+        adds = [[m["add"] for m in mods if _has_talent(talents, m.get("entries"))]]
+    else:
+        adds = [list(c) for n in range(len(mods) + 1) for c in combinations([m["add"] for m in mods], n)]
+    brews = sorted({round(1 - brew["share"] - sum(c), 6) for c in adds})
+    sips = [1.0]
+    sip = purify.get("quick_sip")
+    if sip and purify.get("shuffle_s") and _has_talent(talents, sip.get("entries")):
+        most = max(int((g + sip["per_s"] - 1e-6) // sip["per_s"]) for g in purify["shuffle_s"].values())
+        sips += [round(1 - sip["share"] * k, 6) for k in range(1, most + 1)]
+    spirit = purify.get("tranquil_spirit")
+    if spirit and not _has_talent(talents, spirit.get("entries")):
+        spirit = None
+    most = (MAX_SPHERES_AT_ONCE + (1 if spirit.get("expel_harm") else 0)) if spirit else 0
+    return (brews, brew.get("min_max_health"), sorted(set(sips)), round(1 - spirit["share"], 6) if spirit else None,
+            most)
+
+
+def _passive_keeps(sips, spirit, low, most):
+    """Every keep factor one stretch's passive purifies can give, at least `low`: (factor, the factors
+    a Purifying Brew could have come after: any part of them, in any order). At most one Quick Sip
+    event and `most` Tranquil Spirits."""
+    out = []
+    for e in sips:
+        n = 0
+        while True:
+            f = e * spirit ** n if spirit else e
+            if f < low or n > most or (n and not spirit):
+                break
+            parts = {round((e if take else 1.0) * (spirit ** m if spirit else 1.0), 9)
+                     for take in ({True, False} if e != 1.0 else {False}) for m in range(n + 1)}
+            out.append((f, sorted(parts)))
+            n += 1
+    return out
+
+
+def _purify_fits(p_from, p_to, keeps, max_hp, brew):
+    """Does the pool going from p_from to p_to between two ticks fit the purifies the game has?
+    `brew`: True (a Purifying Brew cast in that stretch), False (none) or None (casts not read)."""
+    brews, minimum, sips, spirit, most = keeps
+    slack = PURIFY_MATCH * p_from + STAGGER_TICKS
+    low = (p_to - slack) / p_from if p_from else 0
+    for f, parts in _passive_keeps(sips, spirit, low, most):
+        if brew is not True and f != 1.0 and abs(p_from * f - p_to) <= slack:
+            return True
+        if brew is False:
+            continue
+        for keep in brews:
+            for g in parts:                      # the brew after this part of the passive ones
+                x = p_from * g
+                cut = (1 - keep) * x
+                if minimum and max_hp:
+                    cut = max(cut, minimum * max_hp)
+                x = max(x - cut, 0) * f / g
+                if abs(x - p_to) <= slack:
+                    return True
+    return False
+
+
+def _stagger_pools(ticks, ins, purifies=None, purify=None, talents=None):
+    """The pool just before each staggered hit: {id(in event): [estimates]}; one estimate when the log
+    settles it, two (the replay then works out both) when it doesn't, [] when unknown.
+
+    `ticks`: the player's Stagger ticks; `ins`: their STAGGER_AURA absorbed events (each a hit's
+    staggered amount); `purifies`: their casts of Purifying Brew and of the flat purifies' buttons (None:
+    not read); `purify`: the patch's purify sizes (STAGGER_PURIFY; the latest patch's if None); `talents`:
+    their loadout for the pull (None: not in the log). All from up to STAGGER_LOOKBACK_MS before the
+    window. Two readings:
+      - after: the tick after it is the pool over STAGGER_TICKS, so the pool before was STAGGER_TICKS
+        x tick - staggered amount; wrong (too small) if a purify came after the hit, before that tick;
+      - before: the tick before it left its size x (ticks left - 1); wrong (too big) if a purify came
+        between that tick and the hit.
+    When they differ, a purify came on one side: the side where the change fits the game's purifies
+    (_purify_fits; with the casts read, a side with a Purifying Brew cast must fit one with the brew, a
+    side without one a passive purify; a side where a flat purify's button was pressed fits any change)
+    is it. When both fit (a cast on one side, a Quick Sip that could be on the other: the truth lies
+    between), neither does, or only the side without a cast fits (the cast's side held something the
+    replay can't size), both readings are kept. Weavi, Undermine p24: Touch of Death 165 ms before a hit,
+    the pool 2,144,052 by the tick before, 5 by the tick after; without Tranquil Spirit or Quick Sip
+    nothing else fits, so the tick after is right. Weavi, Undermine p24: the cast's side read 0.5000 on every one of 12 with a cast;
+    Quel'Danas p104: 0.0500, 0.1000, 0.5000, 0.5500. A pool that grew between the ticks can't be a
+    purify: the tick after is right."""
+    purify = purify or STAGGER_PURIFY[LATEST]
+    keeps = _purify_keeps(purify, talents)
+    # A flat purify with talent entries only for players with the talent; without (Touch of Death's 325095)
+    # every Brewmaster has it. With no loadout in the log a talent's (Staggering Strikes on Blackout Kick) may
+    # be there: its button makes a side fit, but never decides a side on its own.
+    flat_ids = {c for f in purify.get("flat", ())
+                if "entries" not in f or (talents is not None and _has_talent(talents, f["entries"])) for c in f["casts"]}
+    maybe_ids = {c for f in purify.get("flat", ()) if "entries" in f and talents is None for c in f["casts"]}
+    seq = sorted([(t["timestamp"], 1, "tick", t) for t in ticks] + [(e["timestamp"], 0, "in", e) for e in ins],
+                 key=lambda x: (x[0], x[1]))
+    casts = None if purifies is None else sorted(c["timestamp"] for c in purifies
+                                                 if c.get("abilityGameID", PURIFYING_BREW) == PURIFYING_BREW)
+    flats = None if purifies is None else sorted(c["timestamp"] for c in purifies if c.get("abilityGameID") in flat_ids)
+    maybes = None if purifies is None else sorted(c["timestamp"] for c in purifies if c.get("abilityGameID") in maybe_ids)
+    out, pool, left, prev = {}, None, None, None
+    for i, (ts, _, kind, e) in enumerate(seq):
+        if kind == "tick":
+            if left:
+                pool, left = _tick_raw(e) * (left - 1), left - 1
+            else:
+                pool = left = None
+            prev = (ts, e)
+            continue
+        amount = e.get("amount") or 0
+        nxt = next((x for x in seq[i + 1:]), None)
+        after = max(STAGGER_TICKS * _tick_raw(nxt[3]) - amount, 0) if nxt is not None and nxt[2] == "tick" else None
+        guesses = [g for g in (pool, after) if g is not None]
+        if pool is not None and after is not None:
+            if abs(pool - after) <= 0.01 * max(pool, after) + 2 or after > pool:
+                guesses = [after]
+            else:
+                max_hp = nxt[3].get("maxHitPoints") or (prev[1].get("maxHitPoints") if prev else None)
+                cast_before = None if casts is None else any(prev is not None and prev[0] < c <= ts for c in casts)
+                cast_after = None if casts is None else any(ts <= c < nxt[0] for c in casts)
+                # A flat purify's button pressed on a side: that side can have lost any amount.
+                before_in = lambda times: bool(times) and any(prev is not None and prev[0] < c <= ts for c in times)
+                after_in = lambda times: bool(times) and any(ts <= c < nxt[0] for c in times)
+                sure_before = before_in(flats) or _purify_fits(pool, after, keeps, max_hp, cast_before)
+                sure_after = after_in(flats) or _purify_fits(pool + amount, after + amount, keeps, max_hp, cast_after)
+                fit_before = sure_before or before_in(maybes)
+                fit_after = sure_after or after_in(maybes)
+                # A Purifying Brew cast on the side that fits nothing: something the replay can't size
+                # (a flat purify) came with it, so the other side's fit doesn't settle it. Nor does a side
+                # that fits only by a flat purify the player may not have.
+                cast_unfit = cast_after if fit_before else cast_before
+                only_maybe = not (sure_before if fit_before else sure_after)
+                if fit_before != fit_after and not cast_unfit and not only_maybe:
+                    guesses = [after] if fit_before else [pool]
+                else:
+                    guesses = [pool, after]          # can't tell which side
+        out[id(e)] = guesses
+        pool = max(guesses) + amount if guesses else None
+        left = STAGGER_TICKS
+    return out
+
+
+def _stagger_share(window, ins, pools):
+    """Each staggered hit's staggered amount and pool estimates: {hit index: (amount, [pool before])}.
+    An absorbed event is matched to the hit with its source and ability within 2 ms."""
+    out, used = {}, set()
+    for e in ins:
+        best = None
+        for k, h in enumerate(window):
+            if k in used or _stagger_tick(h) or h.get("type") != "damage":
+                continue
+            if h.get("sourceID") == e.get("attackerID") and h.get("abilityGameID") == e.get("extraAbilityGameID") \
+                    and abs(h["timestamp"] - e["timestamp"]) <= 2:
+                if best is None or abs(h["timestamp"] - e["timestamp"]) < abs(window[best]["timestamp"] - e["timestamp"]):
+                    best = k
+        if best is not None:
+            used.add(best)
+            out[best] = (e.get("amount") or 0, pools.get(id(e), []))
+    return out
+
+
 def _ignores_reduction(hit):
-    """Nothing at all was mitigated (not even versatility): the hit ignores damage reduction.
+    """The hit ignores damage reduction: nothing at all was mitigated (not even versatility), or it is
+    a Stagger tick (reduced when the hit it came from was staggered, never while it ticks).
 
     WCL leaves `mitigated` out when it's 0; `unmitigatedAmount` shows the log has the data.
     """
+    if _stagger_tick(hit):
+        return True
     return not hit.get("mitigated") and (hit.get("unmitigatedAmount") or 0) > 0
 
 
@@ -966,6 +1771,15 @@ def _armor_reduction(hit, ability_schools):
     if ability in IGNORES_ARMOR:
         return False
     return True if ability in REDUCED_BY_ARMOR else None
+
+
+def _armor_unknown(hit, ability_schools):
+    """Why an armor increase can't be judged on this hit: {"why": "armorUnknown"} when it isn't known
+    whether armor reduces it, {"why": "armorValueUnknown", "missing": "armor" | "constant"} when armor
+    does but their armor on the hit or the boss's armor constant isn't known."""
+    if _armor_reduction(hit, ability_schools) is None:
+        return {"why": "armorUnknown"}
+    return {"why": "armorValueUnknown", "missing": "armor" if not hit.get("armor") else "constant"}
 
 
 def _armor_dr(extra, hit):
@@ -1025,12 +1839,30 @@ def _resolve(entry, talent_entries, observed_absorbs, spec=None, applied=None):
             if applied is not None:
                 applied.append({"talent": needs["talent"], "field": field, "rank": rank,
                                 "adds": seen if value is None else value,
-                                **({"school": c["school"]} if c.get("school") else {})})
+                                **({"school": c["school"]} if c.get("school") else {}),
+                                **({"dur_ms": c["dur_ms"]} if c.get("dur_ms") else {})})
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 value = value * rank
-        extra = {k: c[k] for k in ("over_ms", "ticks", "current", "replaces_form") if k in c}
+        extra = {k: c[k] for k in ("over_ms", "ticks", "current", "replaces_form", "from_target", "dr_hit", "share",
+                                   "stacks", "decay_end_ms", "decay_after_ms", "tick_ms", "first_tick", "dur_ms")
+                 if k in c}
+        if "tick_ms" in extra:
+            # Talents that change the tick period (Reinvigoration: Frenzied Regeneration's +33%).
+            for m in c.get("period_mods", ()):
+                rank = _mod_rank(m, talent_entries, spec)
+                if rank:
+                    extra["tick_ms"] = (extra["tick_ms"] + m["add_ms"] * rank if "add_ms" in m
+                                        else extra["tick_ms"] * (1 + (m["mult"] - 1) * rank))
+        if "decay_after_ms" in extra:
+            # The wait before the stacks drop shrinks with the talents that shorten the aura (Righteous
+            # Protector: "$389539s14/1000*(1-$204074s2/100)"), not with those that lengthen it.
+            for m in entry.get("duration_mods", ()):
+                rank = _mod_rank(m, talent_entries, spec)
+                if rank and m.get("mult", 1) < 1:
+                    extra["decay_after_ms"] *= 1 + (m["mult"] - 1) * rank
         if seen:
-            out.append({"absorb_amount": seen, "school": c.get("school")})
+            out.append({"absorb_amount": seen, "school": c.get("school"),
+                        **({"share": c["share"]} if "share" in c else {})})
             continue
         if value is None:
             return None, []              # only scored from a real shield size, and none was seen
@@ -1045,7 +1877,8 @@ def _resolve(entry, talent_entries, observed_absorbs, spec=None, applied=None):
             boosted.append(m["talent"])
             if applied is not None:
                 applied.append({"talent": m["talent"], "field": field, "rank": rank,
-                                **({"add": m["add"]} if "add" in m else {"mult": m["mult"]})})
+                                **({"add": m["add"]} if "add" in m else {"mult": m["mult"]}),
+                                **({"school": c["school"]} if c.get("school") not in (None, "all") else {})})
         if field == "dr":
             value = min(value, 1.0)
         if value:
@@ -1121,7 +1954,8 @@ def potion_rank(sid, cat, own_heals, talent_entries, spec, talents_by_fight=None
             "bonus": round((base / ranks[i]["heal"] - 1) * 100, 1)}
 
 
-def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec, talents_by_fight=None):
+def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec, talents_by_fight=None,
+                        soulburn_casts=(), soulburn_spent=()):
     """How much an unused Healthstone or potion would have healed this player, as a scorable entry.
 
     From the player's own uses of it in the same report when there are any:
@@ -1134,6 +1968,12 @@ def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec, t
     Otherwise from the catalog: the Healthstone's game-data share with talents
     (Demonic Healthstone: the share measured in real logs of that tier), or a
     potion's typical heal with the player's healing-taken talents and buffs.
+    Soulburn (catalog "soulburn"): its share is on every Healthstone of a Warlock with Gorebound
+    Fortitude; for one with only the Soulburn talent, the entry is without it and "withSoulburn" holds
+    the Healthstone with it, which the replay credits only when Soulburn could have been cast first
+    (SoulburnTimeline). Their own heals are read without it: a heal that had it (_with_soulburn: after a
+    Soulburn cast, `soulburn_casts`, whose buff no other spell used first, `soulburn_spent`) or under
+    Gorebound has its share taken off.
     """
     entry = cat.all[sid]
     # Their own uses of this exact potion or Healthstone. The log names only the
@@ -1143,20 +1983,35 @@ def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec, t
     own = [h for h in own_heals if h[1] == sid]
     out = {"name": entry["name"], "kind": entry["kind"], "estimated": True, "boostedBy": []}
     if entry["kind"] == "healthstone":
+        sb = entry.get("soulburn")
+        gore = _gorebound_rank(entry, talent_entries, spec)
+        burned = _with_soulburn(entry, sb, own, soulburn_casts, soulburn_spent, talents_by_fight, talent_entries,
+                                spec)
         shares = [h[2] / h[3] for h in own if h[3]]
-        extra = [c for c in (entry.get("mitigation") or []) if "hp" in c]     # Soulburn: Healthstone
+        # Their own heals without Soulburn's share (a heal with it has it taken off).
+        plain = [s - (sb["heal"] if b else 0) for s, b in zip(shares, burned)]
+        extra = [c for c in (entry.get("mitigation") or []) if "hp" in c]     # Gorebound: Soulburn: Healthstone
         extra, boosted = _resolve({"mitigation": extra, "name": entry["name"]}, talent_entries, {}, spec)
+        gore_heal = sb["heal"] * gore if sb and gore else 0.0
         if shares:
-            out["mitigation"] = [{"heal": statistics.median(shares)}] + (extra or [])
+            out["mitigation"] = [{"heal": statistics.median(plain) + gore_heal}] + (extra or [])
             out["source"] = "log"
-            out["samples"] = {"n": len(shares), "minShare": round(min(shares), 3), "maxShare": round(max(shares), 3)}
+            # The range shown is of the heals without Soulburn's share, as the estimate reads them.
+            out["samples"] = {"n": len(plain), "minShare": round(min(plain), 3), "maxShare": round(max(plain), 3)}
         elif entry["name"] == "Demonic Healthstone" and cat.demonic_healthstone:
-            out["mitigation"] = [{"heal": cat.demonic_healthstone}] + (extra or [])
+            out["mitigation"] = [{"heal": cat.demonic_healthstone + gore_heal}] + (extra or [])
             out["source"] = "typical"
         else:
             out["applied"] = []
             out["mitigation"], out["boostedBy"] = _resolve(entry, talent_entries, {}, spec, out["applied"])
             out["source"] = "gameData"
+        if sb and not gore and _mod_rank(sb, talent_entries, spec) and out["mitigation"]:
+            # Soulburn pressed first: its share on the heal, and its max health for its duration.
+            heal = [dict(c, heal=c["heal"] + sb["heal"]) if "heal" in c else c for c in out["mitigation"]]
+            out["withSoulburn"] = {
+                "mitigation": heal + [{"hp": sb["hp"], "dur_ms": sb["dur_ms"]}],
+                "applied": [{"talent": sb["talent"], "field": "heal", "rank": 1, "add": sb["heal"]},
+                            {"talent": sb["talent"], "field": "hp", "rank": 1, "add": sb["hp"]}]}
         return out
     if own:
         heals = [h[2] / (h[4] or 1.0) for h in own]
@@ -1193,13 +2048,53 @@ def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec, t
     return out
 
 
+def _gorebound_rank(entry, talent_entries, spec):
+    """Gorebound Fortitude's rank for this Healthstone (its max health mod in the catalog), 0 without it."""
+    for c in entry.get("mitigation") or ():
+        for m in c.get("mods", ()) if "hp" in c else ():
+            rank = _mod_rank(m, talent_entries, spec)
+            if rank:
+                return rank
+    return 0
+
+
+def _with_soulburn(entry, sb, own, soulburn_casts, soulburn_spent, talents_by_fight, talent_entries, spec):
+    """For each of their own Healthstone heals: did it have Soulburn's share? Yes when its buff (387626,
+    20 s) was still on them: the latest Soulburn cast within the buff before the heal (pressed on the same
+    millisecond in the logs), and no spell that uses the buff up cast from it until the heal (`soulburn_spent`:
+    the catalog's "consumed_by", Demonic Circle: Teleport, Demonic Gateway...; nor an earlier Healthstone of
+    theirs). Measured on 8 reports' Warlocks (2VtyDR4CF6PGLjbd, g2R9GZcd1rP6JKpw and the targets): every heal
+    so read healed the plain share and every other heal after a cast the share plus 0.30, as the buff's
+    removebuff and Soulburn: Healthstone (387636) show. Or with Gorebound Fortitude in that heal's pull
+    (their loadout at death when that pull's isn't known)."""
+    out = []
+    stones = sorted(h[0] for h in own)
+    for h in own:
+        if not sb:
+            out.append(False)
+            continue
+        last = max((t for t in soulburn_casts if 0 <= h[0] - t <= sb["buff_ms"]), default=None)
+        cast = last is not None and not any(last <= x < h[0] for x in list(soulburn_spent) + stones)
+        talents = (talents_by_fight or {}).get(h[6]) if len(h) > 6 else None
+        talents = talent_entries if talents is None else talents
+        out.append(cast or bool(_gorebound_rank(entry, talents, spec)))
+    return out
+
+
 def _full_hit(hit):
     """Whole hit: WCL's `amount` is only the health it took (the rest is `overkill`, or absorbed)."""
     return (hit.get("amount") or 0) + (hit.get("overkill") or 0) + (hit.get("absorbed") or 0)
 
 
 def _effect_applies(m, hit, ability_schools):
-    """Does one component apply to this hit: True / False / None (unknown)."""
+    """Does one component apply to this hit: True / False / None (unknown).
+
+    An effect on the unit it is cast on (`from_target`: The War Within's Fiery Brand) covers only the
+    hits of the unit the replay brands (assess_survival tags them `fromTarget`), and never a hit that
+    already lists its aura: that unit was branded then, so the hit is already cut (it doesn't stack).
+    """
+    if m.get("from_target") and (not hit.get("fromTarget") or m["from_target"] in _auras(hit)):
+        return False
     if m.get("armor"):
         return _armor_reduction(hit, ability_schools) and (True if _armor_dr(m["armor"], hit) is not None else None)
     return _school_applies(m.get("school"), hit, ability_schools, immunity=bool(m.get("immune")))
@@ -1211,9 +2106,13 @@ def _keep(comps, hit, max_hp, missing_hp, ability_schools):
     Reductions are skipped for a hit that ignored them, immunities for spells
     that pierce them. Armor increases multiply (Bear Form x Ursine Vigor);
     shifting forms takes the current form's armor bonus off first.
+    A reduction that grows with the hit (`dr_hit`: Dampen Harm, 20% to 50%) cuts its value plus
+    (dr_hit - value) x min(x, 1), x the hit after every other reduction (the player's real ones are in
+    the logged hit; those pressed with it come first) as a share of `max_hp`, their max health then.
     """
     keep, armor_up = 1.0, 1.0
     no_reduction = _ignores_reduction(hit)
+    by_size = []
     for m in comps:
         if not any(f in m for f in ("immune", "armor", "dr", "dr_missing")):
             continue
@@ -1224,6 +2123,8 @@ def _keep(comps, hit, max_hp, missing_hp, ability_schools):
                 keep = 0.0
         elif m.get("armor"):
             armor_up *= 1 + m["armor"]
+        elif not no_reduction and m.get("dr_hit") is not None:
+            by_size.append(m)
         elif not no_reduction:
             dr = m.get("dr") or 0
             if m.get("dr_missing"):              # up to its value at no health, by missing health
@@ -1233,6 +2134,9 @@ def _keep(comps, hit, max_hp, missing_hp, ability_schools):
         if any(m.get("replaces_form") for m in comps):
             armor_up /= hit.get("formArmor") or 1.0
         keep *= 1 - _armor_dr(armor_up - 1, hit)
+    for m in by_size:
+        x = min(_full_hit(hit) * keep / max_hp, 1.0) if max_hp else 0.0
+        keep *= 1 - min(m["dr"] + (m["dr_hit"] - m["dr"]) * x, 1.0)
     return keep
 
 
@@ -1271,13 +2175,37 @@ class _Points(list):
 
 
 class _Window:
-    """A death's replayed hits with what every replay reads from them, worked out once."""
+    """A death's replayed hits with what every replay reads from them, worked out once.
 
-    def __init__(self, hits, ability_schools):
+    `stagger`: for a Brewmaster, {hit index: (staggered amount, [pool before])} (_stagger_share), or
+    {} when the log has no staggered amounts. Stagger takes its share of a hit after the reductions
+    and before any shield (on Weavi's hits its share is a fixed part of the whole reduced hit, Dampen
+    Harm's too, and another shield takes only what is left), so a reduction pressed before a hit
+    shrinks its staggered amount alike: the replay counts the part taken at once (the rest of the
+    hit) as any hit, and puts the cut staggered part into the pool, where every later tick is that
+    much smaller (_simulate). A hit of a Brewmaster without its staggered amount counts only its amount
+    and overkill (its absorbed part may be staggered: never credited).
+    """
+
+    def __init__(self, hits, ability_schools, stagger=None):
         self.hits = hits
         self.schools = ability_schools
         self.points = _Points(_health_points(hits))
-        self.full = [_full_hit(h) for h in hits]
+        self.stagger = stagger
+        self.full = []
+        # What the player's real shields absorbed of each hit as counted in `full` (Stagger's part left
+        # out): a shield that takes a share (Celestial Infusion) takes it of what they left.
+        self.shielded = []
+        for k, h in enumerate(hits):
+            if stagger is None or _stagger_tick(h):
+                self.full.append(_full_hit(h))
+                self.shielded.append(h.get("absorbed") or 0)
+            elif k in stagger:
+                self.full.append(max(_full_hit(h) - stagger[k][0], 0))
+                self.shielded.append(max((h.get("absorbed") or 0) - stagger[k][0], 0))
+            else:
+                self.full.append((h.get("amount") or 0) + (h.get("overkill") or 0))
+                self.shielded.append(0)
         self.known = [h.get("resourceActor") == 2 and bool(h.get("maxHitPoints")) for h in hits]
         self.before = []
         for h, known in zip(hits, self.known):
@@ -1304,26 +2232,120 @@ class _Window:
         return self._applies[key]
 
 
-def _option(entry_name, comps, dur_ms, legacy_ticks=None):
+def _hot_full(opt, max_hp):
+    """A button's whole heal over time, with the healing-taken increases it brings itself (Verdant Heart's
+    +20% while Frenzied Regeneration is up), as _simulate lands each tick: the "of" its ticks before the
+    death are a part of."""
+    taken = 1 + sum(c.get("heal_taken", 0) for c, _ in opt["lasting"])
+    return sum((c.get("heal", 0) * max_hp + c.get("heal_amount", 0)) * (1 if c.get("boosted") else taken)
+               for c, _, _ in opt["hots"])
+
+
+def _option(entry_name, comps, dur_ms):
     """One button's effect, timed: {"name", "lasting": [(comp, ms or None)], "instant": [comp], "hots": [(comp, ticks, ms)]}.
 
-    Effects last the aura's duration; without one (Bear Form, Soulburn's health)
-    they're up until the death. Heals land when pressed, or over time.
+    Effects last the aura's duration; without one (Bear Form) they're up until the death. An effect
+    with its own `dur_ms` (Ursine Vigor's 4 s, Gorebound Fortitude's 12 s of max health) lasts no longer
+    than that. Heals land when pressed, or over time (_hot).
     """
-    opt = {"name": entry_name, "lasting": [], "instant": [], "hots": []}
+    opt = {"name": entry_name, "lasting": [], "instant": [], "hots": [],
+           "comps": comps, "dur_ms": dur_ms, "extend": None}
     for c in comps or ():
         if "heal" in c or "heal_amount" in c:
-            over = c.get("over_ms") or (dur_ms if legacy_ticks else None)
-            if over:
-                opt["hots"].append((c, c.get("ticks") or legacy_ticks or 1, over))
+            hot = _hot(c, dur_ms)
+            if hot:
+                opt["hots"].append(hot)
             else:
                 opt["instant"].append(c)
+        elif c.get("stacks") and dur_ms:
+            opt["lasting"] += _stack_layers(c, dur_ms)
         else:
-            opt["lasting"].append((c, dur_ms))
+            own = c.get("dur_ms")
+            opt["lasting"].append((c, min(own, dur_ms) if own and dur_ms and dur_ms > 0 else own or dur_ms))
     return opt
 
 
-def _simulate(options, press, win, kb_index):
+STACK_DROP_MS = 1_000            # Sentinel's stacks drop one a second
+
+
+def _stack_layers(c, dur_ms):
+    """A per-stack effect whose stacks drop one a second (Sentinel), as lasting effects that run out one
+    after another: [(comp, ms)]. "After X sec, you will begin to lose 1 stack per second": X is
+    `decay_after_ms` after the press, or `decay_end_ms` before the aura ends, and the k-th stack goes k
+    seconds after X, so the last one goes as the aura ends when X + 15 s is its duration (16 s and "After
+    ${$d-15} sec" in The War Within, 20 s and 5 s from 12.0.5); the aura's end takes every stack left. Holy
+    Power spent only delays the drop, so the real stacks were never fewer. Reductions are layered so the
+    ones up multiply to exactly the stacks' sum (n stacks of 2%: 1 - 0.02n); max health adds per stack
+    (each group runs out on its own)."""
+    n = c["stacks"]
+    start = c["decay_after_ms"] if "decay_after_ms" in c else dur_ms - c.get("decay_end_ms", 0)
+    start = max(start, 0)
+    drops = [min(start + k * STACK_DROP_MS, dur_ms) for k in range(1, n + 1)]
+    field = "dr" if "dr" in c else "hp" if "hp" in c else None
+    base = {k: v for k, v in c.items() if k not in ("stacks", "decay_after_ms", "decay_end_ms", "dr", "hp")}
+    layers, j = [], n
+    for ms in sorted(set(drops)):
+        count = drops.count(ms)              # stacks (from the top) that drop at this moment
+        lo, j = j - count, j - count         # layers lo+1 .. lo+count
+        v = c[field]
+        if field == "dr":
+            value = 1 - (1 - (lo + count) * v) / (1 - lo * v)
+        else:
+            value = count * v
+        layers.append((dict(base, **{field: value}), ms))
+    return layers
+
+
+def _at_press(opt, press):
+    """The option as pressed at `press`: an aura that each cast of some buttons lengthens (Zealot's Paragon:
+    Judgment and Hammer of Wrath on Sentinel; `extend` = (ms a cast, the player's cast times)) lasts its
+    duration plus that much for every such cast while it is up, a cast at or after the press counting."""
+    if not opt.get("extend") or not opt.get("dur_ms") or opt["dur_ms"] < 0:
+        return opt
+    dur = _extended_ms(opt["dur_ms"], *opt["extend"], press)
+    return opt if dur == opt["dur_ms"] else _option(opt["name"], opt["comps"], dur)
+
+
+def _extended_ms(dur_ms, ms, casts, press):
+    """How long an aura pressed at `press` lasts when each cast in `casts` while it is up adds `ms`."""
+    end = press + dur_ms
+    for t in sorted(casts):
+        if press <= t < end:
+            end += ms
+    return end - press
+
+
+def _hot(c, dur_ms):
+    """A heal over time as it lands: (comp with its whole heal, ticks, ms it lasts), or None for a heal
+    that lands at once. A talent's heal over time is its own spell (`over_ms`); a button's own lasts the
+    aura (`dur_ms`, with the player's talents). The game ticks every `tick_ms` while the aura is up, plus
+    once as it is applied (`first_tick`): Frenzied Regeneration 4 times in 3 s; 4 in 4 s with
+    Reinvigoration (a period 33% longer). More ticks heal more: the catalog's heal is for its `ticks`."""
+    if not c.get("tick_ms"):
+        return (c, c["ticks"], c["over_ms"]) if c.get("over_ms") and c.get("ticks") else None
+    over = c.get("over_ms") or dur_ms
+    base = c.get("ticks")
+    if not over or over < 0:
+        if not base:
+            return None
+        return c, base, c["tick_ms"] * (base - (1 if c.get("first_tick") else 0))
+    n = int(over / c["tick_ms"] + 1e-9) + (1 if c.get("first_tick") else 0)
+    if base and n != base:
+        c = dict(c, **{k: c[k] * n / base for k in ("heal", "heal_amount") if k in c})
+    return c, n, over
+
+
+def _tick_times(c, ticks, over, press):
+    """When a heal over time's ticks land: evenly over its duration, the last as it ends; or, with the
+    game's tick period (`tick_ms`) and a tick as it is pressed (`first_tick`: as Soul Immolation's 6 ticks
+    in 5 s on every press in the logs), at the press and every period after."""
+    if c.get("tick_ms"):
+        first = 0 if c.get("first_tick") else 1
+        return [press + c["tick_ms"] * (k + first) for k in range(ticks)]
+    return [press + over / ticks * (k + 1) for k in range(ticks)]
+
+
+def _simulate(options, press, win, kb_index, credit="least"):
     """Health the player would have had on top of their real health right after the killing blow,
     with every option pressed at `press`. Returns (extra health, HoT ticks landed).
 
@@ -1337,9 +2359,13 @@ def _simulate(options, press, win, kb_index):
         before each hit, the extra is capped by what they were missing then
         (their real heals would have overhealed the rest).
     The player lives if the extra is more than the killing blow's overkill.
-    `win`: the death's hits, prepared (_Window).
+    `win`: the death's hits, prepared (_Window). `credit`: with two Stagger pool estimates for a hit
+    (_stagger_pools), the one that credits "least" or "most".
     """
     hits, points = win.hits, win.points
+    options = [_at_press(o, press) for o in options]
+    stagger = win.stagger or {}
+    cut = 0.0                 # share of the Stagger pool the presses cut off (ticks and purifies keep it)
     lasting = [(c, press + ms if ms else float("inf")) for o in options for c, ms in o["lasting"]]
     heal_taken = [(c["heal_taken"], until) for c, until in lasting if c.get("heal_taken")]
     hp_now, max_now = _health_at(points, press)
@@ -1363,14 +2389,17 @@ def _simulate(options, press, win, kb_index):
         extra += gain
         dmax += grow
         expiries.append((until, gain, grow))
-    shields = [[c.get("absorb", 0) * max_now + c.get("absorb_amount", 0), c, until]
-               for c, until in lasting if c.get("absorb") or c.get("absorb_amount")]
+    # A shield with a "share" (Celestial Infusion) takes only that share of what the others left.
+    shields = sorted([[c.get("absorb", 0) * max_now + c.get("absorb_amount", 0), c, until]
+                      for c, until in lasting if c.get("absorb") or c.get("absorb_amount")],
+                     key=lambda sh: sh[1].get("share") is not None)
     # Reductions, immunities and armor up, dropped as they run out (in that order).
     covering = [c for c, _ in lasting if any(f in c for f in ("immune", "armor", "dr", "dr_missing"))]
     ends = sorted(((until, c) for c, until in lasting if c in covering and until != float("inf")),
                   key=lambda x: x[0])
     sig = tuple(id(c) for c in covering)
-    by_health = any(c.get("dr_missing") for c in covering)
+    # Reductions that depend on health or on the hit against max health: worked out for every hit.
+    by_health = any(c.get("dr_missing") or c.get("dr_hit") is not None for c in covering)
 
     # Heals: (time, amount before healing-taken increases, boosted already?).
     heals = []
@@ -1379,11 +2408,11 @@ def _simulate(options, press, win, kb_index):
             heals.append((press, (c.get("heal", 0) * max_now + c.get("heal_amount", 0)), c.get("boosted")))
         for c, ticks, over in o["hots"]:
             total = c.get("heal", 0) * max_now + c.get("heal_amount", 0)
-            heals += [(press + over / ticks * (k + 1), total / ticks, c.get("boosted")) for k in range(ticks)]
+            heals += [(at, total / ticks, c.get("boosted")) for at in _tick_times(c, ticks, over, press)]
     heals.sort(key=lambda x: x[0])
     kb_ts = hits[kb_index]["timestamp"]
-    hot_ticks = sum(1 for o in options for _, ticks, over in o["hots"]
-                    for k in range(ticks) if press + over / ticks * (k + 1) < kb_ts)
+    hot_ticks = sum(1 for o in options for c, ticks, over in o["hots"]
+                    for at in _tick_times(c, ticks, over, press) if at < kb_ts)
     hi = 0
 
     def land_heals(until_t):
@@ -1414,18 +2443,31 @@ def _simulate(options, press, win, kb_index):
         if win.known[k]:
             extra = min(extra, max(max_k + dmax - hp_before, 0))
         dmg = win.full[k]
-        if not dmg:
+        staggered = stagger.get(k)
+        if not dmg and not staggered:
             continue
         while ends and ends[0][0] < t:
             covering.remove(ends.pop(0)[1])
         if covering:
             key = None if by_health else (sig, len(ends))
-            left = dmg * win.keep(covering, key, k, max_k, max(max_k + dmax - hp_before - extra, 0))
+            keep = win.keep(covering, key, k, max_k + dmax, max(max_k + dmax - hp_before - extra, 0))
         else:
-            left = dmg
+            keep = 1.0
+        left = dmg * keep
+        if stagger and _stagger_tick(hits[k]):
+            left *= 1 - cut               # the pool is that much smaller: so is every tick
+        if staggered:
+            # The pool takes this hit's staggered amount, cut by the reductions up (keep). The share of
+            # the pool cut off is a mix of the share before and this hit's: with the pool estimate that
+            # credits least (_stagger_pools), or the smaller share when the pool isn't known.
+            amount, pools = staggered
+            mixes = [(cut * pool + amount * (1 - keep)) / (pool + amount) for pool in pools if pool + amount > 0]
+            cut = (max(mixes) if credit == "most" else min(mixes)) if mixes else min(cut, 1 - keep)
         for sh in shields:
             if sh[0] > 0 and sh[2] >= t and left > 0 and win.applies(sh[1], k):
-                took = min(sh[0], left)
+                share = sh[1].get("share")
+                # A share shield takes its share of what the real shields (up to what they took) left too.
+                took = min(sh[0], left if share is None else max(left - win.shielded[k], 0) * share)
                 sh[0] -= took
                 left -= took
         extra += dmg - left
@@ -1485,15 +2527,19 @@ def _explain(entry, comps, applied, hit, amount, max_hp, missing_hp, ability_sch
             immune = bool(m.get("immune"))
             applies = _effect_applies(m, hit, ability_schools)
             if applies is None and m.get("armor"):
-                out["why"] = "armorUnknown"
+                out.update(_armor_unknown(hit, ability_schools))
             elif applies is None:
                 out["why"] = "aoeUnknown"
             elif not applies and m.get("armor"):
                 out["why"] = "notArmor"
+            elif not applies and m.get("from_target"):
+                out["why"] = "notBranded"
             elif not applies:
                 out["why"], out["school"] = "school", m.get("school")
             elif immune and hit.get("abilityGameID") in IGNORES_IMMUNITY:
                 out["why"] = "pierces"
+            elif (m.get("dr") or m.get("armor")) and _stagger_tick(hit):
+                out["why"] = "stagger"
             elif (m.get("dr") or m.get("armor")) and _ignores_reduction(hit):
                 out["why"] = "noReduction"
             elif ("heal" in m or "heal_amount" in m or "heal_taken" in m) and \
@@ -1528,7 +2574,7 @@ def _lethal_hits(hits, killing):
     return out
 
 
-def _press_times(earliest, win, kb_index, options=None):
+def _press_times(earliest, win, kb_index, options=None, extra=()):
     """Moments worth trying to press at, from `earliest` up to REACTION_MS before the killing blow.
 
     Health only rises between hits, so these are just after each hit (most
@@ -1536,11 +2582,13 @@ def _press_times(earliest, win, kb_index, options=None):
     each (covers the most for effects that run out), plus the earliest and
     latest moments allowed. Given the options, only the moments that can
     matter for them: effects that last until the death and nothing else are
-    best pressed as early as possible.
+    best pressed as early as possible. `extra`: more moments to try (where
+    whether it can be pressed changes: SoulburnTimeline.changes).
     """
     latest = win.hits[kb_index]["timestamp"] - REACTION_MS
     if earliest > latest:
         return []
+    extra = {t for t in extra if earliest <= t <= latest}
     after = before = True
     if options is not None:
         heals = any(o["instant"] or o["hots"] for o in options)
@@ -1550,8 +2598,8 @@ def _press_times(earliest, win, kb_index, options=None):
         after = heals or shield_or_hp
         before = timed or shield_or_hp
         if not after and not before:
-            return [earliest]            # up until the death either way: the earliest covers the most
-    times = {earliest, latest}
+            return sorted({earliest} | extra)   # up until the death either way: the earliest covers the most
+    times = {earliest, latest} | extra
     for h in win.hits[:kb_index]:
         if before and earliest <= h["timestamp"] - 1 <= latest:
             times.add(h["timestamp"] - 1)
@@ -1560,20 +2608,269 @@ def _press_times(earliest, win, kb_index, options=None):
     return sorted(times)
 
 
-def _best_press(options, earliest, win, kb_index):
+def _best_press(options, earliest, win, kb_index, credit="least", allowed=None, extra=()):
     """(extra health, press time, HoT ticks) for the best moment to press (_press_times);
-    None when it can't be pressed in time."""
+    None when it can't be pressed in time. `allowed(t)`: only the moments it is true of
+    (with `extra` moments to try)."""
     best = None
-    for t in _press_times(earliest, win, kb_index, options):
-        extra, ticks = _simulate(options, t, win, kb_index)
-        if best is None or extra >= best[0] - 1e-6:
-            best = (extra, t, ticks)          # the latest press that saves the most
+    for t in _press_times(earliest, win, kb_index, options, extra):
+        if allowed is not None and not allowed(t):
+            continue
+        saved, ticks = _simulate(options, t, win, kb_index, credit)
+        if best is None or saved >= best[0] - 1e-6:
+            best = (saved, t, ticks)          # the latest press that saves the most
     return best
+
+
+# The death strips the player's auras just before WCL logs the killing hit: measured on 587 killing
+# hits in six Mythic logs (2026-10-08), the strip's removals come 0-39 ms before it (210 within
+# 10 ms, 57 at 10-19, 17 at 20-29, 5 at 30-39); the next removals are 70+ ms out, auras running
+# out on their own. An aura that came up within this span before the killing hit, after the hit
+# before it and not on the killing hit's own aura list, came from the killing hit itself.
+DEATH_STRIP_MS = 50
+
+
+def max_health_size(aura_id, patch, talents=None, spec=None):
+    """(share, flat) an aura changes this player's max health by in a patch (max x (1 + share) + flat),
+    from game data (max_health_auras.py): every term of the aura that applies to them (a term needing a
+    talent only with that talent in `talents`, {entry: rank}; a spec's only for that spec), its share
+    with the talents and spec passives that change it. (0.0, 0) for an aura that doesn't change max
+    health; None when an applying term isn't in the data."""
+    terms = []
+    key = [int(x) for x in patch.split(".")]
+    for first, ts in MAX_HEALTH.get(aura_id, ()):
+        if [int(x) for x in first.split(".")] <= key:
+            terms = ts
+    talents = talents or {}
+
+    def rank(who):
+        if "entries" in who:
+            return max((talents.get(e, 0) if isinstance(talents, dict) else int(e in talents)
+                        for e in who["entries"]), default=0)
+        if "specs" in who:
+            return int(bool(spec) and _spec_matches(spec, who["specs"]))
+        return 1
+
+    mult, flat = 1.0, 0
+    for t in terms:
+        if not rank(t):
+            continue
+        if "flat" in t:
+            flat += t["flat"]
+            continue
+        if t["share"] is None:
+            return None
+        share = t["share"]
+        for m in t.get("mods", ()):
+            r = rank(m)
+            if r:
+                share = share + m["add"] * r if "add" in m else share * m["mult"]
+        mult *= 1 + share
+    return (round(mult - 1, 6), flat)
+
+
+def _aura_sizer(cat, player_class, spec, talent_entries, ability_names=None, player_id=None, loadout_of=None):
+    """aura ID -> (share, flat) or None for this player, from game data with their talents and spec
+    (max_health_size). Sized by aura ID, wherever the game data puts the effect: Havoc's
+    Metamorphosis (162264) has none, Vengeance's (187827) +40%; Bear Form's +25% Stamina is on its
+    passive 1178 (any druid); Fount of Strength puts +10% on Frenzied Regeneration.
+    `size.by_caster(aid, caster)`: sized with the loadout of whoever cast it (`loadout_of(caster)` ->
+    (talents, spec) or None): talents raise an aura from its caster (Battlefield Commander's +2% on a
+    warrior's Rallying Cry reads x1.12 on every player it lands on). None for an aura sized by a loadout
+    when its caster's isn't known."""
+    patch = getattr(cat, "patch", None) or LATEST
+
+    def size(aid):
+        return max_health_size(aid, patch, talent_entries or {}, spec)
+
+    def by_caster(aid, caster):
+        if caster is None or player_id is None or caster == player_id or aid not in LOADOUT_SIZED:
+            return size(aid)
+        lo = loadout_of(caster) if loadout_of else None
+        if lo is None:
+            return None
+        return max_health_size(aid, patch, lo[0] or {}, lo[1])
+    size.by_caster = by_caster
+
+    def stacks(aid):
+        n = 1
+        key = [int(x) for x in patch.split(".")]
+        for first, m in STACKING.get(aid, ()):
+            if [int(x) for x in first.split(".")] <= key:
+                n = m
+        return n
+    size.stacks = stacks
+    return size
+
+
+def _own_health(h):
+    return h.get("resourceActor") == 2 and bool(h.get("maxHitPoints")) and h.get("type") == "damage"
+
+
+def _set_off_heal(heals, prev_t, t1):
+    """Health the killing hit itself healed (heals: the player's KILLING_HIT_HEALS heals and their
+    cheat-death auras' absorbs and removals, from fetch_death_windows). A heal counts only with its
+    aura's absorb, or its removal (used up), logged after the hit before the killing hit: an absorb
+    logged then took part of the killing hit (its absorbs sum to the hit's `absorbed`). Live: Arzoker,
+    Quel'Danas p89, Stretch Time absorbed at 13395294, Defy Fate healed at 13395295 and absorbed at
+    13395314, Terminate logged at 13395315 with both absorbs; a Defy Fate heal 1 ms after the hit
+    before and 31 ms before the killing hit, with no Defy Fate absorb of it (Alemonk, Quel'Danas p32),
+    was health they had. Guardian Spirit logs no absorb: its aura 47788 is removed 1 ms before its heal
+    48153 (Manaforge 2VtyDR4CF6PGLjbd p75, 25624450 / 25624451)."""
+    window = [h for h in heals if prev_t < h["timestamp"] <= t1]
+    total = 0
+    for h in window:
+        if h.get("type") != "heal" or h.get("abilityGameID") not in KILLING_HIT_HEALS:
+            continue
+        aura = KILLING_HIT_HEALS[h["abilityGameID"]]
+        if any(a.get("abilityGameID") == aura and a.get("type") in ("absorbed", "removebuff", "removedebuff")
+               for a in window):
+            total += h.get("amount") or 0
+    return total
+
+
+def _stacks_at(events, aura_id, t):
+    """Stacks of an aura on the player at time t from its aura events (fetch_death_windows), or None
+    when they can't be told (no event of it, or only its removal after t)."""
+    evs = [e for e in events if e.get("abilityGameID") == aura_id]
+    before = [e for e in evs if e["timestamp"] <= t]
+    if before:
+        e = before[-1]
+        if e["type"] in ("removebuff", "removedebuff"):
+            return 0
+        if e["type"] in ("applybuff", "applydebuff"):
+            return e.get("stack") or 1
+        return e.get("stack")
+    after = [e for e in evs if e["timestamp"] > t]
+    if not after:
+        return None
+    e = after[0]
+    if e["type"] in ("applybuff", "applydebuff"):
+        return 0
+    if e["type"] in ("applybuffstack", "applydebuffstack") and e.get("stack"):
+        return e["stack"] - 1
+    if e["type"] in ("removebuffstack", "removedebuffstack") and e.get("stack") is not None:
+        return e["stack"] + 1
+    return None
+
+
+def _max_hp_before(window, kb_index, aura_size=None, heals=(), aura_events=()):
+    """(max health, health) the player had just before the killing blow window[kb_index] landed.
+
+    WCL logs the killing hit after the death removed the player's auras, so its maxHitPoints has
+    lost every max-health aura they had (live 2026-10-08, four deaths read 105% from it: Strikepal,
+    Nerub-ar p16, auras removed at 1910329-1910332, the hit logged at 1910349 with max 10061382
+    against 11198315 on every hit and heal before). Instead:
+      - the max on their last own-health hit before it, with the auras that came up or ran out
+        between that hit and the killing blow taken in or out: each hit lists the auras up on it,
+        before the death's strip (aura_size: game data with their talents and spec). Live: Black
+        Attunement (+2%) ran out before the killing blow of WgYbA1r7fXdZKtPF actor 137 at 8775890 and
+        bpQCAqm89GhTLW7Z actor 19 at 3055954, Fortitude of the Bear (+20%) before gZBT7Y1j8dNCbwqp
+        actor 14's at 3182550; each killing hit's own max is exactly that.
+      - when that last hit's list changed against the own-health hit before it but its max did not,
+        the max had not caught up yet (seen on 26 of 258 such changes in six logs, up to about a
+        second): the hit before is the reference;
+      - what the killing hit itself healed (_set_off_heal: a cheat death's heal, Defy Fate,
+        Cauterize, Guardian Spirit, Ardent Defender; Embrace the Shadow's heal of the shadow damage it
+        absorbed; Last Resort's Metamorphosis) is not health they had before it: WCL's amount on the
+        killing hit includes it. Live: Arzoker, Quel'Danas p34, Defy Fate healed 136670 inside
+        Terminate, 507980 -> 371310 (73%); Padflash, Manaforge p79, Cauterize healed 2919591, which
+        leaves exactly the 2903317 of his hit before. An aura the killing hit brought (Metamorphosis)
+        is not on its list, so its max health never counts either;
+      - a stacking aura counts once per stack (game data: SpellAuraOptions.CumulativeAura; "increasing
+        your maximum health by $s11% ... per stack": Sentinel; Bone Shield +1% a charge with Foul
+        Bulwark): its stacks on that hit and at the killing blow come from its aura events
+        (`aura_events`); when they can't be told, it is left as it was;
+      - an aura is sized with its caster's loadout (aura_size.by_caster, the caster from its aura
+        events): a warrior's Rallying Cry with Battlefield Commander is +12% on everyone;
+      - never below the killing hit's own max (the death only takes max health away), nor below the
+        health they had.
+    """
+    kb = window[kb_index]
+    kb_max, amount = kb.get("maxHitPoints") or 0, kb.get("amount") or 0
+    t1 = kb["timestamp"]
+    prev_t = window[kb_index - 1]["timestamp"] if kb_index else float("-inf")
+    on_kb = _auras(kb)
+    own = [h for h in window[:kb_index] if _own_health(h)]
+    stacks = getattr(aura_size, "stacks", lambda aid: 1)
+    by_caster = getattr(aura_size, "by_caster", None)
+
+    def size(aid):
+        if aura_size is None:
+            return (0.0, 0)
+        if by_caster is None:
+            return aura_size(aid)
+        # Who cast it: the last of its aura events up to the killing hit (fetch_death_windows reads them
+        # for an aura sized by a loadout that came or went in the window).
+        src = [e.get("sourceID") for e in aura_events
+               if e.get("abilityGameID") == aid and e["timestamp"] <= t1 and e.get("sourceID") is not None]
+        return by_caster(aid, src[-1] if src else None)
+
+    def sized(aids):
+        return [a for a in aids if size(a) not in ((0.0, 0), None)]
+
+    if not own:
+        value = float(kb_max)
+    else:
+        ref = own[-1]
+        if len(own) > 1 and own[-2]["maxHitPoints"] == ref["maxHitPoints"] and \
+                sized(_auras(own[-2]) ^ _auras(ref)):
+            ref = own[-2]
+        value = float(ref["maxHitPoints"])
+        before = _auras(ref)
+        for aid in sorted(on_kb - before):
+            v = size(aid)
+            if v and stacks(aid) == 1:
+                value = value * (1 + v[0]) + v[1]
+        for aid in sorted(before - on_kb):
+            v = size(aid)
+            if v and stacks(aid) == 1:
+                value = (value - v[1]) / (1 + v[0])
+        for aid in sorted(before | on_kb):
+            v = size(aid)
+            if not v or v == (0.0, 0) or stacks(aid) == 1:
+                continue
+            n0 = _stacks_at(aura_events, aid, ref["timestamp"]) if aid in before else 0
+            n1 = _stacks_at(aura_events, aid, t1 - DEATH_STRIP_MS) if aid in on_kb else 0
+            if n0 is not None and n1 is not None and n0 != n1:
+                value = value * (1 + v[0] * n1) / (1 + v[0] * n0)
+    health = max(amount - _set_off_heal(heals, prev_t, t1), 0)
+    return max(round(value), kb_max, health), health
+
+
+def _brand_targets(window, friendly_ids, attackable):
+    """The units a replayed press of an effect on the enemy (Fiery Brand in The War Within) could go
+    on: every enemy that hit them in the replayed seconds, (sourceID, sourceInstance), that the raid
+    attacked in the pull's report (`attackable`: fetch_attacked_units). Fiery Brand is a cast on an
+    enemy target: a rocket, a bomb or a cloud nobody can target is never one (Lunchay, Undermine: Goblin
+    Guided Rocket, Discharged Giga Bomb, Stormfury Cloud, Unstable Crawler Mine took no damage from
+    players). Never the environment (sourceID -1), a hit without a source, their own damage or a
+    friendly player's. None when `attackable` isn't known."""
+    if attackable is None:
+        return None
+    out = []
+    for h in window:
+        src = h.get("sourceID")
+        unit = (src, h.get("sourceInstance"))
+        if src is None or src < 0 or src == h.get("targetID") or src in (friendly_ids or ()) \
+                or src not in attackable or unit in out:
+            continue
+        out.append(unit)
+    return out
+
+
+def _brand(win, unit):
+    """Tag the window's hits from `unit` (fromTarget) and drop what the replay remembered."""
+    for h in win.hits:
+        h["fromTarget"] = unit is not None and (h.get("sourceID"), h.get("sourceInstance")) == unit
+    win._keep.clear()
+    win._applies.clear()
 
 
 def assess_survival(hits, death_ts, available, consumables, ability_names, ability_schools,
                     talent_entries=None, observed_absorbs=None, spec=None, aoe_known=True,
-                    ready_since=None, aura_ms=None, forms=None, armor_k=None, form_armor=None):
+                    aoe_abilities=None, aoe_unknown=frozenset(), ready_since=None, aura_ms=None, forms=None, armor_k=None, form_armor=None,
+                    aura_size=None, friendly_ids=None, attackable=None, stagger_purify=None, soulburn=None):
     """How they died, and whether the defensives they had ready would have saved them.
 
     `hits`: this player's hits (lethal windows, instant kills); the killing blow
@@ -1582,7 +2879,26 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     it was ready (`ready_since`, else the start of the window) and at least
     REACTION_MS before the killing blow. `available` / `consumables`: catalog
     entries ready at death (consumables only if carried and unused this pull).
+    `aura_size` (_aura_sizer): for the max health they had just before the killing blow
+    (_max_hp_before). `friendly_ids`: the report's players, whose hits no effect on the enemy covers;
+    `attackable`: the units the raid attacked (_brand_targets). An effect on the enemy is replayed on
+    each unit it could go on, and the one that saves most counts, as the best press time does.
+    `hits` may also hold the heals a killing hit can set off (fetch_death_windows, type "heal" /
+    "absorbed"), read only for that, and a Brewmaster's Stagger pool (staggered amounts, ticks from
+    before the window, Purifying Brew casts: _stagger_pools, with the patch's `stagger_purify`).
+    A Healthstone with "withSoulburn" (consumable_estimate) is also replayed with Soulburn pressed first,
+    at the moments `soulburn` (SoulburnTimeline; None: nothing known) says it could have been: it counts
+    where it could, and where that can't be told and only it would save them, the verdict is "can't
+    tell" (why "soulburnUnknown").
     """
+    heal_events = [h for h in hits or () if h.get("type") in ("heal", "absorbed")
+                   or (h.get("type") in AURA_EVENTS and h.get("abilityGameID") in WINDOW_HEAL_IDS)]
+    aura_events = [h for h in hits or () if h.get("type") in AURA_EVENTS]
+    purifies = [h for h in hits or () if h.get("type") == "cast" and h.get("abilityGameID") in STAGGER_CAST_IDS]
+    # The player's own casts that lengthen a defensive (fetch_death_windows: Judgment, Hammer of Wrath).
+    own_casts = [h for h in hits or () if h.get("type") == "cast"]
+    hits = [h for h in hits or ()
+            if h.get("type") not in ("heal", "absorbed", "cast") and h.get("type") not in AURA_EVENTS]
     killing = _killing_blow(hits, death_ts)
     if killing is not None and killing.get("type") == "instakill":
         # Killed outright by a mechanic: no damage to reduce, absorb or heal.
@@ -1602,21 +2918,48 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
         }
     if killing is None or killing.get("resourceActor") != 2:
         return None   # no recorded killing blow with health data
-    max_hp = killing.get("maxHitPoints") or 0
-    if not max_hp:
+    if not killing.get("maxHitPoints"):
         return None
     overkill = killing.get("overkill") or 0
     # Verified on live logs: the killing blow's `amount` equals the health the
     # player had left (matches the previous hit's recorded health), and
     # `overkill` is the damage beyond that.
-    hp_before = killing.get("amount") or 0
     hit_size = _full_hit(killing)
 
     tag = {"armorK": armor_k, "formArmor": form_armor, **({} if aoe_known else {"aoeKnown": False})}
-    window = [dict(h, **tag) for h in _lethal_hits(hits, killing)]
+
+    def aoe(h):
+        # WCL marks only hits that dealt damage: such a hit keeps its own mark, and a hit that dealt
+        # none (absorbed whole) takes its ability's status in the report (aoe_abilities), which the
+        # game gives it; unknown when the report couldn't tell (aoe_unknown).
+        if not aoe_known or aoe_abilities is None or h.get("amount"):
+            return {}
+        a = h.get("abilityGameID")
+        if h.get("isAoE") or a in aoe_abilities:
+            return {"aoeAbility": True}
+        return {"aoeAbility": None if a in aoe_unknown else False}
+    window = [dict(h, **tag, **aoe(h), fromTarget=False) for h in _lethal_hits(hits, killing)]
     kb_index = len(window) - 1
+    # The killing blow's own max health is logged after the death stripped their auras; every
+    # figure below (and the replay's health points) uses the max they had just before it.
+    max_hp, hp_before = _max_hp_before(window, kb_index, aura_size, heal_events, aura_events)
+    window[kb_index]["maxHitPoints"] = max_hp
     killing = window[kb_index]
-    win = _Window(window, ability_schools)
+    stagger = None
+    if spec == STAGGER_SPEC:
+        # The pool from the staggered hits and ticks since up to STAGGER_LOOKBACK_MS before the window.
+        since, until = window[0]["timestamp"] - STAGGER_LOOKBACK_MS, killing["timestamp"]
+        ins = [e for e in heal_events if e.get("type") == "absorbed" and e.get("abilityGameID") == STAGGER_AURA
+               and since <= e["timestamp"] <= until]
+        ticks = [h for h in hits if _stagger_tick(h) and since <= h["timestamp"] <= until]
+        casts = [c for c in purifies if since <= c["timestamp"] <= until]
+        stagger = _stagger_share(window, ins, _stagger_pools(ticks, ins, casts, stagger_purify, talent_entries))
+    win = _Window(window, ability_schools, stagger=stagger)
+    if hp_before != (killing.get("amount") or 0):
+        # Health before the blow, without what the blow itself set off (_max_hp_before).
+        win.before[kb_index] = (hp_before, max_hp)
+        at = max(i for i, p in enumerate(win.points) if p[0] == killing["timestamp"] - 0.5)
+        win.points[at] = (killing["timestamp"] - 0.5, hp_before, max_hp)
     points = win.points
     kb_ts = killing["timestamp"]
     window_start = kb_ts - LETHAL_WINDOW_MS
@@ -1624,10 +2967,22 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     missing_at_reaction = max(max_hp - press_hp, 0)
 
     def unknown(comps):
-        return any(win.applies(m, k) is None for m in comps for k in range(len(window))
-                   if not ("heal" in m or "heal_amount" in m))
+        """Why it isn't known whether an effect covers one of the hits: {"why", "whyHit"?} or None.
+        "whyHit": the hit's name when it isn't the killing blow (the reason is about that earlier hit)."""
+        for k in range(len(window)):
+            for m in comps:
+                if "heal" in m or "heal_amount" in m or win.applies(m, k) is not None:
+                    continue
+                cause = _armor_unknown(window[k], ability_schools) if m.get("armor") else {"why": "aoeUnknown"}
+                if k != kb_index:
+                    cause["whyHit"] = ability_names.get(window[k].get("abilityGameID"), "Unknown")
+                return cause
+        return None
 
     per_button, scored, details = {}, [], {}
+    brand_choice, brand_unknown = None, False
+    pool_unsure = any(len(pools) > 1 for _, pools in (stagger or {}).values())
+    stagger_unknown = set()
     for entry in list(available) + list(consumables):
         applied = []
         comps, _ = _resolve(entry, talent_entries, observed_absorbs or {}, spec, applied)
@@ -1636,29 +2991,81 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
             per_button[name] = None
             continue
         dur = (aura_ms or {}).get(name) if not entry.get("estimated") else None
-        legacy = HEAL_OVER_TIME.get(name) if dur else None
-        opts = [_option(name, comps, dur, legacy)]
+        opts = [_option(name, comps, dur)]
+        ext = entry.get("extended_by")
+        rank = _mod_rank(ext, talent_entries, spec) if ext else 0
+        if rank:
+            opts[0]["extend"] = (ext["ms"] * rank, [c["timestamp"] for c in own_casts
+                                                    if c.get("abilityGameID") in ext["casts"]])
         if name in (forms or {}):
             # Needs a form first (Frenzied Regeneration needs Bear Form): judged with it.
             form_comps, _ = _resolve(forms[name], talent_entries, observed_absorbs or {}, spec, applied)
             opts.append(_option(forms[name]["name"], form_comps or [], forms[name].get("aura_ms")))
             comps = comps + (form_comps or [])
         earliest = max((ready_since or {}).get(name, window_start), window_start)
-        best = _best_press(opts, earliest, win, kb_index)
+        if any(c.get("from_target") for c in comps):
+            # On each enemy it could go on; the one that saves most.
+            units = _brand_targets(window, friendly_ids, attackable)
+            if units is None:
+                per_button[name] = None      # which enemies could be branded isn't known
+                details[name] = {"amount": 0, "why": "brandUnknown"}
+                brand_unknown = True
+                continue
+            best, brand_choice = None, None
+            for unit in units:
+                _brand(win, unit)
+                got = _best_press(opts, earliest, win, kb_index)
+                if got is not None and (best is None or got[0] > best[0]):
+                    best, brand_choice = got, unit
+            _brand(win, brand_choice)
+            if best is None:                 # no unit to brand, or ready too late: as any button
+                best = _best_press(opts, earliest, win, kb_index)
+        else:
+            best = _best_press(opts, earliest, win, kb_index)
+        alt, maybe, burned, base_opts = None, None, False, opts
+        if entry.get("withSoulburn"):
+            # Soulburn pressed first (instant, off the global cooldown): only where the log shows it could
+            # have been; the moments it can't tell are tried apart, for a "can't tell".
+            timeline = soulburn if soulburn is not None else SoulburnTimeline(None, None)
+            alt = ([_option(name, entry["withSoulburn"]["mitigation"], dur)], timeline)
+            marks = timeline.marks()
+            yes = _best_press(alt[0], earliest, win, kb_index, allowed=lambda t: timeline.state(t) is True,
+                              extra=marks)
+            maybe = _best_press(alt[0], earliest, win, kb_index, allowed=lambda t: timeline.state(t) is None,
+                                extra=marks)
+            if yes is not None and (best is None or yes[0] > best[0] + 1e-6):
+                best, opts, burned = yes, alt[0], True
+                comps = entry["withSoulburn"]["mitigation"]
+                applied = applied + (entry.get("applied") or []) + entry["withSoulburn"]["applied"]
         amount = best[0] if best else 0.0
-        scored.append((opts, earliest))
+        scored.append((base_opts, earliest, alt))
+        cause = None
         if best is None or amount > overkill:
             per_button[name] = best is not None
         else:
-            per_button[name] = None if unknown(comps) else False
+            cause = unknown(comps)
+            if cause is None and maybe is not None and maybe[0] > overkill:
+                cause = {"why": "soulburnUnknown"}     # only with Soulburn, and the shards aren't known
+            per_button[name] = None if cause else False
+            if per_button[name] is False and pool_unsure:
+                # The Stagger pool before a hit has two readings (a purify on a side the log doesn't
+                # tell): with the one that credits most it would have saved them.
+                most = _best_press(opts, earliest, win, kb_index, "most")
+                if most is not None and most[0] > overkill:
+                    per_button[name] = None
+                    stagger_unknown.add(name)
         details[name] = _explain(entry, comps, applied, killing, amount, max_hp, missing_at_reaction,
                                  ability_schools, missing_at_kb=max(max_hp - hp_before, 0))
+        if burned:
+            details[name]["soulburn"] = True
+        if name in stagger_unknown:
+            details[name]["why"] = "staggerUnknown"
         if best is None:
             details[name]["why"] = "readyTooLate"
         else:
             details[name]["pressAgo"] = round((kb_ts - best[1]) / 1000, 1)
         if opts[0]["hots"]:
-            full = sum((c.get("heal", 0) * max_hp + c.get("heal_amount", 0)) for c, _, _ in opts[0]["hots"])
+            full = _hot_full(opts[0], max_hp)
             of = sum(t for _, t, _ in opts[0]["hots"])
             hot = {"full": round(full), "ticks": best[2] if best else 0, "of": of}
             if best and len(opts) > 1:
@@ -1666,46 +3073,102 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
             details[name]["hot"] = hot
             if best and not hot["ticks"] and not details[name]["amount"]:
                 details[name]["why"] = "hotTooLate"
+        if cause:
+            # Can't tell because a hit's coverage isn't known: that is the reason shown, not one read
+            # off the killing blow alone (which may be a definite no).
+            details[name].update(cause)
 
     together = None
     if scored:
-        # Everything pressed at once, at the best moment (each only once it was ready).
+        # Everything pressed at once, at the best moment (each only once it was ready); an effect on the
+        # enemy on the unit where it saved most alone.
+        _brand(win, brand_choice)
         best_all = 0.0
-        everything = [o for os, _ in scored for o in os]
-        for t in _press_times(min(e for _, e in scored), win, kb_index, everything):
-            opts = [o for os, e in scored if e <= t for o in os]
+        everything = [o for os, _, alt in scored for o in os + (alt[0] if alt else [])]
+        marks = {m for _, _, alt in scored if alt for m in alt[1].marks()}
+        first = min(e for _, e, _ in scored)
+
+        def pressed(t, state=True):
+            # Everything ready by t; a Healthstone with Soulburn first where it could (`state`) be cast.
+            return [o for os, e, alt in scored if e <= t
+                    for o in (alt[0] if alt and alt[1].state(t) is state else os)]
+        for t in _press_times(first, win, kb_index, everything, marks):
+            opts = pressed(t)
             if opts:
                 best_all = max(best_all, _simulate(opts, t, win, kb_index)[0])
-        all_comps = [c for os, _ in scored for o in os
+        all_comps = [c for os, _, _ in scored for o in os
                      for c in [x for x, _ in o["lasting"]] + o["instant"] + [x for x, _, _ in o["hots"]]]
-        together = True if best_all > overkill else (None if unknown(all_comps) else False)
+        if best_all <= overkill and pool_unsure:
+            for t in _press_times(first, win, kb_index, everything, marks):
+                opts = pressed(t)
+                if opts and _simulate(opts, t, win, kb_index, "most")[0] > overkill:
+                    pool_unsure = None          # can't tell
+                    break
+        burn_unsure = best_all <= overkill and any(
+            opts and _simulate(opts, t, win, kb_index)[0] > overkill
+            for t in _press_times(first, win, kb_index, everything, marks) for opts in [pressed(t, None)]
+            if any(alt and alt[1].state(t) is None for _, e, alt in scored if e <= t))
+        together = True if best_all > overkill else \
+            (None if unknown(all_comps) or brand_unknown or pool_unsure is None or burn_unsure else False)
 
     # How they died, from the hits since they were last at high health:
-    #   - one-shot: that was less than a reaction time ago and a single hit took
+    #   - one-shot: that was BURST_WINDOW_MS ago or less and a single hit took
     #     ONE_SHOT_SHARE of their max health or more (Sever);
-    #   - burst: less than a reaction time ago, but no single hit that big
-    #     (several hits at once: no time to react, but not one hit);
+    #   - burst: BURST_WINDOW_MS or less, but no single hit that big
+    #     (several hits at once, not one hit);
     #   - wasLow: they had been below high health for longer.
-    high = [p for p in points if p[0] < kb_ts - 0.5 and p[1] >= FULL_HEALTH * p[2]]
+    # Each hit is measured against the max health they had when it landed: its own on a hit with
+    # their health, else the last one before it; the killing blow's is _max_hp_before's.
+    def share(h):
+        if h is killing:
+            top = max_hp
+        elif _own_health(h):
+            top = h["maxHitPoints"]
+        else:
+            top = _health_at(points, h["timestamp"])[1] or max_hp
+        return _full_hit(h) / top
+
+    # The last moment at high health, walking the hits in log order (hits on the same millisecond
+    # keep it: a player at 99% hit three times on one millisecond went from high to dead at once):
+    # just before each hit (a hit with their health: its own; one without: what the last one left,
+    # as only heals land between hits; the killing blow: hp_before), and just after each hit with
+    # their health. Either is at that hit's own time; the hits since start with that hit (before
+    # it) or the next one (after it).
+    high, start, last = [], None, None
+    for k, h in enumerate(window):
+        top = max_hp if k == kb_index else h.get("maxHitPoints")
+        hp = hp_before if k == kb_index else win.before[k][0] if win.known[k] else last
+        if hp is not None and top and hp >= FULL_HEALTH * top:
+            high, start = [(h["timestamp"], hp, top)], k
+        if k < kb_index and win.known[k]:
+            last = h.get("hitPoints") or 0
+            if last >= FULL_HEALTH * h["maxHitPoints"]:
+                high, start = [(h["timestamp"], last, h["maxHitPoints"])], k + 1
     since = high[-1][0] if high else float("-inf")
-    if hp_before >= FULL_HEALTH * max_hp:
-        since, high = kb_ts - 0.5, high + [(kb_ts - 0.5, hp_before, max_hp)]
-    run = [h for h in window if h["timestamp"] > since]
-    quick = bool(high) and kb_ts - since <= REACTION_MS
-    one_shot = quick and any(_full_hit(h) >= ONE_SHOT_SHARE * max_hp for h in run)
+    run = window[start:] if high else window
+    in_run = set(range(start if high else 0, len(window)))
+    quick = bool(high) and kb_ts - since <= BURST_WINDOW_MS
+    one_shot = quick and any(share(h) >= ONE_SHOT_SHARE for h in run)
     death_type = "oneShot" if one_shot else "burst" if quick else "wasLow"
     from_pct = round(100 * high[-1][1] / high[-1][2]) if quick else None
-    # The hit that set the death up: the biggest one since they were last at
-    # high health (before that, healers had already undone it).
-    biggest = max((h for h in window[:kb_index] if h["timestamp"] > since
-                   and _full_hit(h) >= SETUP_HIT_SHARE * max_hp), key=_full_hit, default=None)
-    if one_shot and (biggest is None or _full_hit(biggest) < ONE_SHOT_SHARE * max_hp):
-        biggest = None        # the killing blow was the one hit; nothing smaller set it up
+    # A one-shot's hit: the biggest since they were last at high health. Named
+    # (oneShotHit) only when it isn't the killing blow, which has its own row:
+    # a big hit, then a small one finishing them.
+    one_shot_hit = None
+    if one_shot:
+        top = max(range(len(window)), key=lambda i: (i in in_run, _full_hit(window[i])))
+        if top != kb_index and _full_hit(window[top]) > _full_hit(killing):
+            one_shot_hit = window[top]
+    # The hit that set the death up (only when it was neither a one-shot nor a
+    # burst): the biggest one since they were last at high health (before
+    # that, healers had already undone it).
+    biggest = None if quick else max((h for h in run[:-1] if share(h) >= SETUP_HIT_SHARE),
+                                     key=_full_hit, default=None)
     # Rot: worn down by one raid-wide ability's repeated damage (what the
     # healers have to keep up with; raid_wide_damage.py, measured from Mythic
     # kills), not set up by a single hit. Soaks and mechanics a player walks
     # into are never rot, and neither is a one-shot or a burst (high health
-    # under a second before).
+    # within BURST_WINDOW_MS before).
     by_ability = defaultdict(list)
     for h in run:
         by_ability[h.get("abilityGameID")].append(h)
@@ -1715,10 +3178,10 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
         total = sum(_full_hit(h) for h in run) or 1
         if not quick and aid in RAID_WIDE and len(hs) >= ROT_MIN_HITS \
                 and sum(_full_hit(h) for h in hs) >= ROT_SHARE * total \
-                and max(_full_hit(h) for h in hs) < ROT_MAX_HIT * max_hp:
+                and max(share(h) for h in hs) < ROT_MAX_HIT:
             rot = {"name": ability_names.get(aid, "Unknown"), "abilityId": aid, "school": ability_schools.get(aid),
                    "hits": len(hs), "total": sum(_full_hit(h) for h in hs),
-                   "pctOfMax": round(100 * sum(_full_hit(h) for h in hs) / max_hp),
+                   "pctOfMax": round(100 * sum(share(h) for h in hs)),
                    "seconds": round((kb_ts - hs[0]["timestamp"]) / 1000, 1)}
             biggest = None
     result = {
@@ -1739,6 +3202,8 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
         "allTogetherWouldSave": together,
         # Why a defensive might not help against this particular hit.
         "ignoresReduction": _ignores_reduction(killing),
+        # A Stagger tick: no reduction changes it as it lands, but one pressed earlier shrinks the pool.
+        "staggerTick": _stagger_tick(killing),
         "ignoresImmunity": killing.get("abilityGameID") in IGNORES_IMMUNITY,
         # The seconds replayed: how many hits, from how long before the killing blow.
         "window": {"hits": len(window), "fromAgo": round((kb_ts - window[0]["timestamp"]) / 1000, 1)},
@@ -1757,18 +3222,26 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
                                           "times": n} for a, (n, _) in sorted(parts.items(), key=lambda x: -x[1][1])]}
     if rot:
         result["rot"] = rot
+    if one_shot_hit is not None:
+        result["oneShotHit"] = {
+            "name": ability_names.get(one_shot_hit.get("abilityGameID"), "Unknown"),
+            "abilityId": one_shot_hit.get("abilityGameID"),
+            "size": _full_hit(one_shot_hit),
+            "pctOfMax": round(100 * share(one_shot_hit)),
+            "school": ability_schools.get(one_shot_hit.get("abilityGameID")),
+            "ago": round((kb_ts - one_shot_hit["timestamp"]) / 1000, 1),
+        }
     if biggest is not None:
         result["biggestHit"] = {
             "name": ability_names.get(biggest.get("abilityGameID"), "Unknown"),
             "abilityId": biggest.get("abilityGameID"),
             "size": _full_hit(biggest),
-            "pctOfMax": round(100 * _full_hit(biggest) / max_hp),
+            "pctOfMax": round(100 * share(biggest)),
             "school": ability_schools.get(biggest.get("abilityGameID")),
             "ago": round((kb_ts - biggest["timestamp"]) / 1000, 1),
         }
         # The same ability hitting them again and again since they were last high (soaking on).
-        same = [h for h in window[:kb_index + 1] if h["timestamp"] > since
-                and h.get("abilityGameID") == biggest.get("abilityGameID")]
+        same = [h for h in run if h.get("abilityGameID") == biggest.get("abilityGameID")]
         if len(same) > 1:
             result["biggestHit"].update(times=len(same), total=sum(_full_hit(h) for h in same),
                                         over=round((kb_ts - same[0]["timestamp"]) / 1000, 1))

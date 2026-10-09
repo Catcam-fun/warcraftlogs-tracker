@@ -206,6 +206,7 @@ def analyze():
             # come from the cache.
             yield f"data: {json.dumps({'stage': 'fights', 'message': 'Collecting fights from reports...'})}\n\n"
             all_fights_raw = []
+            report_encounters = {}
             finished_before = int(time.time() * 1000) - REPORT_CACHE_MIN_AGE_MS
             report_finished = {rep["id"]: bool(rep.get("end")) and rep["end"] < finished_before
                                for rep in reports}
@@ -241,6 +242,8 @@ def analyze():
                     fights = light.get("fights", [])
                     if not fights:
                         continue
+                    # Every boss encounter of the report, kept or not: each one resets long cooldowns.
+                    report_encounters[rid] = [(f['start_time'], f['end_time']) for f in fights if f.get('boss')]
                     report_abs_start = light.get("report_start") or rep["start"]
                     for fight in analyze_fights(fights, fight_zone, difficulty, selected_raid):
                         all_fights_raw.append({
@@ -332,6 +335,10 @@ def analyze():
                                 and is_guild_member(normalize_character_name(d.get("targetName") or ""))]
                 return out
 
+            report_attacked = {}         # rid -> units the raid attacked (fetch_attacked_units)
+            report_aoe = {}              # rid -> (abilities AoE in the report, those it couldn't tell)
+            report_soulburn = {}         # rid -> {Warlock ID: casts and Soulburn buff} (fetch_soulburn_windows)
+
             def fetch_report_deaths(rid, report_fights):
                 """Deaths, defensive data (casts, buffs, talents) and the hits before the deaths that
                 can count, for one report. Independent queries run at once; finished reports are cached."""
@@ -356,8 +363,10 @@ def analyze():
                     instakills = recap_lru.get(ik_key) if finished else None
 
                     def def_key(dead):
+                        # "since-last-encounter": casts now reach back to the last boss encounter's
+                        # end (cast_lookback), so rows cached over the shorter span aren't reused.
                         return (rid, tuple(fight_ids), tuple(sorted(dead)), cat.patch, defensives.CATALOG_FINGERPRINT,
-                                "pull-specs")
+                                "pull-specs", "since-last-encounter")
 
                     def dead_in(ds):
                         return {d.get("targetID") for dl in ds.values() for d in dl if d.get("targetID")}
@@ -384,8 +393,13 @@ def analyze():
                         # No death here can count, so nothing reads this report's defensives or hits.
                         return rid, deaths, defensives.filter_defensive_raw({}, ()), {}, None
 
+                    # The windows carry the heals a killing hit can set off and the aura events of the
+                    # max-health auras the hits list: rows cached before them (or with other lists of those
+                    # IDs) are not reused. Only this key changes, so the report's other cached data (meta,
+                    # fights, deaths, defensives) stays valid.
                     win_key = (rid, tuple((fid, tuple(c)) for fid, c in sorted(counted.items()) if c),
-                               "lethal-window", defensives.LETHAL_WINDOW_MS)
+                               "lethal-window", defensives.LETHAL_WINDOW_MS,
+                               "window-extras", defensives.WINDOW_EXTRAS_KEY)
                     windows = recap_lru.get(win_key) if finished else None
                     # One query at a time: after the first one on a report, WCL charges about a
                     # quarter less for the rest sent one by one than all at once.
@@ -393,7 +407,9 @@ def analyze():
                         try:
                             dead = dead_in(deaths)
                             def_data = defensives.filter_defensive_raw(defensives.fetch_defensive_raw(
-                                token, rid, fight_ids, first_start, last_end, cat, combatants), dead, cat)
+                                token, rid, fight_ids, first_start, last_end, cat, combatants,
+                                prev_end=max([end for _, end in report_encounters.get(rid, []) if end <= first_start],
+                                             default=0)), dead, cat)
                             if finished:
                                 defensive_lru.set(def_key(dead), def_data)
                         except Exception as e:
@@ -415,6 +431,49 @@ def analyze():
                                 recap_lru.set(win_key, windows)
                         except Exception as e:
                             hits_error = e
+                    # The units the raid attacked, for an effect cast on an enemy (The War Within's Fiery
+                    # Brand): only when this patch has one, and only over the pulls where a Vengeance Demon
+                    # Hunter's death can count (a spec the log didn't record counts as one).
+                    brand_pulls = []
+                    if defensives.brands_enemies(cat):
+                        by_name = {f.get("logName") or f.get("name"): f for f in friendlies}
+                        for fid, ds in sorted(counted.items()):
+                            for _, n in ds:
+                                f = by_name.get(n) or {}
+                                if f.get("type") == "DemonHunter" and \
+                                        defensives.pull_spec(def_data, fid, f.get("id")) in (None, "Vengeance"):
+                                    brand_pulls.append(fid)
+                                    break
+                    if brand_pulls:
+                        span = [fd['fight'] for fd in report_fights if fd['fight']['id'] in brand_pulls]
+                        at_key = (rid, tuple(brand_pulls), "attacked-units")
+                        attacked = recap_lru.get(at_key) if finished else None
+                        if attacked is None:
+                            try:
+                                attacked = defensives.fetch_attacked_units(
+                                    token, rid, brand_pulls, min(f['start_time'] for f in span),
+                                    max(f['end_time'] for f in span))
+                                if finished:
+                                    recap_lru.set(at_key, attacked)
+                            except Exception as e:
+                                print(f"[WARN] Attacked units unavailable for report {rid}: {e}")
+                        report_attacked[rid] = set(attacked) if attacked is not None else None
+                    # A Warlock's Healthstone with Soulburn first counts only where their casts show they
+                    # could have cast it (a Soul Shard, Soulburn ready): one request, for the counted deaths
+                    # of Warlocks with Soulburn and without Gorebound Fortitude in that pull.
+                    sb_pulls = defensives.soulburn_pulls(def_data, counted, friendlies, cat)
+                    if sb_pulls:
+                        sb_key = (rid, tuple((fid, tuple(ds)) for fid, ds in sb_pulls), "soulburn",
+                                  defensives.LETHAL_WINDOW_MS, cat.soulburn["buff_ms"])
+                        burns = recap_lru.get(sb_key) if finished else None
+                        if burns is None:
+                            try:
+                                burns = defensives.fetch_soulburn_windows(token, rid, sb_pulls, cat.soulburn)
+                                if finished:
+                                    recap_lru.set(sb_key, burns)
+                            except Exception as e:
+                                print(f"[WARN] Soulburn data unavailable for report {rid}: {e}")
+                        report_soulburn[rid] = burns
                     if def_error:
                         print(f"[WARN] Defensive data unavailable for report {rid}: {def_error}")
 
@@ -423,6 +482,42 @@ def analyze():
                         hits = defensives.merge_hits(windows, instakills)
                     else:
                         print(f"[WARN] Hits before deaths unavailable for report {rid}: {hits_error}")
+
+                    # An ability is AoE when any hit of it in the report is: WCL never marks a hit absorbed
+                    # whole. The windows tell most; for an effect limited to AoE (Feint), the abilities a
+                    # dying player's windows can't tell are read from the report's pulls, one request.
+                    # Also when no hit in the windows is marked: WCL marks every report (14 reports from
+                    # Nerub-ar Palace to the Midnight raids, hundreds of marked hits a pull, 2026-10-09),
+                    # so that is only which hits the deaths took, and an unmarked hit that dealt damage
+                    # is single-target.
+                    if hits is not None:
+                        aoe = defensives.aoe_abilities(hits)
+                        unknown = set()
+                        classes = defensives.aoe_classes(cat)
+                        friendly_types = {f.get("id"): f.get("type") for f in friendlies}
+                        need = defensives.aoe_undecided(
+                            hits, [p for p in hits if classes is None or friendly_types.get(p) in classes],
+                            aoe)
+                        if need:
+                            # "decided": the abilities the report's pulls could tell (a hit that dealt damage).
+                            aoe_key = (rid, tuple(fight_ids), "aoe-abilities", "decided", tuple(sorted(need)))
+                            got = recap_lru.get(aoe_key) if finished else None
+                            if got is None:
+                                try:
+                                    found, decided = defensives.fetch_aoe_abilities(token, rid, fight_ids, first_start,
+                                                                                    last_end, need)
+                                    got = {"aoe": sorted(found), "decided": sorted(decided)}
+                                    if finished:
+                                        recap_lru.set(aoe_key, got)
+                                except Exception as e:
+                                    print(f"[WARN] AoE abilities unavailable for report {rid}: {e}")
+                            if got is None:
+                                unknown = need
+                            else:
+                                aoe |= set(got["aoe"])
+                                # An ability that never dealt damage in the report: WCL never marked it.
+                                unknown = need - set(got["decided"])
+                        report_aoe[rid] = (aoe, frozenset(unknown))
 
                     return rid, deaths, def_data, hits, None
                 except Exception as e:
@@ -465,8 +560,6 @@ def analyze():
                 yield f"data: {json.dumps({'stage': 'deaths', 'message': msg})}\n\n"
             yield f"data: {json.dumps({'stage': 'processing', 'message': f'Processing {len(all_fights_deduped)} fights...'})}\n\n"
             
-            # Whether each report marks AoE hits at all (older logs don't).
-            aoe_known = {rid: defensives.logs_mark_aoe(h) for rid, h in report_hits.items() if h is not None}
             total_deaths = 0
             pullCutoffTimestamps = {}
             
@@ -585,9 +678,18 @@ def analyze():
                             if report_hits.get(rid) is not None else None,
                             ability_schools=fight_data.get('ability_schools', {}),
                             cat=defensives.catalog_for(report_abs_start),
-                            aoe_known=aoe_known.get(rid, True),
                             armor_k=defensives.armor_constant(fight.get('boss'), fight.get('difficulty')),
                             soulwell=soulwell,
+                            # Presses in the report's other pulls count with that pull's talents.
+                            pull_starts={fd['fight']['id']: fd['fight']['start_time']
+                                         for fd in fights_by_report.get(rid, [])},
+                            encounters=report_encounters.get(rid),
+                            attackable=report_attacked.get(rid),
+                            aoe_abilities=report_aoe.get(rid, (None,))[0],
+                            aoe_unknown=report_aoe.get(rid, (None, frozenset()))[1],
+                            # Fetched for this report: their events (none is an empty list); else None.
+                            soulburn_events=(report_soulburn[rid] or {}).get(target_id, [])
+                            if report_soulburn.get(rid) is not None else None,
                         )
                         death_event['defensives'] = defensives.analyze_death(**death_args)
                         cat = defensives.catalog_for(report_abs_start)
