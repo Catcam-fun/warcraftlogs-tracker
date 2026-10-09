@@ -1,7 +1,7 @@
 """Source check: what each counted death row shows (active, ready, health) against WCL's auras, casts and Deaths table.
 
 The ready / on-cooldown recompute (ability_state, written separately from the site's replay) follows
-the same rules: the encounter reset (long cooldowns reset when the encounter starts; short ones keep
+the same rules: the encounter reset (long cooldowns reset when an encounter ends; short ones keep
 the report's whole cast history), each press with the loadout of its own pull, resets from the
 catalog's reset_by (Cold Snap, Black Ox Brew), and the cooldown-reduction inference (a one-charge
 ability pressed again sooner than its cooldown, no reset in between, takes the shortest gap as its
