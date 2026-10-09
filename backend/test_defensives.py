@@ -1,6 +1,7 @@
 import unittest
 import os
 import sys
+import types
 
 import defensives
 import features
@@ -1921,6 +1922,51 @@ class StaggerPoolTests(unittest.TestCase):
                                        aura_ms={"Diffuse Magic": 30_000}, spec="Brewmaster")
         share = 0.6 * 700_000 / 1_365_000
         self.assertAlmostEqual(r["details"]["Diffuse Magic"]["amount"], 180_000 + 2 * 66_500 * share, delta=2)
+
+
+class ShuffleGrantTests(unittest.TestCase):
+    """The catalog build reads what grants Shuffle (Quick Sip counts the seconds gained) from Monk
+    tooltips; only the grants reviewed for the purify fits pass: Keg Smash 5 s, Blackout Kick 3 s,
+    Spinning Crane Kick 1 s."""
+
+    @staticmethod
+    def build():
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
+        import build_defensive_catalog as build
+        return build
+
+    def purify(self, grants):
+        """stagger_purify on game data where each of `grants` {name: seconds} has a tooltip granting it."""
+        build = self.build()
+        values = {(build.PURIFYING_BREW, 0): 50.0, (build.QUICK_SIP, 0): 5.0, (build.QUICK_SIP, 1): 3.0,
+                  (build.TRANQUIL_SPIRIT, 0): 5.0}
+        names, desc, family = {}, {}, {}
+        for k, (name, seconds) in enumerate(grants.items()):
+            sid = 900_000 + k
+            names[sid], desc[sid], family[sid] = name, "Strike, granting Shuffle for $s2 sec.", (build.MONK_FAMILY, [0] * 4)
+            values[(sid, 1)] = seconds
+        gd = types.SimpleNamespace(names=names, family=family, value=lambda s, i: values.get((s, i)))
+        mods = types.SimpleNamespace(effect=lambda *a: [])
+        problems = []
+        out = build.stagger_purify(gd, mods, desc, problems)
+        return out, problems
+
+    def test_the_three_reviewed_grants_pass(self):
+        out, problems = self.purify({"Keg Smash": 5.0, "Blackout Kick": 3.0, "Spinning Crane Kick": 1.0})
+        self.assertEqual(problems, [])
+        self.assertEqual(out["shuffle_s"], {"Blackout Kick": 3.0, "Keg Smash": 5.0, "Spinning Crane Kick": 1.0})
+
+    def test_a_missing_changed_or_new_grant_fails_the_build(self):
+        _, problems = self.purify({"Keg Smash": 5.0, "Blackout Kick": 3.0})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("Spinning Crane Kick", problems[0])
+        _, problems = self.purify({"Keg Smash": 6.0, "Blackout Kick": 3.0, "Spinning Crane Kick": 1.0})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("Keg Smash", problems[0])
+        _, problems = self.purify({"Keg Smash": 5.0, "Blackout Kick": 3.0, "Spinning Crane Kick": 1.0,
+                                   "Tiger Palm": 1.0})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("Tiger Palm", problems[0])
 
 
 class AttackedUnitsTests(unittest.TestCase):
