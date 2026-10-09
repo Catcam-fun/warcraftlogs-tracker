@@ -29,11 +29,24 @@ A reduction that grows with missing health (Icebound Fortitude with Bloody Forti
 at no health) is predicted hit by hit from the player's own health on that hit, as the site does; a hit
 without it is left out (Sunnyvi, Quel'Danas, 2026-10-08: Icebound Fortitude read 0.323 at 90%+ health and
 0.364 at 50-75%; judged against a flat 0.30 it was flagged as "measured 0.35").
+Each hit with a defensive up is measured against the nearest hit without it: one from the same enemy
+unit (sourceID and sourceInstance) with the same ability, at most PAIR_MS away, with the same other
+auras listed and the player missing within HEALTH_BAND of the same share of max health; never against
+the pull's typical hit. Two things move the share of a hit that gets through and are on no aura list:
+  - effects that drift over a pull: on Cauldron of Carnage pull 47 the share through drifted 0.865 ->
+    0.937 from an effect the hits don't list, so Unending Resolve with Strength of Will (0.40; 0.4000 on
+    148 adjacent pairs across five Warlocks) read 0.37 against the pull's median;
+  - passives that grow with missing health: Blessing of Dusk (1241945, a Protection Paladin's "up to
+    10%, increasing as your health decreases", sized at run time) made Ardent Defender (0.30, pressed
+    at low health) read 0.33 against hits at any health (Deawina, Coiled Altar, 126 hits); with the
+    missing health matched within 0.05 it read 0.300 (75 hits).
+A hit without the player's own health on it can't be matched by health and is left out.
 Each (player, defensive) is judged by the median of its hits' gaps (measured minus predicted), not the
 mean: a wrong catalog value is off on every ability, while one boss ability with an untracked modifier
 (Sonic Ba-Boom's amplifiers, Entropic Barrage ticks) can pull a mean far off by itself.
 """
 import statistics
+from bisect import bisect_left
 from collections import defaultdict
 
 import defensives
@@ -42,7 +55,8 @@ from checks.verdict import PASS, fail, skip
 MIN_HITS = 3
 FLAG_AT = 0.03
 MIN_FLAG_HITS = 20            # fewer hits than this are too noisy to flag
-PAIR_MS = 3000                        # a branded and an unbranded hit this close are compared
+PAIR_MS = 3000                        # a hit with and one without the defensive this close are compared
+HEALTH_BAND = 0.05                    # ... with missing health this close (share of max health)
 STAGGER = 124255                      # a Brewmaster's Stagger ticks
 
 
@@ -165,9 +179,10 @@ def check(run):
     # A hit with the defensive up is compared only with hits carrying the same other auras:
     # players press defensives together with untracked reductions and versatility buffs
     # (Protective Light, Shifting Sands), which alone read as several points of extra reduction.
-    # (player, ability, talents, other auras) -> [share of damage that got through, no defensive up]
+    # (player, ability, talents, other auras, pull, enemy unit, its instance)
+    #   -> [(time, missing health, share of damage that got through)], no defensive up
     base = defaultdict(list)
-    # (player, ability, talents) -> {defensive name: [(share that got through, other auras, the hit)]}
+    # (player, ability, talents) -> {defensive name: [(share that got through, other auras, the hit, missing health)]}
     shares = defaultdict(lambda: defaultdict(list))
     # Logs from before Midnight never mark AoE hits: there an AoE-only reduction can't be predicted.
     aoe_known = any(e.get("isAoE") for e in hits)
@@ -180,6 +195,9 @@ def check(run):
             continue                       # reduced when the hit was staggered, never at tick time
         if e.get("blocked"):
             continue                       # a block takes a random cut that _full_hit doesn't add back
+        missing = missing_share(e)
+        if missing is None:
+            continue                       # no health on it: it can't be matched by missing health
         auras = {names.get(a) for a in defensives._auras(e)}
         up = auras & tracked
         if len(up) > 1:
@@ -203,9 +221,27 @@ def check(run):
         key = (e["targetID"], e.get("abilityGameID"), tuple(sorted((talents or {}).items())))
         others = frozenset(auras - {which})
         if which is None:
-            base[key + (others,)].append(through)
+            base[key + (others, e.get("fight"), e.get("sourceID"), e.get("sourceInstance"))].append(
+                (e.get("timestamp") or 0, missing, through))
         else:
-            shares[key][which].append((through, others, e))
+            shares[key][which].append((through, others, e, missing))
+    for seq in base.values():
+        seq.sort(key=lambda b: b[0])
+
+    def nearest(key, e, missing):
+        """Share through of the nearest hit without the defensive in `key`'s group from the hit's own
+        unit, at most PAIR_MS away, with missing health within HEALTH_BAND; None without one."""
+        seq = base.get(key + (e.get("fight"), e.get("sourceID"), e.get("sourceInstance")))
+        if not seq:
+            return None
+        ts = e.get("timestamp") or 0
+        best = None
+        for t, m, through in seq[bisect_left(seq, (ts - PAIR_MS,)):]:
+            if t > ts + PAIR_MS:
+                break
+            if abs(m - missing) <= HEALTH_BAND + 1e-9 and (best is None or abs(t - ts) < best[0]):
+                best = (abs(t - ts), through)
+        return best[1] if best else None
 
     schools = meta.get("ability_schools", {})
     # (player, defensive) -> [(measured, predicted)] per hit, from boss abilities with MIN_HITS or more
@@ -217,15 +253,12 @@ def check(run):
             comps, _ = defensives._resolve(dr_names[name], dict(talents), {}, spec.get(pid))
             # Each hit's own prediction: one ability's hits are not all marked AoE alike.
             by_predicted = defaultdict(list)
-            for through, others, e in with_up:
-                same = base.get((pid, ability, talents, others), [])
-                if len(same) < MIN_HITS:
+            for through, others, e, missing in with_up:
+                usual = nearest((pid, ability, talents, others), e, missing)
+                if not usual:
                     continue
-                usual = statistics.median(same)
                 size = None
                 if scales_with_hit(comps):
-                    if e.get("resourceActor") != 2 or not e.get("maxHitPoints"):
-                        continue             # no max health on this hit: its reduction can't be predicted
                     # The hit after the player's other reductions, as a share of max health.
                     size = e["unmitigatedAmount"] * usual / e["maxHitPoints"]
                 keep, group = predicted_keep(comps, e, aoe_known, schools, size)

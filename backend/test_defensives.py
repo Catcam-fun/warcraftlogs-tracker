@@ -941,6 +941,17 @@ class TalentEffectTests(unittest.TestCase):
         ad = self.by_name(self.tww, "Ardent Defender")
         self.assertIn("Improved Ardent Defender", [m["talent"] for c in ad["mitigation"] for m in c.get("mods", ())])
 
+    def test_strength_of_will_makes_unending_resolve_forty_percent_in_every_patch(self):
+        # Strength of Will (317138: aura 107, a flat -15 on Unending Resolve's -25 reduction) is 0.40 in
+        # every patch; live, back-to-back hits read 0.4000 with it (148 pairs, five Warlocks), 0.25 without.
+        import defensive_catalog
+        for patch in defensive_catalog.CATALOGS:
+            ur = defensive_catalog.CATALOGS[patch][104773]
+            comps, _ = defensives._resolve(ur, {91468: 1}, {})
+            self.assertEqual([c.get("dr") for c in comps if c.get("dr")], [0.4], patch)
+            comps, _ = defensives._resolve(ur, {}, {})
+            self.assertEqual([c.get("dr") for c in comps if c.get("dr")], [0.25], patch)
+
     def test_talent_heal_over_time_carries_its_duration(self):
         ur = self.by_name(defensives._LATEST, "Unending Resolve")
         hot = next(c for c in ur["mitigation"] if (c.get("needs") or {}).get("talent") == "Infernal Vitality")
