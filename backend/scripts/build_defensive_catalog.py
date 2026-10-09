@@ -65,6 +65,9 @@ CURATED = [
     (122783, "Diffuse Magic", "Monk", None, "personal"),
     (122470, "Touch of Karma", "Monk", ["Windwalker"], "personal"),
     (322507, "Celestial Brew", "Monk", ["Brewmaster"], "personal"),
+    # Midnight: the choice node with Celestial Brew (entries 124841 / 136146); in every top Mythic
+    # Brewmaster's log it is this one that is cast.
+    (1241059, "Celestial Infusion", "Monk", ["Brewmaster"], "personal"),
     (115176, "Zen Meditation", "Monk", None, "personal"),
     (116849, "Life Cocoon", "Monk", None, "external"),
     # Paladin
@@ -181,6 +184,7 @@ MITIGATION = {
     # Shields whose size depends on stats or resources: scored only from the
     # player's real shield size seen in the log (absorb=None).
     "Celestial Brew": {"absorb": None}, "Tombstone": {"absorb": None},
+    "Celestial Infusion": {"absorb": None},
     "Stone Bulwark Totem": {"absorb": None},
     # Leech and immunity to charm/fear only, unless Unholy Endurance adds a reduction (TALENT_EFFECTS).
     "Lichborne": {},
@@ -231,6 +235,11 @@ EFFECTS = {
     # player's other reductions as a share of max health: 0.285 at x = 0.285, 0.350 at 0.500, 0.383 at 0.610.
     "Dampen Harm": [("dr", 122278, 1, 1, {"top": 2})],
     "Celestial Brew": [("absorb", 322507, 0)], "Zen Meditation": [("dr", 115176, 1)],
+    # "Absorbing $s2% of incoming damage, up to $<absorb> total": the shield (effect 0, sized by attack
+    # power: from the log) takes only that share of each hit ("share": the effect holding it). Measured on
+    # Weavi's Quel'Danas pull 104: 0.296-0.300 of every Stagger tick, 30% of what Stagger and earlier
+    # shields left of each direct hit.
+    "Celestial Infusion": [("absorb", 1241059, 0, 1, {"share": 1})],
     "Ardent Defender": [("dr", 31850, "aura:87"), ("hp", 31850, "aura:137", {"optional": True}),
                         ("heal_taken", 31850, "aura:118", {"optional": True})],
     "Divine Protection": [("dr", 498, 0), ("heal_taken", 498, "aura:118", {"optional": True})],
@@ -847,6 +856,15 @@ def components(name, gd, mods, problems):
                 comp["from_target"] = spell
             if field == "absorb":
                 comp["observed"] = True
+            if opts.get("share") is not None and index is not None:
+                # A shield that takes only this share of each hit, until it runs out.
+                share = gd.value(spell, opts["share"])
+                if not share:
+                    problems.append(f"{name}: effect {opts['share']} of spell {spell} (its share) is missing")
+                else:
+                    comp["share"] = round(share / 100, 4)
+                if mods.effect(spell, opts["share"], "dr", 1):         # any flat or percent change of it
+                    problems.append(f"{name}: a talent changes effect {opts['share']} of spell {spell}: handle it")
             if opts.get("current"):
                 comp["current"] = True
             if index is not None:
@@ -943,6 +961,11 @@ def reset_sources(gd, desc, catalog, problems):
     """Mark each tracked defensive with the spells that bring it back early (RESETS), from this
     patch's tooltips, and report talents that reset a tracked defensive but are not reviewed."""
     tracked = {d["name"]: d for d in catalog.values() if d["kind"] == "personal"}
+    # A reset acts on the button's charge category, so it reaches every tracked button sharing it: Black
+    # Ox Brew's 12.0.0-12.0.1 tooltip names only Celestial Brew, but Celestial Infusion shares its
+    # category (2293) and 12.0.5's tooltip names both.
+    charge_cat = {d["name"]: gd.charge_cat.get(sid, 0) for sid, d in catalog.items() if d["kind"] == "personal"}
+    sharing = {n: [m for m, c in charge_cat.items() if c and c == charge_cat[n]] or [n] for n in tracked}
     for sid, name in RESETS.items():
         if sid not in gd.names:
             continue
@@ -954,10 +977,14 @@ def reset_sources(gd, desc, catalog, problems):
         for phrase, restores in RESET_PHRASES:
             for mo in re.finditer(phrase, text, re.I):
                 clause = text[mo.end():].split(".")[0]
-                for target, entry in tracked.items():
-                    if re.search(rf"\b{re.escape(target)}\b", clause):
-                        entry.setdefault("reset_by", []).append({"spell": sid, "name": name, "restores": restores})
-                        found = True
+                for target in tracked:
+                    if not re.search(rf"\b{re.escape(target)}\b", clause):
+                        continue
+                    found = True
+                    for same in sharing[target]:
+                        reset = tracked[same].setdefault("reset_by", [])
+                        if not any(r["spell"] == sid for r in reset):
+                            reset.append({"spell": sid, "name": name, "restores": restores})
         if not found:
             problems.append(f"{name}: its tooltip no longer says which defensive it resets: review RESETS")
     for sid in sorted(set(gd.definition_spells)):

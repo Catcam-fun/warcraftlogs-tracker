@@ -1312,9 +1312,11 @@ def _resolve(entry, talent_entries, observed_absorbs, spec=None, applied=None):
                                 **({"school": c["school"]} if c.get("school") else {})})
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 value = value * rank
-        extra = {k: c[k] for k in ("over_ms", "ticks", "current", "replaces_form", "from_target", "dr_hit") if k in c}
+        extra = {k: c[k] for k in ("over_ms", "ticks", "current", "replaces_form", "from_target", "dr_hit", "share")
+                 if k in c}
         if seen:
-            out.append({"absorb_amount": seen, "school": c.get("school")})
+            out.append({"absorb_amount": seen, "school": c.get("school"),
+                        **({"share": c["share"]} if "share" in c else {})})
             continue
         if value is None:
             return None, []              # only scored from a real shield size, and none was seen
@@ -1683,8 +1685,10 @@ def _simulate(options, press, win, kb_index):
         extra += gain
         dmax += grow
         expiries.append((until, gain, grow))
-    shields = [[c.get("absorb", 0) * max_now + c.get("absorb_amount", 0), c, until]
-               for c, until in lasting if c.get("absorb") or c.get("absorb_amount")]
+    # A shield with a "share" (Celestial Infusion) takes only that share of what the others left.
+    shields = sorted([[c.get("absorb", 0) * max_now + c.get("absorb_amount", 0), c, until]
+                      for c, until in lasting if c.get("absorb") or c.get("absorb_amount")],
+                     key=lambda sh: sh[1].get("share") is not None)
     # Reductions, immunities and armor up, dropped as they run out (in that order).
     covering = [c for c, _ in lasting if any(f in c for f in ("immune", "armor", "dr", "dr_missing"))]
     ends = sorted(((until, c) for c, until in lasting if c in covering and until != float("inf")),
@@ -1757,7 +1761,7 @@ def _simulate(options, press, win, kb_index):
             cut = min(mixes) if mixes else min(cut, 1 - keep)
         for sh in shields:
             if sh[0] > 0 and sh[2] >= t and left > 0 and win.applies(sh[1], k):
-                took = min(sh[0], left)
+                took = min(sh[0], left * sh[1].get("share", 1.0))
                 sh[0] -= took
                 left -= took
         extra += dmg - left
