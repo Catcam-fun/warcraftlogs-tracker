@@ -29,3 +29,19 @@ CHEAT_DEATH_HEAL_IDS = {
 }
 
 CHEAT_DEATH_ABILITY_IDS = CHEAT_DEATH_DEBUFF_IDS | CHEAT_DEATH_HEAL_IDS
+
+# Heals the killing hit itself sets off (game data: the cheat deaths' EffectAura 316 "prevent fatal
+# damage" spells and the heals they cast; Embrace the Shadow's absorb turns the shadow damage it takes
+# into a heal). Health they bring is not health the player had before the blow. heal ID -> the absorb
+# that takes part of the killing hit with it (logged within 2 ms of the heal), or None for a heal with no
+# absorb of its own. Read from the death windows (defensives.fetch_death_windows), only these IDs.
+KILLING_HIT_HEALS = {
+    404381: 404195,     # Defy Fate (Evoker): absorbs the fatal hit, the released energy heals
+    87023: 86949,       # Cauterize (Mage): absorbs it, brings you to 35% health
+    451571: 451569,     # Embrace the Shadow (Priest): absorbs 3% of magic damage, heals the shadow part
+    187827: 209258,     # Metamorphosis's heal (+40%) when Last Resort (Vengeance) absorbed the fatal hit
+    48153: None,        # Guardian Spirit (Priest): restores the target to 40% health
+    66235: None,        # Ardent Defender (Protection Paladin): brings you to 20% of max health
+    1236692: None,      # Void Reconstitution (All-Devouring Nucleus): heals 10% of max health (EffectAura 136)
+}
+KILLING_HIT_HEAL_IDS = set(KILLING_HIT_HEALS)

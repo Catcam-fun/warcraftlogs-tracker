@@ -26,7 +26,8 @@ from armor_constants import ARMOR_K, IGNORES_ARMOR, REDUCED_BY_ARMOR
 from boss_spell_flags import IGNORES_IMMUNITY
 from raid_wide_damage import RAID_WIDE
 from defensive_catalog import CATALOGS, HEALING_TAKEN, LATEST, PATCHES
-from max_health_auras import MAX_HEALTH
+from max_health_auras import MAX_HEALTH, STACKING
+from features import KILLING_HIT_HEALS
 from spell_icons import DESCRIPTIONS as CATALOG_DESCRIPTIONS, ICONS as CATALOG_ICONS
 from warcraftlogs import graphql_query
 
@@ -787,8 +788,6 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
                                              aoe_known=aoe_known, ready_since=ready_since,
                                              aura_ms={e["name"]: _talented_duration(e, talent_entries, spec) for e in ready_entries},
                                              forms=forms, armor_k=armor_k, form_armor=form_armor,
-                                             max_health_auras=_max_health_bands(own_events, cat, ability_names,
-                                                                                talent_entries, spec, player_class),
                                              aura_size=_aura_sizer(cat, player_class, spec, talent_entries,
                                                                    ability_names))
 
@@ -844,6 +843,17 @@ WINDOW_BLOCKS_PER_REQUEST = 20
 
 # Everything the survival assessment reads from a hit (the rest, like
 # positions and stats, is dropped so cached reports stay small).
+# The heals (and Last Resort's absorb) the death windows read (fetch_death_windows); part of the
+# windows' cache key in app.py.
+WINDOW_HEAL_IDS = frozenset(set(KILLING_HIT_HEALS) | {a for a in KILLING_HIT_HEALS.values() if a})
+# Stacking auras that change max health (game data, any patch): their stack events are read too.
+WINDOW_STACK_IDS = frozenset(a for a in STACKING if any(t.get("share") or t.get("flat")
+                                                        for _, terms in MAX_HEALTH[a] for t in terms))
+AURA_EVENTS = {"applybuff", "applybuffstack", "removebuffstack", "removebuff",
+               "applydebuff", "applydebuffstack", "removedebuffstack", "removedebuff"}
+WINDOW_TYPES = {"damage", "heal", "absorbed"} | AURA_EVENTS
+# What is kept of a heal or aura event (fetch_death_windows).
+HEAL_FIELDS = ("timestamp", "type", "sourceID", "targetID", "abilityGameID", "fight", "amount", "stack")
 HIT_FIELDS = ("timestamp", "type", "sourceID", "targetID", "abilityGameID", "fight", "buffs",
               "hitType", "amount", "overkill", "absorbed", "mitigated", "unmitigatedAmount",
               "isAoE", "resourceActor", "hitPoints", "maxHitPoints", "armor")
@@ -890,8 +900,9 @@ def _fetch_blocks(token, report_code, blocks, keep=None):
     return out
 
 
-def fetch_death_windows(token, report_code, pulls):
-    """Every hit the given players took in the seconds before their deaths.
+def fetch_death_windows(token, report_code, pulls, heals=True):
+    """Every hit the given players took in the seconds before their deaths, and the heals a
+    killing hit can set off with their absorbs (features.KILLING_HIT_HEALS).
 
     `pulls`: [(fightID, [(death_ts, log name)])], the deaths that can count.
     WCL charges about a point per page of events and at least one per block,
@@ -901,6 +912,13 @@ def fetch_death_windows(token, report_code, pulls):
     filter), scoped to those pulls. Measured on live Mythic logs: 19 -> 8 and
     11 -> 5 points for a night's reports, each block still one page. Only the
     hits inside a death's window are kept. Returns {targetID: [hits, by time]}.
+    With `heals`, one more block over all those pulls, from WCL's All stream, reads on the players who
+    died the heals a killing hit can set off (and Last Resort's absorb) and the stack changes of the
+    stacking max-health auras, in the same lists (type "heal" / "absorbed" / aura events with "stack").
+    Measured on a live Mythic report (k9mC7RxjKPt1TgZW, 27 pulls, 86 deaths, 14 blocks), alternating
+    old and new on a warm cache: 15.0 -> 19.4 points (Healing alone: 16.7; Buffs and Debuffs blocks
+    beside it: 19.5; one Healing block per pull group: 29). The All stream can't replace DamageTaken
+    itself: it leaves the aura list off its damage events.
     """
     pulls = sorted(((fid, sorted(d)) for fid, d in pulls if d and any(n for _, n in d)), key=lambda p: p[1][0][0])
     groups = []
@@ -923,6 +941,16 @@ def fetch_death_windows(token, report_code, pulls):
     if not blocks:
         return {}
     windows.sort()
+    if heals:
+        every = [d for _, ds in pulls for d in ds]
+        names = sorted({n for _, n in every if n})
+        # One block from the All stream: the heals a killing hit can set off (and Last Resort's absorb),
+        # and the stack changes of the stacking max-health auras (a hit lists an aura, not its stacks).
+        ids = sorted(WINDOW_HEAL_IDS | WINDOW_STACK_IDS)
+        flt = ("target.name in (" + ", ".join(json.dumps(n, ensure_ascii=False) for n in names) + ")"
+               f" and ability.id in ({', '.join(map(str, ids))})")
+        blocks["extras"] = ([fid for fid, _ in pulls], max(min(t for t, _ in every) - LETHAL_WINDOW_MS, 0),
+                            max(t for t, _ in every) + KILLING_BLOW_AFTER_MS + 1, "All", flt)
 
     def in_a_window(ts):
         # Windows are all as long: the one starting last at or before ts ends last too.
@@ -930,10 +958,16 @@ def fetch_death_windows(token, report_code, pulls):
         return i >= 0 and ts <= windows[i][1]
 
     def keep(e):
-        return e.get("type") == "damage" and in_a_window(e.get("timestamp", 0))
+        return e.get("type") in WINDOW_TYPES and in_a_window(e.get("timestamp", 0))
 
     events = [e for evs in _fetch_blocks(token, report_code, blocks, keep).values() for e in evs]
-    return index_hits(events)
+    out = index_hits(events)
+    for e in events:
+        if e.get("type") in WINDOW_TYPES - {"damage"} and e.get("targetID") is not None:
+            out.setdefault(e["targetID"], []).append({k: e[k] for k in HEAL_FIELDS if k in e})
+    for hits in out.values():
+        hits.sort(key=lambda e: e["timestamp"])
+    return out
 
 
 def fetch_instakills(token, report_code, fight_ids, start_time, end_time):
@@ -1706,30 +1740,6 @@ def max_health_size(aura_id, patch, talents=None, spec=None):
     return (round(mult - 1, 6), flat)
 
 
-def _own_max_health_entries(cat, player_class, spec, talent_entries):
-    """{name: (max-health share, instant heal share)} of the catalog's max-health buttons this player
-    can have (their class and spec), with their talents."""
-    out = {}
-    for entry in cat.all.values():
-        if entry.get("kind") not in ("personal", "external") or entry.get("class") != player_class:
-            continue
-        if entry.get("specs") and spec and not _spec_matches(spec, entry["specs"]):
-            continue
-        comps, _ = _resolve(entry, talent_entries, {}, spec)
-        mult, flat, heal = 1.0, 0.0, 0.0
-        for c in comps or ():
-            if c.get("hp"):
-                if c.get("current"):
-                    flat += c["hp"]
-                else:
-                    mult *= 1 + c["hp"]
-            if c.get("heal") and not c.get("over_ms"):
-                heal += c["heal"]
-        if mult + flat > 1:
-            out[entry["name"]] = (round(mult + flat - 1, 6), heal)
-    return out
-
-
 def _aura_sizer(cat, player_class, spec, talent_entries, ability_names=None):
     """aura ID -> (share, flat) or None for this player, from game data with their talents and spec
     (max_health_size). Sized by aura ID, wherever the game data puts the effect: Havoc's
@@ -1739,33 +1749,72 @@ def _aura_sizer(cat, player_class, spec, talent_entries, ability_names=None):
 
     def size(aid):
         return max_health_size(aid, patch, talent_entries or {}, spec)
+
+    def stacks(aid):
+        n = 1
+        key = [int(x) for x in patch.split(".")]
+        for first, m in STACKING.get(aid, ()):
+            if [int(x) for x in first.split(".")] <= key:
+                n = m
+        return n
+    size.stacks = stacks
     return size
-
-
-def _max_health_bands(own_events, cat, ability_names, talent_entries=None, spec=None, player_class=None):
-    """[(start, end or None, aura ID, instant heal share)] of the player's catalog max-health auras
-    (their class and spec only; the aura must change max health in the game data), from their aura
-    events (time order). Used to find an aura the killing hit itself set off (Last Resort's
-    Metamorphosis) and the heal it brought."""
-    own = _own_max_health_entries(cat, player_class, spec, talent_entries)
-    patch = getattr(cat, "patch", None) or LATEST
-    bands, open_ = [], {}
-    for ts, typ, aid, *_ in own_events or ():
-        if ability_names.get(aid) not in own or max_health_size(aid, patch, talent_entries, spec) == (0.0, 0):
-            continue
-        if typ == "applybuff":
-            open_.setdefault(aid, ts)
-        elif typ == "removebuff":
-            bands.append((open_.pop(aid, 0), ts, aid, own[ability_names[aid]][1]))
-    bands += [(start, None, aid, own[ability_names[aid]][1]) for aid, start in open_.items()]
-    return sorted(bands)
 
 
 def _own_health(h):
     return h.get("resourceActor") == 2 and bool(h.get("maxHitPoints")) and h.get("type") == "damage"
 
 
-def _max_hp_before(window, kb_index, aura_size=None, bands=()):
+def _set_off_heal(heals, prev_t, t1):
+    """Health the killing hit itself healed (heals: the player's KILLING_HIT_HEALS heals and their
+    absorbs, from fetch_death_windows). A heal with an absorb of its own counts only with that absorb
+    logged after the hit before the killing hit: an absorb logged then took part of the killing hit (its
+    absorbs sum to the hit's `absorbed`). Live: Arzoker, Quel'Danas p89, Stretch Time absorbed at
+    13395294, Defy Fate healed at 13395295 and absorbed at 13395314, Terminate logged at 13395315 with
+    both absorbs; a Defy Fate heal 1 ms after the hit before and 31 ms before the killing hit, with no
+    Defy Fate absorb of it (Alemonk, Quel'Danas p32), was health they had. A heal with none (Guardian
+    Spirit, Ardent Defender) counts within DEATH_STRIP_MS before the killing hit."""
+    window = [h for h in heals if prev_t < h["timestamp"] <= t1]
+    total = 0
+    for h in window:
+        if h.get("type") != "heal" or h.get("abilityGameID") not in KILLING_HIT_HEALS:
+            continue
+        absorb = KILLING_HIT_HEALS[h["abilityGameID"]]
+        if absorb is None:
+            ok = t1 - h["timestamp"] <= DEATH_STRIP_MS
+        else:
+            ok = any(a.get("type") == "absorbed" and a.get("abilityGameID") == absorb for a in window)
+        if ok:
+            total += h.get("amount") or 0
+    return total
+
+
+def _stacks_at(events, aura_id, t):
+    """Stacks of an aura on the player at time t from its aura events (fetch_death_windows), or None
+    when they can't be told (no event of it, or only its removal after t)."""
+    evs = [e for e in events if e.get("abilityGameID") == aura_id]
+    before = [e for e in evs if e["timestamp"] <= t]
+    if before:
+        e = before[-1]
+        if e["type"] in ("removebuff", "removedebuff"):
+            return 0
+        if e["type"] in ("applybuff", "applydebuff"):
+            return e.get("stack") or 1
+        return e.get("stack")
+    after = [e for e in evs if e["timestamp"] > t]
+    if not after:
+        return None
+    e = after[0]
+    if e["type"] in ("applybuff", "applydebuff"):
+        return 0
+    if e["type"] in ("applybuffstack", "applydebuffstack") and e.get("stack"):
+        return e["stack"] - 1
+    if e["type"] in ("removebuffstack", "removedebuffstack") and e.get("stack") is not None:
+        return e["stack"] + 1
+    return None
+
+
+def _max_hp_before(window, kb_index, aura_size=None, heals=(), aura_events=()):
     """(max health, health) the player had just before the killing blow window[kb_index] landed.
 
     WCL logs the killing hit after the death removed the player's auras, so its maxHitPoints has
@@ -1774,18 +1823,23 @@ def _max_hp_before(window, kb_index, aura_size=None, bands=()):
     against 11198315 on every hit and heal before). Instead:
       - the max on their last own-health hit before it, with the auras that came up or ran out
         between that hit and the killing blow taken in or out: each hit lists the auras up on it,
-        before the death's strip (aura_size: game data, their talents on their own buttons). Live:
-        Black Attunement (+2%) ran out before the killing blow of WgYbA1r7fXdZKtPF actor 137 at
-        8775890 and bpQCAqm89GhTLW7Z actor 19 at 3055954, Fortitude of the Bear (+20%) before
-        gZBT7Y1j8dNCbwqp actor 14's at 3182550; each killing hit's own max is exactly that.
+        before the death's strip (aura_size: game data with their talents and spec). Live: Black
+        Attunement (+2%) ran out before the killing blow of WgYbA1r7fXdZKtPF actor 137 at 8775890 and
+        bpQCAqm89GhTLW7Z actor 19 at 3055954, Fortitude of the Bear (+20%) before gZBT7Y1j8dNCbwqp
+        actor 14's at 3182550; each killing hit's own max is exactly that.
       - when that last hit's list changed against the own-health hit before it but its max did not,
         the max had not caught up yet (seen on 26 of 258 such changes in six logs, up to about a
         second): the hit before is the reference;
-      - an aura the killing hit set off (`bands`: came up after the hit before it, within
-        DEATH_STRIP_MS of it, and not on its list: Last Resort's Metamorphosis, Soulcleavi,
-        Manaforge p54) is not health or max health they had before the blow; its heal is taken off
-        the killing hit's amount (WCL: Metamorphosis healed 11748168 at 8002681, 18995479 -> 30743647,
-        and the hit read 30743644);
+      - what the killing hit itself healed (_set_off_heal: a cheat death's heal, Defy Fate,
+        Cauterize, Guardian Spirit, Ardent Defender; Embrace the Shadow's heal of the shadow damage it
+        absorbed; Last Resort's Metamorphosis) is not health they had before it: WCL's amount on the
+        killing hit includes it. Live: Arzoker, Quel'Danas p34, Defy Fate healed 136670 inside
+        Terminate, 507980 -> 371310 (73%); Padflash, Manaforge p79, Cauterize healed 2919591, which
+        leaves exactly the 2903317 of his hit before. An aura the killing hit brought (Metamorphosis)
+        is not on its list, so its max health never counts either;
+      - a stacking aura counts once per stack (game data: SpellAuraOptions.CumulativeAura; "increasing
+        your maximum health by $s11% ... per stack": Sentinel): its stacks on that hit and at the killing
+        blow come from its aura events (`aura_events`); when they can't be told, it is left as it was;
       - never below the killing hit's own max (the death only takes max health away), nor below the
         health they had.
     """
@@ -1796,6 +1850,7 @@ def _max_hp_before(window, kb_index, aura_size=None, bands=()):
     on_kb = _auras(kb)
     own = [h for h in window[:kb_index] if _own_health(h)]
     size = aura_size or (lambda aid: (0.0, 0))
+    stacks = getattr(size, "stacks", lambda aid: 1)
 
     def sized(aids):
         return [a for a in aids if size(a) not in ((0.0, 0), None)]
@@ -1811,22 +1866,28 @@ def _max_hp_before(window, kb_index, aura_size=None, bands=()):
         before = _auras(ref)
         for aid in sorted(on_kb - before):
             v = size(aid)
-            if v:
+            if v and stacks(aid) == 1:
                 value = value * (1 + v[0]) + v[1]
         for aid in sorted(before - on_kb):
             v = size(aid)
-            if v:
+            if v and stacks(aid) == 1:
                 value = (value - v[1]) / (1 + v[0])
-    heal = sum(h for start, end, aid, h in bands
-               if prev_t < start <= t1 and t1 - start <= DEATH_STRIP_MS and aid not in on_kb)
-    health = max(amount - round(heal * value), 0)
+        for aid in sorted(before | on_kb):
+            v = size(aid)
+            if not v or v == (0.0, 0) or stacks(aid) == 1:
+                continue
+            n0 = _stacks_at(aura_events, aid, ref["timestamp"]) if aid in before else 0
+            n1 = _stacks_at(aura_events, aid, t1 - DEATH_STRIP_MS) if aid in on_kb else 0
+            if n0 is not None and n1 is not None and n0 != n1:
+                value = value * (1 + v[0] * n1) / (1 + v[0] * n0)
+    health = max(amount - _set_off_heal(heals, prev_t, t1), 0)
     return max(round(value), kb_max, health), health
 
 
 def assess_survival(hits, death_ts, available, consumables, ability_names, ability_schools,
                     talent_entries=None, observed_absorbs=None, spec=None, aoe_known=True,
                     ready_since=None, aura_ms=None, forms=None, armor_k=None, form_armor=None,
-                    max_health_auras=None, aura_size=None):
+                    aura_size=None):
     """How they died, and whether the defensives they had ready would have saved them.
 
     `hits`: this player's hits (lethal windows, instant kills); the killing blow
@@ -1835,9 +1896,13 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     it was ready (`ready_since`, else the start of the window) and at least
     REACTION_MS before the killing blow. `available` / `consumables`: catalog
     entries ready at death (consumables only if carried and unused this pull).
-    `aura_size` (_aura_sizer) and `max_health_auras` (_max_health_bands): for the max health and
-    health they had just before the killing blow (_max_hp_before).
+    `aura_size` (_aura_sizer): for the max health they had just before the killing blow
+    (_max_hp_before). `hits` may hold the heals a killing hit can set off (fetch_death_windows,
+    type "heal" / "absorbed"); they are read only for that.
     """
+    heal_events = [h for h in hits or () if h.get("type") in ("heal", "absorbed")]
+    aura_events = [h for h in hits or () if h.get("type") in AURA_EVENTS]
+    hits = [h for h in hits or () if h.get("type") not in ("heal", "absorbed") and h.get("type") not in AURA_EVENTS]
     killing = _killing_blow(hits, death_ts)
     if killing is not None and killing.get("type") == "instakill":
         # Killed outright by a mechanic: no damage to reduce, absorb or heal.
@@ -1870,7 +1935,7 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     kb_index = len(window) - 1
     # The killing blow's own max health is logged after the death stripped their auras; every
     # figure below (and the replay's health points) uses the max they had just before it.
-    max_hp, hp_before = _max_hp_before(window, kb_index, aura_size, max_health_auras or ())
+    max_hp, hp_before = _max_hp_before(window, kb_index, aura_size, heal_events, aura_events)
     window[kb_index]["maxHitPoints"] = max_hp
     killing = window[kb_index]
     win = _Window(window, ability_schools)
