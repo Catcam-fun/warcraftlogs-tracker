@@ -214,6 +214,57 @@ class NewDefensivesTests(unittest.TestCase):
         self.assertNotIn("Earth Elemental", names(r["available"] + r["cooldown"] + r["active"]))
 
 
+class EarthElementalAuraTests(unittest.TestCase):
+    """The +15% max health is aura 381755 ("Earth Elemental" in The War Within, "Primordial Bond" in Midnight);
+    the button's own aura 198103 ("Earth Elemental", no duration in the data) lingers in the log long after
+    the elemental is gone (P6CwHkgFR9Krf1Bz, 12.0.7: 381755 30.2-36.7 s, 198103 up to 7,103 s)."""
+
+    def die(self, auras):
+        from test_defensives import run
+        ee = defensives._LATEST.name_to_id["Earth Elemental"]
+        talents = {**{e: 1 for e in defensives.CATALOG[ee]["talent_entries"]}, 127889: 1}
+        return run("Shaman", "Elemental", casts=[(90_000, ee)], talents=talents, auras=auras,
+                   ability_names={381755: "Primordial Bond", 198103: "Earth Elemental"})
+
+    def test_active_only_with_the_health_aura(self):
+        from test_defensives import names
+        self.assertIn("Earth Elemental", names(self.die([381755, 198103])["active"]))
+        r = self.die([198103])
+        self.assertNotIn("Earth Elemental", names(r["active"]))
+        self.assertIn("Earth Elemental", names(r["cooldown"]))
+
+    def test_the_state_check_reads_the_health_aura(self):
+        from checks.source_state import active_mismatches
+        bands = lambda name: {"name": name, "bands": [{"startTime": 80_000, "endTime": 110_000}]}
+        effect = defensives._LATEST.effect_aura_names
+        self.assertEqual(active_mismatches(["Earth Elemental"], [bands("Primordial Bond")], 100_000, None, effect), [])
+        self.assertEqual(active_mismatches(["Earth Elemental"], [bands("Earth Elemental")], 100_000, None, effect),
+                         ["Earth Elemental"])
+
+    def test_the_durations_check_allows_the_despawn(self):
+        # 36.2-36.7 s against 36 s: the aura goes when the elemental despawns, a moment after its time.
+        from unittest import mock
+        from checks import source_durations
+        def check(end):
+            run = mock.Mock(); run.code = "X"
+            run.pulls = [{"id": 1, "start_time": 0, "end_time": 100_000}]
+            run.meta = {"abilities": {381755: "Primordial Bond"}, "player_details": {}}
+            run.cat = defensives._LATEST
+            buffs = [{"type": "applybuff", "abilityGameID": 381755, "targetID": 7, "timestamp": 1_000},
+                     {"type": "removebuff", "abilityGameID": 381755, "targetID": 7, "timestamp": 1_000 + end}]
+            raw = {"combatants": [{"sourceID": 7}], "casts": [], "buffs": buffs}
+            with mock.patch.object(source_durations.defensives, "fetch_defensive_raw", return_value=raw),                     mock.patch.object(source_durations.defensives, "filter_defensive_raw",
+                                      return_value={"talents": {(1, 7): {}}}),                     mock.patch.object(source_durations.defensives, "pull_spec", return_value="Elemental"),                     mock.patch.object(source_durations.defensives, "_talented_duration", return_value=36_000):
+                return source_durations.check(run).status
+        self.assertEqual(check(36_700), "pass")
+        self.assertEqual(check(38_000), "fail")
+
+    def test_the_catalog_names_the_aura_per_patch(self):
+        self.assertEqual(entry("11.2.7", "Earth Elemental")["auras"], {381755: "Earth Elemental"})
+        self.assertEqual(entry("12.1.0", "Earth Elemental")["auras"], {381755: "Primordial Bond"})
+        self.assertIn("Primordial Bond", defensives._LATEST.buff_names)
+
+
 class SentinelTests(unittest.TestCase):
     """Sentinel (389539, Protection Paladin): 15 stacks (SpellAuraOptions), each +1% max health (effect 10) and
     -2% damage taken (effect 11). Stacks drop 1 a second: over the last 15 s of its duration in The War Within

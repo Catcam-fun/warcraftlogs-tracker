@@ -108,8 +108,13 @@ class Catalog:
         # Shields a talent adds to a button (Matted Fur): scored from their real size in the log.
         self.observed_auras = sorted({c["aura"] for d in self.all.values() for c in d.get("mitigation") or ()
                                       if isinstance(c, dict) and c.get("aura")})
+        # Buttons whose effect is an aura of its own (Earth Elemental: 381755): aura -> the button's name; only
+        # those auras say the button's effect is up, not the button's same-named aura.
+        self.aura_owner = {int(a): d["name"] for d in self.all.values() for a in d.get("auras") or {}}
+        self.effect_aura_names = {d["name"]: set((d.get("auras") or {}).values()) for d in self.all.values()
+                                  if d.get("auras")}
         self.buff_names = sorted({d["name"] for d in list(self.personal.values()) + list(self.external.values())}
-                                 | set(self.observed_auras))
+                                 | set(self.observed_auras) | {n for ns in self.effect_aura_names.values() for n in ns})
         heal = HEALING_TAKEN.get(patch, {})
         self.heal_talents = heal.get("talents", [])
         self.heal_auras = {int(k): v for k, v in heal.get("auras", {}).items()}
@@ -146,6 +151,23 @@ class Catalog:
 
 
 _CATALOGS = {p: Catalog(p) for p in CATALOGS}
+
+
+def aura_name(cat, aid, ability_names):
+    """The catalog name an aura in the log stands for: its own name, the button's for an aura that carries a
+    button's effect (Earth Elemental's 381755, "Primordial Bond" in Midnight), None for a button's
+    same-named aura that doesn't (Earth Elemental's 198103)."""
+    owner, effect = effect_auras(cat)
+    if aid in owner:
+        return owner[aid]
+    name = ability_names.get(aid)
+    return None if name in effect else name
+
+
+def effect_auras(cat):
+    """(aura -> button, button -> names of its effect auras) of a catalog; empty for a stand-in without them."""
+    owner, names = getattr(cat, "aura_owner", None), getattr(cat, "effect_aura_names", None)
+    return (owner if isinstance(owner, dict) else {}), (names if isinstance(names, dict) else {})
 
 
 def catalog_for(report_start_ms=None):
@@ -643,7 +665,7 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
     own_events = (buff_events or {}).get(player_id, [])
 
     def max_ms(aid):
-        sid = cat.name_to_id.get(ability_names.get(aid))
+        sid = cat.name_to_id.get(aura_name(cat, aid, ability_names))
         return cat.all[sid].get("aura_ms") if sid else None
 
     if killing is not None:
@@ -652,15 +674,16 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
             if ts > death_ts:
                 break
             if typ in ("applybuff", "refreshbuff", "applybuffstack"):
-                casters[ability_names.get(aid)] = src
+                casters[aura_name(cat, aid, ability_names)] = src
         for aid in _auras(killing):
-            name = ability_names.get(aid)
+            name = aura_name(cat, aid, ability_names)
             if name in cat.name_to_id:
                 active[name] = casters.get(name)
     elif buff_events is not None:
         for aid, src in _buffs_active_at(death_ts, own_events, max_ms).items():
-            if ability_names.get(aid) in cat.name_to_id:
-                active[ability_names.get(aid)] = src
+            name = aura_name(cat, aid, ability_names)
+            if name in cat.name_to_id:
+                active[name] = src
     active_names = set(active)
 
     result = {"active": [], "available": [], "cooldown": [], "talentsKnown": talent_entries is not None,
