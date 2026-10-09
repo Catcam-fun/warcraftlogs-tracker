@@ -883,9 +883,13 @@ WINDOW_BLOCKS_PER_REQUEST = 20
 # Stagger (115069, a Brewmaster passive) is an absorb aura (EffectAura 69): the game cuts a hit by the
 # player's damage reductions first, then Stagger delays a share of what is left (logged as `absorbed`
 # on the hit) into ticks of STAGGER_TICK every 0.5 s over 10 s (124255 EffectAuraPeriod 500, 124273-5
-# duration 10000). A tick is damage already reduced: defensives up while it ticks never change it (Weavi,
-# Undermine, 2026-10-08: 246 ticks under Fortifying Brew and 26 under Dampen Harm read 0.600 through, as
-# every tick does), while shields absorb ticks (1194 of Weavi's 6137 ticks were partly absorbed).
+# duration 10000). A tick is damage already reduced: no defensive the site judges changes it as it lands
+# (Weavi, Undermine, 2026-10-08: under Fortifying Brew 1458 ticks read 1.000 through and 457 read 0.600,
+# under Dampen Harm 302 and 113, exactly as without them), while shields absorb ticks (1194 of his 6137).
+# The one thing that cuts a tick is Invoke Niuzao, the Black Ox (132578, and 358520): "while active, 40%
+# of damage delayed by Stagger is instead Staggered by Niuzao" (an absorb, aura 69, logged as mitigated):
+# every one of his 1873 ticks at 0.600 had one Niuzao up, all 47 at 0.36 both, none of the 4216 at 1.000.
+# It is an offensive cooldown, not in the catalog, so the replay never presses it; real ones are in the log.
 STAGGER_TICK = 124255
 STAGGER_SPEC = "Brewmaster"
 # The pool, as the logs show it (Weavi, Undermine p24 and Quel'Danas p104, 2026-10-08): WCL logs each
@@ -899,6 +903,13 @@ STAGGER_TICKS = 20
 # How far before a death window the pool's ticks and staggered hits are read: the last staggered hit
 # before a tick is at most STAGGER_TICKS ticks back.
 STAGGER_LOOKBACK_MS = 10_500
+# Purifies take a share of the pool off between ticks (game data, the same in every patch from 11.0.2):
+# Purifying Brew 119582 50% (Mantra of Purity +10%), Quick Sip 388505 and Tranquil Spirit 393357 5% each.
+# Only Purifying Brew is a cast; the others (and Staggering Strikes' flat amount, Midnight's Purifying
+# Brew minimum of 8% of max health) show only in the ticks.
+PURIFYING_BREW = 119582
+PURIFY_SHARES = sorted({round(1 - brew * 0.95 ** k, 6) for brew in (1.0, 0.5, 0.4) for k in range(4)} - {0.0})
+PURIFY_MATCH = 0.0015         # a purify's share read from the ticks lands this close (Undermine p24: 0.5000)
 # The heals a killing hit can set off and their cheat-death auras the death windows read
 # (fetch_death_windows).
 WINDOW_HEAL_IDS = frozenset(set(KILLING_HIT_HEALS) | {a for a in KILLING_HIT_HEALS.values() if a})
@@ -918,7 +929,8 @@ HIT_FIELDS = ("timestamp", "type", "sourceID", "sourceInstance", "targetID", "ab
               "isAoE", "resourceActor", "hitPoints", "maxHitPoints", "armor")
 # For the windows' cache key in app.py: windows cached with other extras or without a field kept
 # here (sourceInstance, for Fiery Brand's unit) are not reused.
-WINDOW_EXTRAS_KEY = hashlib.sha1(repr((WINDOW_EXTRAS_IDS, HIT_FIELDS, HEAL_FIELDS, STAGGER_LOOKBACK_MS)).encode()).hexdigest()[:12]
+WINDOW_EXTRAS_KEY = hashlib.sha1(repr((WINDOW_EXTRAS_IDS, HIT_FIELDS, HEAL_FIELDS, STAGGER_LOOKBACK_MS,
+                                       PURIFYING_BREW)).encode()).hexdigest()[:12]
 
 
 def _events_query(blocks):
@@ -1012,8 +1024,10 @@ def fetch_death_windows(token, report_code, pulls, heals=True):
     if heals:
         every = [d for _, ds in pulls for d in ds]
         names = sorted({n for _, n in every if n})
-        flt = ("target.name in (" + ", ".join(json.dumps(n, ensure_ascii=False) for n in names) + ")"
-               f" and ability.id in ({', '.join(map(str, WINDOW_EXTRAS_IDS))})")
+        who = ", ".join(json.dumps(n, ensure_ascii=False) for n in names)
+        # Purifying Brew casts have no target (-1): read by their caster.
+        flt = (f"(target.name in ({who}) and ability.id in ({', '.join(map(str, WINDOW_EXTRAS_IDS))}))"
+               f" or (source.name in ({who}) and type = 'cast' and ability.id = {PURIFYING_BREW})")
         blocks["extras"] = ([fid for fid, _ in pulls],
                             max(min(t for t, _ in every) - LETHAL_WINDOW_MS - STAGGER_LOOKBACK_MS, 0),
                             max(t for t, _ in every) + KILLING_BLOW_AFTER_MS + 1, "All", flt)
@@ -1025,7 +1039,8 @@ def fetch_death_windows(token, report_code, pulls, heals=True):
 
     def stagger_pool(e):
         return (e.get("type") == "absorbed" and e.get("abilityGameID") == STAGGER_AURA) or \
-            (e.get("type") == "damage" and e.get("abilityGameID") == STAGGER_TICK)
+            (e.get("type") == "damage" and e.get("abilityGameID") == STAGGER_TICK) or \
+            (e.get("type") == "cast" and e.get("abilityGameID") == PURIFYING_BREW)
 
     def keep(e):
         if stagger_pool(e):
@@ -1042,7 +1057,9 @@ def fetch_death_windows(token, report_code, pulls, heals=True):
                if e.get("type") != "damage" or (e.get("targetID"), e.get("timestamp")) not in seen]
     out = index_hits(events)
     for e in events:
-        if e.get("type") in WINDOW_TYPES - {"damage"} and e.get("targetID") is not None:
+        if e.get("type") == "cast" and e.get("sourceID") is not None:      # Purifying Brew, by its caster
+            out.setdefault(e["sourceID"], []).append({k: e[k] for k in HEAL_FIELDS if k in e})
+        elif e.get("type") in WINDOW_TYPES - {"damage"} and e.get("targetID") is not None:
             out.setdefault(e["targetID"], []).append({k: e[k] for k in HEAL_FIELDS if k in e})
     for hits in out.values():
         hits.sort(key=lambda e: e["timestamp"])
@@ -1158,36 +1175,60 @@ def _stagger_tick(hit):
 
 def _tick_raw(tick):
     """What a Stagger tick took off the pool: its unmitigated size (a share of some ticks is
-    mitigated, 0.600 through; shields absorb ticks too)."""
+    mitigated while Invoke Niuzao is up, 0.600 through; shields absorb ticks too)."""
     return tick.get("unmitigatedAmount") or _full_hit(tick)
 
 
-def _stagger_pools(ticks, ins):
-    """The pool just before each staggered hit: {id(in event): [estimates]}, [] when unknown.
+def _stagger_pools(ticks, ins, purifies=None):
+    """The pool just before each staggered hit: {id(in event): [estimates]}; one estimate when the log
+    settles it, two (the replay then works out both) when it doesn't, [] when unknown.
 
     `ticks`: the player's Stagger ticks; `ins`: their STAGGER_AURA absorbed events (each a hit's
-    staggered amount), both from up to STAGGER_LOOKBACK_MS before the window. Two estimates:
-      - from the tick after it: that tick is the pool over STAGGER_TICKS, so the pool before was
-        STAGGER_TICKS x tick - staggered amount (too small if a purify came in between);
-      - from the tick before it: that tick left its size x (ticks left - 1) (too big if a purify came
-        in between).
-    A purify on one side makes one of them wrong; the replay takes the one that credits least."""
+    staggered amount); `purifies`: their Purifying Brew casts (None: not read). All from up to
+    STAGGER_LOOKBACK_MS before the window. Two readings:
+      - after: the tick after it is the pool over STAGGER_TICKS, so the pool before was STAGGER_TICKS
+        x tick - staggered amount; wrong (too small) if a purify came after the hit, before that tick;
+      - before: the tick before it left its size x (ticks left - 1); wrong (too big) if a purify came
+        between that tick and the hit.
+    When they differ, a purify came on one side: a Purifying Brew cast on one side says which; else the
+    share it took, read each way (1 - after / before, or 1 - (after + amount) / (before + amount)),
+    matching one of PURIFY_SHARES says which (Weavi, Undermine p24: the cast's side read 0.5000 on
+    every one of 12 with a cast; Quel'Danas p104: 0.0500, 0.1000, 0.5000 and 0.5500 for Quick Sips and
+    Purifying Brew). A pool that grew between the ticks can't be a purify: the tick after is right."""
     seq = sorted([(t["timestamp"], 1, "tick", t) for t in ticks] + [(e["timestamp"], 0, "in", e) for e in ins],
                  key=lambda x: (x[0], x[1]))
-    out, pool, left = {}, None, None
-    for i, (_, _, kind, e) in enumerate(seq):
+    casts = sorted(c["timestamp"] for c in purifies or ())
+    out, pool, left, prev = {}, None, None, None
+    for i, (ts, _, kind, e) in enumerate(seq):
         if kind == "tick":
             if left:
                 pool, left = _tick_raw(e) * (left - 1), left - 1
             else:
                 pool = left = None
+            prev = ts
             continue
-        guesses = [pool] if pool is not None else []
+        amount = e.get("amount") or 0
         nxt = next((x for x in seq[i + 1:]), None)
-        if nxt is not None and nxt[2] == "tick":
-            guesses.append(max(STAGGER_TICKS * _tick_raw(nxt[3]) - (e.get("amount") or 0), 0))
+        after = max(STAGGER_TICKS * _tick_raw(nxt[3]) - amount, 0) if nxt is not None and nxt[2] == "tick" else None
+        guesses = [g for g in (pool, after) if g is not None]
+        if pool is not None and after is not None:
+            if abs(pool - after) <= 0.01 * max(pool, after) + 2 or after > pool:
+                guesses = [after]
+            else:
+                cast_before = any(prev is not None and prev < c <= ts for c in casts)
+                cast_after = any(ts <= c < nxt[0] for c in casts)
+                share_before = 1 - after / pool
+                share_after = 1 - (after + amount) / (pool + amount)
+                sig_before = any(abs(share_before - f) <= PURIFY_MATCH for f in PURIFY_SHARES)
+                sig_after = any(abs(share_after - f) <= PURIFY_MATCH for f in PURIFY_SHARES)
+                if cast_before != cast_after:
+                    guesses = [after] if cast_before else [pool]
+                elif sig_before != sig_after:
+                    guesses = [after] if sig_before else [pool]
+                else:
+                    guesses = [pool, after]          # can't tell which side
         out[id(e)] = guesses
-        pool = max(guesses) + (e.get("amount") or 0) if guesses else None
+        pool = max(guesses) + amount if guesses else None
         left = STAGGER_TICKS
     return out
 
@@ -1639,7 +1680,7 @@ def _option(entry_name, comps, dur_ms, legacy_ticks=None):
     return opt
 
 
-def _simulate(options, press, win, kb_index):
+def _simulate(options, press, win, kb_index, credit="least"):
     """Health the player would have had on top of their real health right after the killing blow,
     with every option pressed at `press`. Returns (extra health, HoT ticks landed).
 
@@ -1653,7 +1694,8 @@ def _simulate(options, press, win, kb_index):
         before each hit, the extra is capped by what they were missing then
         (their real heals would have overhealed the rest).
     The player lives if the extra is more than the killing blow's overkill.
-    `win`: the death's hits, prepared (_Window).
+    `win`: the death's hits, prepared (_Window). `credit`: with two Stagger pool estimates for a hit
+    (_stagger_pools), the one that credits "least" or "most".
     """
     hits, points = win.hits, win.points
     stagger = win.stagger or {}
@@ -1752,7 +1794,7 @@ def _simulate(options, press, win, kb_index):
             # credits least (_stagger_pools), or the smaller share when the pool isn't known.
             amount, pools = staggered
             mixes = [(cut * pool + amount * (1 - keep)) / (pool + amount) for pool in pools if pool + amount > 0]
-            cut = min(mixes) if mixes else min(cut, 1 - keep)
+            cut = (max(mixes) if credit == "most" else min(mixes)) if mixes else min(cut, 1 - keep)
         for sh in shields:
             if sh[0] > 0 and sh[2] >= t and left > 0 and win.applies(sh[1], k):
                 took = min(sh[0], left)
@@ -1894,12 +1936,12 @@ def _press_times(earliest, win, kb_index, options=None):
     return sorted(times)
 
 
-def _best_press(options, earliest, win, kb_index):
+def _best_press(options, earliest, win, kb_index, credit="least"):
     """(extra health, press time, HoT ticks) for the best moment to press (_press_times);
     None when it can't be pressed in time."""
     best = None
     for t in _press_times(earliest, win, kb_index, options):
-        extra, ticks = _simulate(options, t, win, kb_index)
+        extra, ticks = _simulate(options, t, win, kb_index, credit)
         if best is None or extra >= best[0] - 1e-6:
             best = (extra, t, ticks)          # the latest press that saves the most
     return best
@@ -2165,13 +2207,16 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     `aura_size` (_aura_sizer): for the max health they had just before the killing blow
     (_max_hp_before). `friendly_ids`: the report's players, whose hits no effect on the enemy covers;
     `attackable`: the units the raid attacked (_brand_targets). An effect on the enemy is replayed on
-    each unit it could go on, and the one that saves most counts, as the best press time does. `hits` may hold the heals a killing hit can set off (fetch_death_windows,
-    type "heal" / "absorbed"); they are read only for that.
+    each unit it could go on, and the one that saves most counts, as the best press time does.
+    `hits` may also hold the heals a killing hit can set off (fetch_death_windows, type "heal" /
+    "absorbed"), read only for that, and a Brewmaster's Stagger pool (staggered amounts, ticks from
+    before the window, Purifying Brew casts: _stagger_pools).
     """
     heal_events = [h for h in hits or () if h.get("type") in ("heal", "absorbed")
                    or (h.get("type") in AURA_EVENTS and h.get("abilityGameID") in WINDOW_HEAL_IDS)]
     aura_events = [h for h in hits or () if h.get("type") in AURA_EVENTS]
-    hits = [h for h in hits or () if h.get("type") not in ("heal", "absorbed") and h.get("type") not in AURA_EVENTS]
+    purifies = [h for h in hits or () if h.get("type") == "cast" and h.get("abilityGameID") == PURIFYING_BREW]
+    hits = [h for h in hits or () if h.get("type") not in ("heal", "absorbed", "cast") and h.get("type") not in AURA_EVENTS]
     killing = _killing_blow(hits, death_ts)
     if killing is not None and killing.get("type") == "instakill":
         # Killed outright by a mechanic: no damage to reduce, absorb or heal.
@@ -2214,7 +2259,8 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
         ins = [e for e in heal_events if e.get("type") == "absorbed" and e.get("abilityGameID") == STAGGER_AURA
                and since <= e["timestamp"] <= until]
         ticks = [h for h in hits if _stagger_tick(h) and since <= h["timestamp"] <= until]
-        stagger = _stagger_share(window, ins, _stagger_pools(ticks, ins))
+        casts = [c for c in purifies if since <= c["timestamp"] <= until]
+        stagger = _stagger_share(window, ins, _stagger_pools(ticks, ins, casts))
     win = _Window(window, ability_schools, stagger=stagger)
     if hp_before != (killing.get("amount") or 0):
         # Health before the blow, without what the blow itself set off (_max_hp_before).
@@ -2233,6 +2279,8 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
 
     per_button, scored, details = {}, [], {}
     brand_choice, brand_unknown = None, False
+    pool_unsure = any(len(pools) > 1 for _, pools in (stagger or {}).values())
+    stagger_unknown = set()
     for entry in list(available) + list(consumables):
         applied = []
         comps, _ = _resolve(entry, talent_entries, observed_absorbs or {}, spec, applied)
@@ -2274,8 +2322,17 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
             per_button[name] = best is not None
         else:
             per_button[name] = None if unknown(comps) else False
+            if per_button[name] is False and pool_unsure:
+                # The Stagger pool before a hit has two readings (a purify on a side the log doesn't
+                # tell): with the one that credits most it would have saved them.
+                most = _best_press(opts, earliest, win, kb_index, "most")
+                if most is not None and most[0] > overkill:
+                    per_button[name] = None
+                    stagger_unknown.add(name)
         details[name] = _explain(entry, comps, applied, killing, amount, max_hp, missing_at_reaction,
                                  ability_schools, missing_at_kb=max(max_hp - hp_before, 0))
+        if name in stagger_unknown:
+            details[name]["why"] = "staggerUnknown"
         if best is None:
             details[name]["why"] = "readyTooLate"
         else:
@@ -2303,7 +2360,14 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
                 best_all = max(best_all, _simulate(opts, t, win, kb_index)[0])
         all_comps = [c for os, _ in scored for o in os
                      for c in [x for x, _ in o["lasting"]] + o["instant"] + [x for x, _, _ in o["hots"]]]
-        together = True if best_all > overkill else (None if unknown(all_comps) or brand_unknown else False)
+        if best_all <= overkill and pool_unsure:
+            for t in _press_times(min(e for _, e in scored), win, kb_index, everything):
+                opts = [o for os, e in scored if e <= t for o in os]
+                if opts and _simulate(opts, t, win, kb_index, "most")[0] > overkill:
+                    pool_unsure = None          # can't tell
+                    break
+        together = True if best_all > overkill else \
+            (None if unknown(all_comps) or brand_unknown or pool_unsure is None else False)
 
     # How they died, from the hits since they were last at high health:
     #   - one-shot: that was BURST_WINDOW_MS ago or less and a single hit took
