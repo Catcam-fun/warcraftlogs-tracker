@@ -551,17 +551,48 @@ class AoeByAbilityTests(unittest.TestCase):
 
     def test_fetch_reads_the_abilities_hits_in_the_reports_pulls(self):
         from unittest import mock
+        # 20 is marked on a hit that dealt damage; 50 dealt damage unmarked; 60 was only ever absorbed
+        # whole (WCL never marks those, so it stays unknown, not single-target), even on a hit marked.
         page = {"reportData": {"report": {"a": {"data": [
-            {"type": "damage", "abilityGameID": 20, "isAoE": True},
-            {"type": "damage", "abilityGameID": 50, "isAoE": False}], "nextPageTimestamp": None}}}}
+            {"type": "damage", "abilityGameID": 20, "amount": 5, "isAoE": True},
+            {"type": "damage", "abilityGameID": 50, "amount": 5, "isAoE": False},
+            {"type": "damage", "abilityGameID": 60, "amount": 0, "absorbed": 9, "isAoE": True}],
+            "nextPageTimestamp": None}}}}
         with mock.patch.object(defensives, "graphql_query", return_value=page) as q:
-            self.assertEqual(defensives.fetch_aoe_abilities("t", "R", [3, 4], 100, 900, {50, 20}), {20})
+            self.assertEqual(defensives.fetch_aoe_abilities("t", "R", [3, 4], 100, 900, {50, 20, 60}),
+                             ({20}, {20, 50}))
         query = q.call_args[0][1]
         self.assertIn("dataType: DamageTaken", query)
         self.assertIn("fightIDs: [3, 4]", query)
         self.assertIn("endTime: 901", query)
-        self.assertIn('ability.id in (20, 50)', query)
+        self.assertIn('ability.id in (20, 50, 60)', query)
         self.assertNotIn("includeResources", query)
+
+    def test_fetch_stops_once_every_ability_is_decided(self):
+        from unittest import mock
+        first = {"reportData": {"report": {"a": {"data": [
+            {"type": "damage", "abilityGameID": 20, "amount": 5, "isAoE": True}], "nextPageTimestamp": 500}}}}
+        second = {"reportData": {"report": {"a": {"data": [
+            {"type": "damage", "abilityGameID": 50, "amount": 5, "isAoE": False}], "nextPageTimestamp": 700}}}}
+        import copy
+        pages = lambda *ps: [copy.deepcopy(p) for p in ps]
+        with mock.patch.object(defensives, "graphql_query", side_effect=pages(first, second)) as q:
+            self.assertEqual(defensives.fetch_aoe_abilities("t", "R", [3], 100, 900, {20}), ({20}, {20}))
+        self.assertEqual(q.call_count, 1)
+        with mock.patch.object(defensives, "graphql_query", side_effect=pages(first, second, first)) as q:
+            self.assertEqual(defensives.fetch_aoe_abilities("t", "R", [3], 100, 900, {20, 50}), ({20}, {20, 50}))
+        self.assertEqual(q.call_count, 2)
+
+    def test_a_hit_that_dealt_damage_keeps_its_own_mark(self):
+        # Only hits that dealt no damage take their ability's status; a hit that dealt damage carries
+        # WCL's own mark (every one of an ability marked alike on the logs tried; the safer rule).
+        kb = hit(100_000, 1_000_000, 0, overkill=300_000, aoe=False)        # 40% of 1.3M would save
+        r = defensives.assess_survival([kb], 100_000, ready(FEINT), [], NAMES, SCHOOLS, talent_entries={},
+                                       aoe_abilities={500})
+        self.assertFalse(r["wouldSave"]["Feint"])
+        r = defensives.assess_survival([dict(kb, isAoE=True)], 100_000, ready(FEINT), [], NAMES, SCHOOLS,
+                                       talent_entries={}, aoe_abilities=set(), aoe_unknown={500})
+        self.assertTrue(r["wouldSave"]["Feint"])
 
     def test_classes_with_an_aoe_only_effect(self):
         self.assertEqual(defensives.aoe_classes(defensives._CATALOGS["12.1.0"]), {"Rogue"})

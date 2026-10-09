@@ -359,7 +359,7 @@ class AnalyzeFlowTests(unittest.TestCase):
                 c._data.clear()
             self._fights = lambda token, rid, cls=cls: fights(token, rid, cls)
             with mock.patch.object(app_module.defensives, "fetch_aoe_abilities", autospec=True,
-                                   return_value={7}) as aoe, \
+                                   return_value=({7}, {7})) as aoe, \
                     mock.patch.object(app_module.defensives, "analyze_death",
                                       wraps=app_module.defensives.analyze_death) as death:
                 self._run()
@@ -376,6 +376,17 @@ class AnalyzeFlowTests(unittest.TestCase):
         self._fights = lambda token, rid: fights(token, rid, "Rogue")
         with mock.patch.object(app_module.defensives, "fetch_aoe_abilities", autospec=True,
                                side_effect=RuntimeError("rate limited")), \
+                mock.patch.object(app_module.defensives, "analyze_death",
+                                  wraps=app_module.defensives.analyze_death) as death:
+            self._run()
+        self.assertEqual((death.call_args.kwargs["aoe_abilities"], death.call_args.kwargs["aoe_unknown"]),
+                         ({8}, frozenset({7})))
+        # Ability 7 never dealt damage anywhere in the report's pulls: unknown, not "not AoE".
+        for c in (app_module.report_meta_cache, app_module.report_fights_cache, app_module.deaths_lru,
+                  app_module.defensive_lru, app_module.recap_lru):
+            c._data.clear()
+        with mock.patch.object(app_module.defensives, "fetch_aoe_abilities", autospec=True,
+                               return_value=(set(), set())), \
                 mock.patch.object(app_module.defensives, "analyze_death",
                                   wraps=app_module.defensives.analyze_death) as death:
             self._run()
