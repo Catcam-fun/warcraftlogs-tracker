@@ -101,6 +101,20 @@ class RunTests(unittest.TestCase):
             self.assertNotIn("targetID", query)
             self.assertEqual(variables["p"], 7)
 
+    def test_aura_events_filter_by_the_aura_holder(self):
+        # Live (Manaforge g2R9GZcd1rP6JKpw actor 67): Buffs events by targetID were the player's own casts
+        # (87); by sourceID the auras on them (124, a shaman's Ancestral Vigor among them). Debuffs too.
+        reply = {"reportData": {"report": {"events": {"data": []}}}}
+        with mock.patch("checks.common.graphql_query", return_value=reply) as q:
+            run = Run("t", parse_target("X:manaforge"))
+            run.aura_events("X", 7, 1000, 2000)
+            queries = [c[0][1] for c in q.call_args_list]
+        self.assertEqual(len(queries), 2)
+        for kind in ("Buffs", "Debuffs"):
+            query = next(x for x in queries if f"dataType: {kind}," in x)
+            self.assertIn("sourceID: $p", query)
+            self.assertNotIn("targetID", query)
+
     def test_damage_taken_filters_by_the_unit_hit(self):
         # Live 2026-10-07: DamageTaken with targetID returned only a Demon Hunter's 13 self-hits;
         # sourceID returned all 41 hits they took, the boss's killing blow included.
@@ -1310,6 +1324,11 @@ class StateTests(unittest.TestCase):
         # Live (Arzoker, Quel'Danas p46): Ebon Might healed in the millisecond the strip ended its band.
         bands = [(26_350_000, 26_382_079, 395152, "Ebon Might")]
         heals = [(26_382_079, 28_440, 395152, "Ebon Might", "heal")]
+        self.assertEqual(rules_labels.max_hp_before(hits, 1, LO("12.1.0"), bands, heals)[1], 81_784)
+        # Only a cheat death's heal (features.KILLING_HIT_HEALS): a Prayer of Mending jump 1 ms after a
+        # Prayer of Mending band ended is health they had.
+        bands = [(3_090_000, 3_097_286, 41635, "Prayer of Mending")]
+        heals = [(3_097_287, 9_000, 33110, "Prayer of Mending", "heal")]
         self.assertEqual(rules_labels.max_hp_before(hits, 1, LO("12.1.0"), bands, heals)[1], 81_784)
 
     def test_a_set_off_heal_that_leaves_them_below_max_is_read(self):

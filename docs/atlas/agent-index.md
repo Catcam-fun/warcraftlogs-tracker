@@ -953,7 +953,7 @@
   - check_mitigation: backend/checks/source_mitigation.py:127
   - check_slots: backend/checks/rules_slots.py:40
   - check_counting: backend/checks/rules_counting.py:27
-  - check_labels: backend/checks/rules_labels.py:429
+  - check_labels: backend/checks/rules_labels.py:433
   - check_verdicts: backend/checks/rules_verdicts.py:168
   - check_defensives: backend/checks/rules_defensives.py:5
   - checks_registry: backend/checks/registry.py:6
