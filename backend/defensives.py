@@ -441,9 +441,11 @@ def _spec_matches(spec, specs):
 
 
 def _mod_rank(mod, talent_entries, spec):
-    """How many times a modifier applies to this player: talent rank, or 1 for their spec's passive."""
-    if mod.get("specs"):
-        return 1 if spec and _spec_matches(spec, mod["specs"]) else 0
+    """How many times a modifier applies to this player: talent rank, or 1 for their spec's passive.
+    A modifier can be both (Improved Prismatic Barrier in The War Within: an Arcane spec passive and a
+    talent entry): either gives it, once."""
+    if mod.get("specs") and spec and _spec_matches(spec, mod["specs"]):
+        return max(1, _rank(talent_entries, mod.get("entries", ())))
     return _rank(talent_entries, mod.get("entries", ()))
 
 
