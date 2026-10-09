@@ -1239,8 +1239,13 @@ class StateTests(unittest.TestCase):
         self.assertIn("needs the player's loadout", rules_labels.aura_size(22842, LO(latest, None, "Guardian")))
         own = lambda ts, amount, mx, buffs="", ok=0: dict(self.own(ts, amount, 1, mx, overkill=ok), buffs=buffs)
         hits = [own(1, 10, 1000), own(2, 500, 1000, "22842.", ok=1)]
-        self.assertEqual(rules_labels.max_hp_before(hits, 1, LO(latest, {117218: 1}, "Guardian"))[:2], (1100, 500))
-        self.assertIn("needs the player's loadout", rules_labels.max_hp_before(hits, 1, LO(latest, None, "Guardian"))[2])
+        cast = [{"timestamp": 1, "type": "applybuff", "abilityGameID": 22842, "sourceID": 1}]
+        self.assertEqual(rules_labels.max_hp_before(hits, 1, LO(latest, {117218: 1}, "Guardian"), aura_events=cast,
+                                                    pid=1)[:2], (1100, 500))
+        self.assertIn("needs the player's loadout", rules_labels.max_hp_before(hits, 1, LO(latest, None, "Guardian"),
+                                                                               aura_events=cast, pid=1)[2])
+        # Sized by a loadout: who cast it must be known.
+        self.assertIn("who cast it", rules_labels.max_hp_before(hits, 1, LO(latest, {117218: 1}, "Guardian"))[2])
 
     def test_a_stacking_aura_counts_per_stack(self):
         # Sentinel (389539): +1% per stack, 15 stacks; stacks from the player's aura events.
@@ -1254,6 +1259,58 @@ class StateTests(unittest.TestCase):
         self.assertEqual(rules_labels.max_hp_before(hits, 1, lo, aura_events=ev)[0], round(1_150_000 * 1.03 / 1.15))
         self.assertIn("aura events not read", rules_labels.max_hp_before(hits, 1, lo)[2])
         self.assertIn("can't be told", rules_labels.max_hp_before(hits, 1, lo, aura_events=[])[2])
+
+    def test_talents_fill_a_base_points_zero_effect(self):
+        # Game data: Bone Shield 195181 effect 2 (EffectAura 133, bp 0) gets +1 per charge from Foul Bulwark
+        # (entry 96302); 10 charges on the last hit, 5 at the killing blow.
+        latest = rules_labels.patch_of(1_790_000_000_000)
+        self.assertAlmostEqual(rules_labels.aura_size(195181, LO(latest, {96302: 1}, "Blood"))[0], 0.01)
+        self.assertEqual(rules_labels.aura_size(195181, LO(latest, {}, "Blood")), (0.0, 0))
+        self.assertAlmostEqual(rules_labels.aura_size(207400, LO(latest, {101909: 1}, "Restoration"))[0], 0.05)
+        own = lambda ts, amount, mx, ok=0: dict(self.own(ts, amount, 1, mx, overkill=ok), buffs="195181.")
+        hits = [own(90_000, 10, 1_100_000), own(100_000, 900_000, 1_000_000, ok=1)]
+        ev = [{"timestamp": 89_000, "type": "applybuffstack", "abilityGameID": 195181, "stack": 10, "sourceID": 1},
+              {"timestamp": 95_000, "type": "removebuffstack", "abilityGameID": 195181, "stack": 5, "sourceID": 1}]
+        self.assertEqual(rules_labels.max_hp_before(hits, 1, LO(latest, {96302: 1}, "Blood"), aura_events=ev, pid=1)[:2],
+                         (1_050_000, 900_000))
+        # Without Foul Bulwark the charges change nothing, and the death is judged.
+        self.assertEqual(rules_labels.max_hp_before(hits, 1, LO(latest, {}, "Blood"), aura_events=ev, pid=1),
+                         (1_100_000, 900_000, None))
+
+    def test_an_aura_is_sized_with_its_casters_loadout(self):
+        # Live (Voidspire, P6CwHkgFR9Krf1Bz p43, actor 8): 511853 on the hit before; actor 24, a warrior with
+        # Battlefield Commander (134033, +2%), cast Rallying Cry at 4526123; the next hit read 573274 (x1.12).
+        latest = rules_labels.patch_of(1_790_000_000_000)
+        hits = [self.own(4_525_705, 10, 400_000, 511_853),
+                dict(self.own(4_526_791, 500_000, 0, 511_853, overkill=1), buffs="97463.")]
+        ev = [{"timestamp": 4_526_123, "type": "applybuff", "abilityGameID": 97463, "sourceID": 24}]
+        warrior = {24: LO(latest, {134033: 1}, "Fury")}
+        got = rules_labels.max_hp_before(hits, 1, LO(latest, {}, "Discipline"), aura_events=ev, pid=8,
+                                         loadout_for=warrior.get)
+        self.assertEqual(got, (573_275, 500_000, None))
+        self.assertIn("who cast it", rules_labels.max_hp_before(hits, 1, LO(latest, {}, "Discipline"), pid=8,
+                                                                loadout_for=warrior.get)[2])
+        self.assertIn("caster's loadout", rules_labels.max_hp_before(hits, 1, LO(latest, {}, "Discipline"),
+                                                                     aura_events=ev, pid=8, loadout_for={}.get)[2])
+
+    def test_a_cheat_death_aura_used_up_as_it_heals(self):
+        # Guardian Spirit: WCL logs no absorb; its aura's band ends 1 ms before its heal (live, Manaforge
+        # p75: 47788 removed at 25624450, 48153 healed at 25624451).
+        hits = [self.own(25_624_000, 100_000, 1_000_000, 4_000_000),
+                self.own(25_624_460, 2_600_000, 0, 4_000_000, overkill=5_000_000)]
+        bands = [(25_623_272, 25_624_450, 47788, "Guardian Spirit")]
+        heals = [(25_624_451, 1_600_000, 48153, "Guardian Spirit", "heal")]
+        self.assertEqual(rules_labels.max_hp_before(hits, 1, LO("12.1.0"), bands, heals)[1], 1_000_000)
+        # Live (Zeforus, Voidspire p35): Atonement healed at 3097288 and the death's strip ended his Atonement
+        # band at 3097289: health he had.
+        hits = [self.own(3_097_283, 17_458, 68_824, 914_481), self.own(3_097_289, 81_784, 0, 914_481, overkill=8686)]
+        bands = [(3_057_387, 3_097_289, 194384, "Atonement")]
+        heals = [(3_097_288, 5139, 81751, "Atonement", "heal"), (3_097_288, 5318, 81751, "Atonement", "heal")]
+        self.assertEqual(rules_labels.max_hp_before(hits, 1, LO("12.1.0"), bands, heals)[1], 81_784)
+        # Live (Arzoker, Quel'Danas p46): Ebon Might healed in the millisecond the strip ended its band.
+        bands = [(26_350_000, 26_382_079, 395152, "Ebon Might")]
+        heals = [(26_382_079, 28_440, 395152, "Ebon Might", "heal")]
+        self.assertEqual(rules_labels.max_hp_before(hits, 1, LO("12.1.0"), bands, heals)[1], 81_784)
 
     def test_a_set_off_heal_that_leaves_them_below_max_is_read(self):
         # Cheat Death-like: the killing hit was partly absorbed and an aura it set off healed them, still

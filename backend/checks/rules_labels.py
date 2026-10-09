@@ -113,6 +113,24 @@ def aura_size(aura_id, loadout):
     return (total - 1, flat)
 
 
+def by_loadout(aura_id, patch):
+    """Whether an aura's size in a patch depends on a loadout (a term or modifier for some talents or
+    specs). Such an aura is sized with its caster's: talents raise an aura from whoever cast it."""
+    terms = []
+    for first, value in MAX_HEALTH.get(aura_id, ()):
+        if tuple(map(int, first.split("."))) <= tuple(map(int, patch.split("."))):
+            terms = value
+    return any("entries" in w or "specs" in w for t in terms for w in [t, *t.get("mods", ())])
+
+
+def caster_of(events, aura_id, t):
+    """Who cast an aura on the player, from the last of its aura events at or before t (WCL's sourceID
+    on apply, stack and remove events); None when there is none."""
+    src = [e.get("sourceID") for e in events or () if e.get("abilityGameID") == aura_id
+           and e["timestamp"] <= t and e.get("sourceID") is not None]
+    return src[-1] if src else None
+
+
 def _listed(h):
     return {int(x) for x in str(h.get("buffs") or "").split(".") if x.isdigit()}
 
@@ -151,7 +169,8 @@ def stack_count(events, aura_id, t):
     return None
 
 
-def max_hp_before(hits, kb_index, loadout=None, bands=(), heals=(), aura_events=None):
+def max_hp_before(hits, kb_index, loadout=None, bands=(), heals=(), aura_events=None, pid=None,
+                  loadout_for=None):
     """(max HP, health, why not sized or None) just before the killing blow hits[kb_index] landed (hits:
     this death's, time order); (0, 0, None) when the killing hit doesn't carry the player's health.
 
@@ -174,6 +193,12 @@ def max_hp_before(hits, kb_index, loadout=None, bands=(), heals=(), aura_events=
     A stacking aura (stacks_of > 1) counts per stack, its stacks on the reference hit and DEATH_STRIP_MS
     before the killing hit read from `aura_events` (WCL's Buffs and Debuffs events of the player); without
     them, or when they can't be told, the death isn't sized (third value).
+    An aura whose size depends on a loadout (by_loadout) is sized with its caster's: the caster from
+    `aura_events` (caster_of), their Loadout from `loadout_for(caster)` (the player `pid` has `loadout`).
+    Live: a warrior's Rallying Cry with Battlefield Commander reads x1.12 on every player it lands on.
+    A cheat death whose aura is used up rather than absorbing (Guardian Spirit: its aura's band ends 1 ms
+    before its heal, no absorb) sets off its heal the same way: a band under the heal's name ending within
+    SAME_MOMENT_MS of it, after the hit before.
     Never below the killing hit's own max (the death only takes max health away) nor below the health.
     """
     kb = hits[kb_index]
@@ -188,7 +213,18 @@ def max_hp_before(hits, kb_index, loadout=None, bands=(), heals=(), aura_events=
     def size(aid):
         if loadout is None:
             return (0.0, 0)
-        v = aura_size(aid, loadout)
+        lo = loadout
+        if by_loadout(aid, loadout.patch):
+            caster = caster_of(aura_events, aid, t1)
+            if caster is None:
+                why.append(f"aura {aid}: who cast it is not in its aura events")
+                return (0.0, 0)
+            if caster != pid:
+                lo = loadout_for(caster) if loadout_for else None
+                if lo is None:
+                    why.append(f"aura {aid}: its caster's loadout is not known")
+                    return (0.0, 0)
+        v = aura_size(aid, lo)
         if isinstance(v, str):
             why.append(v)
             return (0.0, 0)
@@ -202,8 +238,8 @@ def max_hp_before(hits, kb_index, loadout=None, bands=(), heals=(), aura_events=
                 any(size(a) != (0.0, 0) for a in _listed(own[-2]) ^ _listed(ref)):
             ref = own[-2]
         value = float(ref["maxHitPoints"])
-        stacking = {a for a in on_kb | _listed(ref)
-                    if loadout is not None and stacks_of(a, loadout.patch) > 1 and size(a) != (0.0, 0)}
+        stacking = {a for a in on_kb | _listed(ref) if loadout is not None and stacks_of(a, loadout.patch) > 1
+                    and (by_loadout(a, loadout.patch) or aura_size(a, loadout) != (0.0, 0))}
         for aid in on_kb - _listed(ref) - stacking:
             v = size(aid)
             value = value * (1 + v[0]) + v[1]
@@ -219,7 +255,9 @@ def max_hp_before(hits, kb_index, loadout=None, bands=(), heals=(), aura_events=
             if n0 is None or n1 is None:
                 why.append(f"aura {aid}: stacks can't be told from its aura events")
                 continue
-            value = value * (1 + size(aid)[0] * n1) / (1 + size(aid)[0] * n0)
+            if n0 != n1:
+                v = size(aid)
+                value = value * (1 + v[0] * n1) / (1 + v[0] * n0)
     # What the killing hit set off. A cheat death absorbs part of it and heals in the same moment, under
     # the same name (Defy Fate, Cauterize, Embrace the Shadow: absorb and heal within SAME_MOMENT_MS); an
     # aura that came up in that moment and is not on its list came with it (Last Resort's
@@ -232,6 +270,12 @@ def max_hp_before(hits, kb_index, loadout=None, bands=(), heals=(), aura_events=
     set_off |= {name for start, end, aid, name in bands
                 if prev_t < start <= t1 and aid not in on_kb
                 and any(abs(start - ts) <= SAME_MOMENT_MS for ts, _ in absorbs)}
+    # Used up as it heals: its band ends just before the heal. The death's strip ends the other bands
+    # with or after their last heals (Atonement healed 1 ms before the strip ended its band, Zeforus,
+    # Voidspire p35; Ebon Might healed in the strip's millisecond, Arzoker, Quel'Danas p46).
+    set_off |= {name for ts, name in healed
+                if any(n == name and end is not None and prev_t < end < ts and ts - end <= SAME_MOMENT_MS
+                       for start, end, aid, n in bands)}
     health = kb.get("amount") or 0
     health -= sum(amount for ts, amount, aid, name, typ in heals
                   if typ == "heal" and prev_t < ts <= t1 and name in set_off)
@@ -266,18 +310,31 @@ def run_max_hp_before(run, rid, fid, pid, hits, kb_index):
     loadout = loadout_of(run, rid, fid, pid)
     kb = hits[kb_index]
     aura_events = None
-    listed = set().union(*(_listed(h) for h in hits[:kb_index + 1] if _own_hp(h))) if hits else set()
-    if any(stacks_of(a, loadout.patch) > 1 and aura_size(a, loadout) not in ((0.0, 0),) for a in listed):
-        # A stacking max-health aura on their hits: its stacks, from WCL's aura events of the player.
+    lists = [_listed(h) for h in hits[:kb_index + 1] if _own_hp(h)]
+    listed = set().union(*lists) if lists else set()
+    changed = listed - set.intersection(*lists) if lists else set()
+
+    def loadout_for(caster):
+        lo = loadout_of(run, rid, fid, caster)
+        return lo if lo.talents is not None else None
+    if any(stacks_of(a, loadout.patch) > 1 and (by_loadout(a, loadout.patch) or aura_size(a, loadout) != (0.0, 0))
+           for a in listed) or \
+            any(by_loadout(a, loadout.patch) for a in changed):
+        # A stacking max-health aura on their hits (its stacks), or one sized by a loadout that came or
+        # went (who cast it): from WCL's aura events of the player.
         start = kb["timestamp"] - LETHAL_WINDOW_MS
         aura_events = run.aura_events(rid, pid, start, kb["timestamp"] + 1)
-    value, health, why = max_hp_before(hits, kb_index, loadout, aura_events=aura_events)
+    value, health, why = max_hp_before(hits, kb_index, loadout, aura_events=aura_events, pid=pid,
+                                       loadout_for=loadout_for)
     if not value:
         return value, health, why
     own = [h for h in hits[:kb_index] if _own_hp(h)]
-    listed_max = max_hp_before(hits[:kb_index] + [dict(kb, amount=0)], kb_index, loadout, aura_events=aura_events)[0]
+    listed_max = max_hp_before(hits[:kb_index] + [dict(kb, amount=0)], kb_index, loadout, aura_events=aura_events,
+                               pid=pid, loadout_for=loadout_for)[0]
+    # Something the killing hit set off: an absorb on it, more health than the lists allow, an aura it
+    # brought, or one used up just before it (Guardian Spirit's aura goes as it heals).
     suspicious = (kb.get("absorbed") or 0) > 0 or (kb.get("amount") or 0) > listed_max or \
-        (own and _listed(kb) - _listed(own[-1]))
+        (own and _listed(kb) ^ _listed(own[-1]))
     if not suspicious:
         return value, health, why
     t1 = kb["timestamp"]
@@ -287,7 +344,8 @@ def run_max_hp_before(run, rid, fid, pid, hits, kb_index):
              if e.get("type") in ("heal", "absorbed")]
     if not any(typ == "heal" for *_, typ in heals):
         return value, health, why
-    return max_hp_before(hits, kb_index, loadout, aura_bands(run.buffs(rid, fid, pid)), heals, aura_events)
+    return max_hp_before(hits, kb_index, loadout, aura_bands(run.buffs(rid, fid, pid)), heals, aura_events,
+                         pid, loadout_for)
 
 
 def max_at(hits, i, kb_index, max_hp):
