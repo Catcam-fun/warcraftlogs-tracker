@@ -2218,6 +2218,15 @@ class _Window:
         return self._applies[key]
 
 
+def _hot_full(opt, max_hp):
+    """A button's whole heal over time, with the healing-taken increases it brings itself (Verdant Heart's
+    +20% while Frenzied Regeneration is up), as _simulate lands each tick: the "of" its ticks before the
+    death are a part of."""
+    taken = 1 + sum(c.get("heal_taken", 0) for c, _ in opt["lasting"])
+    return sum((c.get("heal", 0) * max_hp + c.get("heal_amount", 0)) * (1 if c.get("boosted") else taken)
+               for c, _, _ in opt["hots"])
+
+
 def _option(entry_name, comps, dur_ms):
     """One button's effect, timed: {"name", "lasting": [(comp, ms or None)], "instant": [comp], "hots": [(comp, ticks, ms)]}.
 
@@ -3042,7 +3051,7 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
         else:
             details[name]["pressAgo"] = round((kb_ts - best[1]) / 1000, 1)
         if opts[0]["hots"]:
-            full = sum((c.get("heal", 0) * max_hp + c.get("heal_amount", 0)) for c, _, _ in opts[0]["hots"])
+            full = _hot_full(opts[0], max_hp)
             of = sum(t for _, t, _ in opts[0]["hots"])
             hot = {"full": round(full), "ticks": best[2] if best else 0, "of": of}
             if best and len(opts) > 1:
