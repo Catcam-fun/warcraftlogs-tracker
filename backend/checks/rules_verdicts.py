@@ -91,7 +91,10 @@ def early_presses(details, kb_ts, ready):
     for name, det in details.items():
         if det.get("pressAgo") is None or ready.get(name) is None:
             continue
-        if kb_ts - det["pressAgo"] * 1000 < ready[name] - READY_TOLERANCE_MS:
+        if ready[name] > kb_ts + READY_TOLERANCE_MS:
+            out.append(f"{name}: judged but still on cooldown at the killing blow "
+                       f"(ready {round((ready[name] - kb_ts) / 1000, 1)}s after it)")
+        elif kb_ts - det["pressAgo"] * 1000 < ready[name] - READY_TOLERANCE_MS:
             out.append(f"{name}: pressed {det['pressAgo']}s before the killing blow "
                        f"but only ready {round((kb_ts - ready[name]) / 1000, 1)}s before")
     return out
@@ -122,9 +125,11 @@ def ready_times(run, ev, rid, fid, pid, fight_start, kb_ts, names):
                     and fight_start <= e["timestamp"] <= kb_ts]
             if used:
                 t, sid = max(used)
-                back = t + cat.all[sid]["cooldown_ms"]
-                if back <= kb_ts:
-                    out[name] = back
+                # Kept even when it is not back by the killing blow: a judged consumable still on
+                # cooldown is the very case to flag. Game rule (the site's too, checked independently
+                # here from WCL casts): a Healthstone is 60 s, health potions share 300 s, from the
+                # last use of that kind in this pull; the pull resets them.
+                out[name] = t + cat.all[sid]["cooldown_ms"]
             continue
         sid = cat.name_to_id.get(name)
         entry = cat.all.get(sid) if sid is not None else None
