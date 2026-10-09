@@ -372,18 +372,27 @@ def label(hits, kb_index, max_hp=None, health=None):
         max_hp, health, _ = max_hp_before(hits, kb_index)
     health = (kb.get("amount") or 0) if health is None else health
     share = {id(h): full_hit(h) / (max_at(hits, i, kb_index, max_hp) or 1) for i, h in enumerate(hits)}
-    since_i, since_ts = -1, None      # index of the latest high-health hit before the killing blow
+    # The last moment they were at high health, in log order (hits on one millisecond keep the
+    # log's order): just before a hit, at its time (one with their health: after + amount; one
+    # without: what the last hit with their health left, as only heals land between hits; the
+    # killing blow: `health`), or just after a hit with their health, at its time.
+    since_i, since_ts, last = -1, None, None   # hits since the high moment: hits[since_i + 1:]
     for i in range(kb_index + 1):
         h = hits[i]
-        if not _own_hp(h):
-            continue
-        after = h.get("hitPoints") or 0
-        if i < kb_index and after >= HIGH * h["maxHitPoints"]:
-            since_i, since_ts = i, h["timestamp"]                 # high just after this hit
-        elif i == kb_index and health >= HIGH * max_hp:
-            since_i, since_ts = i - 1, h["timestamp"]             # high just before the killing blow
-        elif i < kb_index and after + (h.get("amount") or 0) >= HIGH * h["maxHitPoints"]:
-            since_i, since_ts = i - 1, h["timestamp"]             # high just before this hit
+        own = _own_hp(h)
+        top = max_hp if i == kb_index else h["maxHitPoints"] if own else last and last[1]
+        if i == kb_index:
+            now = health
+        elif own:
+            now = (h.get("hitPoints") or 0) + (h.get("amount") or 0)
+        else:
+            now = last and last[0]
+        if top and now >= HIGH * top:
+            since_i, since_ts = i - 1, h["timestamp"]                 # high just before this hit
+        if i < kb_index and own:
+            last = (h.get("hitPoints") or 0, h["maxHitPoints"])
+            if last[0] >= HIGH * last[1]:
+                since_i, since_ts = i, h["timestamp"]                 # high just after this hit
     run = hits[since_i + 1:kb_index + 1]
     quick = since_ts is not None and kb["timestamp"] - since_ts <= BURST_WINDOW_MS
     one_shot = quick and any(share[id(h)] >= ONE_SHOT for h in run)
@@ -441,10 +450,15 @@ def check(run):
         rid, fid, name = ev["reportId"], ev["fightId"], ev.get("originalCharacter")
         pid = run.actor_id(rid, name)
         if pid is None:
+            skipped.append(f"{name} pull {fid}: not among report {rid}'s players")
             continue
         death_ts = ev["timestamp"] + run.fight(rid, fid)["start_time"]
         got = death_hits(run.hits_before(rid, fid, pid, death_ts), death_ts)
-        if got is None or not max_hp_before(*got)[0]:
+        if got is None:
+            skipped.append(f"{name} pull {fid}: no killing hit in WCL's damage taken")
+            continue
+        if not max_hp_before(*got)[0]:
+            skipped.append(f"{name} pull {fid}: WCL's hits carry none of the player's health")
             continue
         max_hp, health, why = run_max_hp_before(run, rid, fid, pid, *got)
         if why:
@@ -459,10 +473,13 @@ def check(run):
             items.append(f"{name} pull {fid}: site {'/'.join(map(str, site))}, rule {'/'.join(map(str, want))}")
     if not seen:
         return skip("no counted deaths with a survival block")
+    # Every death left out is counted and named, so a pass shows what it did not cover.
+    note = ""
+    if skipped:
+        note = f"{len(skipped)} of {seen} deaths not compared: {'; '.join(skipped[:3])}" \
+            + (f"; {len(skipped) - 3} more" if len(skipped) > 3 else "")
     if not compared:
-        return skip("no counted death has a killing hit in WCL's damage taken"
-                    + (f"; {len(skipped)} not sized: {skipped[0]}" if skipped else ""))
+        return skip("no counted death has a killing hit in WCL's damage taken" + (f"; {note}" if note else ""))
     if items:
-        return fail(items, reason=f"{len(skipped)} deaths skipped, max HP not sized" if skipped else "")
-    return Outcome("pass", reason=f"{len(skipped)} deaths skipped, max HP not sized: {'; '.join(skipped[:3])}") \
-        if skipped else PASS
+        return fail(items, reason=note)
+    return Outcome("pass", reason=note) if note else PASS

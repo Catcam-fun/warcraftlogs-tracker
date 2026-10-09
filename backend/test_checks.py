@@ -1090,6 +1090,26 @@ class LabelRuleTests(unittest.TestCase):
 
     def test_exactly_one_and_a_half_seconds_is_quick(self):
         self.assertEqual(label([self.hit(0, 10, 990), self.hit(600, 790, 200), self.hit(1500, 200, 0, overkill=5)], 2)["deathType"], "burst")
+        # High just before a hit (and not after it), exactly 1.5 s before the killing blow: inclusive.
+        h = self.hit
+        self.assertEqual(label([h(0, 300, 690), h(1500, 690, 0, overkill=10)], 1)["deathType"], "burst")
+        self.assertEqual(label([h(0, 300, 690), h(1501, 690, 0, overkill=10)], 1)["deathType"], "wasLow")
+
+    def test_hits_on_the_killing_blows_millisecond(self):
+        # At 99% (last hit 3 s before), then three hits on the killing blow's millisecond: high just
+        # before the first of them, so a burst, not "set up by".
+        h = self.hit
+        drops = [h(0, 10, 990), h(3000, 400, 590, aid=6), h(3000, 400, 190, aid=6), h(3000, 190, 0, aid=6, overkill=200)]
+        self.assertEqual(label(drops, 3), {"deathType": "burst", "rot": None, "biggestHit": None, "oneShotHit": None})
+        # From 99%, an 85% hit and a small finishing tick on one millisecond: a one-shot by the big hit.
+        sever = [h(0, 10, 990), h(3000, 850, 140, aid=6), h(3000, 140, 0, aid=5, overkill=50)]
+        self.assertEqual(label(sever, 2), {"deathType": "oneShot", "rot": None, "biggestHit": None, "oneShotHit": 6})
+        # A hit without the player's health between: they kept what the last hit left until it landed.
+        other = dict(h(2000, 100, 950), resourceActor=1)
+        self.assertEqual(label([h(0, 10, 900), other, h(3000, 800, 0, overkill=100)], 2)["deathType"], "oneShot")
+        # Still at 90% just after a shielded hit: that hit isn't "since they were last high".
+        shield = [dict(h(0, 50, 900, aid=6), absorbed=400), h(2000, 500, 400, aid=7), h(5000, 400, 0, aid=8, overkill=10)]
+        self.assertEqual(label(shield, 2)["biggestHit"], 7)
 
     def test_one_shot_names_its_hit_and_never_a_set_up_hit(self):
         h = self.hit
@@ -1174,6 +1194,18 @@ class LabelRuleTests(unittest.TestCase):
         ev["defensives"]["survival"]["deathType"] = "burst"
         run.hits_before.return_value = hits[:2]
         self.assertEqual(rules_labels.check(run).status, "skip")
+        # A death left out still shows in a pass's reason: what it did not cover, and why.
+        lost = dict(ev, originalCharacter="Ann", timestamp=5000)
+        run.counted_deaths.return_value = [ev, lost]
+        run.hits_before.side_effect = lambda rid, fid, pid, ts: hits if ts == 101000 else hits[:2]
+        o = rules_labels.check(run)
+        self.assertEqual((o.status, o.reason),
+                         ("pass", "1 of 2 deaths not compared: Ann pull 2: no killing hit in WCL's damage taken"))
+        no_health = [dict(x, maxHitPoints=0) for x in hits]
+        run.hits_before.side_effect = lambda rid, fid, pid, ts: hits if ts == 101000 else no_health
+        self.assertIn("Ann pull 2: WCL's hits carry none of the player's health", rules_labels.check(run).reason)
+        run.actor_id.side_effect = lambda rid, name: None if name == "Ann" else 7
+        self.assertIn("Ann pull 2: not among report R's players", rules_labels.check(run).reason)
 
 
 class SelectionTests(unittest.TestCase):
