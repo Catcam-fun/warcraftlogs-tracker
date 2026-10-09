@@ -35,6 +35,7 @@ CURATED = [
     # Druid
     (22812, "Barkskin", "Druid", None, "personal"),
     (61336, "Survival Instincts", "Druid", None, "personal"),
+    (102558, "Incarnation: Guardian of Ursoc", "Druid", ["Guardian"], "personal"),
     (108238, "Renewal", "Druid", None, "personal"),
     (22842, "Frenzied Regeneration", "Druid", None, "personal"),
     # Every druid can shift; for Guardians it's their normal form, not a defensive.
@@ -65,6 +66,9 @@ CURATED = [
     (122783, "Diffuse Magic", "Monk", None, "personal"),
     (122470, "Touch of Karma", "Monk", ["Windwalker"], "personal"),
     (322507, "Celestial Brew", "Monk", ["Brewmaster"], "personal"),
+    # Midnight: the choice node with Celestial Brew (entries 124841 / 136146); in every top Mythic
+    # Brewmaster's log it is this one that is cast.
+    (1241059, "Celestial Infusion", "Monk", ["Brewmaster"], "personal"),
     (115176, "Zen Meditation", "Monk", None, "personal"),
     (116849, "Life Cocoon", "Monk", None, "external"),
     # Paladin
@@ -73,6 +77,7 @@ CURATED = [
     (184662, "Shield of Vengeance", "Paladin", ["Retribution"], "personal"),
     (31850, "Ardent Defender", "Paladin", ["Protection"], "personal"),
     (86659, "Guardian of Ancient Kings", "Paladin", ["Protection"], "personal"),
+    (389539, "Sentinel", "Paladin", ["Protection"], "personal"),
     (633, "Lay on Hands", "Paladin", None, "personal"),
     (1022, "Blessing of Protection", "Paladin", None, "external"),
     (6940, "Blessing of Sacrifice", "Paladin", None, "external"),
@@ -82,6 +87,7 @@ CURATED = [
     (47585, "Dispersion", "Priest", ["Shadow"], "personal"),
     (19236, "Desperate Prayer", "Priest", None, "personal"),
     (586, "Fade", "Priest", None, "personal"),
+    (421453, "Ultimate Penitence", "Priest", ["Discipline"], "personal"),
     (33206, "Pain Suppression", "Priest", None, "external"),
     (47788, "Guardian Spirit", "Priest", None, "external"),
     (62618, "Power Word: Barrier", "Priest", None, "external"),
@@ -93,17 +99,20 @@ CURATED = [
     # Shaman
     (108271, "Astral Shift", "Shaman", None, "personal"),
     (108270, "Stone Bulwark Totem", "Shaman", None, "personal"),
+    (198103, "Earth Elemental", "Shaman", None, "personal"),
     (98008, "Spirit Link Totem", "Shaman", None, "external"),
     (198838, "Earthen Wall Totem", "Shaman", None, "external"),
     # Warlock
     (104773, "Unending Resolve", "Warlock", None, "personal"),
     (108416, "Dark Pact", "Warlock", None, "personal"),
+    (6789, "Mortal Coil", "Warlock", None, "personal"),
     # Warrior
     (871, "Shield Wall", "Warrior", None, "personal"),
     (12975, "Last Stand", "Warrior", ["Protection"], "personal"),
     (184364, "Enraged Regeneration", "Warrior", ["Fury"], "personal"),
     (118038, "Die by the Sword", "Warrior", ["Arms"], "personal"),
     (23920, "Spell Reflection", "Warrior", None, "personal"),
+    (202168, "Impending Victory", "Warrior", None, "personal"),
     (97462, "Rallying Cry", "Warrior", None, "external"),
     # Consumables (any class)
     (6262, "Healthstone", None, None, "healthstone"),
@@ -127,7 +136,7 @@ BASELINE = {198589, 187827, 22812, 186265, 109304, 642, 498, 47585, 1966, 185311
 # talent spells are automatic or pet versions (Shield of Vengeance 1261562,
 # Diffuse Magic 1243287, Survival of the Fittest 203965), not the button.
 # Verified against real logs (players with the entry press the button).
-NAME_ALIAS_OK = {"Fortifying Brew"}
+NAME_ALIAS_OK = {"Fortifying Brew", "Incarnation: Guardian of Ursoc"}   # the latter: 394786 in The War Within
 
 # How much each ability would have helped, used for "would it have saved
 # them". Values come from the game data (SpellEffect: aura 87 damage-taken
@@ -181,6 +190,12 @@ MITIGATION = {
     # Shields whose size depends on stats or resources: scored only from the
     # player's real shield size seen in the log (absorb=None).
     "Celestial Brew": {"absorb": None}, "Tombstone": {"absorb": None},
+    "Celestial Infusion": {"absorb": None},
+    # "While ascended, gain a shield for 100% of your health": its applybuff carries the real size.
+    "Ultimate Penitence": {"absorb": None},
+    "Incarnation: Guardian of Ursoc": {"hp": .30, "dur": 30}, "Earth Elemental": {"hp": .15},
+    "Mortal Coil": {"heal": .20}, "Impending Victory": {"heal": .30},
+    "Sentinel": {"dr": .02, "hp": .01},             # per stack (STACK_DECAY)
     "Stone Bulwark Totem": {"absorb": None},
     # Leech and immunity to charm/fear only, unless Unholy Endurance adds a reduction (TALENT_EFFECTS).
     "Lichborne": {},
@@ -231,6 +246,18 @@ EFFECTS = {
     # player's other reductions as a share of max health: 0.285 at x = 0.285, 0.350 at 0.500, 0.383 at 0.610.
     "Dampen Harm": [("dr", 122278, 1, 1, {"top": 2})],
     "Celestial Brew": [("absorb", 322507, 0)], "Zen Meditation": [("dr", 115176, 1)],
+    # "Absorbing $s2% of incoming damage, up to $<absorb> total": the shield (effect 0, sized by attack
+    # power: from the log) takes only that share of each hit ("share": the effect holding it). Measured on
+    # Weavi's Quel'Danas pull 104: 0.296-0.300 of every Stagger tick, 30% of what Stagger and earlier
+    # shields left of each direct hit.
+    "Celestial Infusion": [("absorb", 1241059, 0, 1, {"share": 1})],
+    "Ultimate Penitence": [("absorb", 421453, "aura:69")],
+    "Incarnation: Guardian of Ursoc": [("hp", 102558, "aura:133")],
+    # The War Within: on the button's own aura (381755 "Earth Elemental"); Midnight: only with Primordial
+    # Bond (381755 renamed after it, BUTTON_NEEDS).
+    "Earth Elemental": [("hp", 381755, "aura:133")],
+    "Mortal Coil": [("heal", 108396, 0)], "Impending Victory": [("heal", 202166, 0)],
+    "Sentinel": [("dr", 389539, "aura:87", 1, {"stacks": True}), ("hp", 389539, "aura:133", 1, {"stacks": True})],
     "Ardent Defender": [("dr", 31850, "aura:87"), ("hp", 31850, "aura:137", {"optional": True}),
                         ("heal_taken", 31850, "aura:118", {"optional": True})],
     "Divine Protection": [("dr", 498, 0), ("heal_taken", 498, "aura:118", {"optional": True})],
@@ -287,6 +314,19 @@ TALENT_EFFECTS = {
     # "For 4 sec after shifting into Bear Form, your health and armor are increased by 15%."
     "Ursine Vigor": [("Bear Form", "hp", [("talent", 0)], {}), ("Bear Form", "armor", [("talent", 0)], {})],
     "Mantra of Tenacity": [("Fortifying Brew", "absorb_aura", [], {"aura": "Chi Cocoon"})],
+    # The War Within: "Your Prismatic Barrier / Blazing Barrier now grants 5% avoidance while active"
+    # (Sunfury: Arcane and Fire). The 5 is the talent's effect 0; the buff 449336 carries it as a rating
+    # (aura 189, filled by a script). Avoidance cuts area damage: measured 0.289 vs 0.249 on magic area
+    # hits with and without it (1 - 0.75 x 0.95 = 0.2875). Midnight rewrote the talent (its barrier
+    # bonuses linger 8 s after the barrier breaks; 449336 has no aura 189 there): "requires" drops it.
+    "Merely a Setback": [(b, "dr", [("talent", 0)], {"school": "aoe", "requires": (449336, "aura:189")})
+                         for b in ("Prismatic Barrier", "Blazing Barrier")],
+    # Midnight: "Mortal Coil now heals for an additional 5% of maximum health" (effect 1: +5 points by label
+    # on 108396, through a modifier op the analysis doesn't map).
+    "Improved Mortal Coil": [("Mortal Coil", "heal", [("talent", 1)], {})],
+    # The War Within: "While you have an elemental active, your damage taken is reduced by 5%" (381761, aura
+    # 87). Midnight's Primordial Bond is the max-health one (BUTTON_NEEDS): 381761 is gone there.
+    "Primordial Bond": [("Earth Elemental", "dr", [(381761, 0)], {"optional": True})],
 }
 
 # Every talent that names a defensive in its tooltip with a survival word has
@@ -330,7 +370,7 @@ TALENTS_REVIEWED = {
     "Anger Management": "cooldown from Rage spent", "Impenetrable Wall": "cooldown from Shield Slam",
     "Lifeblood": "Leech after a Healthstone", "Swift Artifice": "cast time",
     "Soulburn": "handled", "Iron Stomach": "handled", "Glistening Fur": "handled", "Inspired Guard": "handled",
-    "Berserk": "a separate button", "Incarnation: Guardian of Ursoc": "a separate button (Guardian)",
+    "Berserk": "a separate button",
     "Blood Mist": "parry chance", "Dance of Midnight": "automatic", "Demonsurge": "damage",
     "Elune's Favored": "heals from damage dealt", "Empyreal Ward": "armor after Lay on Hands, which already heals fully",
     "Light's Revocation": "heals per effect removed", "Lycara's Inspiration": "no defensive in Bear Form (movement speed)",
@@ -341,6 +381,15 @@ TALENTS_REVIEWED = {
     "Voidpurge": "cooldown", "Voidrush": "cooldown", "World Killer": "cooldown",
     "Improved Ice Barrier": "handled", "Wilderness Medicine": "cooldown, and heals the pet",
     "Harmonic Surge": "damage", "Improved Blazing Barrier": "heals from damage absorbed",
+    "Sanctified Wrath": "Sentinel's duration: handled (duration_mods)",
+    "Ursoc's Guidance": "cooldown from Rage spent", "Heaven's Wrath": "cooldown from Penance bolts",
+    "Overloaded with Light": "heals allies",
+    "Steadfast as the Peaks": "Impending Victory's +10% max health for 5 s after its heal, filled by a script"
+                              " (437152): left out, so the heal alone is credited",
+    # The Hunter's Sentinel (a mark on enemies), not the Protection Paladin's button.
+    "Don't Look Back": "the Hunter's Sentinel", "Overwatch": "the Hunter's Sentinel",
+    "Crescent Steel": "the Hunter's Sentinel", "Sentinel Watch": "the Hunter's Sentinel",
+    "Moon's Blessing": "the Hunter's Sentinel", "Trueshot": "the Hunter's Sentinel's Mark",
 }
 
 # Potions heal a fixed amount that depends on the potion's quality rank, and
@@ -372,6 +421,44 @@ FORM_REQUIRED = {"Frenzied Regeneration": ("Bear Form", "Empowered Shapeshifting
 # Not Renewing Blaze's 374349: that's the heal-back that follows the 8s window
 # (374348, the button's own aura), and Foci of Life shortens only the heal-back.
 AURA_SPELLS = {"Fortifying Brew": [120954], "Rallying Cry": [97463]}
+
+# How long a button's effect lasts when no aura of its name carries it: Earth Elemental's +15% max health
+# lasts while the elemental (188616) is out, its aura having no duration of its own.
+DURATION_FROM = {"Earth Elemental": 188616}
+
+# Buttons whose effect is an aura of its own, not the button's same-named aura: Earth Elemental's +15% max
+# health is 381755 ("Earth Elemental" in The War Within, "Primordial Bond" in Midnight), while the button's
+# aura 198103 has no duration in the data and lingers in logs long after the elemental is gone (12.0.7:
+# 381755 30.2-36.7 s, 198103 up to 7,103 s). Written per patch as "auras": {aura: its name there}; the
+# analysis reads only those as the defensive being up.
+EFFECT_AURAS = {"Earth Elemental": [381755]}
+
+# Curated buttons that are a defensive only in patches whose data has this effect: {name: (spell, effect)}.
+# (Soul Immolation, which burns the Demon Hunter in 12.0.0-12.0.1 and heals from 12.0.5, was the first; the
+# owner keeps only true defensives as buttons, and it is a Devourer's rotational resource cooldown.)
+ONLY_WITH = {}
+
+# Buttons that are a defensive only with a talent, where the game data has that talent: Midnight's Earth
+# Elemental raises max health only with Primordial Bond ("$?a1279819[, increasing your maximum health by
+# $381755s1%][ and your allies, generating high threat...]"); in The War Within it always did.
+BUTTON_NEEDS = {"Earth Elemental": 1279819}
+
+# Auras of stacks that drop one a second (Sentinel: 15 stacks of Divine Resolve). Each component's value is
+# per stack, "stacks" from SpellAuraOptions; when they start to drop comes from the tooltip:
+#   The War Within "After ${$d-15} sec, you will begin to lose 1 stack per second" -> decay_end_ms
+#   Midnight "After $<delay> sec, ..." with $delay = $389539s14 / 1000 (effect 13; Righteous Protector
+#   shortens it by its own share, as it does the duration) -> decay_after_ms
+STACK_DECAY = {"Sentinel": [(r"\$\{\$d-(\d+)\} sec, you will begin to lose 1 stack per second", "decay_end_ms", None),
+                            (r"\$<delay> sec, you will begin to lose 1 stack per second", "decay_after_ms", 13)]}
+
+# Talents whose casts of other buttons lengthen a tracked defensive: button -> (talent, the spell its tooltip
+# names it by, the buttons whose casts extend it). Zealot's Paragon: "Hammer of Wrath and Judgment ... extend
+# the duration of $?s384092[Crusade]?s394088[Avenging Crusader]?s385438[Sentinel][Avenging Wrath] by
+# ${$s1/1000}.1 sec" (effect 0: 500 ms a rank). Written as "extended_by": {talent, entries, ms (a rank),
+# casts (every Paladin button of those names in the patch)}. Checked on FaC4AgJ8vMTfP1VN (12.1.0): all 16
+# Sentinels of a Protection Paladin with Righteous Protector (12 s) and two ranks lasted 12 s + 1 s per
+# Judgment or Hammer of Wrath cast while it was up, to the 10 ms (16.0 to 25.0 s).
+EXTENDED_BY = {"Sentinel": ("Zealot's Paragon", 385438, ("Judgment", "Hammer of Wrath"))}
 
 # talent -> catalog spell whose modifier it copies onto potions and Healthstones.
 ALSO_CONSUMABLES = {"Iron Stomach": 185311}
@@ -476,6 +563,8 @@ class GameData:
         self.category = {int(r["SpellID"]): int(r["Category"]) for r in categories}
         self.charges = {int(r["ID"]): (int(r["MaxCharges"]), int(r["ChargeRecoveryTime"]))
                         for r in table("SpellCategory", build)}
+        self.stacks = {int(r["SpellID"]): int(r["CumulativeAura"]) for r in table("SpellAuraOptions", build)
+                       if r["DifficultyID"] == "0" and int(r["CumulativeAura"] or 0) > 1}
         self.family = {int(r["SpellID"]): (int(r["SpellClassSet"]),
                                            [int(r[f"SpellClassMask_{i}"]) & 0xffffffff for i in range(4)])
                        for r in table("SpellClassOptions", build)}
@@ -580,14 +669,13 @@ class Modifiers:
                     entries_for_def.get(int(r["ID"]), ()))
 
     def who(self, spell):
-        """{"entries": [...]} or {"specs": [...]} for a modifier source, or None if nobody gets it."""
+        """{"entries": [...], "specs": [...]} (either or both) for a modifier source, or None if nobody
+        gets it. Both: a spec passive that is also a talent entry (Improved Prismatic Barrier, 11.0.2 to
+        11.2.7: every Arcane Mage has it, and the entry too); the analysis gives it to either, once."""
         entries = self.entries_for_spell.get(spell)
-        if entries:
-            return {"entries": sorted(entries)}
         specs = self.gd.spec_spells.get(spell)
-        if specs:
-            return {"specs": sorted(specs)}
-        return None
+        who = {**({"entries": sorted(entries)} if entries else {}), **({"specs": sorted(specs)} if specs else {})}
+        return who or None
 
     def _covers(self, row, spell):
         if row["EffectAura"] in (AURA_ADD_MOD_LABEL, AURA_PCT_MOD_LABEL):
@@ -770,6 +858,8 @@ def aura_duration(gd, sid, name):
         spells |= frontier
     spells |= {e[1] for e in EFFECTS.get(name, ())} | set(AURA_SPELLS.get(name, ()))
     found = [gd.duration.get(s, 0) for s in spells if gd.names.get(s) == name]
+    if name in DURATION_FROM:
+        found = [gd.duration.get(DURATION_FROM[name], 0)]
     return max(found, default=0) if max(found, default=0) > 0 else None   # -1: lasts until cancelled (a form)
 
 
@@ -841,8 +931,30 @@ def components(name, gd, mods, problems):
                 comp["from_target"] = spell
             if field == "absorb":
                 comp["observed"] = True
+            if opts.get("share") is not None and index is not None:
+                # A shield that takes only this share of each hit, until it runs out.
+                share = gd.value(spell, opts["share"])
+                if not share:
+                    problems.append(f"{name}: effect {opts['share']} of spell {spell} (its share) is missing")
+                else:
+                    comp["share"] = round(share / 100, 4)
+                if mods.effect(spell, opts["share"], "dr", 1):         # any flat or percent change of it
+                    problems.append(f"{name}: a talent changes effect {opts['share']} of spell {spell}: handle it")
             if opts.get("current"):
                 comp["current"] = True
+            if opts.get("first_tick") and index is not None:
+                # Ticks at the press and every period after: the count must be the duration's periods + 1.
+                period = gd.periods.get((spell, index), 0)
+                comp["tick_ms"], comp["first_tick"] = period, True
+                if not period or gd.duration.get(spell, 0) // period + 1 != ticks:
+                    problems.append(f"{name}: spell {spell} no longer ticks {ticks} times from the press: review EFFECTS")
+            if opts.get("stacks"):
+                # A value per stack (STACK_DECAY says when they drop).
+                comp["stacks"] = gd.stacks.get(spell)
+                if not comp["stacks"]:
+                    problems.append(f"{name}: spell {spell} has no stacks in SpellAuraOptions")
+                if index is not None and mods.effect(spell, index, field, ticks):
+                    problems.append(f"{name}: a talent changes effect {index} of spell {spell}, a value per stack: handle it")
             if index is not None:
                 m = mods.effect(spell, index, field, ticks)
                 if m:
@@ -876,6 +988,9 @@ def talent_component(gd, mods, talent, field, source, extra, problems):
     who, talent_spell = talent_who(gd, mods, talent)
     if who is None:
         return None                       # not in this patch's talent trees
+    need = extra.get("requires")
+    if need and not effect_indices(gd, *need):
+        return None                       # the talent does something else in this patch
     value = 1.0
     for spell, where in source:
         spell = talent_spell if spell == "talent" else spell
@@ -926,6 +1041,9 @@ RESETS_REVIEWED = {
     "Chaotic Transformation": "Metamorphosis resets Blade Dance and Eye Beam",
     "Violent Transformation": "Metamorphosis resets Sigil of Flame, Immolation Aura, Fel Devastation, Voidblade, The Hunt",
     "Mass Acceleration": "Metamorphosis resets Spirit Bomb or Reap",
+    "Impending Victory": "a kill of an enemy that yields experience or honor resets it: observed recasts cover it",
+    "Wild Guardian": "Incarnation: Guardian of Ursoc grants Wild Guardian charges; resets Thrash and Mangle",
+    "Lunar Storm": "resets Rapid Fire / Wildfire Bomb; names the Hunter's Sentinel",
 }
 RESET_WORDS = re.compile(r"reset|refill|grants? (one|a|an additional|1) charge|gains? (one|a|1) charge", re.I)
 
@@ -934,6 +1052,11 @@ def reset_sources(gd, desc, catalog, problems):
     """Mark each tracked defensive with the spells that bring it back early (RESETS), from this
     patch's tooltips, and report talents that reset a tracked defensive but are not reviewed."""
     tracked = {d["name"]: d for d in catalog.values() if d["kind"] == "personal"}
+    # A reset acts on the button's charge category, so it reaches every tracked button sharing it: Black
+    # Ox Brew's 12.0.0-12.0.1 tooltip names only Celestial Brew, but Celestial Infusion shares its
+    # category (2293) and 12.0.5's tooltip names both.
+    charge_cat = {d["name"]: gd.charge_cat.get(sid, 0) for sid, d in catalog.items() if d["kind"] == "personal"}
+    sharing = {n: [m for m, c in charge_cat.items() if c and c == charge_cat[n]] or [n] for n in tracked}
     for sid, name in RESETS.items():
         if sid not in gd.names:
             continue
@@ -945,10 +1068,14 @@ def reset_sources(gd, desc, catalog, problems):
         for phrase, restores in RESET_PHRASES:
             for mo in re.finditer(phrase, text, re.I):
                 clause = text[mo.end():].split(".")[0]
-                for target, entry in tracked.items():
-                    if re.search(rf"\b{re.escape(target)}\b", clause):
-                        entry.setdefault("reset_by", []).append({"spell": sid, "name": name, "restores": restores})
-                        found = True
+                for target in tracked:
+                    if not re.search(rf"\b{re.escape(target)}\b", clause):
+                        continue
+                    found = True
+                    for same in sharing[target]:
+                        reset = tracked[same].setdefault("reset_by", [])
+                        if not any(r["spell"] == sid for r in reset):
+                            reset.append({"spell": sid, "name": name, "restores": restores})
         if not found:
             problems.append(f"{name}: its tooltip no longer says which defensive it resets: review RESETS")
     for sid in sorted(set(gd.definition_spells)):
@@ -1081,6 +1208,7 @@ def build_catalog(build):
 
     catalog, problems, missing = {}, [], []
     ranks = potion_ranks(build, gd, problems)
+    desc = {int(r["ID"]): r["Description_lang"] for r in table("Spell", build)}
     for sid, name, cls, specs, kind in CURATED:
         if sid not in names:
             missing.append(name)     # not in the game yet (or any more) in this patch
@@ -1092,6 +1220,9 @@ def build_catalog(build):
             # No longer a button: since Midnight, Renewing Blaze is a passive that
             # comes with Obsidian Scales (no casts of it in Midnight logs).
             missing.append(f"{name} (a passive, not a button)")
+            continue
+        if name in ONLY_WITH and not effect_indices(gd, *ONLY_WITH[name]):
+            missing.append(f"{name} (not a defensive in this patch)")
             continue
         max_charges, charge_ms = gd.charges.get(gd.charge_cat.get(sid, 0), (0, 0))
         cd_ms = gd.cooldowns.get(sid, 0)
@@ -1140,6 +1271,45 @@ def build_catalog(build):
             for comp in entry["mitigation"] or ():
                 if "armor" in comp and "needs" not in comp:
                     comp["replaces_form"] = True
+        if name in EFFECT_AURAS:
+            entry["auras"] = {a: gd.names[a] for a in EFFECT_AURAS[name] if a in gd.names}
+            if not entry["auras"]:
+                problems.append(f"{name}: none of its effect auras {EFFECT_AURAS[name]} is in the game data")
+        need = BUTTON_NEEDS.get(name)
+        if need and need in gd.names:
+            # A defensive only for players with this talent: the button alone doesn't count.
+            entries = sorted(mods.entries_for_spell.get(need, ()))
+            if not entries:
+                problems.append(f"{name}: {gd.names[need]} ({need}) is in no talent tree")
+            entry["needs"] = {"talent": gd.names[need], "entries": entries}
+        if name in EXTENDED_BY:
+            talent, via, by = EXTENDED_BY[name]
+            who, tsid = talent_who(gd, mods, talent)
+            ms = gd.value(tsid, 0) if tsid else None
+            if who and not (ms and re.search(rf"\?s{via}\[{re.escape(name)}\]", desc.get(tsid) or "")):
+                problems.append(f"{name}: {talent}'s tooltip no longer extends it: review EXTENDED_BY")
+            elif who:
+                fam = gd.family.get(sid, (None,))[0]
+                casts = sorted(s for s, n in gd.names.items() if n in by and s not in gd.passive
+                               and gd.family.get(s, (None,))[0] == fam and (gd.cooldowns.get(s) or gd.charge_cat.get(s)))
+                entry["extended_by"] = {**who, "ms": int(ms), "casts": casts}
+        if name in STACK_DECAY:
+            text = desc.get(sid) or ""
+            how = None
+            for pattern, key, effect in STACK_DECAY[name]:
+                mo = re.search(pattern, text)
+                if mo and effect is None:
+                    how = {key: int(mo.group(1)) * 1000}
+                elif mo:
+                    value = gd.value(sid, effect)
+                    how = {key: int(value)} if value else None
+                if mo:
+                    break
+            if how is None:
+                problems.append(f"{name}: its tooltip no longer says when its stacks drop: review STACK_DECAY")
+            for comp in entry["mitigation"] or ():
+                if comp.get("stacks") and how:
+                    comp.update(how)
         form = FORM_REQUIRED.get(name)
         if form and gd.shapeshift.get(sid):
             # Castable only in a form (Frenzied Regeneration: Bear Form), unless a talent lifts it.
@@ -1180,7 +1350,6 @@ def build_catalog(build):
             if hp_mods:
                 entry["mitigation"].append({"hp": 0.0, "mods": hp_mods})
     heal = {"talents": mods.healing_taken(), "auras": healing_taken_auras(gd, mods)}
-    desc = {int(r["ID"]): r["Description_lang"] for r in table("Spell", build)}
     reset_sources(gd, desc, catalog, problems)
     for talent in unreviewed_talents(gd, desc, catalog, mods):
         problems.append(f"talent {talent!r} names a defensive: review it (TALENT_EFFECTS / TALENTS_REVIEWED)")

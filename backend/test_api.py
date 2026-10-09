@@ -353,7 +353,7 @@ class AnalyzeFlowTests(unittest.TestCase):
                          dict(hit, timestamp=5_000, abilityGameID=9, amount=800, overkill=100, hitPoints=0,
                               resourceActor=2, isAoE=False)]}
         self._windows = windows
-        for cls, calls in (("Rogue", 2), ("Mage", 0)):
+        for cls, calls in (("Rogue", 2), ("Warrior", 0)):
             for c in (app_module.report_meta_cache, app_module.report_fights_cache, app_module.deaths_lru,
                       app_module.defensive_lru, app_module.recap_lru):
                 c._data.clear()
