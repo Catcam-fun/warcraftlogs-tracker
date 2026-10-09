@@ -919,9 +919,12 @@ STAGGER_LOOKBACK_MS = 10_500
 # (STAGGER_PURIFY, built by scripts/build_defensive_catalog.py): Purifying Brew 119582 clears 50% (Mantra of
 # Purity +10%; from Midnight at least 8% of max health); Quick Sip 388505 purifies 5% each time 3 s of Shuffle
 # are gained, in ONE event (Keg Smash's 5 s can cross two: 10%; Weavi, Quel'Danas p104: 0.1000 on 10 hits,
-# and 0.5500 = 1 - 0.5 x 0.9 with a brew); Tranquil Spirit 393357 clears 5%. Only Purifying Brew is a cast;
-# the others show only in the ticks, and so do the flat ones the replay can't size (Staggering Strikes,
-# Touch of Death).
+# and 0.5500 = 1 - 0.5 x 0.9 with a brew); Tranquil Spirit 393357 clears 5% for every Healing Sphere consumed
+# (and, in The War Within, every Expel Harm), several at once when Expel Harm or Spinning Crane Kick draws
+# them in (Atlai, Undermine p32: 0.0975, 0.1426, 0.2649 with 1, 2, 5 spheres and Expel Harm). The fits
+# don't read the player's talents: a Brewmaster without Tranquil Spirit is also allowed several 5% at once.
+# Only Purifying Brew is a cast; the others show only in the ticks, and so do the flat ones the replay can't
+# size (Staggering Strikes, Touch of Death).
 PURIFYING_BREW = 119582
 # A purify's share read from the ticks lands this close (real ones read within 0.0001: Undermine p24 0.5000,
 # Quel'Danas p104 0.0500, 0.1000, 0.5500), plus the ticks' rounding: each tick is a whole number, and the
@@ -1263,11 +1266,16 @@ def _tick_raw(tick):
 
 def _purify_keeps(purify):
     """What one stretch between two ticks can leave of the pool, from a patch's STAGGER_PURIFY:
-    (Purifying Brew's keep factors, its minimum as a share of max health or None, the passive purifies'
-    keep factors). Quick Sip purifies once per Shuffle gain, by 5% for every 3 s threshold the gain
-    crosses (a gain of g crosses up to (g + 3 - e) // 3 of them, with the seconds left over before it);
-    within one stretch (under 0.5 s, less than a global cooldown) at most one gain, and a Healing Sphere's
-    Tranquil Spirit on top. Purifying Brew with or without each talent that adds to it."""
+    (Purifying Brew's keep factors, its minimum as a share of max health or None, one Quick Sip event's
+    keep factors, Tranquil Spirit's keep factor or None). Quick Sip purifies once per Shuffle gain, by 5%
+    for every 3 s threshold the gain crosses (a gain of g crosses up to (g + 3 - e) // 3 of them, with the
+    seconds left over before it); within one stretch (under 0.5 s, less than a global cooldown) at most
+    one gain that crosses two (one Keg Smash; Press the Advantage's bonus strike, The War Within only,
+    "can trigger effects on behalf of Tiger Palm", which grants no Shuffle). Tranquil
+    Spirit clears 5% for every Healing Sphere consumed (and, in The War Within, every Expel Harm), and
+    Expel Harm or Spinning Crane Kick draws several in at once: any number of them can share a stretch
+    (Atlai, Undermine: Expel Harm with 5 spheres read 1 - 0.95^6). Purifying Brew with or without each
+    talent that adds to it."""
     from itertools import combinations
     brew = purify["brew"]
     adds = [m["add"] for m in brew.get("mods", ())]
@@ -1279,28 +1287,48 @@ def _purify_keeps(purify):
         most = max(int((g + sip["per_s"] - 1e-6) // sip["per_s"]) for g in purify["shuffle_s"].values())
         sips += [round(1 - sip["share"] * k, 6) for k in range(1, most + 1)]
     spirit = purify.get("tranquil_spirit")
-    spirits = [1.0] + ([round(1 - spirit["share"], 6)] if spirit else [])
-    passive = sorted({round(x * y, 6) for x in sips for y in spirits} - {1.0})
-    return brews, brew.get("min_max_health"), passive
+    return brews, brew.get("min_max_health"), sorted(set(sips)), round(1 - spirit["share"], 6) if spirit else None
+
+
+# The least a stretch's passive purifies are taken to leave of the pool (58 Tranquil Spirits at once).
+PASSIVE_FLOOR = 0.05
+
+
+def _passive_keeps(sips, spirit, low):
+    """Every keep factor one stretch's passive purifies can give, at least `low`: (factor, the factors
+    a Purifying Brew could have come after: any part of them, in any order)."""
+    out = []
+    for e in sips:
+        n = 0
+        while True:
+            f = e * spirit ** n if spirit else e
+            if f < low or (n and not spirit):
+                break
+            parts = {round((e if take else 1.0) * (spirit ** m if spirit else 1.0), 9)
+                     for take in ({True, False} if e != 1.0 else {False}) for m in range(n + 1)}
+            out.append((f, sorted(parts)))
+            n += 1
+    return out
 
 
 def _purify_fits(p_from, p_to, keeps, max_hp, brew):
     """Does the pool going from p_from to p_to between two ticks fit the purifies the game has?
     `brew`: True (a Purifying Brew cast in that stretch), False (none) or None (casts not read)."""
-    brews, minimum, passive = keeps
+    brews, minimum, sips, spirit = keeps
     slack = PURIFY_MATCH * p_from + STAGGER_TICKS
-    for f in [1.0] + passive:
+    low = max((p_to - slack) / p_from if p_from else 0, PASSIVE_FLOOR)
+    for f, parts in _passive_keeps(sips, spirit, low):
         if brew is not True and f != 1.0 and abs(p_from * f - p_to) <= slack:
             return True
         if brew is False:
             continue
         for keep in brews:
-            for first in (True, False):          # the brew before or after the passive one
-                x = p_from if first else p_from * f
+            for g in parts:                      # the brew after this part of the passive ones
+                x = p_from * g
                 cut = (1 - keep) * x
                 if minimum and max_hp:
                     cut = max(cut, minimum * max_hp)
-                x = max(x - cut, 0) * (f if first else 1.0)
+                x = max(x - cut, 0) * f / g
                 if abs(x - p_to) <= slack:
                     return True
     return False
