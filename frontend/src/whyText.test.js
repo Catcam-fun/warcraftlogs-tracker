@@ -14,3 +14,8 @@ test("armor that reduces the hit, but whose size isn't known, says what is missi
   expect(whyText({ why: 'armorValueUnknown', missing: 'constant', whyHit: 'Cleave' }, 'Melee'))
     .toBe("the boss's armor constant isn't known, so what more armor would take off Cleave can't be worked out");
 });
+
+test("a Healthstone that only Soulburn would make enough says the shards aren't known", () => {
+  expect(whyText({ why: 'soulburnUnknown' }, 'Frost Bolt'))
+    .toBe("only with Soulburn first, and the log doesn't show whether they had a Soul Shard for it");
+});

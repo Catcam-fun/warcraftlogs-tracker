@@ -461,8 +461,15 @@ class HealthstoneSoulburnTests(unittest.TestCase):
                 self.assertEqual([(m["talent"], m["add"]) for m in hp[0]["mods"]], [("Gorebound Fortitude", 0.2)])
                 self.assertEqual(hp[0]["dur_ms"], 12_000, (patch, name))
                 heal = next(c for c in comps if "heal" in c)
-                self.assertIn(("Gorebound Fortitude", 1.3),
-                              [(m["talent"], m.get("mult")) for m in heal["mods"]], (patch, name))
+                # Adds 30% of max health to the share (measured: 0.30 -> 0.60), not x1.3.
+                self.assertIn(("Gorebound Fortitude", 0.3),
+                              [(m["talent"], m.get("add")) for m in heal["mods"]], (patch, name))
+                self.assertNotIn("Gorebound Fortitude", [m["talent"] for m in heal["mods"] if "mult" in m])
+                # What a Soulburn cast first adds, credited only when the log shows it was possible.
+                self.assertEqual(entry(patch, name)["soulburn"], {
+                    "talent": "Soulburn", "entries": [91469, 116016], "spell": 385899, "buff": 387626,
+                    "buff_ms": 20_000, "cooldown_ms": 6_000, "cost": 10, "heal": 0.3, "hp": 0.2,
+                    "dur_ms": 12_000}, (patch, name))
 
     def test_soulburn_alone_adds_no_health(self):
         hs = entry("12.1.0", "Healthstone")
