@@ -118,6 +118,17 @@ def _report(data):
     return (data.get("reportData") or {}).get("report") or {}
 
 
+def fetch_meta(token, rid, fetch=None, tries=2):
+    """get_fights for one report. get_fights hides a failed fetch as a report with no fights, which
+    would make every check skip or misjudge, so an empty answer is retried once and then raised."""
+    fetch = fetch or get_fights
+    for _ in range(tries):
+        meta = fetch(token, rid)
+        if meta.get("fights"):
+            return meta
+    raise RuntimeError(f"WCL returned no fights for report {rid} (fetch failed or empty report)")
+
+
 class Run:
     """One target's shared state. Nothing is fetched until a property or method needs it."""
 
@@ -149,7 +160,7 @@ class Run:
         return self.meta_for(self.code)
 
     def meta_for(self, rid):
-        return self._memo(("meta", rid), lambda: get_fights(self.token, rid))
+        return self._memo(("meta", rid), lambda: fetch_meta(self.token, rid))
 
     @property
     def pulls(self):

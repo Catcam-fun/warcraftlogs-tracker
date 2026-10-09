@@ -1794,5 +1794,21 @@ class FindLogsTests(unittest.TestCase):
             self.assertIsNone(good_log("t", "manaforge", cand, now_ms=10**12))
 
 
+class FetchMetaTests(unittest.TestCase):
+    def test_empty_fetch_is_retried_then_raised(self):
+        from checks.common import fetch_meta
+        calls = []
+        empty = lambda tok, rid: calls.append(rid) or {"fights": []}
+        with self.assertRaises(RuntimeError):
+            fetch_meta("t", "ABC", fetch=empty)
+        self.assertEqual(calls, ["ABC", "ABC"])
+
+    def test_retry_recovers_a_transient_failure(self):
+        from checks.common import fetch_meta
+        answers = [{"fights": []}, {"fights": [{"id": 1}]}]
+        meta = fetch_meta("t", "ABC", fetch=lambda tok, rid: answers.pop(0))
+        self.assertEqual(meta["fights"], [{"id": 1}])
+
+
 if __name__ == "__main__":
     unittest.main()
