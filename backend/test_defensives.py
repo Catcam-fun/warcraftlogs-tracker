@@ -116,6 +116,39 @@ class DefensiveAnalysisTests(unittest.TestCase):
         self.assertFalse(a["talentsKnown"])
         self.assertNotIn("auraMs", a)
 
+    def test_a_totems_external_has_no_caster_to_read(self):
+        # Spirit Link Totem's aura names the totem (an NPC), not the Shaman: its caster isn't known, and the
+        # tooltip says so instead of claiming a player's talents are unknown.
+        totem = 98008
+        names_map = {sid: d["name"] for sid, d in CATALOG.items()}
+        indexed = {"casts": {}, "talents": {(7, 1): set()}, "buffs": {1: [(95_000, "applybuff", totem, 77)]}}
+        kb = [{"timestamp": 100_000, "type": "damage", "targetID": 1, "amount": 1, "overkill": 1, "buffs": f"{totem}."}]
+        r = defensives.analyze_death(1, "Mage", "Frost", 7, 0, 100_000, indexed, names_map, {5: "Shammy"}, hits=kb)
+        a = next(x for x in r["active"] if x["name"] == "Spirit Link Totem")
+        self.assertEqual((a["by"], a["talentsKnown"], a.get("casterUnknown")), (None, False, True))
+        # A self-cast external (Pain Suppression on themselves) reads their own loadout: no caster flag.
+        ps = 33206
+        indexed = {"casts": {}, "talents": {(7, 1): set()}, "buffs": {1: [(95_000, "applybuff", ps, 1)]}}
+        kb[0]["buffs"] = f"{ps}."
+        r = defensives.analyze_death(1, "Priest", "Discipline", 7, 0, 100_000, indexed, names_map, {}, hits=kb)
+        a = next(x for x in r["active"] if x["name"] == "Pain Suppression")
+        self.assertEqual((a["kind"], a["by"], a["talentsKnown"]), ("external", None, True))
+        self.assertNotIn("casterUnknown", a)
+
+    def test_an_unknown_spec_is_said_when_a_spec_passive_would_change_it(self):
+        # The caster's talents are in the log but not their spec: a spec passive that would change the
+        # entry isn't in the numbers, so the tooltip says the spec is unknown. Whole milliseconds always.
+        entry = {"name": "X", "kind": "external", "aura_ms": 8000, "cooldown_ms": 60_000, "charges": 1,
+                 "mitigation": None,
+                 "duration_mods": [{"talent": "Long Shield", "specs": ["Holy"], "mult": 1.15}]}
+        self.assertEqual(defensives._active_detail(entry, (set(), None), {}),
+                         {"talentsKnown": True, "auraMs": 8000, "cooldownMs": 60_000, "charges": 1, "specKnown": False})
+        a = defensives._active_detail(entry, (set(), "Holy"), {})
+        self.assertEqual(a["auraMs"], 9200)
+        self.assertNotIn("specKnown", a)
+        entry["duration_mods"] = [{"talent": "Odd", "entries": [1], "mult": 1.0001}]
+        self.assertEqual(defensives._active_detail(entry, ({1: 1}, None), {})["auraMs"], 8001)
+
     def test_missing_aura_removal_is_capped_by_duration(self):
         # The log never recorded Ice Block (10s) ending; 60s later it isn't still up.
         indexed = {"casts": {1: [(40_000, ICE_BLOCK)]}, "talents": {(7, 1): entries(ICE_BLOCK)},
@@ -183,7 +216,9 @@ class DefensiveAnalysisTests(unittest.TestCase):
     def test_external_on_killing_blow(self):
         r = run("Mage", "Frost", talents=set(), auras=[999], ability_names={999: "Pain Suppression"})
         ext = [a for a in r["active"] if a["kind"] == "external"]
-        self.assertEqual(ext, [{"name": "Pain Suppression", "kind": "external", "by": None, "talentsKnown": False}])
+        # No aura event names the caster: unknown, and said so.
+        self.assertEqual(ext, [{"name": "Pain Suppression", "kind": "external", "by": None, "talentsKnown": False,
+                                "casterUnknown": True}])
 
     def test_consumables_this_pull_only(self):
         r = run("Mage", "Frost", talents=set(),
@@ -1865,15 +1900,75 @@ class StaggerPoolTests(unittest.TestCase):
         self.assertEqual(pools[id(second)], [1_700_000])
 
     @staticmethod
-    def pools(tick, second_amount, casts=None, purify=None, tick_before=200_000, first=4_000_000):
+    def pools(tick, second_amount, casts=None, purify=None, tick_before=200_000, first=4_000_000, talents=None):
         """The pool estimates before a second staggered hit at 2 s: the first (at 0) staggered `first`,
-        three ticks of `tick_before` (the pool then: 17 x tick_before), and `tick` the tick after it."""
+        three ticks of `tick_before` (the pool then: 17 x tick_before), and `tick` the tick after it.
+        `casts`: times of Purifying Brew casts, or (time, spell) for other buttons."""
         ticks = [pool_tick(500, tick_before, 0), pool_tick(1_000, tick_before, 0),
                  pool_tick(1_500, tick_before, 0), pool_tick(2_500, tick, 0)]
         ins = [staggered(0, first), staggered(2_000, second_amount)]
-        cast = lambda t: {"timestamp": t, "type": "cast", "abilityGameID": defensives.PURIFYING_BREW}
-        out = defensives._stagger_pools(ticks, ins, None if casts is None else [cast(t) for t in casts], purify)
+        cast = lambda t: {"timestamp": t[0] if isinstance(t, tuple) else t, "type": "cast",
+                          "abilityGameID": t[1] if isinstance(t, tuple) else defensives.PURIFYING_BREW}
+        out = defensives._stagger_pools(ticks, ins, None if casts is None else [cast(t) for t in casts], purify,
+                                        talents)
         return out[id(ins[1])]
+
+    # Trait node entries in The War Within (11.1.0's STAGGER_PURIFY).
+    QUICK_SIP, TRANQUIL_SPIRIT, MANTRA, STAGGERING_STRIKES = 124837, 124860, 125042, 124839
+    P11 = defensives.STAGGER_PURIFY["11.1.0"]
+
+    def test_the_fits_read_the_players_talents(self):
+        # Quick Sip and Tranquil Spirit are talents: without them a Brewmaster never purifies a share between
+        # ticks but with the brew. With the loadout known the brew clears only its own share; without a
+        # loadout in the log every talent is allowed.
+        purify = defensives.STAGGER_PURIFY["11.1.0"]
+        keeps = lambda talents: defensives._purify_keeps(purify, talents)
+        self.assertEqual(keeps({}), ([0.5], None, [1.0], None, 0))
+        self.assertEqual(keeps({self.QUICK_SIP: 1}), ([0.5], None, [0.9, 0.95, 1.0], None, 0))
+        self.assertEqual(keeps({self.TRANQUIL_SPIRIT: 1, self.MANTRA: 1}), ([0.4], None, [1.0], 0.95, 8))
+        self.assertEqual(keeps(None), ([0.4, 0.5], None, [0.9, 0.95, 1.0], 0.95, 8))
+        # A sphere's 5% fits only with Tranquil Spirit (Weavi, Quel'Danas p104, and Obimonk have Quick Sip only).
+        fits = lambda to, talents: defensives._purify_fits(1_000_000, to, keeps(talents), None, False)
+        self.assertTrue(fits(950_000, {self.TRANQUIL_SPIRIT: 1}))
+        self.assertTrue(fits(950_000, {self.QUICK_SIP: 1}))            # a Quick Sip of 5%
+        self.assertFalse(fits(902_500, {self.QUICK_SIP: 1}))           # two 5%: a sphere and a Quick Sip
+        self.assertFalse(fits(950_000, {}))
+        # Pool 3.4M, 600k staggered, the tick after 191.5k: 0.05 before the hit, 0.0425 after it: a 5% before
+        # it fits only for a player with Quick Sip or Tranquil Spirit; without either, both readings stay.
+        self.assertEqual(self.pools(191_500, 600_000, casts=[], purify=self.P11, talents={self.QUICK_SIP: 1}), [3_230_000])
+        self.assertEqual(self.pools(191_500, 600_000, casts=[], purify=self.P11, talents={}), [3_400_000, 3_230_000])
+
+    def test_one_stretch_has_at_most_seven_spheres_and_expel_harm(self):
+        # The most spheres read in 500 ms over 33 pulls is 7, and The War Within's Expel Harm adds one: one
+        # Quick Sip event and 8 Tranquil Spirits leave 0.9 x 0.95^8 at the least; Midnight's Expel Harm
+        # doesn't count. A share the passives could reach only with more (0.95^42: Weavi, Undermine p24, read
+        # 2,144,052 -> 5 next to Touch of Death) fits nothing.
+        for patch, most in (("11.1.0", 8), ("12.0.7", 7)):
+            keeps = defensives._purify_keeps(defensives.STAGGER_PURIFY[patch])
+            fits = lambda to: defensives._purify_fits(10_000_000, to, keeps, None, False)
+            self.assertTrue(fits(round(10_000_000 * 0.9 * 0.95 ** most)), patch)
+            self.assertFalse(fits(round(10_000_000 * 0.9 * 0.95 ** (most + 1))), patch)
+            self.assertFalse(fits(round(10_000_000 * 0.95 ** 42)), patch)
+        # Pool 3.4M, 600k staggered, the tick after 71.7k: 1.434M. Read after the hit 0.3585 = 1 - 0.95^20
+        # (20 spheres), read before it 0.755: neither is a purify the game has, so both readings stay.
+        self.assertEqual(self.pools(71_700, 600_000, casts=[], purify=self.P11), [3_400_000, 834_000])
+
+    def test_a_flat_purify_fits_any_change_on_its_side(self):
+        # Weavi, Undermine p24: Touch of Death (322109; 325095: every Brewmaster's purifies a flat amount)
+        # 165 ms before a staggered hit; the tick before said 2,144,052, the tick after 5. He has neither Quick
+        # Sip nor Tranquil Spirit, so nothing after the hit fits: the purify was Touch of Death, before it.
+        # Here: pool 3.4M, 1M staggered, the tick after 50k: 0 left before the hit.
+        self.assertEqual(self.pools(50_000, 1_000_000, casts=[(1_835, 322109)], purify=self.P11, talents={}), [0])
+        # Without the cast nothing fits either side: both readings.
+        self.assertEqual(self.pools(50_000, 1_000_000, casts=[], purify=self.P11, talents={}), [3_400_000, 0])
+        # Touch of Death after the hit, and a Quick Sip of 5% that fits before it: both readings.
+        self.assertEqual(self.pools(191_500, 600_000, casts=[(2_100, 322109)], purify=self.P11, talents={self.QUICK_SIP: 1}),
+                         [3_400_000, 3_230_000])
+        # Staggering Strikes purifies on Blackout Kick (205523) only for players with the talent.
+        bok = [(1_835, 205523)]
+        self.assertEqual(self.pools(50_000, 1_000_000, casts=bok, purify=self.P11, talents={}), [3_400_000, 0])
+        self.assertEqual(self.pools(50_000, 1_000_000, casts=bok, purify=self.P11, talents={self.STAGGERING_STRIKES: 1}), [0])
+        self.assertEqual(self.pools(50_000, 1_000_000, casts=bok, purify=self.P11), [0])            # loadout unknown: maybe
 
     def test_a_purifying_brew_cast_says_which_side(self):
         # Pool 3.4M, 680k staggered, the tick after 102k: 20 x 102k - 680k = 1.36M. Read before the hit
@@ -1907,7 +2002,7 @@ class StaggerPoolTests(unittest.TestCase):
         # the game has (two separate 5% would be 0.0975).
         self.assertEqual(self.pools(154_891, 37_820), [3_060_000])
         keeps = defensives._purify_keeps(defensives.STAGGER_PURIFY["11.1.0"])
-        self.assertEqual(keeps[0], [0.4, 0.5])                       # Purifying Brew, with Mantra of Purity
+        self.assertEqual(keeps[0], [0.4, 0.5])                       # Purifying Brew, with Mantra of Purity or not
         self.assertEqual(keeps[2], [0.9, 0.95, 1.0])                 # one Quick Sip event: 10%, 5% or none
         self.assertEqual(keeps[3], 0.95)                             # each Tranquil Spirit
 
@@ -1915,9 +2010,9 @@ class StaggerPoolTests(unittest.TestCase):
         # Atlai (Undermine, AaM31gBWwFHmD7Rz pulls 32 and 38, ticks with no staggered hit between): a
         # sphere alone 0.0500, Expel Harm drawing 1 sphere 0.0975, 2 spheres 0.1426, 5 spheres 0.2649 =
         # 1 - 0.95^6 (The War Within: Expel Harm counts too), two spheres Spinning Crane Kick pulled in
-        # 0.0975, a sphere with a brew 0.5250. So any number of 5% purifies can share a stretch; a second
-        # 10% Quick Sip can't (one Keg Smash per stretch; Press the Advantage's bonus strike grants no
-        # Shuffle).
+        # 0.0975, a sphere with a brew 0.5250. So several 5% purifies can share a stretch (up to 7 spheres
+        # and Expel Harm); a second 10% Quick Sip can't (one Keg Smash per stretch; Press the Advantage's
+        # bonus strike grants no Shuffle).
         keeps = defensives._purify_keeps(defensives.STAGGER_PURIFY["11.1.0"])
         fits = lambda to, brew=False: defensives._purify_fits(1_000_000, to, keeps, 1_000_000, brew)
         self.assertTrue(fits(735_092))                  # 0.95^6: Expel Harm and 5 spheres
@@ -2008,21 +2103,71 @@ class ShuffleGrantTests(unittest.TestCase):
         import build_defensive_catalog as build
         return build
 
-    def purify(self, grants):
-        """stagger_purify on game data where each of `grants` {name: seconds} has a tooltip granting it."""
+    def purify(self, grants, extra_desc=None, spirit_text=None, drop=()):
+        """stagger_purify on game data where each of `grants` {name: seconds} has a tooltip granting it,
+        Quick Sip, Tranquil Spirit and Staggering Strikes are talents and Touch of Death's 325095 is a
+        Brewmaster spell (as in every patch); `extra_desc` {spell: (name, tooltip, a talent?)} adds Monk
+        spells; `drop`: spells left out of the data."""
         build = self.build()
         values = {(build.PURIFYING_BREW, 0): 50.0, (build.QUICK_SIP, 0): 5.0, (build.QUICK_SIP, 1): 3.0,
                   (build.TRANQUIL_SPIRIT, 0): 5.0}
-        names, desc, family = {}, {}, {}
+        monk = (build.MONK_FAMILY, [0] * 4)
+        names = {build.QUICK_SIP: "Quick Sip", build.TRANQUIL_SPIRIT: "Tranquil Spirit", 387625: "Staggering Strikes",
+                 205523: "Blackout Kick", 325095: "Touch of Death", 322109: "Touch of Death"}
+        desc = {build.TRANQUIL_SPIRIT: spirit_text or "When you consume a Healing Sphere or cast Expel Harm, your "
+                                                      "current Stagger amount is lowered by $s1%.",
+                387625: "When you Blackout Kick, your Stagger is reduced by $<reduc>.",
+                325095: "Touch of Death reduces delayed Stagger damage by $s1% of damage dealt."}
+        family = {sid: monk for sid in names}
+        entries = {build.QUICK_SIP: {1}, build.TRANQUIL_SPIRIT: {2}, 387625: {3}}
+        spec_spells = {325095: {"Brewmaster"}}
+        for sid, (name, text, talent) in (extra_desc or {}).items():
+            names[sid], desc[sid], family[sid] = name, text, monk
+            if talent:
+                entries[sid] = {4}
         for k, (name, seconds) in enumerate(grants.items()):
             sid = 900_000 + k
-            names[sid], desc[sid], family[sid] = name, "Strike, granting Shuffle for $s2 sec.", (build.MONK_FAMILY, [0] * 4)
+            names[sid], desc[sid], family[sid] = name, "Strike, granting Shuffle for $s2 sec.", monk
             values[(sid, 1)] = seconds
-        gd = types.SimpleNamespace(names=names, family=family, value=lambda s, i: values.get((s, i)))
-        mods = types.SimpleNamespace(effect=lambda *a: [])
+        for sid in drop:
+            names.pop(sid, None)
+            desc.pop(sid, None)
+        gd = types.SimpleNamespace(names=names, family=family, value=lambda s, i: values.get((s, i)),
+                                   spec_spells=spec_spells)
+        mods = build.Modifiers.__new__(build.Modifiers)
+        mods.gd, mods.entries_for_spell, mods.effect = gd, entries, lambda *a: []
         problems = []
         out = build.stagger_purify(gd, mods, desc, problems)
         return out, problems
+
+    def test_who_has_each_purify(self):
+        # Quick Sip and Tranquil Spirit are talents: their entries go in the catalog, so the fits read the
+        # player's loadout. Tranquil Spirit counts Expel Harm where its tooltip says so (The War Within).
+        # The flat purifies: Touch of Death (325095, every Brewmaster) and Staggering Strikes (a talent, on
+        # a Brewmaster's Blackout Kick 205523).
+        out, problems = self.purify({"Keg Smash": 5.0, "Blackout Kick": 3.0, "Spinning Crane Kick": 1.0})
+        self.assertEqual(problems, [])
+        self.assertEqual(out["quick_sip"]["entries"], [1])
+        self.assertEqual(out["tranquil_spirit"], {"share": 0.05, "entries": [2], "expel_harm": True})
+        self.assertEqual(out["flat"], [{"name": "Staggering Strikes", "casts": [205523], "entries": [3]},
+                                       {"name": "Touch of Death", "casts": [322109]}])
+        midnight, _ = self.purify({"Keg Smash": 5.0, "Blackout Kick": 3.0, "Spinning Crane Kick": 1.0},
+                                  spirit_text="When you consume a Healing Sphere, you clear $s1% of your Stagger.")
+        self.assertFalse(midnight["tranquil_spirit"]["expel_harm"])
+
+    def test_a_purify_the_fits_were_not_reviewed_for_fails_the_build(self):
+        grants = {"Keg Smash": 5.0, "Blackout Kick": 3.0, "Spinning Crane Kick": 1.0}
+        _, problems = self.purify(grants, extra_desc={999_001: ("Iron Gut", "Clears 20% of your Stagger.", True)})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("Iron Gut", problems[0])
+        # The reviewed ones that take nothing off between ticks pass.
+        _, problems = self.purify(grants, extra_desc={383700: ("Gai Plin's Imperial Brew", "Purifying Brew "
+                                                               "instantly heals you for 25% of the purified Stagger damage.", True)})
+        self.assertEqual(problems, [])
+        # A flat purify gone from the data fails too.
+        _, problems = self.purify(grants, drop=(387625,))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("Staggering Strikes", problems[0])
 
     def test_the_three_reviewed_grants_pass(self):
         out, problems = self.purify({"Keg Smash": 5.0, "Blackout Kick": 3.0, "Spinning Crane Kick": 1.0})
