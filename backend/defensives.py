@@ -936,10 +936,11 @@ def _events_query(blocks, resources=True):
     return "query($c: String!) { reportData { report(code: $c) { " + " ".join(parts) + " } } }"
 
 
-def _fetch_blocks(token, report_code, blocks, keep=None, resources=True):
+def _fetch_blocks(token, report_code, blocks, keep=None, resources=True, stop=None):
     """All events of several blocks, fetched together; blocks that don't fit one page are followed up.
     `keep(event)`, if given, picks the events kept as each block's page arrives, so the
-    others aren't held in memory while the rest download.
+    others aren't held in memory while the rest download. `stop(out)`, if given, ends the
+    following-up as soon as it is true of what was kept so far.
 
     Always with an endTime: WCL returns an empty second page for a block scoped
     by fightIDs without one (verified on a live log).
@@ -964,6 +965,8 @@ def _fetch_blocks(token, report_code, blocks, keep=None, resources=True):
                 if block.get("nextPageTimestamp"):
                     nxt[alias] = (spec[0], block["nextPageTimestamp"]) + tuple(spec[2:])
         pending = nxt
+        if stop is not None and stop(out):
+            break
     return out
 
 
@@ -1124,15 +1127,21 @@ def aoe_classes(cat):
 
 
 def fetch_aoe_abilities(token, report_code, fight_ids, start_time, end_time, ability_ids):
-    """Which of `ability_ids` hit anyone as area damage in the report's pulls (aoe_undecided): one block
-    of WCL's DamageTaken for those abilities, keeping only the hits marked AoE. Fetched only when a death
-    that can count, of a class with an AoE-only effect, has a hit the windows can't tell. Measured on a
-    warm report (AaM31gBWwFHmD7Rz, 26 pulls): 2 abilities, 3,366 events, 1 page: 3.4 points; 6 abilities,
-    26,149 events, 5 pages: 5.0 points (the first query on a cold report: 19)."""
-    flt = f"ability.id in ({', '.join(str(a) for a in sorted(ability_ids))})"
+    """(AoE, decided): which of `ability_ids` (aoe_undecided) are AoE, and which the report's pulls could
+    tell at all. One block of WCL's DamageTaken for those abilities; only hits that dealt damage carry
+    WCL's mark, so an ability is decided by its first such hit, and one that never dealt damage in the
+    report stays unknown (not single-target). Pages stop once every ability is decided. Fetched only
+    when a death that can count, of a class with an AoE-only effect, has a hit the windows can't tell.
+    Measured on a warm report (AaM31gBWwFHmD7Rz, 26 pulls): 2 abilities, 3,366 events, 1 page: 3.4
+    points; 6 abilities, 26,149 events, 5 pages: 5.0 points (the first query on a cold report: 19)."""
+    need = set(ability_ids)
+    flt = f"ability.id in ({', '.join(str(a) for a in sorted(need))})"
     blocks = {"a": (list(fight_ids), start_time, end_time + 1, "DamageTaken", flt)}
-    got = _fetch_blocks(token, report_code, blocks, keep=lambda e: e.get("isAoE"), resources=False)["a"]
-    return {e.get("abilityGameID") for e in got}
+    got = _fetch_blocks(token, report_code, blocks, resources=False,
+                        keep=lambda e: e.get("type") == "damage" and bool(e.get("amount")),
+                        stop=lambda out: need <= {e.get("abilityGameID") for e in out["a"]})["a"]
+    return ({e.get("abilityGameID") for e in got if e.get("isAoE")} & need,
+            {e.get("abilityGameID") for e in got} & need)
 
 
 def index_hits(events):
@@ -2261,9 +2270,10 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     tag = {"armorK": armor_k, "formArmor": form_armor, **({} if aoe_known else {"aoeKnown": False})}
 
     def aoe(h):
-        # An ability is AoE in the report when any hit of it is (aoe_abilities): WCL marks only hits
-        # that dealt damage, and the game counts a hit absorbed whole as AoE all the same.
-        if not aoe_known or aoe_abilities is None:
+        # WCL marks only hits that dealt damage: such a hit keeps its own mark, and a hit that dealt
+        # none (absorbed whole) takes its ability's status in the report (aoe_abilities), which the
+        # game gives it; unknown when the report couldn't tell (aoe_unknown).
+        if not aoe_known or aoe_abilities is None or h.get("amount"):
             return {}
         a = h.get("abilityGameID")
         if h.get("isAoE") or a in aoe_abilities:
