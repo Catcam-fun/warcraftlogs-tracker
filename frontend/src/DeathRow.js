@@ -123,7 +123,7 @@ function whyText(d, hitName) {
     case 'pierces': return `${hitName} goes through immunities`;
     case 'noReduction': return 'Nothing reduced this hit, so damage reduction doesn\'t work on it';
     case 'notBranded': return `${hitName} didn't come from an enemy it could brand`;
-    case 'stagger': return 'Stagger ticks are damage already reduced when it was staggered, so damage reduction doesn\'t work on them';
+    case 'stagger': return 'a reduction does nothing to a Stagger tick as it lands, and it couldn\'t have been up for the hits that filled the pool';
     case 'fullHealth': return 'They were at full health, so a heal can\'t help';
     case 'aoeUnknown': return 'This log doesn\'t mark area damage, so this can\'t be checked';
     case 'instakill': return 'it was an instant kill, with no damage to reduce, absorb or heal';
@@ -306,7 +306,9 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
       )}
       {instakill && <div className="note warn">Instant kill: the game killed them outright, with no damage to reduce, absorb or heal. Only avoiding the mechanic prevents it.</div>}
       {s?.ignoresImmunity && <div className="note warn">Goes through immunities (Ice Block, Divine Shield…)</div>}
-      {s?.ignoresReduction && <div className="note warn">Ignores damage reduction (shields and heals still work)</div>}
+      {s?.staggerTick
+        ? <div className="note warn">A Stagger tick: a reduction does nothing to it as it lands, but one pressed before the hits that filled the pool would have made it smaller (shields and heals still work)</div>
+        : s?.ignoresReduction && <div className="note warn">Ignores damage reduction (shields and heals still work)</div>}
       {notLogged && <p>WarcraftLogs recorded no hit or instant kill for this death, so what killed them isn't known and defensives can't be checked against it.</p>}
       {!s && current && !notLogged && <p>No hit with health data was recorded for this death, so defensives can't be checked against it.</p>}
       {(kills > 0 && !notLogged) || (s?.window && !instakill) ? (
