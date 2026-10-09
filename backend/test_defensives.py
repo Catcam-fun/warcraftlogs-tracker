@@ -847,6 +847,39 @@ class LethalWindowTests(unittest.TestCase):
         # 55s is in A's window; 80s and 120s are between deaths (not kept).
         self.assertEqual([h["timestamp"] for h in hits[1]], [55_000, 55_000])
 
+    def test_window_request_reads_the_heals_a_killing_hit_sets_off(self):
+        # One more block over all the pulls (All stream) on the players who died: only the killing-hit heals
+        # (features.KILLING_HIT_HEALS) and their absorbs, and stacking max-health auras' stack changes.
+        queries = []
+
+        def fake(token, q, v):
+            queries.append(q)
+            dmg = {"timestamp": 59_990, "type": "damage", "targetID": 1, "amount": 5, "overkill": 1,
+                   "hitPoints": 0, "maxHitPoints": 10, "resourceActor": 2}
+            heal = {"timestamp": 59_989, "type": "heal", "targetID": 1, "abilityGameID": 404381, "amount": 3,
+                    "sourceID": 9, "overheal": 0}
+            late = dict(heal, timestamp=200_000)
+            report = {a: {"data": [dmg]} for a in __import__("re").findall(r"(p\d+): events", q)}
+            stack = {"timestamp": 59_000, "type": "removebuffstack", "targetID": 1, "abilityGameID": 389539,
+                     "stack": 4, "sourceID": 1}
+            report["extras"] = {"data": [heal, late, stack]}
+            return {"reportData": {"report": report}}
+        with __import__("unittest.mock").mock.patch.object(defensives, "graphql_query", side_effect=fake):
+            hits = defensives.fetch_death_windows("t", "R", [(3, [(60_000, "A")])])
+        self.assertEqual(len(queries), 1)
+        self.assertIn("extras: events(fightIDs: [3]", queries[0])
+        self.assertIn("dataType: All", queries[0])
+        self.assertIn("389539", queries[0])                 # Sentinel's stacks
+        self.assertIn("404381", queries[0])
+        self.assertIn("209258", queries[0])
+        self.assertEqual([(h["type"], h["timestamp"]) for h in hits[1]],
+                         [("removebuffstack", 59_000), ("heal", 59_989), ("damage", 59_990)])
+        self.assertEqual(hits[1][0]["stack"], 4)
+        self.assertNotIn("overheal", hits[1][0])
+        with __import__("unittest.mock").mock.patch.object(defensives, "graphql_query", side_effect=fake):
+            self.assertEqual([h["type"] for h in defensives.fetch_death_windows("t", "R", [(3, [(60_000, "A")])],
+                                                                                 heals=False)[1]], ["damage"])
+
     def test_identical_hits_at_the_same_moment_all_count(self):
         # Two droplets soaked in the same millisecond for the same amount are two hits.
         same = [hit(99_978, 301_233, 698_767), hit(99_978, 301_233, 397_534)]      # from full health
@@ -1213,30 +1246,70 @@ class MaxHealthBeforeKillingBlowTests(unittest.TestCase):
         hits[-1]["buffs"] = "187827."
         r = self.assess(hits, aura_size=self.sizer("DemonHunter", "Vengeance", names=names))
         self.assertEqual(r["maxHp"], 1_400_000)
-        cat = defensives._LATEST
-        events = [(1, "applybuff", 162264, 1, 0), (2, "removebuff", 162264, 1, 0)]
-        self.assertEqual(defensives._max_health_bands(events, cat, names, {}, "Havoc", "DemonHunter"), [])
-        events = [(1, "applybuff", 187827, 1, 0), (2, "removebuff", 187827, 1, 0)]
-        self.assertEqual(defensives._max_health_bands(events, cat, names, {}, "Vengeance", "DemonHunter"),
-                         [(1, 2, 187827, 0.4)])
-        self.assertEqual(defensives._max_health_bands(events, cat, names, {}, "Vengeance", "Warrior"), [])
 
-    def test_an_aura_the_killing_hit_set_off_is_not_health_before_it(self):
+    @staticmethod
+    def healed(ts, amount, ability, kind="heal"):
+        return {"timestamp": ts, "type": kind, "targetID": 1, "abilityGameID": ability, "amount": amount}
+
+    def test_what_the_killing_hit_healed_is_not_health_before_it(self):
         # Live (Soulcleavi, manaforge p54): at 18995479 / 29370419 when Oblivion landed; Last Resort
-        # absorbed part of it and put him in Metamorphosis (applied 8002680), which healed 11748168
-        # (40% of 29370419); the death removed it (8002683) and the hit was logged at 8002696 with
-        # 30743644 taken. Health before the blow is what he had when it landed: 65%.
+        # (209258) absorbed part of it and put him in Metamorphosis, which healed 11748168 (187827) in the
+        # same moment; the hit was logged at 8002696 with 30743644 taken. Health before the blow: 65%.
         hits = [self.at(8_000_138, 900_304, 15_378_866, 29_370_419),
                 dict(hit(8_001_031, 0, 0), resourceActor=None, maxHitPoints=None, hitPoints=None),
+                self.healed(8_002_681, 58_740_838, 209258, "absorbed"), self.healed(8_002_681, 11_748_168, 187827),
                 self.at(8_002_696, 30_743_644, 0, 29_370_419, overkill=39_340_044, absorbed=58_740_840)]
-        bands = [(8_002_680, 8_002_683, 187827, 0.4)]
-        r = self.assess(hits, max_health_auras=bands)
+        r = self.assess(hits)
         self.assertEqual((r["maxHp"], r["hpBeforePct"]), (29_370_419, 65))
-        # A band that came up with the hit before it (Defy Fate-like, same millisecond) is not the killing hit's.
-        hits[1]["timestamp"] = 8_002_680
-        self.assertEqual(self.assess(hits, max_health_auras=bands)["hpBeforePct"], 100)
-        # More than DEATH_STRIP_MS before the killing hit: not set off by it.
-        self.assertEqual(defensives.DEATH_STRIP_MS, 50)
+        # A Metamorphosis heal without Last Resort's absorb with it is an ordinary press: not the blow's.
+        self.assertEqual(self.assess([h for h in hits if h.get("abilityGameID") != 209258])["hpBeforePct"], 100)
+        # Heals before the hit before the killing hit were health they had.
+        hits[1]["timestamp"] = 8_002_690
+        self.assertEqual(self.assess(hits)["hpBeforePct"], 100)
+
+    def test_a_cheat_death_heal_inside_the_killing_hit(self):
+        # Live (Arzoker, Quel'Danas p34, k9mC7RxjKPt1TgZW): 339946 / 507980 on his last hit; Defy Fate
+        # (404381) healed 136670 inside Terminate and an Ebon Might heal (395152, 92026) landed with it;
+        # Terminate read 507980 taken. Before the blow: 507980 - 136670 = 371310, 73%: not a one-shot
+        # from full health.
+        hits = [self.at(23_324_344, 58_669, 339_946, 507_980),
+                self.healed(23_325_226, 1_015_960, 404195, "absorbed"),
+                self.healed(23_325_226, 136_670, 404381), self.healed(23_325_226, 92_026, 395152),
+                self.at(23_325_227, 507_980, 0, 507_980, overkill=2_896_634, absorbed=1_015_960, ability=1)]
+        r = self.assess(hits)
+        self.assertEqual((r["maxHp"], r["hpBeforePct"], r["deathType"]), (507_980, 73, "wasLow"))
+        # Padflash (Manaforge p79): Cauterize (87023) healed 2919591, leaving exactly his hit-before 2903317.
+        hits = [self.at(26_609_056, 3_896_114, 2_903_317, 16_636_880), self.healed(26_609_235, 2_919_591, 87023),
+                self.healed(26_609_236, 33_273_760, 86949, "absorbed"),
+                self.at(26_609_251, 5_822_908, 0, 16_636_880, overkill=41_093_092, absorbed=33_273_760)]
+        self.assertEqual(self.assess(hits)["hpBeforePct"], 17)          # 2903317 / 16636880
+        # Live (Alemonk, Quel'Danas p32): a Defy Fate heal 1 ms after the hit before and 31 ms before the
+        # killing hit, with no Defy Fate absorb of the killing hit: health they had (301048, 62%).
+        hits = [self.at(22_878_976, 19_449, 277_176, 489_498), self.healed(22_878_977, 23_288, 404381),
+                self.at(22_879_008, 301_048, 0, 489_498, overkill=10_145)]
+        self.assertEqual(self.assess(hits)["hpBeforePct"], 62)
+        # Arzoker p89: Defy Fate healed 42827 at 13395295 and absorbed its part of Terminate at 13395314,
+        # 19 ms apart, both after the hit before: the killing hit's.
+        hits = [self.at(13_394_226, 37_642, 433_271, 507_980), self.healed(13_395_294, 507_980, 410355, "absorbed"),
+                self.healed(13_395_295, 42_827, 404381), self.healed(13_395_314, 1_015_960, 404195, "absorbed"),
+                self.at(13_395_315, 507_980, 0, 507_980, overkill=922_534, absorbed=1_523_940)]
+        self.assertEqual(self.assess(hits)["hpBeforePct"], 92)          # 465153 / 507980
+
+    def test_a_stacking_aura_counts_per_stack(self):
+        # Sentinel (389539): +1% max health per stack, 15 stacks (game data: CumulativeAura 15, "per
+        # stack"), losing one a second. 15 stacks on the last hit, 3 at the killing blow: x1.03 / 1.15.
+        sizer = defensives._aura_sizer(defensives._LATEST, "Paladin", "Protection", {})
+        self.assertEqual(sizer.stacks(389539), 15)
+        aura = lambda ts, kind, n: {"timestamp": ts, "type": kind, "targetID": 1, "abilityGameID": 389539, "stack": n}
+        hits = [aura(89_000, "applybuffstack", 15), self.at(90_000, 10_000, 1_000_000, 1_150_000, buffs=[389539]),
+                aura(95_000, "removebuffstack", 9), aura(98_000, "removebuffstack", 3),
+                self.at(100_000, 900_000, 0, 1_000_000, overkill=1, buffs=[389539])]
+        r = self.assess(hits, aura_size=sizer)
+        self.assertEqual(r["maxHp"], round(1_150_000 * 1.03 / 1.15))
+        # Without its stack events the stacks can't be told: the last hit's max stands.
+        r = self.assess([hits[1], hits[-1]], aura_size=sizer)
+        self.assertEqual(r["maxHp"], 1_150_000)
+        self.assertEqual(defensives._stacks_at([aura(95_000, "removebuffstack", 9)], 389539, 90_000), 10)
 
     def test_earlier_hits_are_measured_against_the_max_they_had_then(self):
         # A 300k hit at 1M max is 30% of max, even though Vampiric Blood ran out before the killing blow.
