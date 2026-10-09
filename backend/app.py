@@ -430,15 +430,27 @@ def analyze():
                         except Exception as e:
                             hits_error = e
                     # The units the raid attacked, for an effect cast on an enemy (The War Within's Fiery
-                    # Brand): only when this patch has one and a Demon Hunter's death can count.
-                    friendly_types = {f.get("id"): f.get("type") for f in friendlies}
-                    if defensives.brands_enemies(cat) and \
-                            any(friendly_types.get(p) == "DemonHunter" for p in dead_in(deaths)):
-                        at_key = (rid, tuple(fight_ids), "attacked-units")
+                    # Brand): only when this patch has one, and only over the pulls where a Vengeance Demon
+                    # Hunter's death can count (a spec the log didn't record counts as one).
+                    brand_pulls = []
+                    if defensives.brands_enemies(cat):
+                        by_name = {f.get("logName") or f.get("name"): f for f in friendlies}
+                        for fid, ds in sorted(counted.items()):
+                            for _, n in ds:
+                                f = by_name.get(n) or {}
+                                if f.get("type") == "DemonHunter" and \
+                                        defensives.pull_spec(def_data, fid, f.get("id")) in (None, "Vengeance"):
+                                    brand_pulls.append(fid)
+                                    break
+                    if brand_pulls:
+                        span = [fd['fight'] for fd in report_fights if fd['fight']['id'] in brand_pulls]
+                        at_key = (rid, tuple(brand_pulls), "attacked-units")
                         attacked = recap_lru.get(at_key) if finished else None
                         if attacked is None:
                             try:
-                                attacked = defensives.fetch_attacked_units(token, rid, fight_ids, first_start, last_end)
+                                attacked = defensives.fetch_attacked_units(
+                                    token, rid, brand_pulls, min(f['start_time'] for f in span),
+                                    max(f['end_time'] for f in span))
                                 if finished:
                                     recap_lru.set(at_key, attacked)
                             except Exception as e:
