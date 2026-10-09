@@ -9,7 +9,7 @@ A reduction that sits on the enemy (The War Within's Fiery Brand cuts the brande
 catalog marks it `from_target`, from the game data's aura 269 on the enemy) is already inside
 WCL's unmitigatedAmount, so the share of a hit that got through shows nothing (Lazelele, Nerub-ar: 0.02
 on 115 hits). It is measured on the raw size instead: the same enemy unit's same ability, one hit
-branded and the next not (or the other way round), at most PAIR_MS apart, so a boss ability that
+branded and the next not (or the other way round), at most BRAND_PAIR_MS apart, so a boss ability that
 ramps over its cast can't pass for the brand (Liquefy's ticks grow, and players brand at its start: on
 Lazelele, every branded hit against every unbranded one within 30 s read 0.374). Adjacent pairs read 0.400 median on
 both logs tried, deciles 0.35-0.45 (Lazelele, Nerub-ar, 11.0.7: 123 pairs; Lunchay, Undermine, 11.1:
@@ -40,7 +40,15 @@ the pull's typical hit. Two things move the share of a hit that gets through and
     10%, increasing as your health decreases", sized at run time) made Ardent Defender (0.30, pressed
     at low health) read 0.33 against hits at any health (Deawina, Coiled Altar, 126 hits); with the
     missing health matched within 0.05 it read 0.300 (75 hits).
-A hit without the player's own health on it can't be matched by health and is left out.
+PAIR_MS is 10 s: twice the rows of 3 s get judged and no row moved by more than FLAG_AT; at 30 s the
+drift came back (Ardent Defender 0.33). A hit that dealt damage without the player's own health on it
+can't be matched by health and is left out.
+A hit absorbed whole (amount 0) never carries the player's health either, and it is where the site's
+claim that an AoE-only reduction (Feint) cuts a hit WCL didn't mark AoE shows. For reductions that don't
+depend on health or on the hit's size, such hits are paired by unit, ability, other auras and time only
+(nearest hit without the defensive within PAIR_MS) and judged in a row of their own, "(absorbed whole)".
+Their share through is the absorbed amount over the unmitigated one; a hit with nothing taken at all
+(immune, missed) is left out.
 Each (player, defensive) is judged by the median of its hits' gaps (measured minus predicted), not the
 mean: a wrong catalog value is off on every ability, while one boss ability with an untracked modifier
 (Sonic Ba-Boom's amplifiers, Entropic Barrage ticks) can pull a mean far off by itself.
@@ -50,12 +58,13 @@ from bisect import bisect_left
 from collections import defaultdict
 
 import defensives
-from checks.verdict import PASS, fail, skip
+from checks.verdict import Outcome, fail, skip
 
 MIN_HITS = 3
 FLAG_AT = 0.03
 MIN_FLAG_HITS = 20            # fewer hits than this are too noisy to flag
-PAIR_MS = 3000                        # a hit with and one without the defensive this close are compared
+PAIR_MS = 10_000                      # a hit with and one without the defensive this close are compared
+BRAND_PAIR_MS = 3000                  # The War Within's Fiery Brand pairs (Liquefy grows over its cast)
 HEALTH_BAND = 0.05                    # ... with missing health this close (share of max health)
 STAGGER = 124255                      # a Brewmaster's Stagger ticks
 
@@ -67,14 +76,28 @@ def on_the_enemy(entry):
 
 
 def report_aoe(hits):
-    """Abilities that hit as area damage in the report: those with any hit marked isAoE. WCL marks
-    only hits that dealt damage (a hit absorbed whole, immune or missed never is, of any ability), and
-    the game counts those as AoE all the same: Feint took 0.400 off 54 unmarked hits absorbed whole of
-    abilities marked elsewhere on Maar (AaM31gBWwFHmD7Rz) and 10 on Esra (2VtyDR4CF6PGLjbd), and
-    0.000 off abilities never marked. None when no hit of the report is marked at all (no log tried, The
-    War Within's included, is like that): an AoE-only reduction can't be predicted there."""
-    aoe = {e.get("abilityGameID") for e in hits if e.get("type") == "damage" and e.get("isAoE")}
-    return aoe or None
+    """(abilities marked AoE, abilities that dealt damage) in the report, or None when no hit of it is
+    marked at all (no log tried, The War Within's included, is like that): an AoE-only reduction can't be
+    predicted there. WCL marks only hits that dealt damage (a hit absorbed whole, immune or missed never
+    is, of any ability), and the game counts those as AoE all the same: Feint took 0.400 off 54 unmarked
+    hits absorbed whole of abilities marked elsewhere on Maar (AaM31gBWwFHmD7Rz) and 10 on Esra
+    (2VtyDR4CF6PGLjbd), and 0.000 off abilities never marked."""
+    dealt = [e for e in hits if e.get("type") == "damage" and e.get("amount")]
+    aoe = {e.get("abilityGameID") for e in dealt if e.get("isAoE")}
+    return (aoe, {e.get("abilityGameID") for e in dealt}) if aoe else None
+
+
+def hit_is_aoe(e, status):
+    """Is hit `e` area damage? A hit that dealt damage carries WCL's own mark; one that dealt none takes
+    its ability's status in the report (report_aoe), and is unknown (None) when the ability never dealt
+    damage in it (never marked, so the report can't tell)."""
+    if status is None:
+        return None
+    if e.get("amount"):
+        return bool(e.get("isAoE"))
+    aoe, dealt = status
+    a = e.get("abilityGameID")
+    return True if a in aoe else (False if a in dealt else None)
 
 
 def missing_share(hit):
@@ -93,8 +116,7 @@ def scales_with_hit(comps):
 
 def predicted_keep(comps, e, aoe, schools, size=None):
     """Share of hit `e` the components let through, and the group its prediction is judged in:
-    (None, None) when it can't be predicted. `aoe`: the abilities that hit as area damage in the report
-    (report_aoe), or None when the report marks no hit AoE. `size`: for a reduction that grows with the hit (`dr_hit`),
+    (None, None) when it can't be predicted. `aoe`: report_aoe of the report. `size`: for a reduction that grows with the hit (`dr_hit`),
     the hit after the player's other reductions as a share of max health; it reduces by its value at
     no damage rising in a straight line to `dr_hit` at a hit of max health, capped there."""
     keep, by_hit = 1.0, False
@@ -102,8 +124,7 @@ def predicted_keep(comps, e, aoe, schools, size=None):
         if not (c.get("dr") or c.get("dr_missing")):
             continue
         if c.get("school") == "aoe":
-            # An AoE-only reduction applies by the ability, not the hit's own mark (report_aoe).
-            applies = None if aoe is None else e.get("abilityGameID") in aoe
+            applies = hit_is_aoe(e, aoe)
         else:
             applies = defensives._school_applies(c.get("school"), e, schools)
         if applies is None:
@@ -130,7 +151,7 @@ def enemy_side(hits, players, names, cat, loadout, spec, pull_spec, aoe, schools
 
     WCL lists the brand on a hit only when the hit came from the branded unit. Each pair is two
     consecutive hits on the player from the same unit (same instance) with the same ability, one listing
-    the defensive and one not, at most PAIR_MS apart; measured = 1 - branded raw / unbranded raw."""
+    the defensive and one not, at most BRAND_PAIR_MS apart; measured = 1 - branded raw / unbranded raw."""
     entries = {d["name"]: d for d in cat.all.values() if on_the_enemy(d)}
     by_unit = defaultdict(list)
     for e in hits:
@@ -148,7 +169,7 @@ def enemy_side(hits, players, names, cat, loadout, spec, pull_spec, aoe, schools
             a, b = seq[i], seq[i + 1]
             if on[i] == on[i + 1] or len(on[i] | on[i + 1]) != 1:
                 continue
-            if (b.get("timestamp") or 0) - (a.get("timestamp") or 0) > PAIR_MS:
+            if (b.get("timestamp") or 0) - (a.get("timestamp") or 0) > BRAND_PAIR_MS:
                 continue
             name = next(iter(on[i] | on[i + 1]))
             d = entries[name]
@@ -196,10 +217,13 @@ def check(run):
     # players press defensives together with untracked reductions and versatility buffs
     # (Protective Light, Shifting Sands), which alone read as several points of extra reduction.
     # (player, ability, talents, other auras, pull, enemy unit, its instance)
-    #   -> [(time, missing health, share of damage that got through)], no defensive up
+    #   -> [(time, missing health, share of damage that got through)], no defensive up, with health
     base = defaultdict(list)
+    base_any = defaultdict(list)            # the same key -> [(time, share through)], any hit without it
     # (player, ability, talents) -> {defensive name: [(share that got through, other auras, the hit, missing health)]}
     shares = defaultdict(lambda: defaultdict(list))
+    whole = defaultdict(lambda: defaultdict(list))   # the same, for hits absorbed whole (no health on them)
+    no_health = 0                           # hits with a defensive up that dealt damage without health
     aoe = report_aoe(hits)
     for e in hits:
         if e.get("type") != "damage" or e.get("targetID") not in players or not e.get("unmitigatedAmount"):
@@ -210,9 +234,6 @@ def check(run):
             continue                       # reduced when the hit was staggered, never at tick time
         if e.get("blocked"):
             continue                       # a block takes a random cut that _full_hit doesn't add back
-        missing = missing_share(e)
-        if missing is None:
-            continue                       # no health on it: it can't be matched by missing health
         auras = {names.get(a) for a in defensives._auras(e)}
         up = auras & tracked
         if len(up) > 1:
@@ -232,88 +253,113 @@ def check(run):
                 and who_spec not in dr_names[which]["specs"]:
             continue
         through = defensives._full_hit(e) / e["unmitigatedAmount"]
+        if not through:
+            continue                       # nothing taken at all (immune, missed): nothing to compare
         talents = loadout.get((e.get("fight"), e["targetID"]))
         key = (e["targetID"], e.get("abilityGameID"), tuple(sorted((talents or {}).items())))
         others = frozenset(auras - {which})
+        unit = (others, e.get("fight"), e.get("sourceID"), e.get("sourceInstance"))
+        missing = missing_share(e)
         if which is None:
-            base[key + (others, e.get("fight"), e.get("sourceID"), e.get("sourceInstance"))].append(
-                (e.get("timestamp") or 0, missing, through))
-        else:
+            base_any[key + unit].append((e.get("timestamp") or 0, through))
+            if missing is not None:
+                base[key + unit].append((e.get("timestamp") or 0, missing, through))
+        elif missing is not None:
             shares[key][which].append((through, others, e, missing))
-    for seq in base.values():
+        elif not e.get("amount"):
+            whole[key][which].append((through, others, e, None))
+        else:
+            no_health += 1                 # dealt damage, no health on it: can't be matched by health
+    for seq in list(base.values()) + list(base_any.values()):
         seq.sort(key=lambda b: b[0])
 
     def nearest(key, e, missing):
         """Share through of the nearest hit without the defensive in `key`'s group from the hit's own
-        unit, at most PAIR_MS away, with missing health within HEALTH_BAND; None without one."""
-        seq = base.get(key + (e.get("fight"), e.get("sourceID"), e.get("sourceInstance")))
+        unit, at most PAIR_MS away, with missing health within HEALTH_BAND (any health for a hit
+        absorbed whole, `missing` None); None without one."""
+        unit = (e.get("fight"), e.get("sourceID"), e.get("sourceInstance"))
+        seq = (base if missing is not None else base_any).get(key + unit)
         if not seq:
             return None
         ts = e.get("timestamp") or 0
         best = None
-        for t, m, through in seq[bisect_left(seq, (ts - PAIR_MS,)):]:
+        for row in seq[bisect_left(seq, (ts - PAIR_MS,)):]:
+            t, through = row[0], row[-1]
             if t > ts + PAIR_MS:
                 break
-            if abs(m - missing) <= HEALTH_BAND + 1e-9 and (best is None or abs(t - ts) < best[0]):
+            if missing is not None and abs(row[1] - missing) > HEALTH_BAND + 1e-9:
+                continue
+            if best is None or abs(t - ts) < best[0]:
                 best = (abs(t - ts), through)
         return best[1] if best else None
 
     schools = meta.get("ability_schools", {})
-    # (player, defensive) -> [(measured, predicted)] per hit, from boss abilities with MIN_HITS or more
+    # (player, defensive, row label) -> [(measured, predicted)] per hit, from boss abilities with
+    # MIN_HITS or more; the label is "" or " (absorbed whole)"
     rows = defaultdict(list)
-    per_hit_base = defaultdict(list)       # (player, defensive) -> the catalog's flat value, where each hit is predicted
-    pairs = set()                          # (player, defensive) rows made of back-to-back hit pairs
-    for (pid, ability, talents), groups in shares.items():
-        for name, with_up in groups.items():
-            comps, _ = defensives._resolve(dr_names[name], dict(talents), {}, spec.get(pid))
-            # Each hit's own prediction: one ability's hits are not all marked AoE alike.
-            by_predicted = defaultdict(list)
-            for through, others, e, missing in with_up:
-                usual = nearest((pid, ability, talents, others), e, missing)
-                if not usual:
-                    continue
-                size = None
-                if scales_with_hit(comps):
-                    # The hit after the player's other reductions, as a share of max health.
-                    size = e["unmitigatedAmount"] * usual / e["maxHitPoints"]
-                keep, group = predicted_keep(comps, e, aoe, schools, size)
-                if keep is not None:
-                    by_predicted[group].append((1 - through / usual, 1 - keep))
-                    if group == "by hit":
-                        flat = 1.0
-                        for c in comps or []:
-                            flat *= 1 - (c.get("dr") or 0)
-                        per_hit_base[(pid, name)].append(1 - flat)
-            for got in by_predicted.values():
-                if len(got) >= MIN_HITS:
-                    rows[(pid, name)] += got
+    per_hit_base = defaultdict(list)       # row -> the catalog's flat value, where each hit is predicted
+    pairs = set()                          # rows made of back-to-back hit pairs
+    no_base = 0                            # hits with a defensive up that found no hit to compare with
+    for label, groups_by_key in (("", shares), (" (absorbed whole)", whole)):
+        for (pid, ability, talents), groups in groups_by_key.items():
+            for name, with_up in groups.items():
+                comps, _ = defensives._resolve(dr_names[name], dict(talents), {}, spec.get(pid))
+                if label and any(c.get("dr_missing") or c.get("dr_hit") is not None for c in comps or []):
+                    continue               # depends on health or the hit's size: not without health
+                # Each hit's own prediction: one ability's hits are not all marked AoE alike.
+                by_predicted = defaultdict(list)
+                for through, others, e, missing in with_up:
+                    usual = nearest((pid, ability, talents, others), e, missing)
+                    if not usual:
+                        no_base += 1
+                        continue
+                    size = None
+                    if scales_with_hit(comps):
+                        # The hit after the player's other reductions, as a share of max health.
+                        size = e["unmitigatedAmount"] * usual / e["maxHitPoints"]
+                    keep, group = predicted_keep(comps, e, aoe, schools, size)
+                    if keep is not None:
+                        by_predicted[group].append((1 - through / usual, 1 - keep))
+                        if group == "by hit":
+                            flat = 1.0
+                            for c in comps or []:
+                                flat *= 1 - (c.get("dr") or 0)
+                            per_hit_base[(pid, name, label)].append(1 - flat)
+                for got in by_predicted.values():
+                    if len(got) >= MIN_HITS:
+                        rows[(pid, name, label)] += got
 
     # A reduction on the enemy: raw sizes of the same unit's same ability, branded next to unbranded.
     for (pid, name), got in enemy_side(hits, players, names, cat, loadout, spec, pull_spec,
                                        aoe, schools).items():
-        rows[(pid, name)] += got
-        pairs.add((pid, name))
+        rows[(pid, name, "")] += got
+        pairs.add((pid, name, ""))
 
     # The median gap between measured and predicted over every hit: a wrong catalog value shows on
     # every ability, while one boss ability with an untracked modifier doesn't move the median.
-    items, measured = [], 0
-    for (pid, name), per in sorted(rows.items(), key=lambda kv: (kv[0][1], players[kv[0][0]]["name"])):
+    items, measured, under = [], 0, 0
+    for (pid, name, label), per in sorted(rows.items(), key=lambda kv: (kv[0][1], players[kv[0][0]]["name"], kv[0][2])):
         n = len(per)
         if n < MIN_FLAG_HITS:
+            under += 1
             continue
         measured += 1
         predicted = sum(p for _, p in per) / n
         real = predicted + statistics.median(m - p for m, p in per)
         if abs(real - predicted) > FLAG_AT:
-            who = f"{players[pid]['name']} {name}"
-            if (pid, name) in pairs:
+            row = (pid, name, label)
+            who = f"{players[pid]['name']} {name}{label}"
+            if row in pairs:
                 items.append(f"{who}: measured {real:.2f}, catalog {predicted:.2f} over {n} pairs")
-            elif per_hit_base.get((pid, name)):
+            elif per_hit_base.get(row):
                 # Each hit has its own prediction (it grows with the hit or with missing health): say so.
-                base = statistics.mean(per_hit_base[(pid, name)])
-                items.append(f"{who}: measured {real:.2f}, predicted {predicted:.2f} (catalog {base:.2f}) over {n} hits")
+                base_value = statistics.mean(per_hit_base[row])
+                items.append(f"{who}: measured {real:.2f}, predicted {predicted:.2f} (catalog {base_value:.2f}) over {n} hits")
             else:
                 items.append(f"{who}: measured {real:.2f}, catalog {predicted:.2f} over {n} hits")
+    # What was and wasn't judged, so a pass is never read as more than it is.
+    reason = (f"{measured} defensives measured, {under} under {MIN_FLAG_HITS} matched hits, "
+              f"{no_base} hits with no baseline, {no_health} without health")
     if not measured:
-        return skip(f"no defensive had enough matched hits to measure ({len(rows)} rows compared)")
-    return fail(items) if items else PASS
+        return skip(f"no defensive had enough matched hits to measure ({reason})")
+    return fail(items, reason=reason) if items else Outcome("pass", reason=reason)
