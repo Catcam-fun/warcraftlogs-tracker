@@ -1507,3 +1507,68 @@ class StaggerTests(unittest.TestCase):
         # Anyone else's absorbed part is a shield's: the reduction saves it for later hits.
         other = self.assess(hits, [DIFFUSE_MAGIC], spec="Frost")
         self.assertAlmostEqual(other["details"]["Diffuse Magic"]["amount"], 400_000, delta=1)
+
+
+FIERY_BRAND, BRANDED = 204021, 207771
+
+
+def enemy_hit(ts, amount, hp_after, source, instance=None, overkill=0, auras=()):
+    h = dict(hit(ts, amount, hp_after, overkill=overkill), sourceID=source,
+             buffs="".join(f"{a}." for a in auras))
+    if instance is not None:
+        h["sourceInstance"] = instance
+    return h
+
+
+class FieryBrandTests(unittest.TestCase):
+    """Fiery Brand by patch, from the game data (207771 effect 0):
+    - The War Within (11.x): aura 269 on the branded enemy, "dealing 40% less damage to" the Demon Hunter.
+      Measured on adjacent hit pairs: the branded unit's hits 0.400 (Lazelele, Nerub-ar, 123 pairs;
+      Lunchay, Undermine, 288 pairs), other units' hits 0.00 / -0.025 (77 pairs).
+    - Midnight (12.0.0 on): aura 87 on the Demon Hunter himself (implicit target: caster), "reducing the
+      damage you take by 40%": every hit. Felvix, Voidspire (Lightblinded Vanguard, 3 bosses): 207771 is a
+      buff on him; hits from the branded boss read 0.585 of unbranded, the other bosses' 0.564."""
+
+    def assess(self, hits, patch="11.0.7", friendlies=()):
+        entry = defensives._CATALOGS[patch].all[FIERY_BRAND]
+        return defensives.assess_survival(hits, 100_000, [entry], [], NAMES, SCHOOLS,
+                                          aura_ms={"Fiery Brand": entry["aura_ms"]}, friendly_ids=set(friendlies))
+
+    def test_the_catalog_follows_the_patch(self):
+        self.assertEqual(defensives._CATALOGS["11.0.7"].all[FIERY_BRAND]["mitigation"],
+                         [{"dr": 0.4, "from_target": BRANDED}])
+        self.assertEqual(defensives._CATALOGS["12.0.0"].all[FIERY_BRAND]["mitigation"], [{"dr": 0.4}])
+
+    def test_the_war_within_brands_only_the_killing_blows_unit(self):
+        # A 600k hit from the boss (unit 50), then a 500k hit from an add (unit 60) kills (100k overkill).
+        hits = [enemy_hit(97_000, 600_000, 400_000, source=50),
+                enemy_hit(100_000, 400_000, 0, source=60, overkill=100_000)]
+        r = self.assess(hits)
+        # Branding the add saves 40% of its 500k hit only, 200k: enough. Never 40% of the boss's too.
+        self.assertAlmostEqual(r["details"]["Fiery Brand"]["amount"], 200_000, delta=1)
+        self.assertTrue(r["wouldSave"]["Fiery Brand"])
+        # In Midnight it is on the Demon Hunter: 40% of both hits.
+        mid = self.assess(hits, patch="12.0.0")
+        self.assertAlmostEqual(mid["details"]["Fiery Brand"]["amount"], 0.4 * 1_100_000, delta=1)
+
+    def test_another_instance_of_the_same_add_is_not_branded(self):
+        hits = [enemy_hit(97_000, 600_000, 400_000, source=60, instance=2),
+                enemy_hit(100_000, 400_000, 0, source=60, instance=1, overkill=300_000)]
+        r = self.assess(hits)
+        self.assertAlmostEqual(r["details"]["Fiery Brand"]["amount"], 0.4 * 700_000, delta=1)
+        self.assertFalse(r["wouldSave"]["Fiery Brand"])
+
+    def test_nothing_to_brand_for_the_environment_or_a_friend(self):
+        for source, friends in ((-1, ()), (None, ()), (7, (7,))):
+            hits = [enemy_hit(100_000, 400_000, 0, source=source, overkill=100_000)]
+            r = self.assess(hits, friendlies=friends)
+            self.assertEqual(r["details"]["Fiery Brand"]["amount"], 0, source)
+            self.assertEqual(r["details"]["Fiery Brand"]["why"], "notBranded", source)
+            self.assertFalse(r["wouldSave"]["Fiery Brand"], source)
+
+    def test_hits_from_a_unit_already_branded_are_not_cut_again(self):
+        # The boss was branded for the first hit (WCL lists 207771 on it: already 40% smaller).
+        hits = [enemy_hit(97_000, 600_000, 400_000, source=50, auras=(BRANDED,)),
+                enemy_hit(100_000, 400_000, 0, source=50, overkill=300_000)]
+        r = self.assess(hits)
+        self.assertAlmostEqual(r["details"]["Fiery Brand"]["amount"], 0.4 * 700_000, delta=1)

@@ -821,7 +821,8 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
                                              aura_ms={e["name"]: _talented_duration(e, talent_entries, spec) for e in ready_entries},
                                              forms=forms, armor_k=armor_k, form_armor=form_armor,
                                              aura_size=_aura_sizer(cat, player_class, spec, talent_entries,
-                                                                   ability_names, player_id, caster_loadout))
+                                                                   ability_names, player_id, caster_loadout),
+                                             friendly_ids=set(actor_names or ()) | {player_id})
 
     for key in ("active", "available", "cooldown"):
         result[key].sort(key=lambda d: (not d.get("major", True), d["name"]))
@@ -881,16 +882,17 @@ WINDOW_HEAL_IDS = frozenset(set(KILLING_HIT_HEALS) | {a for a in KILLING_HIT_HEA
 # What the windows' extras block reads besides: the aura events of stacking max-health auras (their
 # stacks) and of auras sized by a loadout (who cast them).
 WINDOW_EXTRAS_IDS = sorted(WINDOW_HEAL_IDS | STACK_SIZED | LOADOUT_SIZED)
-# For the windows' cache key in app.py.
-WINDOW_EXTRAS_KEY = hashlib.sha1(repr(WINDOW_EXTRAS_IDS).encode()).hexdigest()[:12]
 AURA_EVENTS = {"applybuff", "applybuffstack", "removebuffstack", "removebuff",
                "applydebuff", "applydebuffstack", "removedebuffstack", "removedebuff"}
 WINDOW_TYPES = {"damage", "heal", "absorbed"} | AURA_EVENTS
 # What is kept of a heal or aura event (fetch_death_windows).
 HEAL_FIELDS = ("timestamp", "type", "sourceID", "targetID", "abilityGameID", "fight", "amount", "stack")
-HIT_FIELDS = ("timestamp", "type", "sourceID", "targetID", "abilityGameID", "fight", "buffs",
+HIT_FIELDS = ("timestamp", "type", "sourceID", "sourceInstance", "targetID", "abilityGameID", "fight", "buffs",
               "hitType", "amount", "overkill", "absorbed", "mitigated", "unmitigatedAmount",
               "isAoE", "resourceActor", "hitPoints", "maxHitPoints", "armor")
+# For the windows' cache key in app.py: windows cached with other extras or without a field kept
+# here (sourceInstance, for Fiery Brand's unit) are not reused.
+WINDOW_EXTRAS_KEY = hashlib.sha1(repr((WINDOW_EXTRAS_IDS, HIT_FIELDS)).encode()).hexdigest()[:12]
 
 
 def _events_query(blocks):
@@ -1203,7 +1205,7 @@ def _resolve(entry, talent_entries, observed_absorbs, spec=None, applied=None):
                                 **({"school": c["school"]} if c.get("school") else {})})
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 value = value * rank
-        extra = {k: c[k] for k in ("over_ms", "ticks", "current", "replaces_form") if k in c}
+        extra = {k: c[k] for k in ("over_ms", "ticks", "current", "replaces_form", "from_target") if k in c}
         if seen:
             out.append({"absorb_amount": seen, "school": c.get("school")})
             continue
@@ -1374,7 +1376,14 @@ def _full_hit(hit):
 
 
 def _effect_applies(m, hit, ability_schools):
-    """Does one component apply to this hit: True / False / None (unknown)."""
+    """Does one component apply to this hit: True / False / None (unknown).
+
+    An effect on the unit it is cast on (`from_target`: The War Within's Fiery Brand) covers only the
+    hits of the unit the replay brands (assess_survival tags them `fromTarget`), and never a hit that
+    already lists its aura: that unit was branded then, so the hit is already cut (it doesn't stack).
+    """
+    if m.get("from_target") and (not hit.get("fromTarget") or m["from_target"] in _auras(hit)):
+        return False
     if m.get("armor"):
         return _armor_reduction(hit, ability_schools) and (True if _armor_dr(m["armor"], hit) is not None else None)
     return _school_applies(m.get("school"), hit, ability_schools, immunity=bool(m.get("immune")))
@@ -1674,6 +1683,8 @@ def _explain(entry, comps, applied, hit, amount, max_hp, missing_hp, ability_sch
                 out["why"] = "aoeUnknown"
             elif not applies and m.get("armor"):
                 out["why"] = "notArmor"
+            elif not applies and m.get("from_target"):
+                out["why"] = "notBranded"
             elif not applies:
                 out["why"], out["school"] = "school", m.get("school")
             elif immune and hit.get("abilityGameID") in IGNORES_IMMUNITY:
@@ -1973,10 +1984,21 @@ def _max_hp_before(window, kb_index, aura_size=None, heals=(), aura_events=()):
     return max(round(value), kb_max, health), health
 
 
+def _brand_target(killing, friendly_ids):
+    """(sourceID, sourceInstance) of the unit a replayed press of an effect on the enemy (Fiery Brand
+    in The War Within) goes on: the killing blow's, when an enemy dealt it. Fiery Brand is a cast on an
+    enemy target, and the unit that dealt the killing blow is the one that killed them. None for the
+    environment (sourceID -1), a hit without a source, their own damage or a friendly player's."""
+    src = killing.get("sourceID")
+    if src is None or src < 0 or src == killing.get("targetID") or src in (friendly_ids or ()):
+        return None
+    return (src, killing.get("sourceInstance"))
+
+
 def assess_survival(hits, death_ts, available, consumables, ability_names, ability_schools,
                     talent_entries=None, observed_absorbs=None, spec=None, aoe_known=True,
                     ready_since=None, aura_ms=None, forms=None, armor_k=None, form_armor=None,
-                    aura_size=None):
+                    aura_size=None, friendly_ids=None):
     """How they died, and whether the defensives they had ready would have saved them.
 
     `hits`: this player's hits (lethal windows, instant kills); the killing blow
@@ -1986,7 +2008,8 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     REACTION_MS before the killing blow. `available` / `consumables`: catalog
     entries ready at death (consumables only if carried and unused this pull).
     `aura_size` (_aura_sizer): for the max health they had just before the killing blow
-    (_max_hp_before). `hits` may hold the heals a killing hit can set off (fetch_death_windows,
+    (_max_hp_before). `friendly_ids`: the report's players, whose hits no effect on the enemy covers
+    (_brand_target). `hits` may hold the heals a killing hit can set off (fetch_death_windows,
     type "heal" / "absorbed"); they are read only for that.
     """
     heal_events = [h for h in hits or () if h.get("type") in ("heal", "absorbed")
@@ -2021,7 +2044,9 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     hit_size = _full_hit(killing)
 
     tag = {"armorK": armor_k, "formArmor": form_armor, **({} if aoe_known else {"aoeKnown": False})}
-    window = [dict(h, **tag) for h in _lethal_hits(hits, killing)]
+    brand = _brand_target(killing, friendly_ids)
+    window = [dict(h, **tag, fromTarget=brand is not None and (h.get("sourceID"), h.get("sourceInstance")) == brand)
+              for h in _lethal_hits(hits, killing)]
     kb_index = len(window) - 1
     # The killing blow's own max health is logged after the death stripped their auras; every
     # figure below (and the replay's health points) uses the max they had just before it.

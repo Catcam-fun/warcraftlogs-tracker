@@ -5,7 +5,8 @@ What it can't measure, and leaves out (each verified on live logs, 2026-10-08):
     defensives up at tick time never change them (Weavi: 246 ticks, through share 0.600 with or without).
   - A defensive on a spec the catalog doesn't give it to (Bear Form on a Guardian): the site never
     judges it there.
-A reduction that sits on the enemy (Fiery Brand cuts the branded enemy's damage done) is already inside
+A reduction that sits on the enemy (The War Within's Fiery Brand cuts the branded enemy's damage done: the
+catalog marks it `from_target`, from the game data's aura 269 on the enemy) is already inside
 WCL's unmitigatedAmount, so the share of a hit that got through shows nothing (Lazelele, Nerub-ar: 0.02
 on 115 hits). It is measured on the raw size instead: the same enemy unit's same ability, one hit
 branded and the next not (or the other way round), at most PAIR_MS apart, so a boss ability that
@@ -13,6 +14,9 @@ ramps over its cast can't pass for the brand (Liquefy's ticks grow, and players 
 Lazelele, every branded hit against every unbranded one within 30 s read 0.374). Adjacent pairs read 0.400 median on
 both logs tried, deciles 0.35-0.45 (Lazelele, Nerub-ar, 11.0.7: 123 pairs; Lunchay, Undermine, 11.1:
 288 pairs), and hits from other units while a brand was up were not cut (0.00 median, 77 pairs).
+Midnight's Fiery Brand (12.0.0 on) is a buff on the Demon Hunter that cuts every hit (aura 87, target the
+caster), so it is measured like any other buff (Felvix, Voidspire, 2026-10-08: all three bosses' hits read
+0.56-0.59 of unbranded).
 A reduction that grows with the size of the hit (Dampen Harm: "20% to 50% ... larger attacks being
 reduced by more"; game data 122278 has the two numbers as dummy effects and no curve) is predicted hit by
 hit: the catalog's value at no damage, rising in a straight line to SCALES_WITH_HIT's value at a hit of
@@ -38,12 +42,17 @@ from checks.verdict import PASS, fail, skip
 MIN_HITS = 3
 FLAG_AT = 0.03
 MIN_FLAG_HITS = 20            # fewer hits than this are too noisy to flag
-ON_THE_ENEMY = {"Fiery Brand"}        # cuts the enemy's damage done: already inside unmitigatedAmount
 PAIR_MS = 3000                        # a branded and an unbranded hit this close are compared
 # Reduction at a hit of the player's whole max health (game data 122278 effect 2: 50); the catalog's
 # value is the reduction at no damage (effect 1: 20).
 SCALES_WITH_HIT = {"Dampen Harm": 0.50}
 STAGGER = 124255                      # a Brewmaster's Stagger ticks
+
+
+def on_the_enemy(entry):
+    """Does the catalog entry cut the damage the unit it is cast on deals (`from_target`)? That cut is
+    already inside unmitigatedAmount."""
+    return any(c.get("from_target") for c in entry.get("mitigation") or [])
 
 
 def missing_share(hit):
@@ -85,12 +94,12 @@ def predicted_keep(comps, e, aoe_known, schools, top=None, size=None):
 
 
 def enemy_side(hits, players, names, cat, loadout, spec, pull_spec, aoe_known, schools):
-    """(player, defensive) -> [(measured, predicted)] for reductions on the enemy (ON_THE_ENEMY).
+    """(player, defensive) -> [(measured, predicted)] for reductions on the enemy (on_the_enemy).
 
     WCL lists the brand on a hit only when the hit came from the branded unit. Each pair is two
     consecutive hits on the player from the same unit (same instance) with the same ability, one listing
     the defensive and one not, at most PAIR_MS apart; measured = 1 - branded raw / unbranded raw."""
-    entries = {d["name"]: d for d in cat.all.values() if d["name"] in ON_THE_ENEMY}
+    entries = {d["name"]: d for d in cat.all.values() if on_the_enemy(d)}
     by_unit = defaultdict(list)
     for e in hits:
         if e.get("type") != "damage" or e.get("targetID") not in players or not e.get("unmitigatedAmount"):
@@ -149,7 +158,7 @@ def check(run):
 
     dr_names = {d["name"]: d for d in cat.all.values()
                 if d["kind"] in ("personal", "external") and any("dr" in c for c in d.get("mitigation") or [])
-                and d["name"] not in ON_THE_ENEMY}
+                and not on_the_enemy(d)}
     tracked = set(cat.name_to_id)
     # A hit with the defensive up is compared only with hits carrying the same other auras:
     # players press defensives together with untracked reductions and versatility buffs
