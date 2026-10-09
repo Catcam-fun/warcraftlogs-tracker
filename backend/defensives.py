@@ -876,23 +876,45 @@ WINDOW_BLOCKS_PER_REQUEST = 20
 
 # Everything the survival assessment reads from a hit (the rest, like
 # positions and stats, is dropped so cached reports stay small).
+# Stagger (115069, a Brewmaster passive) is an absorb aura (EffectAura 69): the game cuts a hit by the
+# player's damage reductions first, then Stagger delays a share of what is left (logged as `absorbed`
+# on the hit) into ticks of STAGGER_TICK every 0.5 s over 10 s (124255 EffectAuraPeriod 500, 124273-5
+# duration 10000). A tick is damage already reduced: defensives up while it ticks never change it (Weavi,
+# Undermine, 2026-10-08: 246 ticks under Fortifying Brew and 26 under Dampen Harm read 0.600 through, as
+# every tick does), while shields absorb ticks (1194 of Weavi's 6137 ticks were partly absorbed).
+STAGGER_TICK = 124255
+STAGGER_SPEC = "Brewmaster"
+# The pool, as the logs show it (Weavi, Undermine p24 and Quel'Danas p104, 2026-10-08): WCL logs each
+# hit's staggered amount as an `absorbed` event of STAGGER_AURA (attackerID and extraAbilityGameID: the
+# hit's source and ability); every staggered hit restarts the pool's STAGGER_TICKS ticks (124273-5:
+# 10000 ms, 124255 period 500 ms, in every patch), and each tick deals the pool over the ticks left
+# (pool / tick read 20.00, 19.00, ... exactly, 116 of 130 staggered hits on Undermine p24). Purifies
+# (Purifying Brew, Quick Sip, Staggering Strikes ...) take part of the pool off in between.
+STAGGER_AURA = 115069
+STAGGER_TICKS = 20
+# How far before a death window the pool's ticks and staggered hits are read: the last staggered hit
+# before a tick is at most STAGGER_TICKS ticks back.
+STAGGER_LOOKBACK_MS = 10_500
 # The heals a killing hit can set off and their cheat-death auras the death windows read
 # (fetch_death_windows).
 WINDOW_HEAL_IDS = frozenset(set(KILLING_HIT_HEALS) | {a for a in KILLING_HIT_HEALS.values() if a})
 # What the windows' extras block reads besides: the aura events of stacking max-health auras (their
 # stacks) and of auras sized by a loadout (who cast them).
-WINDOW_EXTRAS_IDS = sorted(WINDOW_HEAL_IDS | STACK_SIZED | LOADOUT_SIZED)
+# And a Brewmaster's Stagger pool: their staggered amounts (STAGGER_AURA absorbs) and ticks, from up to
+# STAGGER_LOOKBACK_MS before each window (the ticks inside it come with the hits).
+WINDOW_EXTRAS_IDS = sorted(WINDOW_HEAL_IDS | STACK_SIZED | LOADOUT_SIZED | {STAGGER_AURA, STAGGER_TICK})
 AURA_EVENTS = {"applybuff", "applybuffstack", "removebuffstack", "removebuff",
                "applydebuff", "applydebuffstack", "removedebuffstack", "removedebuff"}
 WINDOW_TYPES = {"damage", "heal", "absorbed"} | AURA_EVENTS
 # What is kept of a heal or aura event (fetch_death_windows).
-HEAL_FIELDS = ("timestamp", "type", "sourceID", "targetID", "abilityGameID", "fight", "amount", "stack")
+HEAL_FIELDS = ("timestamp", "type", "sourceID", "targetID", "abilityGameID", "fight", "amount", "stack",
+               "attackerID", "extraAbilityGameID")
 HIT_FIELDS = ("timestamp", "type", "sourceID", "sourceInstance", "targetID", "abilityGameID", "fight", "buffs",
               "hitType", "amount", "overkill", "absorbed", "mitigated", "unmitigatedAmount",
               "isAoE", "resourceActor", "hitPoints", "maxHitPoints", "armor")
 # For the windows' cache key in app.py: windows cached with other extras or without a field kept
 # here (sourceInstance, for Fiery Brand's unit) are not reused.
-WINDOW_EXTRAS_KEY = hashlib.sha1(repr((WINDOW_EXTRAS_IDS, HIT_FIELDS)).encode()).hexdigest()[:12]
+WINDOW_EXTRAS_KEY = hashlib.sha1(repr((WINDOW_EXTRAS_IDS, HIT_FIELDS, HEAL_FIELDS, STAGGER_LOOKBACK_MS)).encode()).hexdigest()[:12]
 
 
 def _events_query(blocks):
@@ -988,18 +1010,31 @@ def fetch_death_windows(token, report_code, pulls, heals=True):
         names = sorted({n for _, n in every if n})
         flt = ("target.name in (" + ", ".join(json.dumps(n, ensure_ascii=False) for n in names) + ")"
                f" and ability.id in ({', '.join(map(str, WINDOW_EXTRAS_IDS))})")
-        blocks["extras"] = ([fid for fid, _ in pulls], max(min(t for t, _ in every) - LETHAL_WINDOW_MS, 0),
+        blocks["extras"] = ([fid for fid, _ in pulls],
+                            max(min(t for t, _ in every) - LETHAL_WINDOW_MS - STAGGER_LOOKBACK_MS, 0),
                             max(t for t, _ in every) + KILLING_BLOW_AFTER_MS + 1, "All", flt)
 
-    def in_a_window(ts):
+    def in_a_window(ts, before=0):
         # Windows are all as long: the one starting last at or before ts ends last too.
-        i = bisect_right(windows, (ts, float("inf"))) - 1
+        i = bisect_right(windows, (ts + before, float("inf"))) - 1
         return i >= 0 and ts <= windows[i][1]
 
+    def stagger_pool(e):
+        return (e.get("type") == "absorbed" and e.get("abilityGameID") == STAGGER_AURA) or             (e.get("type") == "damage" and e.get("abilityGameID") == STAGGER_TICK)
+
     def keep(e):
+        if stagger_pool(e):
+            return in_a_window(e.get("timestamp", 0), STAGGER_LOOKBACK_MS)
+        if e.get("abilityGameID") in (STAGGER_AURA, STAGGER_TICK) and e.get("type") != "damage":
+            return False                 # Stagger's own aura events
         return e.get("type") in WINDOW_TYPES and in_a_window(e.get("timestamp", 0))
 
-    events = [e for evs in _fetch_blocks(token, report_code, blocks, keep).values() for e in evs]
+    fetched = _fetch_blocks(token, report_code, blocks, keep)
+    events = [e for alias, evs in fetched.items() if alias != "extras" for e in evs]
+    # The extras block's Stagger ticks add those before the hits' blocks start (the rest are in them).
+    seen = {(e.get("targetID"), e.get("timestamp")) for e in events if stagger_pool(e)}
+    events += [e for e in fetched.get("extras", ())
+               if e.get("type") != "damage" or (e.get("targetID"), e.get("timestamp")) not in seen]
     out = index_hits(events)
     for e in events:
         if e.get("type") in WINDOW_TYPES - {"damage"} and e.get("targetID") is not None:
@@ -1062,14 +1097,6 @@ def merge_hits(*indexes):
 
 
 MELEE_SWING = 1             # WCL's ability ID for auto-attacks ("Melee")
-# Stagger (115069, a Brewmaster passive) is an absorb aura (EffectAura 69): the game cuts a hit by the
-# player's damage reductions first, then Stagger delays a share of what is left (logged as `absorbed`
-# on the hit) into ticks of STAGGER_TICK every 0.5 s over 10 s (124255 EffectAuraPeriod 500, 124273-5
-# duration 10000). A tick is damage already reduced: defensives up while it ticks never change it (Weavi,
-# Undermine, 2026-10-08: 246 ticks under Fortifying Brew and 26 under Dampen Harm read 0.600 through, as
-# every tick does), while shields absorb ticks (1194 of Weavi's 6137 ticks were partly absorbed).
-STAGGER_TICK = 124255
-STAGGER_SPEC = "Brewmaster"
 
 
 def _school_applies(school, hit, ability_schools, immunity=False):
@@ -1103,7 +1130,61 @@ def _school_applies(school, hit, ability_schools, immunity=False):
 
 def _stagger_tick(hit):
     """A Brewmaster's own Stagger tick (STAGGER_TICK)."""
-    return hit.get("abilityGameID") == STAGGER_TICK
+    return hit.get("abilityGameID") == STAGGER_TICK and hit.get("type", "damage") == "damage"
+
+
+def _tick_raw(tick):
+    """What a Stagger tick took off the pool: its unmitigated size (a share of some ticks is
+    mitigated, 0.600 through; shields absorb ticks too)."""
+    return tick.get("unmitigatedAmount") or _full_hit(tick)
+
+
+def _stagger_pools(ticks, ins):
+    """The pool just before each staggered hit: {id(in event): [estimates]}, [] when unknown.
+
+    `ticks`: the player's Stagger ticks; `ins`: their STAGGER_AURA absorbed events (each a hit's
+    staggered amount), both from up to STAGGER_LOOKBACK_MS before the window. Two estimates:
+      - from the tick after it: that tick is the pool over STAGGER_TICKS, so the pool before was
+        STAGGER_TICKS x tick - staggered amount (too small if a purify came in between);
+      - from the tick before it: that tick left its size x (ticks left - 1) (too big if a purify came
+        in between).
+    A purify on one side makes one of them wrong; the replay takes the one that credits least."""
+    seq = sorted([(t["timestamp"], 1, "tick", t) for t in ticks] + [(e["timestamp"], 0, "in", e) for e in ins],
+                 key=lambda x: (x[0], x[1]))
+    out, pool, left = {}, None, None
+    for i, (_, _, kind, e) in enumerate(seq):
+        if kind == "tick":
+            if left:
+                pool, left = _tick_raw(e) * (left - 1), left - 1
+            else:
+                pool = left = None
+            continue
+        guesses = [pool] if pool is not None else []
+        nxt = next((x for x in seq[i + 1:]), None)
+        if nxt is not None and nxt[2] == "tick":
+            guesses.append(max(STAGGER_TICKS * _tick_raw(nxt[3]) - (e.get("amount") or 0), 0))
+        out[id(e)] = guesses
+        pool = max(guesses) + (e.get("amount") or 0) if guesses else None
+        left = STAGGER_TICKS
+    return out
+
+
+def _stagger_share(window, ins, pools):
+    """Each staggered hit's staggered amount and pool estimates: {hit index: (amount, [pool before])}.
+    An absorbed event is matched to the hit with its source and ability within 2 ms."""
+    out, used = {}, set()
+    for e in ins:
+        best = None
+        for k, h in enumerate(window):
+            if k in used or _stagger_tick(h) or h.get("type") != "damage":
+                continue
+            if h.get("sourceID") == e.get("attackerID") and h.get("abilityGameID") == e.get("extraAbilityGameID")                     and abs(h["timestamp"] - e["timestamp"]) <= 2:
+                if best is None or abs(h["timestamp"] - e["timestamp"]) < abs(window[best]["timestamp"] - e["timestamp"]):
+                    best = k
+        if best is not None:
+            used.add(best)
+            out[best] = (e.get("amount") or 0, pools.get(id(e), []))
+    return out
 
 
 def _ignores_reduction(hit):
@@ -1466,20 +1547,29 @@ class _Points(list):
 class _Window:
     """A death's replayed hits with what every replay reads from them, worked out once.
 
-    `staggers`: the player is a Brewmaster, so what a hit logs as absorbed is (mostly) the share
-    Stagger delayed into later ticks. A reduction pressed before the hit shrinks that share too, but
-    how much of it would have ticked before the death the log can't give (the pool mixes every hit's
-    share, and Purifying Brew takes part of it off), so the replay counts only the part taken at once
-    (amount and overkill) and leaves the staggered part to the ticks, as they really landed. That never
-    credits more than the game would; it can credit less.
+    `stagger`: for a Brewmaster, {hit index: (staggered amount, [pool before])} (_stagger_share), or
+    {} when the log has no staggered amounts. Stagger takes its share of a hit after the reductions
+    and before any shield (on Weavi's hits its share is a fixed part of the whole reduced hit, Dampen
+    Harm's too, and another shield takes only what is left), so a reduction pressed before a hit
+    shrinks its staggered amount alike: the replay counts the part taken at once (the rest of the
+    hit) as any hit, and puts the cut staggered part into the pool, where every later tick is that
+    much smaller (_simulate). A hit of a Brewmaster without its staggered amount counts only its amount
+    and overkill (its absorbed part may be staggered: never credited).
     """
 
-    def __init__(self, hits, ability_schools, staggers=False):
+    def __init__(self, hits, ability_schools, stagger=None):
         self.hits = hits
         self.schools = ability_schools
         self.points = _Points(_health_points(hits))
-        self.full = [(h.get("amount") or 0) + (h.get("overkill") or 0) if staggers and not _stagger_tick(h)
-                     else _full_hit(h) for h in hits]
+        self.stagger = stagger
+        self.full = []
+        for k, h in enumerate(hits):
+            if stagger is None or _stagger_tick(h):
+                self.full.append(_full_hit(h))
+            elif k in stagger:
+                self.full.append(max(_full_hit(h) - stagger[k][0], 0))
+            else:
+                self.full.append((h.get("amount") or 0) + (h.get("overkill") or 0))
         self.known = [h.get("resourceActor") == 2 and bool(h.get("maxHitPoints")) for h in hits]
         self.before = []
         for h, known in zip(hits, self.known):
@@ -1542,6 +1632,8 @@ def _simulate(options, press, win, kb_index):
     `win`: the death's hits, prepared (_Window).
     """
     hits, points = win.hits, win.points
+    stagger = win.stagger or {}
+    cut = 0.0                 # share of the Stagger pool the presses cut off (ticks and purifies keep it)
     lasting = [(c, press + ms if ms else float("inf")) for o in options for c, ms in o["lasting"]]
     heal_taken = [(c["heal_taken"], until) for c, until in lasting if c.get("heal_taken")]
     hp_now, max_now = _health_at(points, press)
@@ -1617,15 +1709,26 @@ def _simulate(options, press, win, kb_index):
         if win.known[k]:
             extra = min(extra, max(max_k + dmax - hp_before, 0))
         dmg = win.full[k]
-        if not dmg:
+        staggered = stagger.get(k)
+        if not dmg and not staggered:
             continue
         while ends and ends[0][0] < t:
             covering.remove(ends.pop(0)[1])
         if covering:
             key = None if by_health else (sig, len(ends))
-            left = dmg * win.keep(covering, key, k, max_k + dmax, max(max_k + dmax - hp_before - extra, 0))
+            keep = win.keep(covering, key, k, max_k + dmax, max(max_k + dmax - hp_before - extra, 0))
         else:
-            left = dmg
+            keep = 1.0
+        left = dmg * keep
+        if stagger and _stagger_tick(hits[k]):
+            left *= 1 - cut               # the pool is that much smaller: so is every tick
+        if staggered:
+            # The pool takes this hit's staggered amount, cut by the reductions up (keep). The share of
+            # the pool cut off is a mix of the share before and this hit's: with the pool estimate that
+            # credits least (_stagger_pools), or the smaller share when the pool isn't known.
+            amount, pools = staggered
+            mixes = [(cut * pool + amount * (1 - keep)) / (pool + amount) for pool in pools if pool + amount > 0]
+            cut = min(mixes) if mixes else min(cut, 1 - keep)
         for sh in shields:
             if sh[0] > 0 and sh[2] >= t and left > 0 and win.applies(sh[1], k):
                 took = min(sh[0], left)
@@ -2063,7 +2166,15 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     max_hp, hp_before = _max_hp_before(window, kb_index, aura_size, heal_events, aura_events)
     window[kb_index]["maxHitPoints"] = max_hp
     killing = window[kb_index]
-    win = _Window(window, ability_schools, staggers=spec == STAGGER_SPEC)
+    stagger = None
+    if spec == STAGGER_SPEC:
+        # The pool from the staggered hits and ticks since up to STAGGER_LOOKBACK_MS before the window.
+        since, until = window[0]["timestamp"] - STAGGER_LOOKBACK_MS, killing["timestamp"]
+        ins = [e for e in heal_events if e.get("type") == "absorbed" and e.get("abilityGameID") == STAGGER_AURA
+               and since <= e["timestamp"] <= until]
+        ticks = [h for h in hits if _stagger_tick(h) and since <= h["timestamp"] <= until]
+        stagger = _stagger_share(window, ins, _stagger_pools(ticks, ins))
+    win = _Window(window, ability_schools, stagger=stagger)
     if hp_before != (killing.get("amount") or 0):
         # Health before the blow, without what the blow itself set off (_max_hp_before).
         win.before[kb_index] = (hp_before, max_hp)
@@ -2209,6 +2320,8 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
         "allTogetherWouldSave": together,
         # Why a defensive might not help against this particular hit.
         "ignoresReduction": _ignores_reduction(killing),
+        # A Stagger tick: no reduction changes it as it lands, but one pressed earlier shrinks the pool.
+        "staggerTick": _stagger_tick(killing),
         "ignoresImmunity": killing.get("abilityGameID") in IGNORES_IMMUNITY,
         # The seconds replayed: how many hits, from how long before the killing blow.
         "window": {"hits": len(window), "fromAgo": round((kb_ts - window[0]["timestamp"]) / 1000, 1)},

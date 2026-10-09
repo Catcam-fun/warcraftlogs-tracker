@@ -1488,6 +1488,7 @@ class StaggerTests(unittest.TestCase):
         self.assertEqual(r["details"]["Dampen Harm"]["amount"], 0)
         self.assertEqual(r["details"]["Dampen Harm"]["why"], "stagger")
         self.assertTrue(r["ignoresReduction"])
+        self.assertTrue(r["staggerTick"])
 
     def test_shields_still_absorb_a_stagger_tick(self):
         kb = stagger_tick(100_000, 300_000, 0, overkill=50_000)
@@ -1605,3 +1606,64 @@ class DampenHarmTests(unittest.TestCase):
         # The same 600k hit on a player with 2M max health: x = 0.3, cut 0.29.
         kb = dict(hit(100_000, 400_000, 0, overkill=200_000), maxHitPoints=2 * MAX)
         self.assertAlmostEqual(defensives._prevented([self.DH], kb, 2 * MAX, 1_600_000, SCHOOLS), 0.29 * 600_000)
+
+
+def pool_tick(ts, raw, hp_after, overkill=0):
+    """A Stagger tick nothing reduced: its size is what it took off the pool."""
+    return {"timestamp": ts, "type": "damage", "sourceID": 1, "targetID": 1, "abilityGameID": STAGGER_TICK,
+            "amount": raw - overkill, "overkill": overkill, "absorbed": 0, "unmitigatedAmount": raw,
+            "hitPoints": hp_after, "maxHitPoints": MAX, "resourceActor": 2}
+
+
+def staggered(ts, amount, source=50, ability=500):
+    """WCL's absorbed event for the share of a hit Stagger delayed."""
+    return {"timestamp": ts, "type": "absorbed", "sourceID": 1, "targetID": 1,
+            "abilityGameID": defensives.STAGGER_AURA, "attackerID": source, "extraAbilityGameID": ability,
+            "amount": amount}
+
+
+class StaggerPoolTests(unittest.TestCase):
+    """The pool as the logs show it (Weavi, Undermine p24): each staggered hit's amount is an absorbed
+    event of 115069; every staggered hit restarts 20 ticks and each tick deals the pool over the ticks
+    left (pool / tick read 20.00, 19.00, ... on 116 of 130 staggered hits); purifies take part of it off."""
+
+    def test_pool_before_a_staggered_hit_from_the_ticks_around_it(self):
+        ticks = [pool_tick(500, 200_000, 0), pool_tick(1_000, 200_000, 0), pool_tick(1_500, 200_000, 0),
+                 pool_tick(2_500, 135_000, 0)]
+        first, second = staggered(0, 4_000_000), staggered(2_000, 1_000_000)
+        pools = defensives._stagger_pools(ticks, [first, second])
+        self.assertEqual(pools[id(first)], [0])                     # 20 x 200k - 4M: nothing before
+        # The tick before left 200k x 17 = 3.4M; the tick after says 20 x 135k - 1M = 1.7M: a purify
+        # (half) came in between. Both are kept: the replay uses the one that credits least.
+        self.assertEqual(pools[id(second)], [3_400_000, 1_700_000])
+
+    def test_a_reduction_before_a_staggered_hit_shrinks_every_later_tick(self):
+        # A 1M Frost hit from full: 300k taken at once, 700k staggered (absorbed event), then 20 ticks
+        # of 35k; the 20th kills (15k health left, 20k overkill). Diffuse Magic (60% magic) pressed
+        # before it cuts the 300k by 180k and the pool by 60%, so every tick by 21k: 600k in all.
+        hit_ = dict(hit(90_000, 300_000, 680_000, absorbed=700_000), sourceID=50)
+        ticks = [pool_tick(90_500 + 500 * j, 35_000, 680_000 - 35_000 * (j + 1)) for j in range(19)]
+        ticks.append(pool_tick(100_000, 35_000, 0, overkill=20_000))
+        events = [hit_, staggered(90_000, 700_000)] + ticks
+        r = defensives.assess_survival(events, 100_000, ready(DIFFUSE_MAGIC), [], NAMES, SCHOOLS,
+                                       aura_ms={"Diffuse Magic": 30_000}, spec="Brewmaster")
+        self.assertAlmostEqual(r["details"]["Diffuse Magic"]["amount"], 600_000, delta=2)
+        # Without the staggered amount in the log, only the part taken at once counts.
+        r = defensives.assess_survival([hit_] + ticks, 100_000, ready(DIFFUSE_MAGIC), [], NAMES, SCHOOLS,
+                                       aura_ms={"Diffuse Magic": 30_000}, spec="Brewmaster")
+        self.assertAlmostEqual(r["details"]["Diffuse Magic"]["amount"], 180_000, delta=2)
+
+    def test_a_reduction_only_on_part_of_the_pool(self):
+        # The pool already held an earlier hit's share when a second 700k came in, pressed between: the
+        # cut is 60% of the new share only. The tick before says the pool was 35k x 19 = 665k (the log
+        # skips the ticks between here), the tick after 20 x 66.5k - 700k = 630k: the replay takes the
+        # estimate that credits least, 665k, so each later tick shrinks by 0.6 x 700k / 1365k.
+        ticks = [pool_tick(80_500, 35_000, 900_000)]
+        first = dict(hit(80_000, 300_000, 935_000, absorbed=700_000), sourceID=50)
+        second = dict(hit(90_000, 300_000, 600_000, absorbed=700_000), sourceID=50)
+        after = [pool_tick(90_500, 66_500, 533_500), pool_tick(91_000, 66_500, 0, overkill=400_000)]
+        events = [first, staggered(80_000, 700_000), second, staggered(90_000, 700_000)] + ticks + after
+        r = defensives.assess_survival(events, 91_000, ready(DIFFUSE_MAGIC), [], NAMES, SCHOOLS,
+                                       aura_ms={"Diffuse Magic": 30_000}, spec="Brewmaster")
+        share = 0.6 * 700_000 / 1_365_000
+        self.assertAlmostEqual(r["details"]["Diffuse Magic"]["amount"], 180_000 + 2 * 66_500 * share, delta=2)
