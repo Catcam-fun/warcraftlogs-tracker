@@ -177,7 +177,8 @@ const TALENT_TEXT = (t) => {
   if ('adds' in t) {
     if (t.field === 'absorb' && t.adds > 1) return `adds a ${fmt(t.adds)} shield`;
     const vs = t.school ? ` vs ${schoolScope(t.school)}` : '';
-    return `adds ${pct(t.adds * t.rank)}${t.field === 'absorb' ? ' of max health as a' : ''} ${ADDS_WHAT[t.field] || ''}${vs}`.trim();
+    const lasts = t.dur_ms ? ` for ${secs(t.dur_ms)}` : '';
+    return `adds ${pct(t.adds * t.rank)}${t.field === 'absorb' ? ' of max health as a' : ''} ${ADDS_WHAT[t.field] || ''}${vs}`.trim() + lasts;
   }
   // A talent can take some off as well as add (Elusiveness on Feint's area reduction: −11.4%, measured).
   const vs = t.school ? ` vs ${schoolScope(t.school)}` : '';
