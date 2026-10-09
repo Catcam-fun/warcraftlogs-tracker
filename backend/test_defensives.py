@@ -1572,3 +1572,36 @@ class FieryBrandTests(unittest.TestCase):
                 enemy_hit(100_000, 400_000, 0, source=50, overkill=300_000)]
         r = self.assess(hits)
         self.assertAlmostEqual(r["details"]["Fiery Brand"]["amount"], 0.4 * 700_000, delta=1)
+
+
+class DampenHarmTests(unittest.TestCase):
+    """Dampen Harm (122278): "Reduces all damage you take by 20% to 50% ..., with larger attacks being
+    reduced by more" (effects 1 and 2: dummies of 20 and 50, no curve in the data). Fitted on real hits
+    (Atlai and Weavi, Undermine): 0.20 + 0.30 x min(x, 1), x the hit after the player's other reductions
+    as a share of their max health (0.285 at x = 0.285, 0.350 at 0.500, 0.383 at 0.610)."""
+    DH = {"dr": 0.2, "dr_hit": 0.5}
+
+    def test_the_catalog_carries_both_ends_from_the_game_data(self):
+        for patch in ("11.0.2", "12.1.0"):
+            self.assertEqual(defensives._CATALOGS[patch].all[DAMPEN_HARM]["mitigation"], [self.DH])
+
+    def test_larger_hits_are_reduced_by_more(self):
+        kb = hit(100_000, 400_000, 0, overkill=200_000)               # 600k: x = 0.6, cut 0.38
+        self.assertAlmostEqual(defensives._prevented([self.DH], kb, MAX, 600_000, SCHOOLS), 0.38 * 600_000)
+        small = hit(100_000, 50_000, 0, overkill=50_000)              # 100k: x = 0.1, cut 0.23
+        self.assertAlmostEqual(defensives._prevented([self.DH], small, MAX, 50_000, SCHOOLS), 0.23 * 100_000)
+
+    def test_capped_at_half_for_a_hit_of_max_health_or_more(self):
+        kb = hit(100_000, 1_000_000, 0, overkill=500_000)             # 1.5M: x = 1.5, cut 0.50
+        self.assertAlmostEqual(defensives._prevented([self.DH], kb, MAX, 0, SCHOOLS), 0.5 * 1_500_000)
+
+    def test_size_after_the_other_reductions_pressed_with_it(self):
+        # Shield Wall's 40% first: 1M becomes 600k, x = 0.6, Dampen Harm cuts 0.38 of that.
+        kb = hit(100_000, 1_000_000, 0)
+        keep = 0.6 * (1 - 0.38)
+        self.assertAlmostEqual(defensives._prevented([{"dr": 0.4}, self.DH], kb, MAX, 0, SCHOOLS), (1 - keep) * 1_000_000)
+
+    def test_size_against_the_max_health_they_had_at_that_hit(self):
+        # The same 600k hit on a player with 2M max health: x = 0.3, cut 0.29.
+        kb = dict(hit(100_000, 400_000, 0, overkill=200_000), maxHitPoints=2 * MAX)
+        self.assertAlmostEqual(defensives._prevented([self.DH], kb, 2 * MAX, 1_600_000, SCHOOLS), 0.29 * 600_000)

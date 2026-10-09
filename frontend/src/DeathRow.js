@@ -90,6 +90,7 @@ function effectText(effect, info) {
     const scope = typeof c.school === 'number' ? `${schoolScope(c.school)} ` : SCOPE[c.school] || '';
     const over = c.over_ms ? ` over ${secs(c.over_ms)}` : '';
     if (c.immune) return c.school === 'melee' ? 'Dodges all melee attacks' : `Immune to ${scope}damage`;
+    if (c.dr && c.dr_hit) return `Reduces damage taken by ${pct(c.dr)} to ${pct(c.dr_hit)}, more on larger hits`;
     if (c.dr && c.from_target) return `Reduces damage taken from the branded enemy by ${pct(c.dr)}`;
     if (c.dr) return `Reduces ${scope}damage taken by ${pct(c.dr)}`;
     if (c.dr_missing) return `Reduces damage taken by up to ${pct(c.dr_missing)} more, the lower their health`;

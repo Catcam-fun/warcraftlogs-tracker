@@ -19,8 +19,8 @@ caster), so it is measured like any other buff (Felvix, Voidspire, 2026-10-08: a
 0.56-0.59 of unbranded).
 A reduction that grows with the size of the hit (Dampen Harm: "20% to 50% ... larger attacks being
 reduced by more"; game data 122278 has the two numbers as dummy effects and no curve) is predicted hit by
-hit: the catalog's value at no damage, rising in a straight line to SCALES_WITH_HIT's value at a hit of
-the player's whole max health, where x is the hit after the player's other reductions (unmitigated size x
+hit: the catalog's value at no damage, rising in a straight line to its `dr_hit` (game data 122278
+effect 2: 50) at a hit of the player's whole max health, where x is the hit after the player's other reductions (unmitigated size x
 the matched hits' median share through) over max health, and capped there. Fitted 2026-10-08: Atlai
 (Brewmaster, Undermine) read 0.243/0.245, 0.285/0.285, 0.350/0.350, 0.355/0.355 (measured/rule) up to
 x = 0.57, 81 hits, median residual -0.004; Weavi's Goblin Gun hits at x = 0.61-0.62 read 0.383/0.383 and
@@ -43,9 +43,6 @@ MIN_HITS = 3
 FLAG_AT = 0.03
 MIN_FLAG_HITS = 20            # fewer hits than this are too noisy to flag
 PAIR_MS = 3000                        # a branded and an unbranded hit this close are compared
-# Reduction at a hit of the player's whole max health (game data 122278 effect 2: 50); the catalog's
-# value is the reduction at no damage (effect 1: 20).
-SCALES_WITH_HIT = {"Dampen Harm": 0.50}
 STAGGER = 124255                      # a Brewmaster's Stagger ticks
 
 
@@ -64,11 +61,16 @@ def missing_share(hit):
     return min(max(1 - before / hit["maxHitPoints"], 0.0), 1.0)
 
 
-def predicted_keep(comps, e, aoe_known, schools, top=None, size=None):
+def scales_with_hit(comps):
+    """Does a component grow with the size of the hit (the catalog's `dr_hit`: Dampen Harm)?"""
+    return any(c.get("dr_hit") is not None for c in comps or [])
+
+
+def predicted_keep(comps, e, aoe_known, schools, size=None):
     """Share of hit `e` the components let through, and the group its prediction is judged in:
-    (None, None) when it can't be predicted. `top`, `size`: a reduction that grows with the hit
-    (SCALES_WITH_HIT), from the component's value at no damage to `top` at a hit of max health, at a
-    hit of `size` x max health."""
+    (None, None) when it can't be predicted. `size`: for a reduction that grows with the hit (`dr_hit`),
+    the hit after the player's other reductions as a share of max health; it reduces by its value at
+    no damage rising in a straight line to `dr_hit` at a hit of max health, capped there."""
     keep, by_hit = 1.0, False
     for c in comps or []:
         if not (c.get("dr") or c.get("dr_missing")):
@@ -79,8 +81,8 @@ def predicted_keep(comps, e, aoe_known, schools, top=None, size=None):
         if not applies:
             continue
         dr = c.get("dr") or 0
-        if top is not None and c.get("dr"):
-            dr += (top - dr) * min(size, 1.0)
+        if c.get("dr_hit") is not None and c.get("dr"):
+            dr += (c["dr_hit"] - dr) * min(size, 1.0)
             by_hit = True
         if c.get("dr_missing"):
             missing = missing_share(e)
@@ -221,12 +223,12 @@ def check(run):
                     continue
                 usual = statistics.median(same)
                 size = None
-                if name in SCALES_WITH_HIT:
+                if scales_with_hit(comps):
                     if e.get("resourceActor") != 2 or not e.get("maxHitPoints"):
                         continue             # no max health on this hit: its reduction can't be predicted
                     # The hit after the player's other reductions, as a share of max health.
                     size = e["unmitigatedAmount"] * usual / e["maxHitPoints"]
-                keep, group = predicted_keep(comps, e, aoe_known, schools, SCALES_WITH_HIT.get(name), size)
+                keep, group = predicted_keep(comps, e, aoe_known, schools, size)
                 if keep is not None:
                     by_predicted[group].append((1 - through / usual, 1 - keep))
                     if group == "by hit":

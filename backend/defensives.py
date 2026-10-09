@@ -1205,7 +1205,7 @@ def _resolve(entry, talent_entries, observed_absorbs, spec=None, applied=None):
                                 **({"school": c["school"]} if c.get("school") else {})})
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 value = value * rank
-        extra = {k: c[k] for k in ("over_ms", "ticks", "current", "replaces_form", "from_target") if k in c}
+        extra = {k: c[k] for k in ("over_ms", "ticks", "current", "replaces_form", "from_target", "dr_hit") if k in c}
         if seen:
             out.append({"absorb_amount": seen, "school": c.get("school")})
             continue
@@ -1395,9 +1395,13 @@ def _keep(comps, hit, max_hp, missing_hp, ability_schools):
     Reductions are skipped for a hit that ignored them, immunities for spells
     that pierce them. Armor increases multiply (Bear Form x Ursine Vigor);
     shifting forms takes the current form's armor bonus off first.
+    A reduction that grows with the hit (`dr_hit`: Dampen Harm, 20% to 50%) cuts its value plus
+    (dr_hit - value) x min(x, 1), x the hit after every other reduction (the player's real ones are in
+    the logged hit; those pressed with it come first) as a share of `max_hp`, their max health then.
     """
     keep, armor_up = 1.0, 1.0
     no_reduction = _ignores_reduction(hit)
+    by_size = []
     for m in comps:
         if not any(f in m for f in ("immune", "armor", "dr", "dr_missing")):
             continue
@@ -1408,6 +1412,8 @@ def _keep(comps, hit, max_hp, missing_hp, ability_schools):
                 keep = 0.0
         elif m.get("armor"):
             armor_up *= 1 + m["armor"]
+        elif not no_reduction and m.get("dr_hit") is not None:
+            by_size.append(m)
         elif not no_reduction:
             dr = m.get("dr") or 0
             if m.get("dr_missing"):              # up to its value at no health, by missing health
@@ -1417,6 +1423,9 @@ def _keep(comps, hit, max_hp, missing_hp, ability_schools):
         if any(m.get("replaces_form") for m in comps):
             armor_up /= hit.get("formArmor") or 1.0
         keep *= 1 - _armor_dr(armor_up - 1, hit)
+    for m in by_size:
+        x = min(_full_hit(hit) * keep / max_hp, 1.0) if max_hp else 0.0
+        keep *= 1 - min(m["dr"] + (m["dr_hit"] - m["dr"]) * x, 1.0)
     return keep
 
 
@@ -1563,7 +1572,8 @@ def _simulate(options, press, win, kb_index):
     ends = sorted(((until, c) for c, until in lasting if c in covering and until != float("inf")),
                   key=lambda x: x[0])
     sig = tuple(id(c) for c in covering)
-    by_health = any(c.get("dr_missing") for c in covering)
+    # Reductions that depend on health or on the hit against max health: worked out for every hit.
+    by_health = any(c.get("dr_missing") or c.get("dr_hit") is not None for c in covering)
 
     # Heals: (time, amount before healing-taken increases, boosted already?).
     heals = []
@@ -1613,7 +1623,7 @@ def _simulate(options, press, win, kb_index):
             covering.remove(ends.pop(0)[1])
         if covering:
             key = None if by_health else (sig, len(ends))
-            left = dmg * win.keep(covering, key, k, max_k, max(max_k + dmax - hp_before - extra, 0))
+            left = dmg * win.keep(covering, key, k, max_k + dmax, max(max_k + dmax - hp_before - extra, 0))
         else:
             left = dmg
         for sh in shields:

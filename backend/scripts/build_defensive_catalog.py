@@ -225,6 +225,11 @@ EFFECTS = {
     "Prismatic Barrier": [("absorb", 235450, 0), ("dr", 235450, "aura:87")],
     "Mirror Image": [("dr", 55342, "aura:87", {"optional": True})],
     "Diffuse Magic": [("dr", 122783, 0)], "Touch of Karma": [("absorb", 122470, 1)],
+    # "Reduces all damage you take by $m2% to $m3% ..., with larger attacks being reduced by more":
+    # effect 1 at no damage, effect 2 ("top") at a hit of the player's whole max health. The data has no
+    # curve; real hits (Atlai and Weavi, Undermine, 2026-10-08) fit a straight line in the hit after the
+    # player's other reductions as a share of max health: 0.285 at x = 0.285, 0.350 at 0.500, 0.383 at 0.610.
+    "Dampen Harm": [("dr", 122278, 1, 1, {"top": 2})],
     "Celestial Brew": [("absorb", 322507, 0)], "Zen Meditation": [("dr", 115176, 1)],
     "Ardent Defender": [("dr", 31850, "aura:87"), ("hp", 31850, "aura:137", {"optional": True}),
                         ("heal_taken", 31850, "aura:118", {"optional": True})],
@@ -824,6 +829,13 @@ def components(name, gd, mods, problems):
                     school = data_school
             if school:
                 comp["school"] = school
+            if opts.get("top") is not None and index is not None:
+                # A reduction that grows with the hit (dr_hit: its value at a hit of max health).
+                comp["dr_hit"], _ = data_value(field, gd, spell, opts["top"], ticks)
+                if comp["dr_hit"] is None:
+                    problems.append(f"{name}: effect {opts['top']} of spell {spell} is missing")
+                if mods.effect(spell, opts["top"], field, ticks):
+                    problems.append(f"{name}: a talent changes effect {opts['top']} of spell {spell}: handle it")
             if field == "dr" and index is not None and                     gd.effects[spell][index]["EffectAura"] == AURA_DAMAGE_DONE_TO_CASTER:
                 # Only the hits of the unit it is cast on, which carry this aura in WCL's list.
                 comp["from_target"] = spell
