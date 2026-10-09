@@ -851,6 +851,14 @@ class HealOverTimeTests(unittest.TestCase):
         self.assertEqual(r["details"]["Frenzied Regeneration"]["hot"]["of"], 4)
         self.assertAlmostEqual(r["details"]["Frenzied Regeneration"]["amount"], 320_000, delta=1)
 
+    def test_the_whole_heal_includes_its_own_healing_taken_increase(self):
+        # Verdant Heart's +20% healing taken while Frenzied Regeneration is up raises every tick, so the
+        # whole heal the ticks before death are a part of is 32% x 1.2, never less than what landed.
+        opt = {"lasting": [({"heal_taken": 0.2}, 3_000)], "hots": [({"heal": 0.32}, 4, 3_000)]}
+        self.assertAlmostEqual(defensives._hot_full(opt, 1_000_000), 384_000)
+        opt["hots"][0][0]["boosted"] = True
+        self.assertAlmostEqual(defensives._hot_full(opt, 1_000_000), 320_000)
+
     def test_real_heals_topping_them_up_waste_the_extra(self):
         # Low when it would tick, but a healer brought them back to full before they were hit from full.
         r = self.assess([hit(95_000, 700_000, 300_000), hit(99_500, 10_000, 990_000),
