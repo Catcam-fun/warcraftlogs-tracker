@@ -337,6 +337,7 @@ def analyze():
 
             report_attacked = {}         # rid -> units the raid attacked (fetch_attacked_units)
             report_aoe = {}              # rid -> (abilities AoE in the report, those it couldn't tell)
+            report_soulburn = {}         # rid -> {Warlock ID: casts and Soulburn buff} (fetch_soulburn_windows)
 
             def fetch_report_deaths(rid, report_fights):
                 """Deaths, defensive data (casts, buffs, talents) and the hits before the deaths that
@@ -457,6 +458,22 @@ def analyze():
                             except Exception as e:
                                 print(f"[WARN] Attacked units unavailable for report {rid}: {e}")
                         report_attacked[rid] = set(attacked) if attacked is not None else None
+                    # A Warlock's Healthstone with Soulburn first counts only where their casts show they
+                    # could have cast it (a Soul Shard, Soulburn ready): one request, for the counted deaths
+                    # of Warlocks with Soulburn and without Gorebound Fortitude in that pull.
+                    sb_pulls = defensives.soulburn_pulls(def_data, counted, friendlies, cat)
+                    if sb_pulls:
+                        sb_key = (rid, tuple((fid, tuple(ds)) for fid, ds in sb_pulls), "soulburn",
+                                  defensives.LETHAL_WINDOW_MS, cat.soulburn["buff_ms"])
+                        burns = recap_lru.get(sb_key) if finished else None
+                        if burns is None:
+                            try:
+                                burns = defensives.fetch_soulburn_windows(token, rid, sb_pulls, cat.soulburn)
+                                if finished:
+                                    recap_lru.set(sb_key, burns)
+                            except Exception as e:
+                                print(f"[WARN] Soulburn data unavailable for report {rid}: {e}")
+                        report_soulburn[rid] = burns
                     if def_error:
                         print(f"[WARN] Defensive data unavailable for report {rid}: {def_error}")
 
@@ -670,6 +687,9 @@ def analyze():
                             attackable=report_attacked.get(rid),
                             aoe_abilities=report_aoe.get(rid, (None,))[0],
                             aoe_unknown=report_aoe.get(rid, (None, frozenset()))[1],
+                            # Fetched for this report: their events (none is an empty list); else None.
+                            soulburn_events=(report_soulburn[rid] or {}).get(target_id, [])
+                            if report_soulburn.get(rid) is not None else None,
                         )
                         death_event['defensives'] = defensives.analyze_death(**death_args)
                         cat = defensives.catalog_for(report_abs_start)

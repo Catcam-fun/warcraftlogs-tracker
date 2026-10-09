@@ -9,8 +9,13 @@ determined (no killing hit found, not in the catalog, on cooldown at the killing
 Whether the killing hit ignores immunity is read from WCL's killing ability (the death event's
 abilityId, else the report's abilities named like the killing hit) against
 boss_spell_flags.IGNORES_IMMUNITY, not from the site's own flag.
+A Healthstone credited with Soulburn first (details "soulburn") must have been pressed when Soulburn
+could have been cast, read from WCL: its buff (387626) on the player, or Soulburn off its cooldown (the
+player's casts) and at least one Soul Shard left after the last cast that spent some (WCL's
+classResources type 7, the amount before the cost).
 """
 from boss_spell_flags import IGNORES_IMMUNITY
+from defensives import LETHAL_WINDOW_MS
 from checks import source_state
 from checks.rules_counting import is_counted
 from checks.verdict import PASS, fail, skip
@@ -100,6 +105,38 @@ def early_presses(details, kb_ts, ready):
     return out
 
 
+SOUL_SHARDS = 7          # WCL classResources type
+
+
+def soulburn_possible(t, casts, auras, sb):
+    """Could Soulburn have been cast at t (see the module docstring)? `casts`: WCL casts with resources;
+    `auras`: the player's aura events; `sb`: the catalog's "soulburn" (spell, buff, cooldown, cost)."""
+    buff = [e for e in auras if e.get("abilityGameID") == sb["buff"] and e["timestamp"] <= t]
+    if buff and buff[-1].get("type") in ("applybuff", "refreshbuff") and t - buff[-1]["timestamp"] < sb["buff_ms"]:
+        return True
+    own = [e for e in casts if e.get("type") == "cast" and e["timestamp"] <= t]
+    if any(e.get("abilityGameID") == sb["spell"] and t - e["timestamp"] < sb["cooldown_ms"] for e in own):
+        return False
+    spent = [c for e in own for c in e.get("classResources") or () if c.get("type") == SOUL_SHARDS]
+    return bool(spent) and (spent[-1].get("amount") or 0) - (spent[-1].get("cost") or 0) >= sb["cost"]
+
+
+def soulburn_presses(details, kb_ts, casts, auras, sb):
+    """Healthstones credited with Soulburn first at a press when it couldn't have been cast (any moment
+    within the 0.1 s pressAgo rounding that allows it passes)."""
+    out = []
+    for name, det in details.items():
+        if not det.get("soulburn") or det.get("pressAgo") is None:
+            continue
+        press = kb_ts - det["pressAgo"] * 1000
+        lo, hi = press - READY_TOLERANCE_MS, press + READY_TOLERANCE_MS
+        moments = {lo, hi} | {e["timestamp"] for e in list(casts) + list(auras) if lo <= e["timestamp"] <= hi}
+        if not any(soulburn_possible(t, casts, auras, sb) for t in moments):
+            out.append(f"{name}: credited with Soulburn {det['pressAgo']}s before the killing blow, "
+                       f"when the log shows it couldn't be cast (no shard, or on cooldown)")
+    return out
+
+
 def killing_hit_ts(hits, death_ts):
     """When WCL's killing hit landed: the last hit with overkill (or an instant kill) up to
     KILL_AFTER_MS after the death event; None when there is none."""
@@ -167,7 +204,13 @@ def _press_items(run, ev, player):
     kb_ts = killing_hit_ts(run.hits_before(rid, fid, pid, death_ts), death_ts)
     if kb_ts is None:
         return []
-    return early_presses(details, kb_ts, ready_times(run, ev, rid, fid, pid, fight_start, kb_ts, names))
+    out = early_presses(details, kb_ts, ready_times(run, ev, rid, fid, pid, fight_start, kb_ts, names))
+    sb = run.cat.soulburn
+    if sb and any(det.get("soulburn") for det in details.values()):
+        start = kb_ts - LETHAL_WINDOW_MS - sb["buff_ms"] - READY_TOLERANCE_MS
+        out += soulburn_presses(details, kb_ts, run.resource_casts(rid, pid, start, kb_ts),
+                                run.aura_events(rid, pid, start, kb_ts), sb)
+    return out
 
 
 def check(run):
