@@ -489,6 +489,13 @@ ALSO_CONSUMABLES = {"Iron Stomach": 185311}
 # in the 20 s before it and 0.60 (0.65) with one, and 0.60 for a Warlock with Gorebound Fortitude
 # (x1.3 would be 0.39 / 0.455).
 SOULBURN, SOULBURN_BUFF, SOULBURN_HEALTHSTONE = 385899, 387626, 387636
+# The spells other than the Healthstone that Soulburn's tooltip says it empowers, by the name it gives them:
+# its buff (387626) goes to the first of them cast (its effects are dummy auras the server script reads, so
+# the tooltip is the data's only list). Measured on WCL (205 removebuffs of it over 8 Mythic reports): with a
+# Demonic Healthstone 124, a Demonic Gateway 65, a Demonic Circle: Teleport 1 (within 0.1 s), at death 10,
+# run out 5; nothing else used it up.
+SOULBURN_EMPOWERS = {"Demonic Circle: Teleport": 48020, "Demonic Gateway": 111771, "Drain Life": 234153,
+                     "Health Funnel": 755}
 GOREBOUND = "Gorebound Fortitude"
 POWER_SOUL_SHARDS = "7"     # SpellPower PowerType; costs in tenths of a shard, as WCL's classResources
 
@@ -1117,11 +1124,28 @@ def gorebound(gd, mods, desc, problems):
     return (who,) + benefit
 
 
+def soulburn_consumers(gd, desc, problems):
+    """The spell IDs of the casts that use up Soulburn's buff before a Healthstone can (SOULBURN_EMPOWERS),
+    from the spells Soulburn's tooltip names in this patch. A name not mapped, or mapped to a spell of
+    another name, is a problem."""
+    out = []
+    for name in re.findall(r"\|c[0-9A-Fa-f]{8}([^|]+)\|r", desc.get(SOULBURN) or ""):
+        name = name.strip()
+        if name == "Healthstone":
+            continue
+        sid = SOULBURN_EMPOWERS.get(name)
+        if sid is None or gd.names.get(sid) != name:
+            problems.append(f"Soulburn ({SOULBURN}) now empowers {name!r}: map its spell in SOULBURN_EMPOWERS")
+            continue
+        out.append(sid)
+    return sorted(out)
+
+
 def soulburn(gd, mods, desc, problems):
     """What a Warlock with the Soulburn talent gets on a Healthstone by casting Soulburn first, from this
     patch's data, or None when the talent isn't in a tree: {"talent", "entries", "spell", "buff",
     "buff_ms", "cooldown_ms", "cost" (Soul Shards, in tenths as WCL logs them), "heal" (share of max
-    health added), "hp", "dur_ms"}. The replay credits it only at moments the log shows Soulburn could
+    health added), "hp", "dur_ms", "consumed_by" (the other spells whose cast uses the buff up)}. The replay credits it only at moments the log shows Soulburn could
     have been cast (defensives.SoulburnTimeline). Soulburn is instant and off the global cooldown (in the
     logs it is pressed on the same millisecond as the Healthstone), which the build checks."""
     who, _ = talent_who(gd, mods, "Soulburn")
@@ -1141,7 +1165,8 @@ def soulburn(gd, mods, desc, problems):
         return None
     heal, hp, dur = benefit
     return {**who, "spell": SOULBURN, "buff": SOULBURN_BUFF, "buff_ms": buff_ms, "cooldown_ms": cooldown,
-            "cost": cost[1], "heal": heal, "hp": hp, "dur_ms": dur}
+            "cost": cost[1], "heal": heal, "hp": hp, "dur_ms": dur,
+            "consumed_by": soulburn_consumers(gd, desc, problems)}
 
 
 def talent_component(gd, mods, talent, field, source, extra, problems):
