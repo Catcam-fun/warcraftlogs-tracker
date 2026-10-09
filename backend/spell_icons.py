@@ -35,6 +35,7 @@ ICONS = {'Algari Healing Potion': 'inv_flask_red',
  'Dispersion': 'spell_shadow_dispersion',
  'Divine Protection': 'spell_holy_divineprotection',
  'Divine Shield': 'spell_holy_divineshield',
+ 'Earth Elemental': 'spell_nature_earthelemental_totem',
  'Earthen Wall Totem': 'spell_nature_stoneskintotem',
  'Enraged Regeneration': 'ability_warrior_focusedrage',
  'Evasion': 'spell_shadow_shadowward',
@@ -52,6 +53,8 @@ ICONS = {'Algari Healing Potion': 'inv_flask_red',
  'Ice Block': 'spell_frost_frost',
  'Ice Cold': 'spell_fire_bluefire',
  'Icebound Fortitude': 'spell_deathknight_iceboundfortitude',
+ 'Impending Victory': 'spell_impending_victory',
+ 'Incarnation: Guardian of Ursoc': 'spell_druid_incarnation',
  'Invigorating Healing Potion': 'inv_alchemy_70_flask04',
  'Ironbark': 'spell_druid_ironbark',
  'Last Stand': 'spell_holy_ashestoashes',
@@ -60,6 +63,7 @@ ICONS = {'Algari Healing Potion': 'inv_flask_red',
  'Life Cocoon': 'ability_monk_chicocoon',
  'Metamorphosis': 'ability_demonhunter_metamorphasistank',
  'Mirror Image': 'spell_magic_lesserinvisibilty',
+ 'Mortal Coil': 'ability_warlock_mortalcoil',
  'Netherwalk': 'spell_warlock_demonsoul',
  'Obsidian Scales': 'inv_artifact_dragonscales',
  'Pain Suppression': 'spell_holy_painsupression',
@@ -71,9 +75,11 @@ ICONS = {'Algari Healing Potion': 'inv_flask_red',
  'Renewing Blaze': 'ability_evoker_masterylifebinder_red',
  'Roar of Sacrifice': 'ability_hunter_fervor',
  'Rune Tap': 'spell_deathknight_runetap',
+ 'Sentinel': 'spell_holy_holynova',
  'Shield Wall': 'ability_warrior_shieldwall',
  'Shield of Vengeance': 'ability_paladin_shieldofthetemplar',
  'Silvermoon Health Potion': 'inv_12_profession_alchemy_lightpotion_orange',
+ 'Soul Immolation': 'inv_12_dh_void_ability_voidpurge',
  'Spell Reflection': 'ability_warrior_shieldreflection',
  'Spirit Link Totem': 'spell_shaman_spiritlink',
  'Stone Bulwark Totem': 'ability_shaman_stonebulwark',
@@ -82,6 +88,7 @@ ICONS = {'Algari Healing Potion': 'inv_flask_red',
  'Time Dilation': 'ability_evoker_timedilation',
  'Tombstone': 'ability_fiegndead',
  'Touch of Karma': 'ability_monk_touchofkarma',
+ 'Ultimate Penitence': 'ability_priest_ascendance',
  'Unending Resolve': 'spell_shadow_demonictactics',
  'Vampiric Blood': 'spell_shadow_lifedrain',
  'Zen Meditation': 'ability_monk_zenmeditation',
@@ -154,6 +161,7 @@ DESCRIPTIONS = {'Algari Healing Potion': 'Restores health.',
  'Divine Protection': 'Reduces all damage you take by 20% for 8 sec. Usable while stunned.',
  'Divine Shield': 'Grants immunity to all damage, harmful effects, knockbacks and forced movement effects '
                   'for 8 sec. Cannot be used if you have Forbearance. Causes Forbearance for 30 sec.',
+ 'Earth Elemental': 'Calls forth a Earth Elemental to protect you for 30 sec.',
  'Earthen Wall Totem': 'Summons a totem at the target location with health for 15 sec. damage from each '
                        'attack against allies nearby of the totem is redirected to the totem.',
  'Enraged Regeneration': 'Reduces damage taken by 30% and Bloodthirst restores an additional 20% health for '
@@ -185,6 +193,13 @@ DESCRIPTIONS = {'Algari Healing Potion': 'Restores health.',
              'preventing you from recasting Ice Cold for 30 sec.',
  'Icebound Fortitude': 'Your blood freezes, granting immunity to Stun effects and reducing all damage you '
                        'take by 30% for 8 sec.',
+ 'Impending Victory': 'Instantly attack the target, causing damage and healing you for 30% of your maximum '
+                      'health. Killing an enemy that yields experience or honor resets the cooldown of '
+                      'Impending Victory and makes it cost no Rage.',
+ 'Incarnation: Guardian of Ursoc': 'An improved Bear Form that grants the benefits of Berserk, causes Mangle '
+                                   'to hit up to targets, and increases maximum health. Lasts 30 sec. You '
+                                   'may freely shapeshift in and out of this improved Bear Form for its '
+                                   'duration.',
  'Invigorating Healing Potion': 'Restores health.',
  'Ironbark': "The target's skin becomes as tough as Ironwood, reducing damage taken by 20% for 12 sec.",
  'Last Stand': 'Increases maximum health by 30% for 8 sec and instantly heals you for that amount.',
@@ -199,6 +214,8 @@ DESCRIPTIONS = {'Algari Healing Potion': 'Restores health.',
  'Mirror Image': 'Creates copies of you nearby for 15 sec, which cast spells and attack your enemies. While '
                  'active, you generate significantly reduced threat. Taking direct damage will cause one of '
                  'your images to dissipate.',
+ 'Mortal Coil': 'Horrifies an enemy target into fleeing, incapacitating for 3 sec and healing you for 20% of '
+                'maximum health.',
  'Netherwalk': 'Slip into the nether when you active Blur, increasing movement speed by 100% and becoming '
                'immune to damage for 2.5 sec.',
  'Obsidian Scales': 'Reinforce your scales, reducing damage taken by 30%. Lasts 12 sec.',
@@ -219,11 +236,18 @@ DESCRIPTIONS = {'Algari Healing Potion': 'Restores health.',
                       'but 50% of all damage taken by that target is transferred to your pet. Lasts 10 sec '
                       "or until your pet's health drops below 25%.",
  'Rune Tap': 'Reduces all damage taken by 20% for 4 sec.',
+ 'Sentinel': 'Call upon the Light and gain 15 stacks of Divine Resolve, increasing your maximum health and '
+             'reducing your damage taken per stack for 20 sec. After sec, you will begin to lose 1 stack per '
+             'second, but each 3 Holy Power spent will delay the loss of your next stack by 1 sec. While '
+             'active, your damage and healing are increased by 10%, and critical strike chance is increased '
+             'by 10%.',
  'Shield Wall': 'Reduces all damage you take by 40% for 8 sec.',
  'Shield of Vengeance': 'Creates a barrier of holy light that absorbs damage for 10 sec. When the shield '
                         'expires, it bursts to inflict Holy damage equal to the total amount absorbed, '
                         'divided among all nearby enemies.',
  'Silvermoon Health Potion': 'Restores health.',
+ 'Soul Immolation': 'Light your soul aflame, healing yourself for of your maximum health, generating Fury '
+                    'and shattering Soul Fragments over 5 sec.',
  'Spell Reflection': 'Raise your, reflecting on you and reducing magic damage you take by 20% for 5 sec.',
  'Spirit Link Totem': 'Summons a totem at the target location for 6 sec, which reduces damage taken by all '
                       'party and raid members within 10 yards by 10%. Immediately and every 1 sec, the '
@@ -238,6 +262,10 @@ DESCRIPTIONS = {'Algari Healing Potion': 'Restores health.',
               'damage equal to 6% of your maximum health for 8 sec.',
  'Touch of Karma': 'Absorbs all damage taken for 10 sec, up to 50% of your maximum health, and redirects 70% '
                    'of that amount to the enemy target as Nature damage over 6 sec.',
+ 'Ultimate Penitence': 'Ascend into the air and unleash a massive barrage of Penance bolts, causing Holy '
+                       'damage to enemies or healing to allies over 6 sec. While ascended, gain a shield for '
+                       '100% of your health. In addition, you are unaffected by knockbacks or crowd control '
+                       'effects.',
  'Unending Resolve': 'Hardens your skin, reducing all damage you take by 25% and granting immunity to '
                      'interrupt, silence, and pushback effects for 8 sec.',
  'Vampiric Blood': 'Embrace your undeath, increasing your maximum health by 30% and increasing all healing '
