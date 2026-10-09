@@ -109,9 +109,12 @@ class Catalog:
         # Spells that bring a tracked defensive back early (Cold Snap, Black Ox Brew): their casts are read too.
         self.reset_ids = frozenset(r["spell"] for d in self.tracked.values() for r in d.get("reset_by", ()))
         # Soulburn's benefit on a Healthstone (the Healthstones' "soulburn": build_defensive_catalog.soulburn):
-        # its casts are read too, for its cooldown and to tell which Healthstones had it.
+        # its casts are read too, for its cooldown and to tell which Healthstones had it, and the casts of the
+        # other spells its buff empowers (Demonic Circle: Teleport, Demonic Gateway...), which use it up.
         self.soulburn = next((d["soulburn"] for d in self.consumable.values() if d.get("soulburn")), None)
-        self.soulburn_ids = frozenset({self.soulburn["spell"]}) if self.soulburn else frozenset()
+        self.soulburn_spent_ids = frozenset((self.soulburn or {}).get("consumed_by", ()))
+        self.soulburn_ids = (frozenset({self.soulburn["spell"]}) | self.soulburn_spent_ids if self.soulburn
+                             else frozenset())
         self.cast_ids = sorted(set(self.tracked) | set(self.consumable) | self.reset_ids | self.soulburn_ids)
         # Casts that lengthen a tracked defensive (Zealot's Paragon: Judgment and Hammer of Wrath on
         # Sentinel), read from the death windows (fetch_death_windows), not the report-wide casts.
@@ -944,8 +947,9 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
         death_mult = _heal_taken_mult(_auras(killing), cat) if killing is not None else 1.0
         own_heals = (indexed.get("heals") or {}).get(player_id, [])
         burns = casts_by_spell.get(cat.soulburn["spell"], []) if cat.soulburn else []
+        spent = sorted(t for s in cat.soulburn_spent_ids for t in casts_by_spell.get(s, ()))
         consumables = [consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec, talents_by_fight,
-                                           soulburn_casts=burns)
+                                           soulburn_casts=burns, soulburn_spent=spent)
                        for sid in unused_consumables]
         for sid, c in zip(unused_consumables, consumables):
             if sid == from_soulwell:
@@ -1951,7 +1955,7 @@ def potion_rank(sid, cat, own_heals, talent_entries, spec, talents_by_fight=None
 
 
 def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec, talents_by_fight=None,
-                        soulburn_casts=()):
+                        soulburn_casts=(), soulburn_spent=()):
     """How much an unused Healthstone or potion would have healed this player, as a scorable entry.
 
     From the player's own uses of it in the same report when there are any:
@@ -1967,8 +1971,9 @@ def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec, t
     Soulburn (catalog "soulburn"): its share is on every Healthstone of a Warlock with Gorebound
     Fortitude; for one with only the Soulburn talent, the entry is without it and "withSoulburn" holds
     the Healthstone with it, which the replay credits only when Soulburn could have been cast first
-    (SoulburnTimeline). Their own heals are read without it: a heal after a Soulburn cast (within its
-    buff, `soulburn_casts`) or under Gorebound has its share taken off.
+    (SoulburnTimeline). Their own heals are read without it: a heal that had it (_with_soulburn: after a
+    Soulburn cast, `soulburn_casts`, whose buff no other spell used first, `soulburn_spent`) or under
+    Gorebound has its share taken off.
     """
     entry = cat.all[sid]
     # Their own uses of this exact potion or Healthstone. The log names only the
@@ -1980,7 +1985,8 @@ def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec, t
     if entry["kind"] == "healthstone":
         sb = entry.get("soulburn")
         gore = _gorebound_rank(entry, talent_entries, spec)
-        burned = _with_soulburn(entry, sb, own, soulburn_casts, talents_by_fight, talent_entries, spec)
+        burned = _with_soulburn(entry, sb, own, soulburn_casts, soulburn_spent, talents_by_fight, talent_entries,
+                                spec)
         shares = [h[2] / h[3] for h in own if h[3]]
         # Their own heals without Soulburn's share (a heal with it has it taken off).
         plain = [s - (sb["heal"] if b else 0) for s, b in zip(shares, burned)]
@@ -2052,16 +2058,23 @@ def _gorebound_rank(entry, talent_entries, spec):
     return 0
 
 
-def _with_soulburn(entry, sb, own, soulburn_casts, talents_by_fight, talent_entries, spec):
-    """For each of their own Healthstone heals: did it have Soulburn's share? Yes after a Soulburn cast
-    within its buff (387626, 20 s; pressed on the same millisecond in the logs), or with Gorebound
-    Fortitude in that heal's pull (their loadout at death when that pull's isn't known)."""
+def _with_soulburn(entry, sb, own, soulburn_casts, soulburn_spent, talents_by_fight, talent_entries, spec):
+    """For each of their own Healthstone heals: did it have Soulburn's share? Yes when its buff (387626,
+    20 s) was still on them: the latest Soulburn cast within the buff before the heal (pressed on the same
+    millisecond in the logs), and no spell that uses the buff up cast from it until the heal (`soulburn_spent`:
+    the catalog's "consumed_by", Demonic Circle: Teleport, Demonic Gateway...; nor an earlier Healthstone of
+    theirs). Measured on 8 reports' Warlocks (2VtyDR4CF6PGLjbd, g2R9GZcd1rP6JKpw and the targets): every heal
+    so read healed the plain share and every other heal after a cast the share plus 0.30, as the buff's
+    removebuff and Soulburn: Healthstone (387636) show. Or with Gorebound Fortitude in that heal's pull
+    (their loadout at death when that pull's isn't known)."""
     out = []
+    stones = sorted(h[0] for h in own)
     for h in own:
         if not sb:
             out.append(False)
             continue
-        cast = any(0 <= h[0] - t <= sb["buff_ms"] for t in soulburn_casts)
+        last = max((t for t in soulburn_casts if 0 <= h[0] - t <= sb["buff_ms"]), default=None)
+        cast = last is not None and not any(last <= x < h[0] for x in list(soulburn_spent) + stones)
         talents = (talents_by_fight or {}).get(h[6]) if len(h) > 6 else None
         talents = talent_entries if talents is None else talents
         out.append(cast or bool(_gorebound_rank(entry, talents, spec)))
