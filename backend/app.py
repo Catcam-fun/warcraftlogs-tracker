@@ -389,13 +389,13 @@ def analyze():
                         # No death here can count, so nothing reads this report's defensives or hits.
                         return rid, deaths, defensives.filter_defensive_raw({}, ()), {}, None
 
-                    # The windows now carry the heals a killing hit can set off and the stacks of max-health
-                    # auras: rows cached before them (or with other lists of those IDs) are not reused. Only this key changes, so the
-                    # report's other cached data (meta, fights, deaths, defensives) stays valid.
+                    # The windows carry the heals a killing hit can set off and the aura events of the
+                    # max-health auras the hits list: rows cached before them (or with other lists of those
+                    # IDs) are not reused. Only this key changes, so the report's other cached data (meta,
+                    # fights, deaths, defensives) stays valid.
                     win_key = (rid, tuple((fid, tuple(c)) for fid, c in sorted(counted.items()) if c),
                                "lethal-window", defensives.LETHAL_WINDOW_MS,
-                               "killing-hit-heals", tuple(sorted(defensives.WINDOW_HEAL_IDS)),
-                               "max-health-stacks", tuple(sorted(defensives.WINDOW_STACK_IDS)))
+                               "window-extras", defensives.WINDOW_EXTRAS_KEY)
                     windows = recap_lru.get(win_key) if finished else None
                     # One query at a time: after the first one on a report, WCL charges about a
                     # quarter less for the rest sent one by one than all at once.

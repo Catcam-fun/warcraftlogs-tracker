@@ -3,6 +3,7 @@ import os
 import sys
 
 import defensives
+import features
 from defensive_catalog import CATALOG
 
 ICE_BLOCK, ICE_COLD, MIRROR, ALTER_TIME = 45438, 414658, 55342, 342245
@@ -870,6 +871,9 @@ class LethalWindowTests(unittest.TestCase):
         self.assertIn("extras: events(fightIDs: [3]", queries[0])
         self.assertIn("dataType: All", queries[0])
         self.assertIn("389539", queries[0])                 # Sentinel's stacks
+        self.assertIn("195181", queries[0])                 # Bone Shield's charges (Foul Bulwark fills it)
+        self.assertIn("97463", queries[0])                  # Rallying Cry: who cast it
+        self.assertIn("47788", queries[0])                  # Guardian Spirit's aura, removed as it heals
         self.assertIn("404381", queries[0])
         self.assertIn("209258", queries[0])
         self.assertEqual([(h["type"], h["timestamp"]) for h in hits[1]],
@@ -1288,6 +1292,21 @@ class MaxHealthBeforeKillingBlowTests(unittest.TestCase):
         hits = [self.at(22_878_976, 19_449, 277_176, 489_498), self.healed(22_878_977, 23_288, 404381),
                 self.at(22_879_008, 301_048, 0, 489_498, overkill=10_145)]
         self.assertEqual(self.assess(hits)["hpBeforePct"], 62)
+
+    def test_a_cheat_death_aura_used_up_by_the_killing_hit(self):
+        # Guardian Spirit, Ardent Defender and All-Devouring Nucleus carry EffectAura 316 like Defy Fate; WCL
+        # logs no absorb for Guardian Spirit, it removes the aura as it heals (live, Manaforge
+        # 2VtyDR4CF6PGLjbd p75: 47788 removed at 25624450, 48153 healed 981289 at 25624451).
+        removed = dict(self.healed(25_624_450, None, 47788, "removebuff"), sourceID=277)
+        hits = [self.at(25_624_000, 100_000, 1_000_000, 4_000_000), removed,
+                self.healed(25_624_451, 1_600_000, 48153),
+                self.at(25_624_460, 2_600_000, 0, 4_000_000, overkill=5_000_000)]
+        self.assertEqual(self.assess(hits)["hpBeforePct"], 25)          # (2600000 - 1600000) / 4000000
+        # A Guardian Spirit heal without its aura going after the hit before is not the killing hit's.
+        hits[1]["timestamp"] = 25_623_990
+        self.assertEqual(self.assess(hits)["hpBeforePct"], 65)
+        self.assertEqual({h: features.KILLING_HIT_HEALS[h] for h in (48153, 66235, 1236692)},
+                         {48153: 47788, 66235: 31850, 1236692: 1235500})
         # Arzoker p89: Defy Fate healed 42827 at 13395295 and absorbed its part of Terminate at 13395314,
         # 19 ms apart, both after the hit before: the killing hit's.
         hits = [self.at(13_394_226, 37_642, 433_271, 507_980), self.healed(13_395_294, 507_980, 410355, "absorbed"),
@@ -1385,3 +1404,55 @@ class MaxHealthWhereTheGameDataPutsItTests(unittest.TestCase):
         # Havoc's Metamorphosis stays at nothing; Hexing Strike (EffectAura 80, all stats -5%) lowers it.
         self.assertEqual(defensives.max_health_size(162264, latest, {}, "Havoc"), (0.0, 0))
         self.assertEqual(defensives.max_health_size(1260567, latest), (-0.05, 0))
+
+    def test_base_points_zero_that_talents_fill(self):
+        # Game data 12.1.0: Bone Shield 195181 effect 2 is EffectAura 133 with base points 0; Foul Bulwark
+        # 206974 (entry 96302) adds 1 to it (EffectAura 107 on effect 2): +1% max health per charge.
+        # Ancestral Vigor 207400 effect 0 (133, bp 0) gets +5 from its talent 207401; Grimoire of Sacrifice
+        # 196099 effect 1 (137 Stamina, bp 0) +3 from Profane Bargain 389576.
+        latest = defensives._LATEST.patch
+        self.assertEqual(defensives.max_health_size(195181, latest, {}, "Blood"), (0.0, 0))
+        self.assertEqual(defensives.max_health_size(195181, latest, {96302: 1}, "Blood"), (0.01, 0))
+        self.assertEqual(defensives.max_health_size(207400, latest, {}, "Restoration"), (0.0, 0))
+        self.assertEqual(defensives.max_health_size(207400, latest, {101909: 1}, "Restoration"), (0.05, 0))
+        self.assertEqual(defensives.max_health_size(196099, latest, {91426: 1}, "Affliction"), (0.03, 0))
+        # Improved Ardent Defender's +20% is its modifier on Ardent Defender's own effect 4, counted once.
+        self.assertEqual(defensives.max_health_size(31850, latest, {102441: 1}, "Protection"), (0.2, 0))
+        # The loadouts the site reads keep those talents.
+        self.assertTrue({96302, 101909, 91426, 134033} <= defensives._LATEST.relevant_talent_entries)
+        # Bone Shield with Foul Bulwark: 10 charges on the last hit, 5 at the killing blow -> x1.05 / 1.10.
+        sizer = self.sizer("DeathKnight", "Blood", {96302: 1})
+        aura = lambda ts, kind, n: {"timestamp": ts, "type": kind, "targetID": 1, "abilityGameID": 195181,
+                                    "stack": n, "sourceID": 1}
+        hits = [aura(89_000, "applybuffstack", 10), self.at(90_000, 10_000, 1_000_000, 1_100_000, buffs=[195181]),
+                aura(95_000, "removebuffstack", 5),
+                self.at(100_000, 900_000, 0, 1_000_000, overkill=1, buffs=[195181])]
+        self.assertEqual(self.assess(hits, sizer)["maxHp"], 1_050_000)
+        # Without the talent the charges change nothing.
+        self.assertEqual(self.assess(hits, self.sizer("DeathKnight", "Blood"))["maxHp"], 1_100_000)
+
+    def test_an_aura_is_sized_with_its_casters_loadout(self):
+        # Live (Voidspire, P6CwHkgFR9Krf1Bz p43, actor 8): 511853 max on the hit at 4525705; actor 24, a
+        # warrior with Battlefield Commander (entry 134033, +2%) and not Inspiring Presence, cast Rallying
+        # Cry 97463 on him at 4526123; the next hit read 573274 = 511853 x 1.12. Actor 8 has neither talent.
+        loadouts = {24: ({134033: 1}, "Fury")}
+        sizer = defensives._aura_sizer(defensives._LATEST, "Priest", "Discipline", {}, None, 8, loadouts.get)
+        cry = {"timestamp": 4_526_123, "type": "applybuff", "sourceID": 24, "targetID": 8, "abilityGameID": 97463}
+        hits = [self.at(4_525_705, 10_000, 400_000, 511_853), cry,
+                self.at(4_526_791, 500_000, 0, 511_853, overkill=1, buffs=[97463])]
+        self.assertEqual(self.assess(hits, sizer)["maxHp"], 573_275)
+        # With the target's own loadout it would read x1.10.
+        self.assertEqual(defensives.max_health_size(97463, defensives._LATEST.patch, {}, "Discipline"), (0.1, 0))
+        # A caster whose loadout isn't known: left as it was (the last hit's max).
+        sizer = defensives._aura_sizer(defensives._LATEST, "Priest", "Discipline", {}, None, 8, {}.get)
+        self.assertEqual(self.assess(hits, sizer)["maxHp"], 511_853)
+        # A self-cast aura uses the player's own loadout.
+        self.assertEqual(sizer.by_caster(97463, 8), (0.1, 0))
+
+    def test_every_players_loadout_is_kept(self):
+        # Another player's talents size an aura they cast on a player who died.
+        raw = {"combatants": [{"type": "combatantinfo", "fight": 3, "sourceID": 24, "specID": 72,
+                               "talentTree": [{"id": 134033, "rank": 1}, {"id": 1, "rank": 1}]}]}
+        idx = defensives.filter_defensive_raw(raw, {8})
+        self.assertEqual(idx["talents"][(3, 24)], {134033: 1})
+        self.assertEqual(idx["specs"][(3, 24)], "Fury")
