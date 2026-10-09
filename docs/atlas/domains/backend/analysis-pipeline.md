@@ -23,7 +23,7 @@ anchors:
   dedup_loop: "backend/app.py:263"
   fetch_report_deaths: "backend/app.py:335"
   no_counted_death: "backend/app.py:383"
-  get_report_fights: "backend/warcraftlogs.py:333"
+  get_report_fights: "backend/warcraftlogs.py:347"
   processing_loop: "backend/app.py:473"
   result: "backend/app.py:631"
   raid_encounters: "backend/analysis.py:234"
@@ -51,7 +51,7 @@ invariants:
   - "MUST: drop duplicate pulls before fetching deaths, so a pull logged by three raiders is counted once."
   - "MUST: sort pulls by start time, then report code, then fight id, so the copy of a pull that is kept never depends on which report was read first."
   - "NEVER: cache the deaths of a report that failed to load; get_report_deaths_bulk re-raises so the caller records the failure instead."
-content_hash: sha256:e789daedf54a5e3c52af06c0283adb91f4c4ee4d817c4bd9d3887b66e7a51127
+content_hash: sha256:6028bd3fb774879f42b0ceffe08dff08b77b126a1dd7befe0f11e6be56c52164
 ---
 ## Summary
 
@@ -76,7 +76,7 @@ The generator yields a progress event at each stage. Click each step to see what
 - title: List the guild's reports | short: Reports | sub: tier date window
   body: `resolve_report_window` intersects the user's dates with the tier window (`backend/app.py:189`), then `get_guild_reports` pages through the guild's reports in that window (`backend/app.py:191`). An `authorFilters` list keeps only reports whose owner name is in it (`backend/app.py:195`). No reports ends the stream (`backend/app.py:199`).
 - title: Read each report's fights | short: Fights | sub: light list, six at once
-  body: Up to `REPORT_FETCH_WORKERS` (6) reports are read at once (`backend/app.py:50`, `backend/app.py:234`). Each read is the light fight list, `get_report_fights`: the report's start and its fights, with no players or abilities (`backend/warcraftlogs.py:333`). A report whose end time is more than two hours old counts as finished (`backend/app.py:209`), and its list comes from `report_fights_cache` when present (`backend/app.py:215`). `analyze_fights` keeps only this raid's boss pulls at the chosen difficulty (`backend/app.py:245`). Each kept pull records its report and its absolute start and end (`backend/app.py:246`).
+  body: Up to `REPORT_FETCH_WORKERS` (6) reports are read at once (`backend/app.py:50`, `backend/app.py:234`). Each read is the light fight list, `get_report_fights`: the report's start and its fights, with no players or abilities (`backend/warcraftlogs.py:347`). A report whose end time is more than two hours old counts as finished (`backend/app.py:209`), and its list comes from `report_fights_cache` when present (`backend/app.py:215`). `analyze_fights` keeps only this raid's boss pulls at the chosen difficulty (`backend/app.py:245`). Each kept pull records its report and its absolute start and end (`backend/app.py:246`).
   gotcha: The light list costs WarcraftLogs 1 point; the full read costs 3. Every listed report gets the light read, but only the reports that keep pulls get the full one.
 - title: Drop duplicate pulls | short: Dedup | sub: same pull, several logs
   body: `dedup_pulls` (`backend/analysis.py:84`, called at `backend/app.py:266`) groups every log's copies of a pull and keeps the earliest one, unless another raider's copy lasts more than `TRUNCATED_COPY_MS` (5 s) longer; then it keeps that longest copy, since the earliest logger stopped logging mid-pull. Only the reports that kept pulls are then read in full with `get_fights`: players, specs and ability names (`backend/app.py:224`, `backend/app.py:270`). Finished reports come from `report_meta_cache`. Each kept pull gets its report's actors, ability names, schools and icons (`backend/app.py:284`). No pulls left ends the stream with a difficulty message (`backend/app.py:278`).
@@ -212,7 +212,7 @@ relied-on-by: [[feat-analyze]] — the Analyze button runs this pipeline
 
 ## Gotchas
 
-- **Reports are not filtered by zone**: `get_guild_reports` fetches by date only, because WarcraftLogs gives each report one zone and a raid night mixed with dungeons can be filed under the dungeon zone (`backend/warcraftlogs.py:176`). The encounter allowlist does the filtering.
+- **Reports are not filtered by zone**: `get_guild_reports` fetches by date only, because WarcraftLogs gives each report one zone and a raid night mixed with dungeons can be filed under the dungeon zone (`backend/warcraftlogs.py:190`). The encounter allowlist does the filtering.
 - **Open tiers page through everything since their start**: a `None` end date means no upper bound. Only the newest tier (Midnight Season 2, `backend/analysis.py:265`) is open; Midnight Season 1 ends 2026-08-23 (`backend/analysis.py:269`), and a test fails if an older tier is left open (`backend/test_raid_selection.py`).
 - **The first log of a pull wins, unless it was cut short**: dedup keeps whichever report's copy starts earliest (report code first on a tie), unless another copy lasts more than 5 s longer (`backend/analysis.py:84`). A copy only a little shorter is kept even if it misses a few seconds. A log that can't be read in full also gives way (`backend/app.py:275`).
 - **A report with no death that can count reads no defensives**: it returns after the deaths query (`backend/app.py:383`), so its defensive data is empty, not missing, and it does not show in the "defensive details missing" warning.

@@ -4,10 +4,10 @@ title: Testing & Checks
 domain: testing
 status: documented
 summary:
-  - "Two kinds of confidence: offline unit tests (thirteen backend unittest files, two frontend jest files) and real-log check scripts that compare the analysis with live WarcraftLogs data."
+  - "Two kinds of confidence: offline unit tests (backend unittest files, two frontend jest files) and the backend/checks package, which compares the analysis with live WarcraftLogs data."
   - "Backend tests are unittest.TestCase classes run from backend/ with python -m unittest (pytest also collects them, but it is not in requirements.txt)."
   - "Frontend tests run under Create React App's jest with npm test in frontend/."
-  - "The check scripts need WCL_CLIENT_ID and WCL_CLIENT_SECRET and spend that key's WarcraftLogs points; only check_deaths.py sets a failing exit code."
+  - "The checks need WCL_CLIENT_ID and WCL_CLIENT_SECRET and spend that key's WarcraftLogs points; python -m checks exits non-zero when any check fails."
   - "Only the hand-started AWS deploy workflow runs the unit tests; nothing runs them on pull requests."
 tagline: What is tested offline, what is checked against real logs, and what is not covered.
 anchors:
@@ -21,11 +21,21 @@ anchors:
   analyze_config_test: frontend/src/AnalyzeConfig.test.js:22
   api_test: frontend/src/api.test.js:14
   npm_test: frontend/package.json:22
-  check_deaths: backend/scripts/check_deaths.py:24
-  check_deaths_exit: backend/scripts/check_deaths.py:55
-  check_durations: backend/scripts/check_durations.py:52
-  check_mitigation: backend/scripts/check_mitigation.py:30
-  check_defensives: backend/scripts/check_defensives.py:18
+  check_deaths: backend/checks/source_deaths.py:9
+  check_selection: backend/checks/source_selection.py:57
+  check_participation: backend/checks/source_participation.py:24
+  check_state: backend/checks/source_state.py:201
+  check_durations: backend/checks/source_durations.py:30
+  check_mitigation: backend/checks/source_mitigation.py:45
+  check_slots: backend/checks/rules_slots.py:40
+  check_counting: backend/checks/rules_counting.py:27
+  check_labels: backend/checks/rules_labels.py:97
+  check_verdicts: backend/checks/rules_verdicts.py:166
+  check_defensives: backend/checks/rules_defensives.py:5
+  checks_registry: backend/checks/registry.py:6
+  checks_target: backend/checks/common.py:36
+  checks_unit_tests: backend/test_checks.py:1
+  carried_over: backend/checks/source_durations.py:20
   only_workflow: .github/workflows/atlas-sync.yml:1
 links:
   - backend
@@ -36,12 +46,12 @@ links:
   - game-data
   - warcraftlogs
   - operations
-content_hash: sha256:32c8cad1b1e3da80936fb14249bb5e2142de139ad6efdf931ca6762ec9b106af
+content_hash: sha256:5bd9d9b410903b658790fa389d33700a39a9f2ea05e54ff05e87a4f00f87a947
 ---
 ## Summary
 
 - **Unit tests** run offline. The backend ones mock WarcraftLogs and Supabase, so they need no keys and no network; the frontend ones mock `fetch` and the Supabase client.
-- **Real-log checks** are scripts in `backend/scripts/check_*.py`. Each reads one or more real WarcraftLogs reports and compares what the analysis reads or predicts with what the log shows.
+- **Real-log checks** are the `backend/checks` package, run as `python -m checks <subcommand> <target>` from `backend/`. Eleven checks read a real WarcraftLogs report, run the site's own analysis on it and compare the two. Its offline unit tests are in `backend/test_checks.py`.
 - Run the unit tests on every change. Run the checks after a new raid tier, a new patch, or any change to how deaths or defensives are fetched; [[operations]] lists where they fit in the new-tier procedure.
 - Little runs automatically. The AWS deploy workflow runs both unit suites before it deploys (`.github/workflows/deploy-aws.yml:54`, `.github/workflows/deploy-aws.yml:60`); it runs on every push to `main` and when started by hand (`.github/workflows/deploy-aws.yml:14`), not on pull requests. The pull-request workflow, `.github/workflows/atlas-sync.yml:1`, only checks that these docs are in sync with their generated HTML. The real-log checks never run automatically.
 
@@ -66,19 +76,25 @@ Every test file and check script. Filter by kind.
 | `backend/test_armor_build.py` {backend} | `build_armor_constants.py` event reading (`backend/test_armor_build.py:33`) | every page of a fight is read |
 | `frontend/src/AnalyzeConfig.test.js` {frontend} | The raid picker (`frontend/src/AnalyzeConfig.test.js:22`) | five raid cards; Season 2 is one combined card; clicking sends `selectedRaid` and shows the right lineup (9, 9 and 8 bosses) |
 | `frontend/src/api.test.js` {frontend} | `api.js` helpers (`frontend/src/api.test.js:14`) | `stripSecrets`; bearer token on signed-in calls; fail fast without a session; network failure gives a readable error; credentials remembered in `localStorage` and cleared when emptied |
-| `backend/scripts/check_deaths.py` {check} | Deaths the site reads vs WarcraftLogs' own Deaths table (`backend/scripts/check_deaths.py:24`) | Mythic pulls of the raid key only (`backend/scripts/check_deaths.py:32`); compares player, pull, timestamp and killing-blow name |
-| `backend/scripts/check_durations.py` {check} | How long personal defensives with duration talents last, predicted vs real aura uses (`backend/scripts/check_durations.py:52`) | Mythic pulls; within 350 ms is exact (`backend/scripts/check_durations.py:32`) |
-| `backend/scripts/check_mitigation.py` {check} | Catalog damage reductions vs real hits with and without the defensive up (`backend/scripts/check_mitigation.py:30`) | boss pulls, optionally a list of fight IDs |
-| `backend/scripts/check_defensives.py` {check} | Prints one report's full defensive picture per death (`backend/scripts/check_defensives.py:18`) | warns if talent entry IDs never match the catalog (`backend/scripts/check_defensives.py:45`) |
+| `backend/checks/source_deaths.py` {check} | `deaths` (source): Deaths the site reads match WCL's Deaths table (`backend/checks/source_deaths.py:9`) | run with `python -m checks deaths <target>` |
+| `backend/checks/source_selection.py` {check} | `selection` (source): The pulls and kills the site kept match the guild's reports on WCL (`backend/checks/source_selection.py:57`) | run with `python -m checks selection <target>` |
+| `backend/checks/source_participation.py` {check} | `participation` (source): Who was in each kept pull, and who counts as roster, match WCL (`backend/checks/source_participation.py:24`) | run with `python -m checks participation <target>` |
+| `backend/checks/source_state.py` {check} | `state` (source): Active, ready and health at death match WCL's auras, casts and Deaths table (`backend/checks/source_state.py:201`) | run with `python -m checks state <target>` |
+| `backend/checks/source_durations.py` {check} | `durations` (source): Defensive durations (catalog + talents) match real aura uses (`backend/checks/source_durations.py:30`) | run with `python -m checks durations <target>` |
+| `backend/checks/source_mitigation.py` {check} | `mitigation` (source): Catalog damage reductions match real hits with and without the defensive (`backend/checks/source_mitigation.py:45`) | run with `python -m checks mitigation <target>` |
+| `backend/checks/rules_slots.py` {check} | `slots` (rules): Slots and wipes follow the owner's rules (`backend/checks/rules_slots.py:40`) | run with `python -m checks slots <target>` |
+| `backend/checks/rules_counting.py` {check} | `counting` (rules): A death counts when slot <= X and not in a wipe; defensives exist exactly on deaths that can count (`backend/checks/rules_counting.py:27`) | run with `python -m checks counting <target>` |
+| `backend/checks/rules_labels.py` {check} | `labels` (rules): Death labels follow the rules: one-shot, burst, rot (raid-wide only) or set up by (`backend/checks/rules_labels.py:97`) | run with `python -m checks labels <target>` |
+| `backend/checks/rules_verdicts.py` {check} | `verdicts` (rules): Would-save verdicts obey the press, overkill, immunity and instant-kill rules (`backend/checks/rules_verdicts.py:166`) | run with `python -m checks verdicts <target>` |
+| `backend/checks/rules_defensives.py` {check} | `defensives` (rules): Talent entry IDs in the log match the catalog (`backend/checks/rules_defensives.py:5`) | run with `python -m checks defensives <target>` |
+| `backend/test_checks.py` {backend} | Unit tests of the checks package with WarcraftLogs mocked (`backend/test_checks.py:1`) | `test_defensives.py` imports `carried_over` from `checks.source_durations` (`backend/checks/source_durations.py:20`) |
 
 What each check takes and what passing looks like:
 
-| Script {check} | Arguments | Passing looks like |
+| Command {check} | Target | Passing looks like |
 |---|---|---|
-| `check_deaths.py` {check} | `<reportCode>:<raid key> ...` | `missing 0, extra 0, different killing blow 0` for every report; exit code 1 otherwise (`backend/scripts/check_deaths.py:55`). Stops if a pull has 200 deaths, the table's cap (`backend/scripts/check_deaths.py:42`). |
-| `check_durations.py` {check} | `<reportCode>:<raid key> ...` | no `<-- LONGER` flag; a defensive is flagged when more than a tenth of its uses outlast the prediction (`backend/scripts/check_durations.py:110`). "Ended early" is normal. A press while the aura is up (a refresh) starts a new use that keeps up to 30% of the time left (`carried_over`, `backend/scripts/check_durations.py:42`). Each aura ID is timed on its own, except The War Within's Renewing Blaze heal-back (`NOT_THE_BUTTON`, `backend/scripts/check_durations.py:36`). Uses stretched by a mastery or by Smoke Screen's Exhilaration (`EXTENDED_BY`, `backend/scripts/check_durations.py:39`) count as "extended", not longer. Raid cooldowns other players cast, Dancing Rune Weapon and Metamorphosis can read longer without affecting a verdict (docstring, `backend/scripts/check_durations.py:18`). |
-| `check_mitigation.py` {check} | `<reportCode> [fightID,...]` | no `<-- check` flag: measured and catalog reduction within 0.03 for any defensive with 20 or more hits (`backend/scripts/check_mitigation.py:26`, `backend/scripts/check_mitigation.py:97`). Reads all damage taken, so pass a few fight IDs on a big report. |
-| `check_defensives.py` {check} | `<reportCode> [fightID]` | no pass/fail; read the printed deaths. A `!! Talent entry IDs never match` line means the talent format changed. |
+| `python -m checks all <target> ...` {check} | `<reportCode>:<raid key>` or `<reportCode>:<raid key>:<Guild>/<Server>/<REGION>` (`backend/checks/common.py:36`) | every check prints pass; exit code non-zero if any fails. Use `source`, `rules` or one check name (`deaths`, `state`, `mitigation`, ...) instead of `all` to run fewer (`backend/checks/registry.py:6`). `find-logs` prints one finished Mythic target per raid. `--json <file>` saves the results. |
+| A skip | none | the check could not run on this log and says why; a skip is not a pass |
 
 ## Standing it up
 
@@ -88,33 +104,35 @@ What each check takes and what passing looks like:
 | Backend dependencies | `pip install -r backend/requirements.txt` first: tests import `supabase_client`, which needs `brotli` and `supabase` | `backend/requirements.txt` |
 | pytest | not listed in `requirements.txt`; install it separately if you prefer it | `backend/requirements.txt` |
 | Frontend runner | `cd frontend && npm test` (`react-scripts test`, watch mode; `CI=true` runs once) | `frontend/package.json:22` |
-| Check scripts | `WCL_CLIENT_ID` and `WCL_CLIENT_SECRET` in the environment (`backend/scripts/check_deaths.py:27`) | your own WarcraftLogs API client |
-| Check cost | each check spends the key's WarcraftLogs points; `check_mitigation.py` reads all damage taken in the chosen pulls | script docstrings |
+| Checks | `WCL_CLIENT_ID` and `WCL_CLIENT_SECRET` in the environment (`backend/checks/common.py:95`) | your own WarcraftLogs API client |
+| Check cost | each run prints the WarcraftLogs points it spent; a whole `all` run costs about 200-500 | `backend/checks/README.md` |
 | CI | unit tests run only in the AWS deploy, on pushes to `main` or by hand (`.github/workflows/deploy-aws.yml:54`); `.github/workflows/atlas-sync.yml` only verifies the Atlas on pull requests | `.github/workflows/` |
 
 ## Invariants
 
-- **MUST** keep `check_deaths.py` at zero missing, zero extra and zero different killing blows on a Mythic log of every raid key after any change to how deaths are fetched; its exit code is the only automated pass/fail among the checks (`backend/scripts/check_deaths.py:55`).
+- **MUST** aim for `python -m checks all` at zero fails on a Mythic log of every raid key after any change to fetching or to a rule; its exit code is the automated pass/fail (`backend/checks/verdict.py:70`). Today `all` exits 1 on every raid because of open findings against the site, so zero fails is the target, not the current state.
 - **NEVER** let the unit tests reach WarcraftLogs or Supabase: they patch `get_access_token`, `get_report_fights`, `get_fights`, `get_report_deaths_bulk` and the `defensives` fetchers (`backend/test_api.py:288`), and swap `supabase_client.db` for a fake (`backend/test_api.py:83`), so they run without keys.
 
 ## Gotchas
 
 - **No test runs on a pull request**: the unit suites run only when someone starts the AWS deploy workflow. A broken test is otherwise found only when someone runs it locally.
 - **Frontend death counting has no test**: `frontend/src/deathCounting.js` decides what counts when you change "first X" on the Results page, including the fallback for results saved before slots existed. Only the backend half (`rank_pull_deaths`) is tested.
-- **The WarcraftLogs retry path is untested**: `make_request_with_retry` (`backend/warcraftlogs.py:30`), with its 4xx-no-retry rule and `Retry-After` handling, has no test. Only the token cache is (`backend/test_api.py:225`).
+- **The WarcraftLogs retry path is untested**: `make_request_with_retry` (`backend/warcraftlogs.py:44`), with its 4xx-no-retry rule and `Retry-After` handling, has no test. Only the token cache is (`backend/test_api.py:225`).
 - **Report-cache eviction is untested**: `evict_report_cache` (`backend/supabase_client.py:395`) and the five-minute back-off after an error have no test; `test_cache.py` covers only the retry of a reset connection (`backend/test_cache.py:60`).
 - **Date windows are tested for one raid**: `test_season_two_default_and_custom_date_windows` covers `midnight-s2-all` only. The other seven windows in `RAID_DATE_WINDOWS` are not asserted.
 - **Some tests read generated data**: `test_defensives.py` runs against the committed `defensive_catalog.py`, and `test_generated_file` expects Sever's text in `boss_spell_text.py` (`backend/test_boss_spell_text.py:34`). Rebuilding those modules can change what these tests see.
-- **The checks only look at Mythic**: `check_deaths.py` and `check_durations.py` pass difficulty 5 to `analyze_fights`. They also pass `None` as the zone, so a raid key missing from `RAID_ENCOUNTERS` fails with a type error rather than a clear message.
+- **The checks only look at Mythic**: the package passes difficulty 5 everywhere (`backend/checks/common.py:97`). The raid key must be a key of `RAID_ENCOUNTERS`.
+- **The checks' analysis never touches the shared report cache**: they run `/api/analyze` in process, and `import app` loads `backend/.env` with the real Supabase key, so for that run the shared cache reads as empty and writes go nowhere, and the in-memory caches are cleared before and after (`backend/checks/common.py:71`).
+- **The end-to-end run needs the report's guild**: pass it in the target (`<code>:<raid>:<Guild>/<Server>/<REGION>`) when WarcraftLogs has none attached to the report.
 - **The Analyze form test is pinned to today's raid list**: it expects exactly five raid cards (`frontend/src/AnalyzeConfig.test.js:28`), so adding a tier means updating it.
 
 ## Related
 
 - [[backend]] — the code most tests exercise
 - [[backend-death-counting]] — the slot and wipe rules `test_death_slots.py` pins down
-- [[backend-defensive-analysis]] — what `test_defensives.py` and the defensive checks verify
+- [[backend-defensive-analysis]] — what `test_defensives.py` and the checks verify
 - [[backend-caching-and-limits]] — the caches and limiter `test_cache.py` and `test_api.py` cover
 - [[frontend]] — where the two jest files live
 - [[game-data]] — the generated modules the tests and checks read
-- [[warcraftlogs]] — the API the check scripts call
+- [[warcraftlogs]] — the API the checks call
 - [[operations]] — when to run the checks during a new raid tier

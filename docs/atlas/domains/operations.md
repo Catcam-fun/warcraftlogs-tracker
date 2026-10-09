@@ -25,8 +25,8 @@ anchors:
   report_cache_backoff: backend/supabase_client.py:315
   memory_caches: backend/cache.py:111
   cache_version: backend/cache.py:88
-  wcl_retry: backend/warcraftlogs.py:30
-  wcl_endpoints: backend/warcraftlogs.py:15
+  wcl_retry: backend/warcraftlogs.py:44
+  wcl_endpoints: backend/warcraftlogs.py:25
   report_failure: backend/app.py:428
   analyze_error_event: backend/app.py:667
   catalog_build: backend/scripts/build_defensive_catalog.py:1041
@@ -46,7 +46,7 @@ invariants:
   - "MUST: rebuild spell_icons.py after rebuilding defensive_catalog.py; the icon script reads every catalog ability."
   - "MUST: bump CACHE_VERSION in cache.py when what gets fetched or how it is indexed changes, so old shared-cache rows are never served to new code."
   - "NEVER: hand-edit the generated modules (defensive_catalog.py, boss_spell_flags.py, boss_spell_text.py, spell_icons.py, armor_constants.py, raid_wide_damage.py); edit the script and rerun it."
-content_hash: sha256:f89bc51b4c4e66d6abfc014aaa6aed85b6bc386e304114f03ad55255a0301095
+content_hash: sha256:cda7863e706bb8f92b36d044b10900a3ab22fbe88b9b6e16686c6735709ed303
 ---
 ## Summary
 
@@ -83,7 +83,7 @@ Adding a raid tier, in the order the code's dependencies require. Click each ste
 - title: Raid-wide damage | short: Raid-wide | sub: WCL credentials
   body: WCL_CLIENT_ID=... WCL_CLIENT_SECRET=... python backend/scripts/build_raid_wide.py writes backend/raid_wide_damage.py, the boss abilities whose median occurrence hits at least half the raid (backend/scripts/build_raid_wide.py:29). Only those can make a death read as worn down by rot. It costs about 10 WarcraftLogs points per encounter (backend/scripts/build_raid_wide.py:12).
 - title: Check against real logs | short: Real-log checks | sub: every raid key
-  body: Run check_deaths.py and check_durations.py with reportCode:raidKey arguments, a Mythic log for each raid key, and check_mitigation.py on a report from the new tier. Passing output is described on [[testing]]. If WarcraftLogs reports a spec the code does not know, the API prints "[WARN] Unknown specID" until it is added to SPEC_NAMES (backend/defensives.py:293, backend/defensives.py:346).
+  body: Run python -m checks all reportCode:raidKey (from backend/) on a Mythic log for each raid key, the new tier included (all runs the mitigation check too). Passing output is described on [[testing]]. If WarcraftLogs reports a spec the code does not know, the API prints "[WARN] Unknown specID" until it is added to SPEC_NAMES (backend/defensives.py:293, backend/defensives.py:346).
 ```
 
 ## Reference
@@ -100,18 +100,18 @@ Environment variables, from every `os.environ` lookup in the code.
 | `WEB_CONCURRENCY` {runtime} | `backend/gunicorn.conf.py:13` | `1` | gunicorn worker processes |
 | `GUNICORN_THREADS` {runtime} | `backend/gunicorn.conf.py:15` | `16` | threads per worker |
 | `REACT_APP_API_URL` {build} | `frontend/src/api.js:9` | localhost:5000 on localhost, else the page's own host | API base URL baked in at build time |
-| `WCL_CLIENT_ID`, `WCL_CLIENT_SECRET` {scripts} | `backend/scripts/check_deaths.py:27` and every `check_*` / `build_armor_constants.py` / `build_raid_wide.py` | none, required | the operator's own WarcraftLogs API client |
+| `WCL_CLIENT_ID`, `WCL_CLIENT_SECRET` {scripts} | `backend/checks/common.py:95` and every `build_armor_constants.py` / `build_raid_wide.py` | none, required | the operator's own WarcraftLogs API client |
 | `WAGO_CACHE` {scripts} | `backend/scripts/build_defensive_catalog.py:410` | unset (no cache) | folder for downloaded wago.tools tables; the other wago scripts import `table` from this script, so they use it too |
 
-The frontend's Supabase project URL and public anon key are constants in `frontend/src/supabaseClient.js:3`, not environment variables.
+The frontend's Supabase project URL and public anon key are build variables (`frontend/src/supabaseClient.js:7`): repository secrets for the deploy, `frontend/.env.local` locally.
 
 Failure modes visible in the code, and what the user sees:
 
 | Failure {wcl} | Code | Behavior |
 |---|---|---|
-| Bad WarcraftLogs credentials or query {wcl} | `backend/warcraftlogs.py:48`, `backend/app.py:160` | a 4xx other than 429 is not retried; the stream ends with `Authentication failed: ...` |
-| WarcraftLogs 429, 5xx or network error {wcl} | `backend/warcraftlogs.py:19`, `backend/warcraftlogs.py:51` | up to 3 retries with backoff 1, 2, 4 s (cap 10 s), or the `Retry-After` header capped at 30 s; token requests retry twice (`backend/warcraftlogs.py:120`) |
-| Roster query slow or failing {wcl} | `backend/warcraftlogs.py:290`, `backend/app.py:175` | 40 s timeout, one retry; on failure everyone in the reports counts and the stream says so |
+| Bad WarcraftLogs credentials or query {wcl} | `backend/warcraftlogs.py:62`, `backend/app.py:160` | a 4xx other than 429 is not retried; the stream ends with `Authentication failed: ...` |
+| WarcraftLogs 429, 5xx or network error {wcl} | `backend/warcraftlogs.py:33`, `backend/warcraftlogs.py:65` | up to 3 retries with backoff 1, 2, 4 s (cap 10 s), or the `Retry-After` header capped at 30 s; token requests retry twice (`backend/warcraftlogs.py:134`) |
+| Roster query slow or failing {wcl} | `backend/warcraftlogs.py:304`, `backend/app.py:175` | 40 s timeout, one retry; on failure everyone in the reports counts and the stream says so |
 | A report's full fight data cannot be read {wcl} | `backend/app.py:259` | its pulls go to another log's copy of the same pull if one exists, else they are left out; the report is not listed as failed |
 | One report cannot be read {wcl} | `backend/app.py:428`, `backend/app.py:458` | its pulls get no deaths, its code goes in `meta.failedReports`, and a warning line is streamed |
 | Defensive or hit data fails {wcl} | `backend/app.py:399`, `backend/app.py:462` | deaths still count; a warning says WarcraftLogs may be rate-limiting the key |
@@ -134,7 +134,7 @@ Failure modes visible in the code, and what the user sees:
 | In-memory caches | LRU per process: 200 report metas, 400 light fight lists, 400 death sets, 200 defensive sets, 400 hit windows (`backend/cache.py:111`) | code |
 | Shared cache | Supabase `report_cache`: rows over 4 MB are not stored; every 20th write deletes least-recently-used rows past 200 MB (`backend/supabase_client.py:273`, `backend/supabase_client.py:395`) | code |
 | Shares | expired rows are deleted whenever a new share is stored (`backend/supabase_client.py:230`) | code |
-| WarcraftLogs host | the API calls a Cloudflare Worker proxy for both OAuth and GraphQL (`backend/warcraftlogs.py:15`) | code |
+| WarcraftLogs host | the API calls a Cloudflare Worker proxy for both OAuth and GraphQL (`backend/warcraftlogs.py:25`) | code |
 | Game data host | `wago.tools` for catalog, icons and boss spells (`backend/scripts/build_defensive_catalog.py:408`) | build scripts |
 | Boss art hosts | `wago.tools` and `render.worldofwarcraft.com` (`frontend/scripts/fetch-boss-renders.py:97`, `frontend/scripts/fetch-boss-renders.py:123`) | art script |
 

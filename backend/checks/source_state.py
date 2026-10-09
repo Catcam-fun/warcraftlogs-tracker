@@ -1,0 +1,248 @@
+"""Source check: what each counted death row shows (active, ready, health) against WCL's auras, casts and Deaths table.
+
+The ready / on-cooldown recompute mirrors the site's cooldown-reduction inference (a one-charge
+ability pressed again sooner than its cooldown takes the shortest gap as its cooldown) and its
+lookback rule (long cooldowns reset when the encounter starts). It therefore validates the casts
+data the site read, not those heuristics themselves.
+"""
+import defensives
+from checks.common import TableCapped
+from checks.verdict import PASS, fail, skip
+from defensives import CDR_TOLERANCE_MS, ENCOUNTER_RESET_MS
+
+BAND_TOLERANCE_MS, HP_TOLERANCE = 100, 0.01
+ENTRY_TOLERANCE_MS = 50
+STRIP_LOOKBACK_MS, STRIP_CLUSTER_MS, STRIP_MIN_BANDS = 1000, 150, 2
+CONSUMABLE_KINDS = ("healthstone", "potion")
+
+
+def death_strip(auras, death_ts, fight_start):
+    """When the death stripped the player's auras, or the death event itself when no strip shows.
+
+    Death removes every aura at once, and WCL's death event can come after that (live 2026-10-08,
+    dreamrift pull 1: Chickenism's 19 auras, Fortitude and Battle Shout among them, ended at
+    1244582-1244684, the death event at 1244690; the same Rallying Cry stayed up on the living until
+    1247448). The strip is a cluster: at least STRIP_MIN_BANDS bands up since the pull started (raid
+    buffs, forms) ending within STRIP_CLUSTER_MS of each other in the STRIP_LOOKBACK_MS before the death
+    event, and more than half of those that end there. One such band ending alone (a form dropped, an
+    aura cancelled) is not a strip. The strip is the cluster's earliest end."""
+    ends = sorted(b["endTime"] for a in auras for b in a.get("bands") or []
+                  if b["startTime"] <= fight_start + BAND_TOLERANCE_MS
+                  and death_ts - STRIP_LOOKBACK_MS <= b["endTime"] <= death_ts)
+    for first in ends:
+        together = sum(1 for e in ends if first <= e <= first + STRIP_CLUSTER_MS)
+        if together >= STRIP_MIN_BANDS and together * 2 > len(ends):
+            return first
+    return death_ts
+
+
+def active_mismatches(active_names, auras, death_ts, fight_start=None):
+    """Active names with no same-named aura band around the death (within BAND_TOLERANCE_MS of the
+    death event, or of the moment the death stripped the player's auras when fight_start is given)."""
+    moments = {death_ts}
+    if fight_start is not None:
+        moments.add(death_strip(auras, death_ts, fight_start))
+    out = []
+    for name in active_names:
+        covered = any(b["startTime"] - BAND_TOLERANCE_MS <= t <= b["endTime"] + BAND_TOLERANCE_MS
+                      for a in auras if a.get("name") == name for b in a.get("bands") or [] for t in moments)
+        if not covered:
+            out.append(name)
+    return out
+
+
+def ready_since(cast_times, at, cooldown_ms, charges):
+    """(whether a charge is left at `at`, when a charge last came back after none were left).
+
+    Each use spends one charge, and charges come back one per cooldown_ms, the recharge starting at
+    the first use made with all charges full. The second value is None when the ability never ran
+    out of charges up to `at` (ready all along)."""
+    have, back_at, since = charges, None, None
+
+    def refill(until):
+        nonlocal have, back_at, since
+        while back_at is not None and back_at <= until:
+            if have == 0:
+                since = back_at
+            have += 1
+            back_at = back_at + cooldown_ms if have < charges else None
+
+    for t in sorted(t for t in cast_times if t <= at):
+        refill(t)
+        have = max(have - 1, 0)
+        if back_at is None:
+            back_at = t + cooldown_ms
+    refill(at)
+    return have > 0, since
+
+
+def ready_at(cast_times, death_ts, cooldown_ms, charges):
+    """Whether a charge is left at death_ts (ready_since)."""
+    return ready_since(cast_times, death_ts, cooldown_ms, charges)[0]
+
+
+def entry_for(entries, pid, death_ts):
+    """This death's own Deaths table entry: same player, timestamp within 50 ms (a rezzed player dies twice)."""
+    for e in entries:
+        if e.get("id") == pid and abs(e["timestamp"] - death_ts) <= ENTRY_TOLERANCE_MS:
+            return e
+    return None
+
+
+def killing_hit_auras(run, rid, fid, pid, death_ts):
+    """Names of the auras WCL lists on the player's killing hit (the last overkill hit up to 50 ms after death)."""
+    names = run.meta_for(rid).get("abilities") or {}
+    kills = [h for h in run.hits_before(rid, fid, pid, death_ts)
+             if (h.get("overkill") or 0) > 0 and h["timestamp"] <= death_ts + ENTRY_TOLERANCE_MS]
+    if not kills:
+        return set()
+    return {names.get(a) for a in defensives._auras(kills[-1])}
+
+
+def _killing_event(entry):
+    """The damage event with overkill > 0 and the greatest timestamp (events are newest-first, so ties keep the newest)."""
+    kills = [e for e in entry.get("events") or [] if e.get("type") == "damage" and (e.get("overkill") or 0) > 0]
+    return max(kills, key=lambda e: e.get("timestamp", 0)) if kills else None
+
+
+def health_mismatch(survival, entry):
+    """What differs between the site's health before the killing blow / overkill and WCL's, or None.
+
+    The site's "Died by" is the killing blow's overkill, so it is compared with WCL's killing event,
+    not with the entry's own `overkill`: WCL sums every overkill in the death window there, non-fatal
+    ones included (live 2026-10-08, Weavi, Brewmaster: two Stagger ticks overkilled for 662478 and
+    299233 without killing him, and the entry read 3614972 against the killing hit's 2653261).
+    Health before the killing blow can never be above max HP; the site showing more is a mismatch.
+    """
+    max_hp = survival["maxHp"]
+    site_hp = survival["hpBeforePct"] * max_hp / 100
+    out = []
+    if survival["hpBeforePct"] > 100:
+        out.append(f"health before {survival['hpBeforePct']}% of max HP {max_hp} (above 100%)")
+    kill = _killing_event(entry)
+    if kill is None:
+        out.append(f"health before {round(site_hp)} vs wcl none (no killing hit, max {max_hp})")
+    else:
+        if abs(kill["amount"] - site_hp) > HP_TOLERANCE * max_hp:
+            out.append(f"health before {round(site_hp)} vs wcl {kill['amount']} (max {max_hp})")
+        if (kill.get("overkill") or 0) != (survival.get("overkill") or 0):
+            out.append(f"overkill site {survival.get('overkill')} vs wcl {kill.get('overkill')}")
+    return "; ".join(out) if out else None
+
+
+def _talents(run, rid, fid, pid):
+    for c in run.combatants(rid, fid):
+        if c.get("sourceID") == pid and c.get("fight", fid) == fid:
+            return {t["id"]: t.get("rank") or 1 for t in c.get("talentTree") or []}
+    return None
+
+
+def report_span(run, rid, fid):
+    """The span the site reads a report's casts over: from 3 minutes before its first kept pull
+    to the end of its last (the site's kept pulls are the keys of pullParticipation). Without any
+    kept pull listed for the report, the death's own pull."""
+    fids = {int(k.rsplit("_", 1)[1]) for keys in (run.result.get("pullParticipation") or {}).values()
+            for k in keys if k.rsplit("_", 1)[0] == rid} or {fid}
+    fights = [run.fight(rid, f) for f in sorted(fids)]
+    return (max(0, min(f["start_time"] for f in fights) - ENCOUNTER_RESET_MS),
+            max(f["end_time"] for f in fights))
+
+
+def report_casts(run, rid, fid, pid):
+    """The player's casts over the whole report span the site reads (report_span): cooldown
+    reduction shows up as a short gap anywhere in the report, not only near this death."""
+    return [e for e in run.casts(rid, pid, *report_span(run, rid, fid)) if e.get("type", "cast") == "cast"]
+
+
+def cooldown_window(entry, sid, casts, talents, spec, fight_start, at, history=False):
+    """(the cast times that decide readiness at `at`, cooldown, charges) for one catalog ability,
+    with the pull's talents and spec. With `history`, a short cooldown keeps every earlier cast of
+    the report instead of only the last cooldown x charges: enough to say whether it is ready, not
+    when it became ready (a press 65s before on a 60s cooldown made it ready only 5s before)."""
+    cd = defensives._talented_cooldown(entry, talents, spec)
+    charges = defensives._talented_charges(entry, talents, spec)
+    times = sorted(e["timestamp"] for e in casts if e.get("abilityGameID") == sid)
+    # A one-charge ability pressed again sooner than its cooldown allows: the player has
+    # cooldown reduction the catalog can't see, so their shortest gap is the cooldown.
+    if charges == 1 and len(times) > 1:
+        shortest = min(b - a for a, b in zip(times, times[1:]))
+        if shortest < cd - CDR_TOLERANCE_MS:
+            cd = shortest
+    # Long cooldowns reset when the encounter starts; short ones carry over from before the pull.
+    since = fight_start if entry["cooldown_ms"] >= ENCOUNTER_RESET_MS else 0 if history else at - cd * charges
+    return [t for t in times if max(since, 0) <= t <= at], cd, charges
+
+
+def _ready_items(run, rid, fid, pid, who, ev, fight_start, death_ts):
+    d = ev["defensives"]
+    site_ready = {a["name"] for a in d.get("available") or []}
+    judged = []
+    for name in [a["name"] for a in d.get("available") or []] + [a["name"] for a in d.get("cooldown") or []]:
+        sid = run.cat.name_to_id.get(name)
+        entry = run.cat.all.get(sid) if sid is not None else None
+        if entry is None or entry.get("kind") in CONSUMABLE_KINDS:
+            continue
+        judged.append((name, sid, entry))
+    if not judged:
+        return []
+    talents = _talents(run, rid, fid, pid)
+    casts = report_casts(run, rid, fid, pid)
+    items = []
+    for name, sid, entry in judged:
+        times, cd, charges = cooldown_window(entry, sid, casts, talents, ev.get("spec"), fight_start, death_ts)
+        wcl_ready = ready_at(times, death_ts, cd, charges)
+        if (name in site_ready) and not wcl_ready:
+            items.append(f"{who} pull {fid} {name}: site ready, wcl casts say on cooldown")
+        elif wcl_ready and name not in site_ready:
+            items.append(f"{who} pull {fid} {name}: site on cooldown, wcl casts say ready")
+    return items
+
+
+def check(run):
+    """Active, ready and health at death match WCL's auras, casts and Deaths table"""
+    deaths = run.counted_deaths()
+    if not deaths:
+        return skip("no counted deaths")
+    items, capped = [], set()
+    for ev in deaths:
+        rid, fid, who = ev["reportId"], ev["fightId"], ev["originalCharacter"]
+        pid = run.actor_id(rid, who)
+        if pid is None:
+            items.append(f"{who} pull {fid}: not among report {rid}'s players")
+            continue
+        fight_start = run.fight(rid, fid)["start_time"]
+        death_ts = ev["timestamp"] + fight_start
+        d = ev.get("defensives") or {}
+
+        active = [a["name"] for a in d.get("active") or []]
+        if active:
+            auras = run.buffs(rid, fid, pid)
+            missing = active_mismatches(active, auras, death_ts, fight_start)
+            # A defensive that is a debuff on the enemy (Fiery Brand) is never a band on the player;
+            # WCL's killing hit lists it when it was up.
+            not_buffs = [n for n in missing if not any(a.get("name") == n for a in auras)]
+            if not_buffs:
+                snapshot = killing_hit_auras(run, rid, fid, pid, death_ts)
+                missing = [n for n in missing if n not in not_buffs or n not in snapshot]
+            for name in missing:
+                items.append(f"{who} pull {fid}: active {name} has no aura band at death")
+
+        if d:
+            items += _ready_items(run, rid, fid, pid, who, ev, fight_start, death_ts)
+
+        survival = d.get("survival")
+        if not survival or survival.get("deathType") == "instakill" or (rid, fid) in capped:
+            continue
+        try:
+            entry = entry_for(run.deaths_table(rid, fid), pid, death_ts)
+        except TableCapped:
+            capped.add((rid, fid))
+            items.append(f"pull {fid}: 200+ deaths, table capped")
+            continue
+        if entry is None:
+            items.append(f"{who} pull {fid}: no WCL Deaths table entry at {death_ts}")
+            continue
+        diff = health_mismatch(survival, entry)
+        if diff:
+            items += [f"{who} pull {fid}: {part}" for part in diff.split("; ")]
+    return fail(items) if items else PASS

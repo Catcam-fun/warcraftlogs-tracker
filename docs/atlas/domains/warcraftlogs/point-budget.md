@@ -24,7 +24,7 @@ anchors:
   window_cache_key: backend/app.py:387
   one_at_a_time: backend/app.py:390
   deaths_pool: backend/app.py:440
-  get_report_fights: backend/warcraftlogs.py:333
+  get_report_fights: backend/warcraftlogs.py:347
   deaths_bulk: backend/analysis.py:357
   remaining_events: backend/analysis.py:329
   fetch_combatants: backend/defensives.py:218
@@ -60,7 +60,7 @@ invariants:
   - "NEVER: serve a cached defensive entry built with a different catalog; the key carries the catalog fingerprint."
 flows:
   - request-path
-content_hash: sha256:cd5f9f72a210ca27709a3892bad9b79542b94ab2a0d0a8832e07df6bb106af03
+content_hash: sha256:8c917fa04909f8c4ddd0c56482f19530c88747eea3dd4997386818a5730c6cdd
 ---
 ## Summary
 
@@ -75,9 +75,9 @@ One analysis reads guild-level data once, then each report's fight list, then a 
 
 ```steps
 - title: Guild-level reads | short: Guild | sub: roster and report list
-  body: The roster is skipped entirely when the roster toggle is off (backend/app.py:165). The report list pushes the tier's date window into the WCL query itself (startTime and endTime, backend/warcraftlogs.py:204-206), so out-of-tier reports are never listed; the window comes from resolve_report_window (backend/app.py:189).
+  body: The roster is skipped entirely when the roster toggle is off (backend/app.py:165). The report list pushes the tier's date window into the WCL query itself (startTime and endTime, backend/warcraftlogs.py:218-220), so out-of-tier reports are never listed; the window comes from resolve_report_window (backend/app.py:189).
 - title: Light fight lists | short: Fight lists | sub: 1 point per report
-  body: get_report_fights reads only the report start and its fights (times, name, encounter, difficulty, kill, zone), no players or abilities (backend/warcraftlogs.py:333-381). Its docstring records the cost, 1 point against 3 for get_fights (backend/warcraftlogs.py:334-336). fetch_light_fights reads every report this way, REPORT_FETCH_WORKERS = 6 at a time, and answers finished reports from report_fights_cache (backend/app.py:213-222, 234-235).
+  body: get_report_fights reads only the report start and its fights (times, name, encounter, difficulty, kill, zone), no players or abilities (backend/warcraftlogs.py:347-395). Its docstring records the cost, 1 point against 3 for get_fights (backend/warcraftlogs.py:348-350). fetch_light_fights reads every report this way, REPORT_FETCH_WORKERS = 6 at a time, and answers finished reports from report_fights_cache (backend/app.py:213-222, 234-235).
   gotcha: Asking for fights inside the guild report-list query does not save anything. WCL charges about 1 point per report for them there too.
 - title: Dedup, then the full read | short: Full read | sub: kept reports only
   body: dedup_pulls keeps the earliest copy of each pull (start time, then report code, then fight ID, so the copy kept never depends on which report was read first), or the longest when the earliest was cut short by more than 5 s (backend/analysis.py:84, called at backend/app.py:266). Duplicates are dropped, and only the reports that kept a pull are read in full with get_fights (3 points), cached in report_meta_cache (backend/app.py:224-232, 262-275). A report whose full read comes back empty is marked unreadable and dedup runs again, so its pulls go to another log's copy (backend/app.py:272-275).
@@ -102,7 +102,7 @@ These were measured on fresh Mythic logs. The code does not read them at run tim
 
 | Fact {measured} | Where the code relies on it |
 |---|---|
-| A light fight list costs 1 point; a full `get_fights` costs 3 | read every report light, only kept reports in full (`backend/app.py:203-206`, `backend/warcraftlogs.py:334-336`) |
+| A light fight list costs 1 point; a full `get_fights` costs 3 | read every report light, only kept reports in full (`backend/app.py:203-206`, `backend/warcraftlogs.py:348-350`) |
 | A report's first event query pays a "cold" price (Deaths 2-17 points, about 4 per hour of report span). For 10-30 seconds after a query the report is warm, and a query then costs about 1; after 2 minutes the price is back up. Separately, WCL answers an identical repeat query from its own cache for 45-60 minutes, for about 1 point | loadouts go first (`backend/app.py:369-371`) |
 | CombatantInfo over the kept pulls is the cheapest warm-up, 1.4-3 points; a one-pull query does not warm the report | `fetch_combatants` spans every kept pull (`backend/defensives.py:218-226`) |
 | After the warm-up, queries sent one at a time cost about a quarter less than sent together (3.5 vs 4.8 points per hour of raid) | `backend/app.py:390-391`, `backend/defensives.py:257-258` |
@@ -169,7 +169,7 @@ band structural "Officer's WCL key"
 
 | Lever {lever} | Where | Effect |
 |---|---|---|
-| Date window in the query {scope} | `backend/warcraftlogs.py:204-206` | out-of-tier reports are never listed |
+| Date window in the query {scope} | `backend/warcraftlogs.py:218-220` | out-of-tier reports are never listed |
 | Roster skipped when off {scope} | `backend/app.py:165` | no roster pages at all |
 | Light fight list for every report {scope} | `backend/app.py:213-222` | 1 point per report instead of 3 |
 | Full read for kept reports only {scope} | `backend/app.py:262-275` | duplicate logs cost 1 point, not 3 |
