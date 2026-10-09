@@ -23,6 +23,7 @@ from checks.verdict import PASS, Outcome, fail, skip
 from defensive_catalog import PATCHES
 from defensives import SPEC_NAMES
 from defensives import LETHAL_WINDOW_MS
+from features import KILLING_HIT_HEALS
 from max_health_auras import MAX_HEALTH, STACKING
 from raid_wide_damage import RAID_WIDE
 
@@ -270,12 +271,15 @@ def max_hp_before(hits, kb_index, loadout=None, bands=(), heals=(), aura_events=
     set_off |= {name for start, end, aid, name in bands
                 if prev_t < start <= t1 and aid not in on_kb
                 and any(abs(start - ts) <= SAME_MOMENT_MS for ts, _ in absorbs)}
-    # Used up as it heals: its band ends just before the heal. The death's strip ends the other bands
-    # with or after their last heals (Atonement healed 1 ms before the strip ended its band, Zeforus,
-    # Voidspire p35; Ebon Might healed in the strip's millisecond, Arzoker, Quel'Danas p46).
-    set_off |= {name for ts, name in healed
-                if any(n == name and end is not None and prev_t < end < ts and ts - end <= SAME_MOMENT_MS
-                       for start, end, aid, n in bands)}
+    # A cheat death's aura (EffectAura 316, features.KILLING_HIT_HEALS) used up as it heals: its band ends
+    # just before the heal. Only those heals: any other heal (a Prayer of Mending jump) stays health they
+    # had. The death's strip ends the other bands with or after their last heals (Atonement healed 1 ms
+    # before the strip ended its band, Zeforus, Voidspire p35; Ebon Might healed in the strip's
+    # millisecond, Arzoker, Quel'Danas p46).
+    set_off |= {name for ts, amount, hid, name, typ in heals
+                if typ == "heal" and prev_t < ts <= t1 and hid in KILLING_HIT_HEALS
+                and any(aid == KILLING_HIT_HEALS[hid] and end is not None and prev_t < end < ts
+                        and ts - end <= SAME_MOMENT_MS for start, end, aid, n in bands)}
     health = kb.get("amount") or 0
     health -= sum(amount for ts, amount, aid, name, typ in heals
                   if typ == "heal" and prev_t < ts <= t1 and name in set_off)
