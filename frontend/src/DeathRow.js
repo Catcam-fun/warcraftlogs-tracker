@@ -124,6 +124,7 @@ function whyText(d, hitName) {
     case 'noReduction': return 'Nothing reduced this hit, so damage reduction doesn\'t work on it';
     case 'notBranded': return 'no enemy it could brand (one the raid attacked) hit them in time for it to help';
     case 'brandUnknown': return 'the log didn\'t say which enemies the raid could attack, so this can\'t be checked';
+    case 'staggerUnknown': return 'it depends on whether a purify came before or after a staggered hit, and the log doesn\'t say';
     case 'stagger': return 'a reduction does nothing to a Stagger tick as it lands, and it couldn\'t have been up for the hits that filled the pool';
     case 'fullHealth': return 'They were at full health, so a heal can\'t help';
     case 'aoeUnknown': return 'This log doesn\'t mark area damage, so this can\'t be checked';
@@ -336,6 +337,7 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
     const verdict = !det || !s ? null
       : v === true ? <div className="vd g">✓ Saves them · {fmt(det.amount - s.overkill)} to spare</div>
       : det.why === 'needsTimeline' ? <div className="vd n">Can't tell: the log's health before this death couldn't be read</div>
+      : v == null && det.why ? <div className="vd n">Can't tell<small>{cap(whyText(det, hitName) || '')}</small></div>
       : det.why ? <div className="vd b">✗ Doesn't help<small>{cap(whyText(det, hitName) || '')}</small></div>
       : det.amount > 0 ? <div className="vd b">✗ Not enough · {fmt(s.overkill - det.amount)} short</div>
       : null;
