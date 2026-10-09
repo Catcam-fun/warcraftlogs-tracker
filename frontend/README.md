@@ -22,6 +22,4 @@ Run these in `frontend/`:
 
 ## More
 
-How the site works, page by page and down to file and line, is documented in the
-Project Atlas: `docs/atlas/` (open `docs/atlas/build/index.html`). See its
-Frontend section in particular.
+See the repository's top-level `README.md` for the backend and how the two fit together.
