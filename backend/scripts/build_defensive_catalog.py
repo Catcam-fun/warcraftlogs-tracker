@@ -992,6 +992,9 @@ QUICK_SIP = 388505           # effect 0: purifies this % each time effect 1 seco
 TRANQUIL_SPIRIT = 393357     # effect 0: a Healing Sphere (and, in The War Within, Expel Harm) clears this %
 MONK_FAMILY = 53
 SHUFFLE_GRANT = re.compile(r"(?:grants?|granting) Shuffle for \$(\d*)s(\d)", re.I)
+# The Shuffle grants the purify fits were reviewed for (seconds; every patch from 11.0.2): a grant that
+# disappears, changes or is new fails the current patch's build until it is reviewed here.
+SHUFFLE_GRANTS_REVIEWED = {"Keg Smash": 5.0, "Blackout Kick": 3.0, "Spinning Crane Kick": 1.0}
 
 
 def stagger_purify(gd, mods, desc, problems):
@@ -1035,8 +1038,10 @@ def stagger_purify(gd, mods, desc, problems):
             if mods.effect(spell, index, "purify", 1):
                 problems.append(f"{names.get(spell)}: a talent changes the Shuffle it grants: handle it")
             grants[names.get(sid)] = value
-    if not grants:
-        problems.append("no spell grants Shuffle: Quick Sip can't be sized")
+    for name in sorted(set(grants) | set(SHUFFLE_GRANTS_REVIEWED)):
+        if grants.get(name) != SHUFFLE_GRANTS_REVIEWED.get(name):
+            problems.append(f"Shuffle grant {name}: {grants.get(name)} s in the data, reviewed "
+                            f"{SHUFFLE_GRANTS_REVIEWED.get(name)} s: review it (SHUFFLE_GRANTS_REVIEWED)")
     out["shuffle_s"] = dict(sorted(grants.items()))
     return out
 
