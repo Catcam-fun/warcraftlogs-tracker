@@ -2842,11 +2842,25 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
             top = _health_at(points, h["timestamp"])[1] or max_hp
         return _full_hit(h) / top
 
-    high = [p for p in points if p[0] < kb_ts - 0.5 and p[1] >= FULL_HEALTH * p[2]]
+    # The last moment at high health, walking the hits in log order (hits on the same millisecond
+    # keep it: a player at 99% hit three times on one millisecond went from high to dead at once):
+    # just before each hit (a hit with their health: its own; one without: what the last one left,
+    # as only heals land between hits; the killing blow: hp_before), and just after each hit with
+    # their health. Either is at that hit's own time; the hits since start with that hit (before
+    # it) or the next one (after it).
+    high, start, last = [], None, None
+    for k, h in enumerate(window):
+        top = max_hp if k == kb_index else h.get("maxHitPoints")
+        hp = hp_before if k == kb_index else win.before[k][0] if win.known[k] else last
+        if hp is not None and top and hp >= FULL_HEALTH * top:
+            high, start = [(h["timestamp"], hp, top)], k
+        if k < kb_index and win.known[k]:
+            last = h.get("hitPoints") or 0
+            if last >= FULL_HEALTH * h["maxHitPoints"]:
+                high, start = [(h["timestamp"], last, h["maxHitPoints"])], k + 1
     since = high[-1][0] if high else float("-inf")
-    if hp_before >= FULL_HEALTH * max_hp:
-        since, high = kb_ts - 0.5, high + [(kb_ts - 0.5, hp_before, max_hp)]
-    run = [h for h in window if h["timestamp"] > since]
+    run = window[start:] if high else window
+    in_run = set(range(start if high else 0, len(window)))
     quick = bool(high) and kb_ts - since <= BURST_WINDOW_MS
     one_shot = quick and any(share(h) >= ONE_SHOT_SHARE for h in run)
     death_type = "oneShot" if one_shot else "burst" if quick else "wasLow"
@@ -2856,14 +2870,14 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     # a big hit, then a small one finishing them.
     one_shot_hit = None
     if one_shot:
-        top = max(range(len(window)), key=lambda i: (window[i]["timestamp"] > since, _full_hit(window[i])))
+        top = max(range(len(window)), key=lambda i: (i in in_run, _full_hit(window[i])))
         if top != kb_index and _full_hit(window[top]) > _full_hit(killing):
             one_shot_hit = window[top]
     # The hit that set the death up (only when it was neither a one-shot nor a
     # burst): the biggest one since they were last at high health (before
     # that, healers had already undone it).
-    biggest = None if quick else max((h for h in window[:kb_index] if h["timestamp"] > since
-                                      and share(h) >= SETUP_HIT_SHARE), key=_full_hit, default=None)
+    biggest = None if quick else max((h for h in run[:-1] if share(h) >= SETUP_HIT_SHARE),
+                                     key=_full_hit, default=None)
     # Rot: worn down by one raid-wide ability's repeated damage (what the
     # healers have to keep up with; raid_wide_damage.py, measured from Mythic
     # kills), not set up by a single hit. Soaks and mechanics a player walks
@@ -2941,8 +2955,7 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
             "ago": round((kb_ts - biggest["timestamp"]) / 1000, 1),
         }
         # The same ability hitting them again and again since they were last high (soaking on).
-        same = [h for h in window[:kb_index + 1] if h["timestamp"] > since
-                and h.get("abilityGameID") == biggest.get("abilityGameID")]
+        same = [h for h in run if h.get("abilityGameID") == biggest.get("abilityGameID")]
         if len(same) > 1:
             result["biggestHit"].update(times=len(same), total=sum(_full_hit(h) for h in same),
                                         over=round((kb_ts - same[0]["timestamp"]) / 1000, 1))
