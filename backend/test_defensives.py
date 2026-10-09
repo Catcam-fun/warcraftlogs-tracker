@@ -72,11 +72,49 @@ class DefensiveAnalysisTests(unittest.TestCase):
                                  (100_010, "removebuff", ICE_BLOCK, 1), (100_010, "removebuff", 999, 5)]}}
         r = defensives.analyze_death(1, "Mage", "Frost", 7, 0, 100_000, indexed, names_map, {5: "Holypriest"})
         self.assertIn("Ice Block", names(r["active"]))
-        self.assertIn({"name": "Pain Suppression", "kind": "external", "by": "Holypriest"}, r["active"])
+        pain = next(a for a in r["active"] if a["name"] == "Pain Suppression")
+        self.assertEqual((pain["kind"], pain["by"]), ("external", "Holypriest"))
         # Removed well before death -> not active.
         indexed["buffs"][1] = [(50_000, "applybuff", ICE_BLOCK, 1), (60_000, "removebuff", ICE_BLOCK, 1)]
         r = defensives.analyze_death(1, "Mage", "Frost", 7, 0, 100_000, indexed, names_map, {})
         self.assertNotIn("Ice Block", names(r["active"]))
+
+    def test_an_active_defensive_carries_the_players_talented_values(self):
+        # Barkskin up at death with Oakskin and Improved Barkskin: 30% for 12s, the talents listed.
+        barkskin = 22812
+        r = run("Druid", "Balance", talents={123795, 128591}, auras=[barkskin])
+        a = next(x for x in r["active"] if x["name"] == "Barkskin")
+        self.assertTrue(a["talentsKnown"])
+        self.assertEqual(a["effect"], [{"dr": 0.3}])
+        self.assertEqual((a["auraMs"], a["cooldownMs"], a["charges"]), (12_000, 60_000, 1))
+        self.assertIn({"talent": "Oakskin", "field": "dr", "rank": 1, "add": 0.1}, a["talents"])
+        self.assertIn({"talent": "Improved Barkskin", "field": "duration", "rank": 1, "add_ms": 4000}, a["talents"])
+        # Without the pull's talents: base values aren't claimed as theirs.
+        r = run("Druid", "Balance", auras=[barkskin])
+        a = next(x for x in r["active"] if x["name"] == "Barkskin")
+        self.assertEqual(a, {"name": "Barkskin", "kind": "personal", "major": True, "talentsKnown": False})
+
+    def test_an_active_external_carries_its_casters_talents(self):
+        # Ironbark from a Restoration Druid with Improved Ironbark (-20s) and Regenerative Heartwood (+4s).
+        ironbark = 102342
+        names_map = {sid: d["name"] for sid, d in CATALOG.items()}
+        indexed = {"casts": {}, "talents": {(7, 1): set(), (7, 5): {103141, 103139, 103131}},
+                   "buffs": {1: [(95_000, "applybuff", ironbark, 5)]}}
+        kb = [{"timestamp": 100_000, "type": "damage", "targetID": 1, "amount": 1, "overkill": 1,
+               "buffs": f"{ironbark}."}]
+        r = defensives.analyze_death(1, "Mage", "Frost", 7, 0, 100_000, indexed, names_map, {5: "Treehugger"},
+                                     hits=kb)
+        a = next(x for x in r["active"] if x["name"] == "Ironbark")
+        self.assertEqual((a["kind"], a["by"], a["talentsKnown"]), ("external", "Treehugger", True))
+        self.assertEqual((a["auraMs"], a["cooldownMs"]), (16_000, 70_000))
+        self.assertIn({"talent": "Improved Ironbark", "field": "cooldown", "rank": 1, "add_ms": -20000}, a["talents"])
+        # The caster's loadout isn't in the log: talents unknown.
+        del indexed["talents"][(7, 5)]
+        r = defensives.analyze_death(1, "Mage", "Frost", 7, 0, 100_000, indexed, names_map, {5: "Treehugger"},
+                                     hits=kb)
+        a = next(x for x in r["active"] if x["name"] == "Ironbark")
+        self.assertFalse(a["talentsKnown"])
+        self.assertNotIn("auraMs", a)
 
     def test_missing_aura_removal_is_capped_by_duration(self):
         # The log never recorded Ice Block (10s) ending; 60s later it isn't still up.
@@ -98,7 +136,8 @@ class DefensiveAnalysisTests(unittest.TestCase):
         r = defensives.analyze_death(1, "Mage", "Frost", 7, 0, 100_000, indexed, names_map, {5: "Holypriest"},
                                      hits=kb)
         self.assertNotIn("Ice Block", names(r["active"]))
-        self.assertIn({"name": "Pain Suppression", "kind": "external", "by": "Holypriest"}, r["active"])
+        pain = next(a for a in r["active"] if a["name"] == "Pain Suppression")
+        self.assertEqual((pain["kind"], pain["by"]), ("external", "Holypriest"))
 
     def test_used_ability_is_on_cooldown_with_timings(self):
         r = run("Mage", "Frost", talents=entries(ICE_BLOCK),
@@ -144,7 +183,7 @@ class DefensiveAnalysisTests(unittest.TestCase):
     def test_external_on_killing_blow(self):
         r = run("Mage", "Frost", talents=set(), auras=[999], ability_names={999: "Pain Suppression"})
         ext = [a for a in r["active"] if a["kind"] == "external"]
-        self.assertEqual(ext, [{"name": "Pain Suppression", "kind": "external", "by": None}])
+        self.assertEqual(ext, [{"name": "Pain Suppression", "kind": "external", "by": None, "talentsKnown": False}])
 
     def test_consumables_this_pull_only(self):
         r = run("Mage", "Frost", talents=set(),
