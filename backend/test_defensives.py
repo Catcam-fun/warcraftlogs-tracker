@@ -1852,7 +1852,24 @@ class StaggerPoolTests(unittest.TestCase):
         self.assertEqual(self.pools(154_891, 37_820), [3_060_000])
         keeps = defensives._purify_keeps(defensives.STAGGER_PURIFY["11.1.0"])
         self.assertEqual(keeps[0], [0.4, 0.5])                       # Purifying Brew, with Mantra of Purity
-        self.assertEqual(keeps[2], [0.855, 0.9, 0.9025, 0.95])       # Quick Sip 10% / 5%, Tranquil Spirit
+        self.assertEqual(keeps[2], [0.9, 0.95, 1.0])                 # one Quick Sip event: 10%, 5% or none
+        self.assertEqual(keeps[3], 0.95)                             # each Tranquil Spirit
+
+    def test_tranquil_spirit_clears_five_percent_for_every_sphere(self):
+        # Atlai (Undermine, AaM31gBWwFHmD7Rz pulls 32 and 38, ticks with no staggered hit between): a
+        # sphere alone 0.0500, Expel Harm drawing 1 sphere 0.0975, 2 spheres 0.1426, 5 spheres 0.2649 =
+        # 1 - 0.95^6 (The War Within: Expel Harm counts too), two spheres Spinning Crane Kick pulled in
+        # 0.0975, a sphere with a brew 0.5250. So any number of 5% purifies can share a stretch; a second
+        # 10% Quick Sip can't (one Keg Smash per stretch; Press the Advantage's bonus strike grants no
+        # Shuffle).
+        keeps = defensives._purify_keeps(defensives.STAGGER_PURIFY["11.1.0"])
+        fits = lambda to, brew=False: defensives._purify_fits(1_000_000, to, keeps, 1_000_000, brew)
+        self.assertTrue(fits(735_092))                  # 0.95^6: Expel Harm and 5 spheres
+        self.assertTrue(fits(698_337))                  # 0.95^7: Expel Harm and 6 spheres
+        self.assertTrue(fits(771_637))                  # a 10% Quick Sip and 3 spheres
+        self.assertTrue(fits(451_250, True))            # a brew and 2 spheres
+        self.assertFalse(fits(810_000))                 # two 10% Quick Sips
+        self.assertFalse(fits(451_250))                 # a brew's share, but no brew cast
 
     def test_a_cast_on_one_side_and_a_quick_sip_on_the_other_is_undecided(self):
         # Pool 340k (17 x 20k), 3.06M staggered, the tick after 161.5k: 170k. Read before the hit the
