@@ -96,6 +96,7 @@ function effectText(effect, info) {
     if (c.dr_missing) return `Reduces damage taken by up to ${pct(c.dr_missing)} more, the lower their health`;
     if (c.armor) return `Increases armor by ${pct(c.armor)}`;
     if (c.absorb) return `Absorbs ${scope}damage equal to ${pct(c.absorb)} of max health`;
+    if (c.absorb_amount && c.share) return `Absorbs ${pct(c.share)} of each hit, up to ${fmt(c.absorb_amount)}`;
     if (c.absorb_amount) return `Absorbs ${fmt(c.absorb_amount)} ${scope}damage`;
     if (c.hp) return c.current ? `Increases current and max health by ${pct(c.hp)}` : `Increases max health by ${pct(c.hp)}`;
     if (c.heal) return `Heals ${pct(c.heal)} of max health${over}`;
