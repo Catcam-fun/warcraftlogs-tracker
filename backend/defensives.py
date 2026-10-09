@@ -1989,7 +1989,8 @@ def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec, t
         if shares:
             out["mitigation"] = [{"heal": statistics.median(plain) + gore_heal}] + (extra or [])
             out["source"] = "log"
-            out["samples"] = {"n": len(shares), "minShare": round(min(shares), 3), "maxShare": round(max(shares), 3)}
+            # The range shown is of the heals without Soulburn's share, as the estimate reads them.
+            out["samples"] = {"n": len(plain), "minShare": round(min(plain), 3), "maxShare": round(max(plain), 3)}
         elif entry["name"] == "Demonic Healthstone" and cat.demonic_healthstone:
             out["mitigation"] = [{"heal": cat.demonic_healthstone + gore_heal}] + (extra or [])
             out["source"] = "typical"

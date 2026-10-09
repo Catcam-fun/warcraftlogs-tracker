@@ -2469,6 +2469,8 @@ class SoulburnTests(unittest.TestCase):
         e = self.estimate(DEMONIC_HS, heals, {SOULBURN_TALENT: 1}, casts=[79_999, 150_000])
         self.assertAlmostEqual(e["mitigation"][0]["heal"], 0.30)
         self.assertAlmostEqual(e["withSoulburn"]["mitigation"][0]["heal"], 0.60)
+        # The range shown is of the heals without Soulburn's share, as the estimate reads them.
+        self.assertEqual(e["samples"], {"n": 3, "minShare": 0.3, "maxShare": 0.3})
         only = self.estimate(DEMONIC_HS, heals[1:], {SOULBURN_TALENT: 1}, casts=[79_999, 150_000])
         self.assertAlmostEqual(only["mitigation"][0]["heal"], 0.30)
 
