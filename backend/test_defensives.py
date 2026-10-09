@@ -1048,6 +1048,37 @@ class LethalWindowTests(unittest.TestCase):
         self.assertNotIn("rot", r)
         self.assertEqual(r["biggestHit"]["pctOfMax"], 60)
 
+    def test_high_health_just_before_a_hit_on_the_killing_blows_millisecond(self):
+        # At 99% (last hit 3s before), then three hits on the killing blow's millisecond: a burst
+        # from 99% at once, not "set up by" (the hits ahead of it on that millisecond count).
+        drops = [hit(97_000, 10_000, 990_000), hit(100_000, 400_000, 590_000, ability=600),
+                 hit(100_000, 400_000, 190_000, ability=600), hit(100_000, 190_000, 0, overkill=200_000, ability=600)]
+        r = self.assess(drops)
+        self.assertEqual((r["deathType"], r["burst"]["hits"], r["burst"]["ms"], r["fromPct"], r["burstMs"]),
+                         ("burst", 3, 0, 99, 0))
+        self.assertNotIn("biggestHit", r)
+        # A small hit 0.5s before: still at 99% until the killing millisecond, so the burst took 0 ms.
+        r = self.assess([hit(99_500, 10_000, 990_000)] + drops[1:])
+        self.assertEqual((r["deathType"], r["burst"]["hits"], r["burst"]["ms"]), ("burst", 3, 0))
+        # From 99%, an 85% hit and a small finishing tick on one millisecond: a one-shot by the 85% hit.
+        r = self.assess([hit(97_000, 10_000, 990_000), hit(100_000, 850_000, 140_000, ability=1),
+                         hit(100_000, 140_000, 0, overkill=50_000)])
+        self.assertEqual((r["deathType"], r["oneShotHit"]["name"], r["oneShotHit"]["pctOfMax"]),
+                         ("oneShot", "Melee", 85))
+        # Exactly 1.5s from high health just before a hit (no point after it is high): inclusive.
+        def before(ts):
+            return self.assess([hit(ts, 300_000, 690_000), hit(100_000, 690_000, 0, overkill=10_000)])
+        self.assertEqual((before(98_500)["deathType"], before(98_500)["burstMs"]), ("burst", 1500))
+        self.assertEqual(before(98_499)["deathType"], "wasLow")
+        # A hit without their health between: they kept what the last hit left until it landed.
+        other = dict(hit(99_000, 100_000, 950_000), resourceActor=1)
+        r = self.assess([hit(97_000, 10_000, 900_000), other, hit(100_000, 800_000, 0, overkill=100_000)])
+        self.assertEqual((r["deathType"], r["fromPct"]), ("oneShot", 90))
+        # Still at 90% just after a shielded hit: that hit isn't "since they were last high".
+        r = self.assess([hit(95_000, 50_000, 900_000, absorbed=400_000, ability=600),
+                         hit(97_000, 500_000, 400_000), hit(100_000, 400_000, 0, overkill=10_000)])
+        self.assertEqual((r["deathType"], r["biggestHit"]["name"]), ("wasLow", "Frost Bolt"))
+
     def test_heals_need_time_to_react(self):
         # The big hit and the tick 50ms apart: no time to heal in between, and at full health before.
         fast = self.assess([hit(99_900, 900_000, 100_000), hit(99_950, 100_000, 0, overkill=50_000)],
