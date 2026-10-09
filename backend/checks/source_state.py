@@ -127,7 +127,8 @@ def max_hp_mismatch(survival, wcl_max):
 def _talents(run, rid, fid, pid):
     for c in run.combatants(rid, fid):
         if c.get("sourceID") == pid and c.get("fight", fid) == fid:
-            return {t["id"]: t.get("rank") or 1 for t in c.get("talentTree") or []}
+            # An empty tree is a loadout the log didn't record (as the site reads it): unknown.
+            return {t["id"]: t.get("rank") or 1 for t in c["talentTree"]} if c.get("talentTree") else None
     return None
 
 
@@ -167,7 +168,7 @@ def pull_loadouts(run, rid, fid, pid):
     loadout in, oldest first (WCL records a loadout only at pull start)."""
     out = []
     for c in run.report_combatants(rid, kept_pulls(run, rid, fid)):
-        if c.get("sourceID") != pid or c.get("talentTree") is None:
+        if c.get("sourceID") != pid or not c.get("talentTree"):
             continue
         talents = {t["id"]: t.get("rank") or 1 for t in c["talentTree"]}
         out.append((run.fight(rid, c["fight"])["start_time"], talents, defensives.SPEC_NAMES.get(c.get("specID"))))

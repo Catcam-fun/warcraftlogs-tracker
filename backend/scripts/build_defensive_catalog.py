@@ -300,9 +300,12 @@ EFFECTS = {
 # talents AoE 0.4000 on hundreds of hits; Elusiveness, hits not AoE 0.2000; Elusiveness, AoE 3/7 = 0.4286
 # on seven Rogues (Edude, Ezpi, Noobprint, Maar, Charrend, Nickledon, Kush); Elusiveness and Mirrors (+10%
 # on effect 0), AoE 0.5086 = 1 - 0.8 x (1 - (0.5 - 4/35)) on five. Exact to 4 decimals both ways: keep =
-# 0.8 x (1 - (A - 4/35)). The constant isn't in the game data (a script); if the effect's base value moves,
-# the build fails until it is measured again.
-MEASURED_MODS = {("Feint", 1966, 0): [("Elusiveness", -4 / 35, 0.4)]}
+# 0.8 x (1 - (A - 4/35)). The constant isn't in the game data (a script). Hits were sampled in patches from 11.0.7 to
+# 12.1.0, but none in 11.0.2, 11.0.5, 11.2.0 or 12.0.x; Feint's and Elusiveness' game data is the
+# same in all 14 builds, so it is applied to every patch. Each entry: (talent, add, the effect's base value it
+# was measured at, {(spell, effect index): the talent's own change there it was measured with}); if either
+# moves, the build fails until it is measured again.
+MEASURED_MODS = {("Feint", 1966, 0): [("Elusiveness", -4 / 35, 0.4, {(1966, 1): 0.2})]}
 
 TALENT_EFFECTS = {
     "Bloody Fortitude": [("Icebound Fortitude", "dr_missing", [("talent", 0)], {})],
@@ -970,16 +973,7 @@ def components(name, gd, mods, problems):
                 m = mods.effect(spell, index, field, ticks)
                 if m:
                     comp["mods"] = m
-                for talent, add, at in MEASURED_MODS.get((name, spell, index), ()):
-                    who, _ = talent_who(gd, mods, talent)
-                    if who is None:
-                        problems.append(f"{name}: {talent} (measured on effect {index} of {spell}) is in no talent tree: "
-                                        f"review MEASURED_MODS")
-                    elif abs((comp[out_field] or 0) - at) > 1e-9:
-                        problems.append(f"{name}: effect {index} of {spell} is {comp[out_field]}, {talent}'s change was "
-                                        f"measured at {at}: measure it again (MEASURED_MODS)")
-                    else:
-                        comp["mods"] = comp.get("mods", []) + [{**who, "add": round(add, 6)}]
+                measured_mods(name, spell, index, comp, out_field, field, ticks, gd, mods, problems)
             need = opts.get("needs")
             if need and comp[out_field] and not _talent_mods_reach(comp.get("mods"), need):
                 # A value in the data that a talent's script turns on (Translucent Image).
@@ -1002,6 +996,26 @@ def components(name, gd, mods, problems):
             if comp:
                 out.append(comp)
     return out
+
+
+def measured_mods(name, spell, index, comp, out_field, field, ticks, gd, mods, problems):
+    """Add MEASURED_MODS for this effect to `comp`, or a problem when what they were measured with moved."""
+    for talent, add, at, own in MEASURED_MODS.get((name, spell, index), ()):
+        who, _ = talent_who(gd, mods, talent)
+        moved = [(s_, i_, v) for (s_, i_), v in own.items()
+                 if not any(m.get("talent") == talent and abs(m.get("add", 0) - v) < 1e-9
+                            for m in mods.effect(s_, i_, field, ticks))]
+        if who is None:
+            problems.append(f"{name}: {talent} (measured on effect {index} of {spell}) is in no talent tree: "
+                            f"review MEASURED_MODS")
+        elif abs((comp[out_field] or 0) - at) > 1e-9:
+            problems.append(f"{name}: effect {index} of {spell} is {comp[out_field]}, {talent}'s change was "
+                            f"measured at {at}: measure it again (MEASURED_MODS)")
+        elif moved:
+            problems.append(f"{name}: {talent}'s own change on effect {moved[0][1]} of {moved[0][0]} is no "
+                            f"longer {moved[0][2]}: measure it again (MEASURED_MODS)")
+        else:
+            comp["mods"] = comp.get("mods", []) + [{**who, "add": round(add, 6)}]
 
 
 def talent_component(gd, mods, talent, field, source, extra, problems):
