@@ -469,6 +469,10 @@ def analyze():
                     # An ability is AoE when any hit of it in the report is: WCL never marks a hit absorbed
                     # whole. The windows tell most; for an effect limited to AoE (Feint), the abilities a
                     # dying player's windows can't tell are read from the report's pulls, one request.
+                    # Also when no hit in the windows is marked: WCL marks every report (14 reports from
+                    # Nerub-ar Palace to the Midnight raids, hundreds of marked hits a pull, 2026-10-09),
+                    # so that is only which hits the deaths took, and an unmarked hit that dealt damage
+                    # is single-target.
                     if hits is not None:
                         aoe = defensives.aoe_abilities(hits)
                         unknown = set()
@@ -476,7 +480,7 @@ def analyze():
                         friendly_types = {f.get("id"): f.get("type") for f in friendlies}
                         need = defensives.aoe_undecided(
                             hits, [p for p in hits if classes is None or friendly_types.get(p) in classes],
-                            aoe) if aoe else set()
+                            aoe)
                         if need:
                             # "decided": the abilities the report's pulls could tell (a hit that dealt damage).
                             aoe_key = (rid, tuple(fight_ids), "aoe-abilities", "decided", tuple(sorted(need)))
@@ -539,8 +543,6 @@ def analyze():
                 yield f"data: {json.dumps({'stage': 'deaths', 'message': msg})}\n\n"
             yield f"data: {json.dumps({'stage': 'processing', 'message': f'Processing {len(all_fights_deduped)} fights...'})}\n\n"
             
-            # Whether each report marks AoE hits at all (older logs don't).
-            aoe_known = {rid: defensives.logs_mark_aoe(h) for rid, h in report_hits.items() if h is not None}
             total_deaths = 0
             pullCutoffTimestamps = {}
             
@@ -659,7 +661,6 @@ def analyze():
                             if report_hits.get(rid) is not None else None,
                             ability_schools=fight_data.get('ability_schools', {}),
                             cat=defensives.catalog_for(report_abs_start),
-                            aoe_known=aoe_known.get(rid, True),
                             armor_k=defensives.armor_constant(fight.get('boss'), fight.get('difficulty')),
                             soulwell=soulwell,
                             # Presses in the report's other pulls count with that pull's talents.

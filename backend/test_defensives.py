@@ -628,10 +628,6 @@ class OlderLogTests(unittest.TestCase):
                          ("armorValueUnknown", "constant"))
         self.assertIsNone(r["wouldSave"]["Test Hide"])
 
-    def test_report_marks_aoe_only_if_some_hit_is_aoe(self):
-        self.assertFalse(defensives.logs_mark_aoe({1: [{"isAoE": False}], 2: [{"isAoE": False}]}))
-        self.assertTrue(defensives.logs_mark_aoe({1: [{"isAoE": False}], 2: [{"isAoE": True}]}))
-
 
 class AoeByAbilityTests(unittest.TestCase):
     # Live 2026-10-08: WCL marks isAoE only on hits that dealt damage. A hit an absorb took whole (amount 0,
