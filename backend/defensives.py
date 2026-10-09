@@ -140,6 +140,14 @@ class Catalog:
                 entries.update(m.get("entries", ()))
         for m in self.heal_talents:
             entries.update(m.get("entries", ()))
+        # The talents that decide a Brewmaster's purifies (_purify_keeps, _stagger_pools).
+        sp = self.stagger_purify or {}
+        for m in (sp.get("brew") or {}).get("mods", ()):
+            entries.update(m.get("entries", ()))
+        for key in ("quick_sip", "tranquil_spirit"):
+            entries.update((sp.get(key) or {}).get("entries", ()))
+        for f in sp.get("flat", ()):
+            entries.update(f.get("entries", ()))
         # And every talent that changes how much an aura raises max health (max_health_auras.py: Foul
         # Bulwark on Bone Shield, Battlefield Commander on Rallying Cry), whoever cast the aura.
         entries.update(MAX_HEALTH_ENTRIES)
@@ -533,10 +541,19 @@ def _talented_charges(entry, talent_entries, spec):
                                   for m in entry.get("charge_mods", ()))
 
 
+def _spec_mods(entry):
+    """Does a spec passive change this entry (a modifier given by spec; a mastery's stretch isn't counted)?"""
+    mods = [m for c in entry.get("mitigation") or () if isinstance(c, dict) for m in _mods(c)]
+    mods += [c["needs"] for c in entry.get("mitigation") or () if isinstance(c, dict) and c.get("needs")]
+    mods += list(entry.get("cooldown_mods", ())) + list(entry.get("charge_mods", ())) + list(entry.get("duration_mods", ()))
+    return any(m.get("specs") and not m.get("mastery") for m in mods)
+
+
 def _active_detail(entry, loadout, observed_absorbs):
     """An active defensive as its caster had it: {"talentsKnown"} and, with their loadout (talents,
     spec), the talented "effect" (as the ready buttons resolve it), "auraMs", "cooldownMs", "charges"
-    and "talents" (every talent that changed one of them)."""
+    and "talents" (every talent that changed one of them). "specKnown": False when the caster's spec
+    isn't in the log and a spec passive would change the entry (those aren't in the numbers)."""
     if loadout is None or loadout[0] is None:
         return {"talentsKnown": False}
     talents, spec = loadout
@@ -548,9 +565,12 @@ def _active_detail(entry, loadout, observed_absorbs):
             if rank:
                 applied.append({"talent": m["talent"], "field": field, "rank": rank,
                                 **{k: m[k] for k in ("add_ms", "add", "mult") if k in m}})
-    out = {"talentsKnown": True, "auraMs": _talented_duration(entry, talents, spec),
+    aura_ms = _talented_duration(entry, talents, spec)
+    out = {"talentsKnown": True, "auraMs": round(aura_ms) if aura_ms else aura_ms,
            "cooldownMs": round(_talented_cooldown(entry, talents, spec)),
            "charges": _talented_charges(entry, talents, spec)}
+    if spec is None and _spec_mods(entry):
+        out["specKnown"] = False
     if comps:
         out["effect"] = [{k: (round(v, 3) if isinstance(v, float) else v) for k, v in c.items() if v is not None}
                          for c in comps]
@@ -892,12 +912,17 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
         return talents, (indexed.get("specs") or {}).get((fight_id, caster))
 
     # What each active defensive did as its caster had it: this pull's loadout, the caster's for an
-    # external another player cast (unknown when the log has no loadout for them).
+    # external another player cast (unknown when the log has no loadout for them). An aura whose source
+    # isn't a player (a totem's: Spirit Link Totem, Earthen Wall Totem name the totem) or isn't known
+    # has no caster to read: "casterUnknown".
     for a in result["active"]:
         entry = cat.all[cat.name_to_id[a["name"]]]
         src = active.get(a["name"])
         if a["kind"] == "external" and src != player_id:
-            a.update(_active_detail(entry, caster_loadout(src) if src is not None else None, {}))
+            player = src is not None and src in (actor_names or {})
+            a.update(_active_detail(entry, caster_loadout(src) if player else None, {}))
+            if not player:
+                a["casterUnknown"] = True
         else:
             a.update(_active_detail(entry, (talent_entries, spec), observed))
 
@@ -1008,11 +1033,22 @@ STAGGER_LOOKBACK_MS = 10_500
 # are gained, in ONE event (Keg Smash's 5 s can cross two: 10%; Weavi, Quel'Danas p104: 0.1000 on 10 hits,
 # and 0.5500 = 1 - 0.5 x 0.9 with a brew); Tranquil Spirit 393357 clears 5% for every Healing Sphere consumed
 # (and, in The War Within, every Expel Harm), several at once when Expel Harm or Spinning Crane Kick draws
-# them in (Atlai, Undermine p32: 0.0975, 0.1426, 0.2649 with 1, 2, 5 spheres and Expel Harm). The fits
-# don't read the player's talents: a Brewmaster without Tranquil Spirit is also allowed several 5% at once.
-# Only Purifying Brew is a cast; the others show only in the ticks, and so do the flat ones the replay can't
-# size (Staggering Strikes, Touch of Death).
+# them in (Atlai, Undermine p32: 0.0975, 0.1426, 0.2649 with 1, 2, 5 spheres and Expel Harm). Quick Sip and
+# Tranquil Spirit are talents, and the fits read the player's loadout for the pull: a Brewmaster without one
+# never purifies with it (Weavi, Undermine p24, has neither; Weavi, Quel'Danas p104 and Obimonk only Quick
+# Sip), and with the loadout known the brew clears only its own share (Mantra of Purity or not). Without a
+# loadout in the log, every one is allowed. Purifying Brew is a cast; Quick Sip and Tranquil Spirit show
+# only in the ticks. The flat purifies (Touch of Death, every Brewmaster: 325095; Staggering Strikes on
+# Blackout Kick, a talent) can't be sized, so a stretch where one of their buttons was pressed can have
+# lost any amount (STAGGER_PURIFY "flat"; their casts are read with the brew's).
 PURIFYING_BREW = 119582
+# The most Healing Spheres one stretch between two ticks (under 0.5 s) consumes: the most read in any
+# 500 ms of sphere heals (124507) over 33 pulls, 961 bursts (Atlai, Undermine, 22 pulls: 3 bursts of 6,
+# none more; Weavi, Manaforge, 9 pulls: one of 7; Weavi, Quel'Danas, 2 pulls: 5). Spheres last 30 s and
+# Expel Harm draws in every one up, so the count is bounded by how many a fight leaves up at once, which
+# the game data doesn't cap. With The War Within's Expel Harm on top, a stretch's Tranquil Spirits are
+# at most 8: one Quick Sip event of 10% and 8 of 5% leave 0.9 x 0.95^8 = 0.597 of the pool.
+MAX_SPHERES_AT_ONCE = 7
 # A purify's share read from the ticks lands this close (real ones read within 0.0001: Undermine p24 0.5000,
 # Quel'Danas p104 0.0500, 0.1000, 0.5500), plus the ticks' rounding: each tick is a whole number, and the
 # pool is up to STAGGER_TICKS of them.
@@ -1029,6 +1065,10 @@ WINDOW_EXTRAS_IDS = sorted(WINDOW_HEAL_IDS | STACK_SIZED | LOADOUT_SIZED | {STAG
 # Judgment and Hammer of Wrath on Sentinel), in any patch's catalog: the replay presses inside the window,
 # so only the casts inside it matter.
 WINDOW_CAST_IDS = sorted({c for cat in _CATALOGS.values() for c in cat.extend_ids})
+# A Brewmaster's casts that purify: Purifying Brew, and the buttons of the flat purifies in any patch
+# (Touch of Death, Blackout Kick for Staggering Strikes), read from up to STAGGER_LOOKBACK_MS before a window.
+STAGGER_CAST_IDS = frozenset({PURIFYING_BREW} | {c for p in STAGGER_PURIFY.values() for f in p.get("flat", ())
+                                                 for c in f["casts"]})
 AURA_EVENTS = {"applybuff", "applybuffstack", "removebuffstack", "removebuff",
                "applydebuff", "applydebuffstack", "removedebuffstack", "removedebuff"}
 WINDOW_TYPES = {"damage", "heal", "absorbed", "cast"} | AURA_EVENTS
@@ -1041,7 +1081,7 @@ HIT_FIELDS = ("timestamp", "type", "sourceID", "sourceInstance", "targetID", "ab
 # For the windows' cache key in app.py: windows cached with other extras or without a field kept
 # here (sourceInstance, for Fiery Brand's unit) are not reused.
 WINDOW_EXTRAS_KEY = hashlib.sha1(repr((WINDOW_EXTRAS_IDS, WINDOW_CAST_IDS, HIT_FIELDS, HEAL_FIELDS,
-                                       STAGGER_LOOKBACK_MS, PURIFYING_BREW)).encode()).hexdigest()[:12]
+                                       STAGGER_LOOKBACK_MS, sorted(STAGGER_CAST_IDS))).encode()).hexdigest()[:12]
 
 
 def _events_query(blocks, resources=True):
@@ -1140,9 +1180,9 @@ def fetch_death_windows(token, report_code, pulls, heals=True):
         every = [d for _, ds in pulls for d in ds]
         names = sorted({n for _, n in every if n})
         who = ", ".join(json.dumps(n, ensure_ascii=False) for n in names)
-        # Casts have no target or the enemy's: read by their caster (a Brewmaster's Purifying Brew, and the
-        # buttons that lengthen a defensive: WINDOW_CAST_IDS).
-        casts = ", ".join(map(str, sorted({PURIFYING_BREW} | set(WINDOW_CAST_IDS))))
+        # Casts have no target or the enemy's: read by their caster (a Brewmaster's purifies:
+        # STAGGER_CAST_IDS, and the buttons that lengthen a defensive: WINDOW_CAST_IDS).
+        casts = ", ".join(map(str, sorted(STAGGER_CAST_IDS | set(WINDOW_CAST_IDS))))
         flt = (f"(target.name in ({who}) and ability.id in ({', '.join(map(str, WINDOW_EXTRAS_IDS))}))"
                f" or (source.name in ({who}) and type = 'cast' and ability.id in ({casts}))")
         blocks["extras"] = ([fid for fid, _ in pulls],
@@ -1157,7 +1197,7 @@ def fetch_death_windows(token, report_code, pulls, heals=True):
     def stagger_pool(e):
         return (e.get("type") == "absorbed" and e.get("abilityGameID") == STAGGER_AURA) or \
             (e.get("type") == "damage" and e.get("abilityGameID") == STAGGER_TICK) or \
-            (e.get("type") == "cast" and e.get("abilityGameID") == PURIFYING_BREW)
+            (e.get("type") == "cast" and e.get("abilityGameID") in STAGGER_CAST_IDS)
 
     def keep(e):
         if stagger_pool(e):
@@ -1358,45 +1398,58 @@ def _tick_raw(tick):
     return tick.get("unmitigatedAmount") or _full_hit(tick)
 
 
-def _purify_keeps(purify):
-    """What one stretch between two ticks can leave of the pool, from a patch's STAGGER_PURIFY:
+def _has_talent(talents, entries):
+    """Has the player a talent (by its entries)? True when the loadout isn't known (None): it may be there."""
+    return talents is None or bool(_rank(talents, entries or ()))
+
+
+def _purify_keeps(purify, talents=None):
+    """What one stretch between two ticks can leave of the pool, from a patch's STAGGER_PURIFY and the
+    player's loadout for the pull (`talents`; None: not in the log, every talent allowed):
     (Purifying Brew's keep factors, its minimum as a share of max health or None, one Quick Sip event's
-    keep factors, Tranquil Spirit's keep factor or None). Quick Sip purifies once per Shuffle gain, by 5%
+    keep factors, Tranquil Spirit's keep factor or None, the most Tranquil Spirits one stretch can have).
+    Quick Sip purifies once per Shuffle gain, by 5%
     for every 3 s threshold the gain crosses (a gain of g crosses up to (g + 3 - e) // 3 of them, with the
     seconds left over before it); within one stretch (under 0.5 s, less than a global cooldown) at most
     one gain that crosses two (one Keg Smash; Press the Advantage's bonus strike, The War Within only,
-    "can trigger effects on behalf of Tiger Palm", which grants no Shuffle). Tranquil
-    Spirit clears 5% for every Healing Sphere consumed (and, in The War Within, every Expel Harm), and
-    Expel Harm or Spinning Crane Kick draws several in at once: any number of them can share a stretch
-    (Atlai, Undermine: Expel Harm with 5 spheres read 1 - 0.95^6). Purifying Brew with or without each
-    talent that adds to it."""
+    "can trigger effects on behalf of Tiger Palm", which grants no Shuffle). Whether Spinning Crane
+    Kick's 1 s of Shuffle is granted per enemy hit or per tick isn't settled; the fits allow one Quick
+    Sip event per stretch either way. Tranquil Spirit clears 5% for every Healing Sphere consumed (and,
+    in The War Within, every Expel Harm), and Expel Harm or Spinning Crane Kick draws several in at once:
+    up to MAX_SPHERES_AT_ONCE (and Expel Harm where it counts) can share a stretch (Atlai, Undermine:
+    Expel Harm with 5 spheres read 1 - 0.95^6). Purifying Brew with or without each talent that adds to
+    it, unless the loadout says which."""
     from itertools import combinations
     brew = purify["brew"]
-    adds = [m["add"] for m in brew.get("mods", ())]
-    brews = sorted({round(1 - brew["share"] - sum(c), 6) for n in range(len(adds) + 1)
-                    for c in combinations(adds, n)})
+    mods = brew.get("mods", ())
+    if talents is not None:
+        adds = [[m["add"] for m in mods if _has_talent(talents, m.get("entries"))]]
+    else:
+        adds = [list(c) for n in range(len(mods) + 1) for c in combinations([m["add"] for m in mods], n)]
+    brews = sorted({round(1 - brew["share"] - sum(c), 6) for c in adds})
     sips = [1.0]
     sip = purify.get("quick_sip")
-    if sip and purify.get("shuffle_s"):
+    if sip and purify.get("shuffle_s") and _has_talent(talents, sip.get("entries")):
         most = max(int((g + sip["per_s"] - 1e-6) // sip["per_s"]) for g in purify["shuffle_s"].values())
         sips += [round(1 - sip["share"] * k, 6) for k in range(1, most + 1)]
     spirit = purify.get("tranquil_spirit")
-    return brews, brew.get("min_max_health"), sorted(set(sips)), round(1 - spirit["share"], 6) if spirit else None
+    if spirit and not _has_talent(talents, spirit.get("entries")):
+        spirit = None
+    most = (MAX_SPHERES_AT_ONCE + (1 if spirit.get("expel_harm") else 0)) if spirit else 0
+    return (brews, brew.get("min_max_health"), sorted(set(sips)), round(1 - spirit["share"], 6) if spirit else None,
+            most)
 
 
-# The least a stretch's passive purifies are taken to leave of the pool (58 Tranquil Spirits at once).
-PASSIVE_FLOOR = 0.05
-
-
-def _passive_keeps(sips, spirit, low):
+def _passive_keeps(sips, spirit, low, most):
     """Every keep factor one stretch's passive purifies can give, at least `low`: (factor, the factors
-    a Purifying Brew could have come after: any part of them, in any order)."""
+    a Purifying Brew could have come after: any part of them, in any order). At most one Quick Sip
+    event and `most` Tranquil Spirits."""
     out = []
     for e in sips:
         n = 0
         while True:
             f = e * spirit ** n if spirit else e
-            if f < low or (n and not spirit):
+            if f < low or n > most or (n and not spirit):
                 break
             parts = {round((e if take else 1.0) * (spirit ** m if spirit else 1.0), 9)
                      for take in ({True, False} if e != 1.0 else {False}) for m in range(n + 1)}
@@ -1408,10 +1461,10 @@ def _passive_keeps(sips, spirit, low):
 def _purify_fits(p_from, p_to, keeps, max_hp, brew):
     """Does the pool going from p_from to p_to between two ticks fit the purifies the game has?
     `brew`: True (a Purifying Brew cast in that stretch), False (none) or None (casts not read)."""
-    brews, minimum, sips, spirit = keeps
+    brews, minimum, sips, spirit, most = keeps
     slack = PURIFY_MATCH * p_from + STAGGER_TICKS
-    low = max((p_to - slack) / p_from if p_from else 0, PASSIVE_FLOOR)
-    for f, parts in _passive_keeps(sips, spirit, low):
+    low = (p_to - slack) / p_from if p_from else 0
+    for f, parts in _passive_keeps(sips, spirit, low, most):
         if brew is not True and f != 1.0 and abs(p_from * f - p_to) <= slack:
             return True
         if brew is False:
@@ -1428,30 +1481,40 @@ def _purify_fits(p_from, p_to, keeps, max_hp, brew):
     return False
 
 
-def _stagger_pools(ticks, ins, purifies=None, purify=None):
+def _stagger_pools(ticks, ins, purifies=None, purify=None, talents=None):
     """The pool just before each staggered hit: {id(in event): [estimates]}; one estimate when the log
     settles it, two (the replay then works out both) when it doesn't, [] when unknown.
 
     `ticks`: the player's Stagger ticks; `ins`: their STAGGER_AURA absorbed events (each a hit's
-    staggered amount); `purifies`: their Purifying Brew casts (None: not read); `purify`: the patch's
-    purify sizes (STAGGER_PURIFY; the latest patch's if None). All from up to STAGGER_LOOKBACK_MS before
-    the window. Two readings:
+    staggered amount); `purifies`: their casts of Purifying Brew and of the flat purifies' buttons (None:
+    not read); `purify`: the patch's purify sizes (STAGGER_PURIFY; the latest patch's if None); `talents`:
+    their loadout for the pull (None: not in the log). All from up to STAGGER_LOOKBACK_MS before the
+    window. Two readings:
       - after: the tick after it is the pool over STAGGER_TICKS, so the pool before was STAGGER_TICKS
         x tick - staggered amount; wrong (too small) if a purify came after the hit, before that tick;
       - before: the tick before it left its size x (ticks left - 1); wrong (too big) if a purify came
         between that tick and the hit.
     When they differ, a purify came on one side: the side where the change fits the game's purifies
     (_purify_fits; with the casts read, a side with a Purifying Brew cast must fit one with the brew, a
-    side without one a passive purify) is it. When both fit (a cast on one side, a Quick Sip that could
-    be on the other: the truth lies between), neither does (Staggering Strikes' flat amount), or only
-    the side without a cast fits (the cast's side held something the replay can't size), both
-    readings are kept. Weavi, Undermine p24: the cast's side read 0.5000 on every one of 12 with a cast;
+    side without one a passive purify; a side where a flat purify's button was pressed fits any change)
+    is it. When both fit (a cast on one side, a Quick Sip that could be on the other: the truth lies
+    between), neither does, or only the side without a cast fits (the cast's side held something the
+    replay can't size), both readings are kept. Weavi, Undermine p24: Touch of Death 165 ms before a hit,
+    the pool 2,144,052 by the tick before, 5 by the tick after; without Tranquil Spirit or Quick Sip
+    nothing else fits, so the tick after is right. Weavi, Undermine p24: the cast's side read 0.5000 on every one of 12 with a cast;
     Quel'Danas p104: 0.0500, 0.1000, 0.5000, 0.5500. A pool that grew between the ticks can't be a
     purify: the tick after is right."""
-    keeps = _purify_keeps(purify or STAGGER_PURIFY[LATEST])
+    purify = purify or STAGGER_PURIFY[LATEST]
+    keeps = _purify_keeps(purify, talents)
+    # A flat purify with talent entries only for players with the talent; without (Touch of Death's 325095)
+    # every Brewmaster has it.
+    flat_ids = {c for f in purify.get("flat", ()) if "entries" not in f or _has_talent(talents, f["entries"])
+                for c in f["casts"]}
     seq = sorted([(t["timestamp"], 1, "tick", t) for t in ticks] + [(e["timestamp"], 0, "in", e) for e in ins],
                  key=lambda x: (x[0], x[1]))
-    casts = None if purifies is None else sorted(c["timestamp"] for c in purifies)
+    casts = None if purifies is None else sorted(c["timestamp"] for c in purifies
+                                                 if c.get("abilityGameID", PURIFYING_BREW) == PURIFYING_BREW)
+    flats = None if purifies is None else sorted(c["timestamp"] for c in purifies if c.get("abilityGameID") in flat_ids)
     out, pool, left, prev = {}, None, None, None
     for i, (ts, _, kind, e) in enumerate(seq):
         if kind == "tick":
@@ -1472,8 +1535,11 @@ def _stagger_pools(ticks, ins, purifies=None, purify=None):
                 max_hp = nxt[3].get("maxHitPoints") or (prev[1].get("maxHitPoints") if prev else None)
                 cast_before = None if casts is None else any(prev is not None and prev[0] < c <= ts for c in casts)
                 cast_after = None if casts is None else any(ts <= c < nxt[0] for c in casts)
-                fit_before = _purify_fits(pool, after, keeps, max_hp, cast_before)
-                fit_after = _purify_fits(pool + amount, after + amount, keeps, max_hp, cast_after)
+                # A flat purify's button pressed on a side: that side can have lost any amount.
+                flat_before = bool(flats) and any(prev is not None and prev[0] < c <= ts for c in flats)
+                flat_after = bool(flats) and any(ts <= c < nxt[0] for c in flats)
+                fit_before = flat_before or _purify_fits(pool, after, keeps, max_hp, cast_before)
+                fit_after = flat_after or _purify_fits(pool + amount, after + amount, keeps, max_hp, cast_after)
                 # A Purifying Brew cast on the side that fits nothing: something the replay can't size
                 # (a flat purify) came with it, so the other side's fit doesn't settle it.
                 cast_unfit = cast_after if fit_before else cast_before
@@ -1640,7 +1706,8 @@ def _resolve(entry, talent_entries, observed_absorbs, spec=None, applied=None):
             boosted.append(m["talent"])
             if applied is not None:
                 applied.append({"talent": m["talent"], "field": field, "rank": rank,
-                                **({"add": m["add"]} if "add" in m else {"mult": m["mult"]})})
+                                **({"add": m["add"]} if "add" in m else {"mult": m["mult"]}),
+                                **({"school": c["school"]} if c.get("school") not in (None, "all") else {})})
         if field == "dr":
             value = min(value, 1.0)
         if value:
@@ -2561,7 +2628,7 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     heal_events = [h for h in hits or () if h.get("type") in ("heal", "absorbed")
                    or (h.get("type") in AURA_EVENTS and h.get("abilityGameID") in WINDOW_HEAL_IDS)]
     aura_events = [h for h in hits or () if h.get("type") in AURA_EVENTS]
-    purifies = [h for h in hits or () if h.get("type") == "cast" and h.get("abilityGameID") == PURIFYING_BREW]
+    purifies = [h for h in hits or () if h.get("type") == "cast" and h.get("abilityGameID") in STAGGER_CAST_IDS]
     # The player's own casts that lengthen a defensive (fetch_death_windows: Judgment, Hammer of Wrath).
     own_casts = [h for h in hits or () if h.get("type") == "cast"]
     hits = [h for h in hits or ()
@@ -2620,7 +2687,7 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
                and since <= e["timestamp"] <= until]
         ticks = [h for h in hits if _stagger_tick(h) and since <= h["timestamp"] <= until]
         casts = [c for c in purifies if since <= c["timestamp"] <= until]
-        stagger = _stagger_share(window, ins, _stagger_pools(ticks, ins, casts, stagger_purify))
+        stagger = _stagger_share(window, ins, _stagger_pools(ticks, ins, casts, stagger_purify, talent_entries))
     win = _Window(window, ability_schools, stagger=stagger)
     if hp_before != (killing.get("amount") or 0):
         # Health before the blow, without what the blow itself set off (_max_hp_before).
