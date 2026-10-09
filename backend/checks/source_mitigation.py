@@ -2,8 +2,9 @@
 
 What it can't measure, and leaves out (each verified on live logs, 2026-10-08):
   - Stagger ticks (a Brewmaster's own delayed damage): they were reduced when the hit was staggered;
-    defensives up at tick time never change them (Weavi, under Fortifying Brew: 1.000 through, or 0.600 with
-    Invoke Niuzao up, which takes 40% of each tick, exactly as without it).
+    defensives up at tick time never change them (Weavi, under Fortifying Brew, as without it: The War
+    Within 1.000 through, or 0.600 with Invoke Niuzao up, which takes 40% of each tick; Midnight also
+    shows runs of 0.95 / 0.57, a 5% cut from a source not yet known, under it or not).
   - A defensive on a spec the catalog doesn't give it to (Bear Form on a Guardian): the site never
     judges it there.
 A reduction that sits on the enemy (The War Within's Fiery Brand cuts the branded enemy's damage done: the
