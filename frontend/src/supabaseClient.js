@@ -1,7 +1,11 @@
 import { createClient } from '@supabase/supabase-js'
 
-const supabaseUrl = 'REDACTED'
-const supabaseAnonKey = 'REDACTED'
+// Set at build time from the deploy's GitHub secrets (frontend/.env.local for
+// local dev). The browser needs both, so they are visible in the live site's
+// JavaScript; they are kept out of the repo, and the anon key only reaches
+// what Supabase's row-level security allows.
+const supabaseUrl = process.env.REACT_APP_SUPABASE_URL || 'http://localhost:54321'
+const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY || 'unset'
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 

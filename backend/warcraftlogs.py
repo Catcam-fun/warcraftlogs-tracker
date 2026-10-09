@@ -2,6 +2,7 @@
 warcraftlogs.py - WarcraftLogs API interactions (token, GraphQL, reports, fights)
 """
 
+import os
 import time
 import requests
 import unicodedata
@@ -11,9 +12,22 @@ import threading
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# API Endpoints
-GRAPHQL_ENDPOINT = "REDACTED/api/v2/client"
-OAUTH_TOKEN_URL = "REDACTED/oauth/token"
+# API Endpoints. Traffic goes through our WarcraftLogs proxy, whose address is
+# the WCL_PROXY_URL setting (kept out of the repo; the deploy sets it on the
+# Lambda). Unset, calls go straight to WarcraftLogs.
+WCL_DIRECT_URL = "https://www.warcraftlogs.com"
+
+
+def _wcl_base():
+    return (os.environ.get("WCL_PROXY_URL") or WCL_DIRECT_URL).rstrip("/")
+
+
+def graphql_endpoint():
+    return f"{_wcl_base()}/api/v2/client"
+
+
+def oauth_token_url():
+    return f"{_wcl_base()}/oauth/token"
 
 # Retry config
 MAX_RETRIES = 3
@@ -113,7 +127,7 @@ def get_access_token(client_id, client_secret):
         # Use retry logic with increased timeout
         response = make_request_with_retry(
             'post',
-            OAUTH_TOKEN_URL,
+            oauth_token_url(),
             data=data,
             headers=headers,
             timeout=60,  # Increased from 30 to 60 seconds
@@ -157,7 +171,7 @@ def graphql_query(token, query, variables=None, timeout=120, max_retries=3):
     try:
         response = make_request_with_retry(
             'post',
-            GRAPHQL_ENDPOINT,
+            graphql_endpoint(),
             json=payload,
             headers=headers,
             timeout=timeout,
