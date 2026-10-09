@@ -447,11 +447,6 @@ DURATION_FROM = {"Earth Elemental": 188616}
 # analysis reads only those as the defensive being up.
 EFFECT_AURAS = {"Earth Elemental": [381755]}
 
-# Curated buttons that are a defensive only in patches whose data has this effect: {name: (spell, effect)}.
-# (Soul Immolation, which burns the Demon Hunter in 12.0.0-12.0.1 and heals from 12.0.5, was the first; the
-# owner keeps only true defensives as buttons, and it is a Devourer's rotational resource cooldown.)
-ONLY_WITH = {}
-
 # Buttons that are a defensive only with a talent, where the game data has that talent: Midnight's Earth
 # Elemental raises max health only with Primordial Bond ("$?a1279819[, increasing your maximum health by
 # $381755s1%][ and your allies, generating high threat...]"); in The War Within it always did.
@@ -956,12 +951,6 @@ def components(name, gd, mods, problems):
                     problems.append(f"{name}: a talent changes effect {opts['share']} of spell {spell}: handle it")
             if opts.get("current"):
                 comp["current"] = True
-            if opts.get("first_tick") and index is not None:
-                # Ticks at the press and every period after: the count must be the duration's periods + 1.
-                period = gd.periods.get((spell, index), 0)
-                comp["tick_ms"], comp["first_tick"] = period, True
-                if not period or gd.duration.get(spell, 0) // period + 1 != ticks:
-                    problems.append(f"{name}: spell {spell} no longer ticks {ticks} times from the press: review EFFECTS")
             if opts.get("stacks"):
                 # A value per stack (STACK_DECAY says when they drop).
                 comp["stacks"] = gd.stacks.get(spell)
@@ -1315,9 +1304,6 @@ def build_catalog(build):
             # No longer a button: since Midnight, Renewing Blaze is a passive that
             # comes with Obsidian Scales (no casts of it in Midnight logs).
             missing.append(f"{name} (a passive, not a button)")
-            continue
-        if name in ONLY_WITH and not effect_indices(gd, *ONLY_WITH[name]):
-            missing.append(f"{name} (not a defensive in this patch)")
             continue
         max_charges, charge_ms = gd.charges.get(gd.charge_cat.get(sid, 0), (0, 0))
         cd_ms = gd.cooldowns.get(sid, 0)
