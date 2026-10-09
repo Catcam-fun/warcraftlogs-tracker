@@ -466,10 +466,31 @@ class HealthstoneSoulburnTests(unittest.TestCase):
                               [(m["talent"], m.get("add")) for m in heal["mods"]], (patch, name))
                 self.assertNotIn("Gorebound Fortitude", [m["talent"] for m in heal["mods"] if "mult" in m])
                 # What a Soulburn cast first adds, credited only when the log shows it was possible.
+                # The buff goes to the first spell it empowers: Soulburn's tooltip lists Demonic Circle:
+                # Teleport, Demonic Gateway, Drain Life, Health Funnel (The War Within only) and the
+                # Healthstone. A cast of one of the others between Soulburn and a Healthstone used it up.
+                spent = [48020, 111771, 234153] + ([755] if patch.startswith("11.") else [])
                 self.assertEqual(entry(patch, name)["soulburn"], {
                     "talent": "Soulburn", "entries": [91469, 116016], "spell": 385899, "buff": 387626,
                     "buff_ms": 20_000, "cooldown_ms": 6_000, "cost": 10, "heal": 0.3, "hp": 0.2,
-                    "dur_ms": 12_000}, (patch, name))
+                    "dur_ms": 12_000, "consumed_by": sorted(spent)}, (patch, name))
+
+    def test_the_spells_soulburn_empowers_come_from_its_tooltip(self):
+        import os, sys
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
+        import build_defensive_catalog as b
+
+        class GD:
+            names = {48020: "Demonic Circle: Teleport", 111771: "Demonic Gateway", 234153: "Drain Life",
+                     755: "Health Funnel"}
+        tip = ("Consumes a Soul Shard.\n\n|cFFFFFFFFDemonic Circle: Teleport|r: faster.\n\n"
+               "|cFFFFFFFFDemonic Gateway|r: instant.\n\n|cFFFFFFFFHealthstone|r: more healing.")
+        problems = []
+        self.assertEqual(b.soulburn_consumers(GD, {b.SOULBURN: tip}, problems), [48020, 111771])
+        self.assertEqual(problems, [])
+        b.soulburn_consumers(GD, {b.SOULBURN: tip + "\n\n|cFFFFFFFFShadow Bolt|r: more."}, problems)
+        self.assertEqual(len(problems), 1)        # a spell it now empowers that isn't mapped: fails loudly
+        self.assertIn("Shadow Bolt", problems[0])
 
     def test_soulburn_alone_adds_no_health(self):
         hs = entry("12.1.0", "Healthstone")
