@@ -836,7 +836,7 @@ def components(name, gd, mods, problems):
                     problems.append(f"{name}: effect {opts['top']} of spell {spell} is missing")
                 if mods.effect(spell, opts["top"], field, ticks):
                     problems.append(f"{name}: a talent changes effect {opts['top']} of spell {spell}: handle it")
-            if field == "dr" and index is not None and                     gd.effects[spell][index]["EffectAura"] == AURA_DAMAGE_DONE_TO_CASTER:
+            if field == "dr" and index is not None and gd.effects[spell][index]["EffectAura"] == AURA_DAMAGE_DONE_TO_CASTER:
                 # Only the hits of the unit it is cast on, which carry this aura in WCL's list.
                 comp["from_target"] = spell
             if field == "absorb":

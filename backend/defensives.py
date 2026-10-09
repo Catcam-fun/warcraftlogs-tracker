@@ -1024,7 +1024,8 @@ def fetch_death_windows(token, report_code, pulls, heals=True):
         return i >= 0 and ts <= windows[i][1]
 
     def stagger_pool(e):
-        return (e.get("type") == "absorbed" and e.get("abilityGameID") == STAGGER_AURA) or             (e.get("type") == "damage" and e.get("abilityGameID") == STAGGER_TICK)
+        return (e.get("type") == "absorbed" and e.get("abilityGameID") == STAGGER_AURA) or \
+            (e.get("type") == "damage" and e.get("abilityGameID") == STAGGER_TICK)
 
     def keep(e):
         if stagger_pool(e):
@@ -1200,7 +1201,8 @@ def _stagger_share(window, ins, pools):
         for k, h in enumerate(window):
             if k in used or _stagger_tick(h) or h.get("type") != "damage":
                 continue
-            if h.get("sourceID") == e.get("attackerID") and h.get("abilityGameID") == e.get("extraAbilityGameID")                     and abs(h["timestamp"] - e["timestamp"]) <= 2:
+            if h.get("sourceID") == e.get("attackerID") and h.get("abilityGameID") == e.get("extraAbilityGameID") \
+                    and abs(h["timestamp"] - e["timestamp"]) <= 2:
                 if best is None or abs(h["timestamp"] - e["timestamp"]) < abs(window[best]["timestamp"] - e["timestamp"]):
                     best = k
         if best is not None:
@@ -2133,7 +2135,8 @@ def _brand_targets(window, friendly_ids, attackable):
     for h in window:
         src = h.get("sourceID")
         unit = (src, h.get("sourceInstance"))
-        if src is None or src < 0 or src == h.get("targetID") or src in (friendly_ids or ())                 or src not in attackable or unit in out:
+        if src is None or src < 0 or src == h.get("targetID") or src in (friendly_ids or ()) \
+                or src not in attackable or unit in out:
             continue
         out.append(unit)
     return out

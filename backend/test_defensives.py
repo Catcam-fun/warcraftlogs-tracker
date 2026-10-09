@@ -1620,6 +1620,15 @@ class DampenHarmTests(unittest.TestCase):
         keep = 0.6 * (1 - 0.38)
         self.assertAlmostEqual(defensives._prevented([{"dr": 0.4}, self.DH], kb, MAX, 0, SCHOOLS), (1 - keep) * 1_000_000)
 
+    def test_size_after_armor_pressed_with_it(self):
+        # Bear Form's +220% armor on a melee swing first: 10k armor against K = 10k takes 50%, 32k takes
+        # 76.2%, so the hit keeps 0.238 / 0.5 = 0.476 of itself; x = 0.476, Dampen Harm cuts 0.343 of that.
+        kb = dict(hit(100_000, 1_000_000, 0, ability=1), armor=10_000, armorK=10_000)
+        armor_keep = (1 - 32_000 / 42_000) / 0.5
+        keep = armor_keep * (1 - (0.2 + 0.3 * armor_keep))
+        self.assertAlmostEqual(defensives._prevented([{"armor": 2.2}, self.DH], kb, MAX, 0, {1: PHYS}),
+                               (1 - keep) * 1_000_000, delta=1)
+
     def test_size_against_the_max_health_they_had_at_that_hit(self):
         # The same 600k hit on a player with 2M max health: x = 0.3, cut 0.29.
         kb = dict(hit(100_000, 400_000, 0, overkill=200_000), maxHitPoints=2 * MAX)
