@@ -1321,7 +1321,8 @@ def _stagger_pools(ticks, ins, purifies=None, purify=None):
     When they differ, a purify came on one side: the side where the change fits the game's purifies
     (_purify_fits; with the casts read, a side with a Purifying Brew cast must fit one with the brew, a
     side without one a passive purify) is it. When both fit (a cast on one side, a Quick Sip that could
-    be on the other: the truth lies between) or neither does (Staggering Strikes' flat amount), both
+    be on the other: the truth lies between), neither does (Staggering Strikes' flat amount), or only
+    the side without a cast fits (the cast's side held something the replay can't size), both
     readings are kept. Weavi, Undermine p24: the cast's side read 0.5000 on every one of 12 with a cast;
     Quel'Danas p104: 0.0500, 0.1000, 0.5000, 0.5500. A pool that grew between the ticks can't be a
     purify: the tick after is right."""
@@ -1351,7 +1352,10 @@ def _stagger_pools(ticks, ins, purifies=None, purify=None):
                 cast_after = None if casts is None else any(ts <= c < nxt[0] for c in casts)
                 fit_before = _purify_fits(pool, after, keeps, max_hp, cast_before)
                 fit_after = _purify_fits(pool + amount, after + amount, keeps, max_hp, cast_after)
-                if fit_before != fit_after:
+                # A Purifying Brew cast on the side that fits nothing: something the replay can't size
+                # (a flat purify) came with it, so the other side's fit doesn't settle it.
+                cast_unfit = cast_after if fit_before else cast_before
+                if fit_before != fit_after and not cast_unfit:
                     guesses = [after] if fit_before else [pool]
                 else:
                     guesses = [pool, after]          # can't tell which side

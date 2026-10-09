@@ -1830,6 +1830,19 @@ class StaggerPoolTests(unittest.TestCase):
         self.assertEqual(self.pools(120_000, 1_000_000), [3_400_000, 1_400_000])
         self.assertEqual(self.pools(120_000, 1_000_000, casts=[1_800]), [3_400_000, 1_400_000])
 
+    def test_a_cast_on_a_side_that_fits_nothing_keeps_both_readings(self):
+        # Pool 3.4M, 600k staggered, the tick after 190k: 3.2M. Read before the hit the purify took
+        # 0.0588, read after it 0.05: a Quick Sip after the hit fits, but the Purifying Brew was cast
+        # before it, and nothing with a brew fits that side (a flat purify could have been there too).
+        # The cast says the purify the after side fits isn't the whole story: both readings are kept.
+        # Without the casts the Quick Sip after the hit decides it.
+        self.assertEqual(self.pools(190_000, 600_000), [3_400_000])
+        self.assertEqual(self.pools(190_000, 600_000, casts=[1_800]), [3_400_000, 3_200_000])
+        # The mirror: 3.4M, 600k, the tick after 191.5k: 3.23M, 0.05 before the hit (a Quick Sip), 0.0425
+        # after it, where the brew was cast: both readings again. Without the cast the Quick Sip decides.
+        self.assertEqual(self.pools(191_500, 600_000), [3_230_000])
+        self.assertEqual(self.pools(191_500, 600_000, casts=[2_200]), [3_400_000, 3_230_000])
+
     def test_one_quick_sip_purifies_ten_percent_at_once(self):
         # Quick Sip purifies 5% for each 3 s of Shuffle gained, in one event: Keg Smash's 5 s can cross
         # two thresholds (Weavi, Quel'Danas p104: 0.1000 on 10 hits). Pool 3.4M, 37,820 staggered, the
