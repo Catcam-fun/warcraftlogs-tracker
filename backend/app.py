@@ -335,6 +335,8 @@ def analyze():
                                 and is_guild_member(normalize_character_name(d.get("targetName") or ""))]
                 return out
 
+            report_attacked = {}         # rid -> units the raid attacked (fetch_attacked_units)
+
             def fetch_report_deaths(rid, report_fights):
                 """Deaths, defensive data (casts, buffs, talents) and the hits before the deaths that
                 can count, for one report. Independent queries run at once; finished reports are cached."""
@@ -427,6 +429,20 @@ def analyze():
                                 recap_lru.set(win_key, windows)
                         except Exception as e:
                             hits_error = e
+                    # The units the raid attacked, for an effect cast on an enemy (The War Within's Fiery
+                    # Brand): only when this patch has one and a Demon Hunter's death can count.
+                    friendly_types = {f.get("id"): f.get("type") for f in friendlies}
+                    if defensives.brands_enemies(cat) and                             any(friendly_types.get(p) == "DemonHunter" for p in dead_in(deaths)):
+                        at_key = (rid, tuple(fight_ids), "attacked-units")
+                        attacked = recap_lru.get(at_key) if finished else None
+                        if attacked is None:
+                            try:
+                                attacked = defensives.fetch_attacked_units(token, rid, fight_ids, first_start, last_end)
+                                if finished:
+                                    recap_lru.set(at_key, attacked)
+                            except Exception as e:
+                                print(f"[WARN] Attacked units unavailable for report {rid}: {e}")
+                        report_attacked[rid] = set(attacked) if attacked is not None else None
                     if def_error:
                         print(f"[WARN] Defensive data unavailable for report {rid}: {def_error}")
 
@@ -604,6 +620,7 @@ def analyze():
                             pull_starts={fd['fight']['id']: fd['fight']['start_time']
                                          for fd in fights_by_report.get(rid, [])},
                             encounters=report_encounters.get(rid),
+                            attackable=report_attacked.get(rid),
                         )
                         death_event['defensives'] = defensives.analyze_death(**death_args)
                         cat = defensives.catalog_for(report_abs_start)

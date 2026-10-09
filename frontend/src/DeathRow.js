@@ -122,7 +122,8 @@ function whyText(d, hitName) {
         : `${hitName} isn't physical damage`;
     case 'pierces': return `${hitName} goes through immunities`;
     case 'noReduction': return 'Nothing reduced this hit, so damage reduction doesn\'t work on it';
-    case 'notBranded': return `${hitName} didn't come from an enemy it could brand`;
+    case 'notBranded': return 'no enemy it could brand (one the raid attacked) hit them in time for it to help';
+    case 'brandUnknown': return 'the log didn\'t say which enemies the raid could attack, so this can\'t be checked';
     case 'stagger': return 'a reduction does nothing to a Stagger tick as it lands, and it couldn\'t have been up for the hits that filled the pool';
     case 'fullHealth': return 'They were at full health, so a heal can\'t help';
     case 'aoeUnknown': return 'This log doesn\'t mark area damage, so this can\'t be checked';
