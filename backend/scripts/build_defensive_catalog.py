@@ -261,9 +261,14 @@ EFFECTS = {
     "Earth Elemental": [("hp", 381755, "aura:133")],
     "Mortal Coil": [("heal", 108396, 0)], "Impending Victory": [("heal", 202166, 0)],
     # 4% of max health a tick, 6 ticks over 5 s, the first on the press (the tooltip's $s3 = 6; on
-    # P6CwHkgFR9Krf1Bz every press ticked 6 times, 25,254 each at about 631k max health).
+    # P6CwHkgFR9Krf1Bz every press ticked 6 times, 25,254 each at about 631k max health): "first_tick"
+    # keeps that schedule (a tick at the press, then one each period). Its duration can't change for a
+    # Devourer: Agonizing Flames (x1.5) is a Vengeance-only node (90971, spec set 10) and the +4 s is Havoc's.
+    # Spontaneous Immolation adds 1 to effect 1 (aura 107, op 12): +1% a tick, +6% over the 6 ticks, as its
+    # tooltip says (${$s1*$1241937s3}% = 1 x 6; $s3 is effect 2, 6, in every patch with the heal).
     # Effect 4: armor +0, filled by Infernal Armor (+20%) for Devourers ("$?c3[Soul Immolation]...").
-    "Soul Immolation": [("heal", 1241937, "aura:20", 6), ("armor", 1241937, "aura:101", {"optional": True})],
+    "Soul Immolation": [("heal", 1241937, "aura:20", 6, {"first_tick": True}),
+                        ("armor", 1241937, "aura:101", {"optional": True})],
     "Sentinel": [("dr", 389539, "aura:87", 1, {"stacks": True}), ("hp", 389539, "aura:133", 1, {"stacks": True})],
     "Ardent Defender": [("dr", 31850, "aura:87"), ("hp", 31850, "aura:137", {"optional": True}),
                         ("heal_taken", 31850, "aura:118", {"optional": True})],
@@ -939,6 +944,12 @@ def components(name, gd, mods, problems):
                     problems.append(f"{name}: a talent changes effect {opts['share']} of spell {spell}: handle it")
             if opts.get("current"):
                 comp["current"] = True
+            if opts.get("first_tick") and index is not None:
+                # Ticks at the press and every period after: the count must be the duration's periods + 1.
+                period = gd.periods.get((spell, index), 0)
+                comp["tick_ms"], comp["first_tick"] = period, True
+                if not period or gd.duration.get(spell, 0) // period + 1 != ticks:
+                    problems.append(f"{name}: spell {spell} no longer ticks {ticks} times from the press: review EFFECTS")
             if opts.get("stacks"):
                 # A value per stack (STACK_DECAY says when they drop).
                 comp["stacks"] = gd.stacks.get(spell)

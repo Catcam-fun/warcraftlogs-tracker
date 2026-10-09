@@ -42,16 +42,18 @@ def death_strip(auras, death_ts, fight_start):
 def active_mismatches(active_names, auras, death_ts, fight_start=None, effect_auras=None):
     """Active names with no same-named aura band around the death (within BAND_TOLERANCE_MS of the
     death event, or of the moment the death stripped the player's auras when fight_start is given).
-    `effect_auras`: {button: names of the auras carrying its effect} (the catalog's "auras": Earth
-    Elemental's is "Primordial Bond" in Midnight): those, not the button's same-named aura."""
+    `effect_auras`: {button: IDs of the auras carrying its effect} (the catalog's "auras": Earth
+    Elemental's 381755): those by aura ID, not the button's same-named aura (198103 lingers, and in The
+    War Within both are named "Earth Elemental")."""
     moments = {death_ts}
     if fight_start is not None:
         moments.add(death_strip(auras, death_ts, fight_start))
     out = []
     for name in active_names:
-        want = (effect_auras or {}).get(name) or {name}
+        ids = (effect_auras or {}).get(name)
         covered = any(b["startTime"] - BAND_TOLERANCE_MS <= t <= b["endTime"] + BAND_TOLERANCE_MS
-                      for a in auras if a.get("name") in want for b in a.get("bands") or [] for t in moments)
+                      for a in auras if (a.get("guid") in ids if ids else a.get("name") == name)
+                      for b in a.get("bands") or [] for t in moments)
         if not covered:
             out.append(name)
     return out
@@ -72,7 +74,7 @@ def killing_hit_auras(run, rid, fid, pid, death_ts):
              if (h.get("overkill") or 0) > 0 and h["timestamp"] <= death_ts + ENTRY_TOLERANCE_MS]
     if not kills:
         return set()
-    return {names.get(a) for a in defensives._auras(kills[-1])}
+    return {defensives.aura_name(run.cat, a, names) for a in defensives._auras(kills[-1])}
 
 
 def _killing_event(entry):
@@ -301,7 +303,7 @@ def check(run):
         if active:
             auras = run.buffs(rid, fid, pid)
             missing = active_mismatches(active, auras, death_ts, fight_start,
-                                        defensives.effect_auras(run.cat)[1])
+                                        defensives.effect_aura_ids(run.cat))
             # A defensive that is a debuff on the enemy (Fiery Brand) is never a band on the player;
             # WCL's killing hit lists it when it was up.
             not_buffs = [n for n in missing if not any(a.get("name") == n for a in auras)]
