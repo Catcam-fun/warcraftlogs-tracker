@@ -2457,6 +2457,11 @@ class SoulburnTests(unittest.TestCase):
         self.assertIs(self.tl(consumed).state(1_500), False)          # on its 6 s cooldown
         self.assertIs(self.tl(consumed).state(7_000), True)           # ready again, shards left
         self.assertIn(7_000, self.tl(consumed).changes)
+        # Used up by another spell it empowers (a Demonic Gateway at 1,400: the buff's removebuff with it).
+        gate = events + [{"timestamp": 1_400, "type": "cast", "sourceID": 1, "abilityGameID": self.sb["consumed_by"][0]},
+                         {"timestamp": 1_400, "type": "removebuff", "targetID": 1, "abilityGameID": SOULBURN_BUFF}]
+        self.assertIs(self.tl(gate).state(1_399), True)
+        self.assertIs(self.tl(gate).state(1_400), False)
 
     def estimate(self, sid, heals=(), talents=None, casts=()):
         return defensives.consumable_estimate(sid, self.cat, list(heals), 1.0, talents or {}, "Demonology",
@@ -2481,6 +2486,37 @@ class SoulburnTests(unittest.TestCase):
         self.assertEqual(e["samples"], {"n": 3, "minShare": 0.3, "maxShare": 0.3})
         only = self.estimate(DEMONIC_HS, heals[1:], {SOULBURN_TALENT: 1}, casts=[79_999, 150_000])
         self.assertAlmostEqual(only["mitigation"][0]["heal"], 0.30)
+
+    def test_a_soulburn_spent_on_another_spell_is_not_on_the_healthstone(self):
+        # Soulburn's buff goes to the first spell it empowers (its tooltip: Demonic Circle: Teleport, Demonic
+        # Gateway, Drain Life, Health Funnel, Healthstone). 2VtyDR4CF6PGLjbd-like: Soulburn, then a Demonic
+        # Gateway 2 s later (the buff removed with it), then a Healthstone healing the plain 35%.
+        heals = [(10_000, DEMONIC_HS, 350_000, 1_000_000, 1.0), (80_000, DEMONIC_HS, 350_000, 1_000_000, 1.0),
+                 (150_000, DEMONIC_HS, 650_000, 1_000_000, 1.0), (152_000, DEMONIC_HS, 350_000, 1_000_000, 1.0)]
+        e = defensives.consumable_estimate(DEMONIC_HS, self.cat, heals, 1.0, {SOULBURN_TALENT: 1}, "Demonology",
+                                           soulburn_casts=[74_000, 150_000], soulburn_spent=[76_000])
+        self.assertAlmostEqual(e["mitigation"][0]["heal"], 0.35)
+        # 80,000: the Gateway used it; 152,000: the 150,000 Healthstone did.
+        self.assertEqual(e["samples"], {"n": 4, "minShare": 0.35, "maxShare": 0.35})
+
+    def test_the_spells_that_use_soulburn_are_read_and_passed_on(self):
+        from unittest import mock
+        spent = self.sb["consumed_by"]
+        self.assertTrue(set(spent) <= set(self.cat.cast_ids))
+        indexed = defensives.index_defensive_events({"casts": [
+            {"type": "cast", "timestamp": 5, "sourceID": 1, "abilityGameID": spent[0]}]}, self.cat)
+        self.assertEqual(indexed["casts"][1], [(5, spent[0])])
+        indexed = {"casts": {1: [(74_000, SOULBURN_SPELL), (76_000, spent[0]), (20_000, HEALTHSTONE)]},
+                   "talents": {(7, 1): {SOULBURN_TALENT: 1}},
+                   "heals": {1: [(80_000, HEALTHSTONE, 250_000, 1_000_000, 1.0, None, 7)]}}
+        hits = [hit(190_000, 600_000, 400_000), hit(200_000, 400_000, 0, overkill=350_000)]
+        r = defensives.analyze_death(1, "Warlock", "Demonology", 7, 150_000, 200_000, indexed, NAMES, {1: "Wl"},
+                                     hits=hits, ability_schools=SCHOOLS, cat=self.cat, soulburn_events=None)
+        self.assertEqual(r["survival"]["details"]["Healthstone"].get("why"), "soulburnUnknown")
+        with mock.patch.object(defensives, "consumable_estimate", wraps=defensives.consumable_estimate) as est:
+            defensives.analyze_death(1, "Warlock", "Demonology", 7, 150_000, 200_000, indexed, NAMES, {1: "Wl"},
+                                     hits=hits, ability_schools=SCHOOLS, cat=self.cat, soulburn_events=None)
+        self.assertEqual(est.call_args.kwargs["soulburn_spent"], [76_000])
 
     def test_gorebound_always_has_it(self):
         both = {SOULBURN_TALENT: 1, GOREBOUND_TALENT: 1}

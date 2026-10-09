@@ -983,6 +983,10 @@ class VerdictRuleTests(unittest.TestCase):
         self.assertEqual(len(rules_verdicts.soulburn_presses(details, 10_000, cooling, [], sb)), 1)
         buffed = [{"type": "applybuff", "timestamp": 7_000, "abilityGameID": 387626}]
         self.assertEqual(rules_verdicts.soulburn_presses(details, 10_000, cooling, buffed, sb), [])
+        # Used up by a Demonic Gateway (its removebuff) before the press: no longer on them, and on cooldown.
+        gated = buffed + [{"type": "removebuff", "timestamp": 7_500, "abilityGameID": 387626}]
+        self.assertEqual(len(rules_verdicts.soulburn_presses(details, 10_000, cooling + [spend(7_500, 0, 0, 111771)],
+                                                             gated, sb)), 1)
         self.assertEqual(rules_verdicts.soulburn_presses(details, 10_000, [], [], sb)[0][:12], "Healthstone:")
 
     def test_early_presses(self):
