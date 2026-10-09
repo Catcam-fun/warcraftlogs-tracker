@@ -289,9 +289,13 @@ class MitigationCheckTests(unittest.TestCase):
             self.assertEqual(source_mitigation.check(run).status, "pass")
 
 
-    def test_aoe_reduction_is_predicted_hit_by_hit(self):
-        # Live 2026-10-07 (Esra, Manaforge): one boss ability's hits are not all marked AoE, so Feint's
-        # AoE-only 40% must be predicted per hit, not from one sample hit of the ability.
+    def test_aoe_reduction_applies_by_ability(self):
+        # Live 2026-10-08: WCL marks isAoE only on hits that dealt damage; a hit absorbed whole is never
+        # marked, of any ability, and the game counts it as AoE all the same (Feint took 0.400 off 54 such
+        # hits on Maar, Undermine, and 10 on Esra, Manaforge; 0.000 off abilities never marked). An ability
+        # is AoE when any hit of it in the report is. Hits absorbed whole carry no health and are left out
+        # here, so this fixture gives an unmarked hit health to show the rule: ability 1 is AoE (marked
+        # elsewhere), ability 2 never is.
         from checks import source_mitigation
         run = mock.Mock(); run.code = "X"
         run.pulls = [{"id": 1, "start_time": 0, "end_time": 100_000}]
@@ -302,16 +306,21 @@ class MitigationCheckTests(unittest.TestCase):
                               "mitigation": [{"dr": 0.4, "school": "aoe"}]}}
         run.cat.relevant_talent_entries = set()
         run.combatants.return_value = []
-        hit = lambda through, buffs, aoe: _healthy({"type": "damage", "targetID": 2, "abilityGameID": 1, "fight": 1,
-                                                    "unmitigatedAmount": 1250, "mitigated": 1250 - through,
-                                                    "amount": through, "buffs": buffs, "isAoE": aoe})
-        hits = [hit(1000, "", True)] * 10 + [hit(1000, "", False)] * 10
-        hits += [hit(600, "1966.", True)] * 20 + [hit(1000, "1966.", False)] * 15 + [hit(600, "1966.", True)]
+        hit = lambda ability, through, buffs, aoe: _healthy({
+            "type": "damage", "targetID": 2, "abilityGameID": ability, "fight": 1, "unmitigatedAmount": 1250,
+            "mitigated": 1250 - through, "amount": through, "buffs": buffs, "isAoE": aoe})
+        hits = [hit(1, 1000, "", True)] * 5 + [hit(1, 1000, "", False)] * 5
+        hits += [hit(1, 600, "1966.", True)] * 10 + [hit(1, 600, "1966.", False)] * 25
+        hits += [hit(2, 1000, "", False)] * 5 + [hit(2, 1000, "1966.", False)] * 10
         with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
             self.assertEqual(source_mitigation.check(run).status, "pass")
-        # A log that marks no hit AoE (before Midnight): the AoE-only reduction can't be predicted,
-        # so nothing is measured, and that is a skip, never a pass.
+        # Judged by each hit's own mark, the 25 unmarked hits of ability 1 would read 0.40 against 0 and
+        # the median gap 0.40: flagged.
+        self.assertEqual(source_mitigation.report_aoe(hits), {1})
+        # A log that marks no hit AoE: the AoE-only reduction can't be predicted, so nothing is measured,
+        # and that is a skip, never a pass.
         hits = [dict(h, isAoE=False) for h in hits]
+        self.assertIsNone(source_mitigation.report_aoe(hits))
         with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
             o = source_mitigation.check(run)
         self.assertEqual(o.status, "skip")
