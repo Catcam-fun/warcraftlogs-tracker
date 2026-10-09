@@ -66,6 +66,17 @@ def on_the_enemy(entry):
     return any(c.get("from_target") for c in entry.get("mitigation") or [])
 
 
+def report_aoe(hits):
+    """Abilities that hit as area damage in the report: those with any hit marked isAoE. WCL marks
+    only hits that dealt damage (a hit absorbed whole, immune or missed never is, of any ability), and
+    the game counts those as AoE all the same: Feint took 0.400 off 54 unmarked hits absorbed whole of
+    abilities marked elsewhere on Maar (AaM31gBWwFHmD7Rz) and 10 on Esra (2VtyDR4CF6PGLjbd), and
+    0.000 off abilities never marked. None when no hit of the report is marked at all (no log tried, The
+    War Within's included, is like that): an AoE-only reduction can't be predicted there."""
+    aoe = {e.get("abilityGameID") for e in hits if e.get("type") == "damage" and e.get("isAoE")}
+    return aoe or None
+
+
 def missing_share(hit):
     """Share of max health the player was missing just before this hit (its own health is on it
     when resourceActor is 2: health after the hit plus what it took), or None without it."""
@@ -80,16 +91,21 @@ def scales_with_hit(comps):
     return any(c.get("dr_hit") is not None for c in comps or [])
 
 
-def predicted_keep(comps, e, aoe_known, schools, size=None):
+def predicted_keep(comps, e, aoe, schools, size=None):
     """Share of hit `e` the components let through, and the group its prediction is judged in:
-    (None, None) when it can't be predicted. `size`: for a reduction that grows with the hit (`dr_hit`),
+    (None, None) when it can't be predicted. `aoe`: the abilities that hit as area damage in the report
+    (report_aoe), or None when the report marks no hit AoE. `size`: for a reduction that grows with the hit (`dr_hit`),
     the hit after the player's other reductions as a share of max health; it reduces by its value at
     no damage rising in a straight line to `dr_hit` at a hit of max health, capped there."""
     keep, by_hit = 1.0, False
     for c in comps or []:
         if not (c.get("dr") or c.get("dr_missing")):
             continue
-        applies = defensives._school_applies(c.get("school"), dict(e, aoeKnown=aoe_known), schools)
+        if c.get("school") == "aoe":
+            # An AoE-only reduction applies by the ability, not the hit's own mark (report_aoe).
+            applies = None if aoe is None else e.get("abilityGameID") in aoe
+        else:
+            applies = defensives._school_applies(c.get("school"), e, schools)
         if applies is None:
             return None, None
         if not applies:
@@ -109,7 +125,7 @@ def predicted_keep(comps, e, aoe_known, schools, size=None):
     return keep, ("by hit" if by_hit else round(1 - keep, 4))
 
 
-def enemy_side(hits, players, names, cat, loadout, spec, pull_spec, aoe_known, schools):
+def enemy_side(hits, players, names, cat, loadout, spec, pull_spec, aoe, schools):
     """(player, defensive) -> [(measured, predicted)] for reductions on the enemy (on_the_enemy).
 
     WCL lists the brand on a hit only when the hit came from the branded unit. Each pair is two
@@ -143,7 +159,7 @@ def enemy_side(hits, players, names, cat, loadout, spec, pull_spec, aoe_known, s
                 continue
             branded, other = (a, b) if on[i] else (b, a)
             comps, _ = defensives._resolve(d, dict(loadout.get((fight, pid)) or {}), {}, spec.get(pid))
-            keep, _ = predicted_keep(comps, branded, aoe_known, schools)
+            keep, _ = predicted_keep(comps, branded, aoe, schools)
             if keep is not None:
                 out[(pid, name)].append((1 - branded["unmitigatedAmount"] / other["unmitigatedAmount"], 1 - keep))
     return out
@@ -184,8 +200,7 @@ def check(run):
     base = defaultdict(list)
     # (player, ability, talents) -> {defensive name: [(share that got through, other auras, the hit, missing health)]}
     shares = defaultdict(lambda: defaultdict(list))
-    # Logs from before Midnight never mark AoE hits: there an AoE-only reduction can't be predicted.
-    aoe_known = any(e.get("isAoE") for e in hits)
+    aoe = report_aoe(hits)
     for e in hits:
         if e.get("type") != "damage" or e.get("targetID") not in players or not e.get("unmitigatedAmount"):
             continue
@@ -261,7 +276,7 @@ def check(run):
                 if scales_with_hit(comps):
                     # The hit after the player's other reductions, as a share of max health.
                     size = e["unmitigatedAmount"] * usual / e["maxHitPoints"]
-                keep, group = predicted_keep(comps, e, aoe_known, schools, size)
+                keep, group = predicted_keep(comps, e, aoe, schools, size)
                 if keep is not None:
                     by_predicted[group].append((1 - through / usual, 1 - keep))
                     if group == "by hit":
@@ -275,7 +290,7 @@ def check(run):
 
     # A reduction on the enemy: raw sizes of the same unit's same ability, branded next to unbranded.
     for (pid, name), got in enemy_side(hits, players, names, cat, loadout, spec, pull_spec,
-                                       aoe_known, schools).items():
+                                       aoe, schools).items():
         rows[(pid, name)] += got
         pairs.add((pid, name))
 
