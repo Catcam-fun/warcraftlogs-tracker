@@ -21,7 +21,7 @@ anchors:
   kill_counts: "frontend/src/App.js:1276"
   wcl_link: "frontend/src/App.js:1336"
   player_list: "frontend/src/App.js:2101"
-  death_row: "frontend/src/DeathRow.js:242"
+  death_row: "frontend/src/DeathRow.js:243"
   defensive_summary: "frontend/src/DefensivePanel.js:20"
   result_shape: "backend/app.py:665"
   death_event: "backend/app.py:576"
@@ -46,13 +46,13 @@ invariants:
   - "NEVER: let a cheat death take a real death's slot; it is counted separately as +N cheat (frontend/src/deathCounting.js:31)."
   - "MUST: defensive analysis exist only for deaths that could count (slot <= maxCutoff, not in a wipe, not a cheat death) (backend/app.py:600)."
   - "NEVER: call the server when a filter changes; every table is recomputed from the loaded result (frontend/src/App.js:1266)."
-content_hash: sha256:98e88cc01f21165243cc98da05485635f4456667942a943da9012f06edab405a
+content_hash: sha256:8f5f854a892e64e4f6f209227ff1066a502466ff6eb1ea383729b47eda743311
 ---
 ## Summary
 
 - **What it is.** The `/results` route (`frontend/src/App.js:1595`) shows the analysis held in app state: a filter bar, a collapsible death-rate matrix, and a player list whose rows expand into a per-boss death log.
 - **Where the numbers come from.** The server sends every guild-member death with a `slot` and `inWipe` (`backend/app.py:576`). The browser decides what counts with `isCounted` (`frontend/src/deathCounting.js:22`), so changing "Deaths to count" re-scores instantly.
-- **What a death row shows.** `DeathRow` (`frontend/src/DeathRow.js:242`) draws the killing blow, health before it, the defensive strip and a "View log" link.
+- **What a death row shows.** `DeathRow` (`frontend/src/DeathRow.js:243`) draws the killing blow, health before it, the defensive strip and a "View log" link.
 - **What it leaves alone.** Results never refetch. Saved, shared and recent runs all render through the same page from stored data.
 
 ## How it works
@@ -71,13 +71,13 @@ You arrive here after an analysis, a saved report, a share link, or a Recent run
 - title: Read the player list | short: Players | sub: rate, preventable
   body: computeFilteredStats sorts players by real death rate (frontend/src/App.js:1140). Each row shows deaths over pulls, the rate, +N cheat when cheat deaths count (frontend/src/App.js:2127), and a defensive chip such as "3/5 preventable" from summarizeDefensives (frontend/src/DefensivePanel.js:20).
 - title: Expand a player | short: Death log | sub: per boss, per death
-  body: Expanding lists bosses in Adventure Guide order (frontend/src/App.js:153), each with top killing abilities and one DeathRow per counted death (frontend/src/App.js:2180). The row text describes the death as one-shot, burst, worn down by a raid-wide ability (rot), or the biggest hit before it (frontend/src/DeathRow.js:258).
+  body: Expanding lists bosses in Adventure Guide order (frontend/src/App.js:153), each with top killing abilities and one DeathRow per counted death (frontend/src/App.js:2180). The row text describes the death as one-shot, burst, worn down by a raid-wide ability (rot), or the biggest hit before it (frontend/src/DeathRow.js:259).
 - title: Hover the killing blow | short: Killing blow | sub: spell text, kill count
   body: The tooltip shows the ability's icon (abilityIcons by spell ID), its in-game description (abilityText, backend/app.py:692), the hit size, and "Killed N raiders in these pulls" from killCounts (frontend/src/App.js:1276).
 - title: Hover a defensive | short: Defensive verdict | sub: saves, not enough, can't tell
-  body: Ready abilities and consumables are green when the server's replay says they would have saved the player, red otherwise, with the amount and press time (frontend/src/DeathRow.js:329). Active and on-cooldown abilities have their own tooltips (frontend/src/DeathRow.js:385).
+  body: Ready abilities and consumables are green when the server's replay says they would have saved the player, red otherwise, with the amount and press time (frontend/src/DeathRow.js:330). Active and on-cooldown abilities have their own tooltips (frontend/src/DeathRow.js:387).
 - title: Open the log | short: View log | sub: WarcraftLogs deaths view
-  body: Each row links to https://www.warcraftlogs.com/reports/<report>#fight=<fight>&type=deaths (frontend/src/App.js:1336), opened in a new tab (frontend/src/DeathRow.js:454).
+  body: Each row links to https://www.warcraftlogs.com/reports/<report>#fight=<fight>&type=deaths (frontend/src/App.js:1336), opened in a new tab (frontend/src/DeathRow.js:456).
 ```
 
 ## Diagram
@@ -139,7 +139,7 @@ relied-on-by: [[feat-share]] — share links open here
 | `isCounted` {code} | `frontend/src/deathCounting.js:22` | the counting rule |
 | `computeFilteredStats` {code} | `frontend/src/App.js:993` | player list |
 | `computeOverviewData` {code} | `frontend/src/App.js:1143` | matrix |
-| `DeathRow` {code} | `frontend/src/DeathRow.js:242` | one death |
+| `DeathRow` {code} | `frontend/src/DeathRow.js:243` | one death |
 | `DefensiveSummaryChip` {code} | `frontend/src/DefensivePanel.js:43` | preventable and one-shot chips |
 
 ## Invariants

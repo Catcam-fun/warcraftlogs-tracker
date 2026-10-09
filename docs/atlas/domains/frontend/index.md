@@ -43,7 +43,7 @@ links:
   - feat-saved
   - feat-share
   - feat-account
-content_hash: sha256:e95bc5be3ead4d10df4d5b0b6fef1d79362cdc623b98f02a04427190b389c784
+content_hash: sha256:71643d2cb4b4135d5816013d88f0d51b8d2d0b16e814bbf12c41b7d0c23ab3d9
 ---
 ## Summary
 
@@ -126,7 +126,7 @@ The main modules. Filter by role.
 | `seasonTwoRaids.js` {page} | The Midnight Season 2 raid entry, shared by `AnalyzeConfig.js` and `App.js` | `frontend/src/seasonTwoRaids.js:6` |
 | `SavedReports.js` {page} | Lists, opens and deletes the signed-in user's saved analyses | `frontend/src/SavedReports.js:10` |
 | `TermsOfService.js` / `PrivacyPolicy.js` {page} | Static legal pages at `/terms` and `/privacy` | `frontend/src/TermsOfService.js:6` |
-| `DeathRow.js` {results} | One death: killing blow, health bar, defensive icon strip, tooltips | `frontend/src/DeathRow.js:242` |
+| `DeathRow.js` {results} | One death: killing blow, health bar, defensive icon strip, tooltips | `frontend/src/DeathRow.js:243` |
 | `DefensivePanel.js` {results} | Per-player defensive rollup chips | `frontend/src/DefensivePanel.js:20` |
 | `deathCounting.js` {results} | Decides which deaths count toward "first X deaths per pull" | `frontend/src/deathCounting.js:22` |
 | `Auth.js` {account} | Sign-in / sign-up / reset modal with a Cloudflare Turnstile CAPTCHA | `frontend/src/Auth.js:8` |

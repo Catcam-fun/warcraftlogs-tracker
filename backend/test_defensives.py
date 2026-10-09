@@ -1463,7 +1463,7 @@ STAGGER_TICK, DAMPEN_HARM, DIFFUSE_MAGIC = 124255, 122278, 122783
 
 def stagger_tick(ts, amount, hp_after, overkill=0):
     """A Brewmaster's own Stagger tick as WCL logs it: source and target are the Monk, and a
-    `mitigated` share is listed (0.600 through on every tick, defensives or not)."""
+    `mitigated` share is listed (0.600 through while Invoke Niuzao takes 40% of each tick, defensives or not)."""
     raw = (amount + overkill) / 0.6
     return {"timestamp": ts, "type": "damage", "sourceID": 1, "targetID": 1, "abilityGameID": STAGGER_TICK,
             "amount": amount, "overkill": overkill, "absorbed": 0, "mitigated": round(raw * 0.4),
@@ -1474,7 +1474,8 @@ class StaggerTests(unittest.TestCase):
     """Stagger (115069) is an absorb aura (aura 69): damage reductions cut the hit first, Stagger then
     delays a share of what is left into ticks of 124255 every 0.5 s over 10 s. A tick is never reduced by
     a defensive up while it ticks (Weavi, Undermine: 246 ticks under Fortifying Brew, 26 under Dampen
-    Harm, all 0.600 through as without), while shields absorb ticks (1194 of Weavi's ticks absorbed)."""
+    Harm, 1.000 through, or 0.600 with Invoke Niuzao up, as without them), while shields absorb ticks
+    (1194 of Weavi's ticks absorbed)."""
 
     def assess(self, hits, available, spec="Brewmaster"):
         durations = {CATALOG[s]["name"]: CATALOG[s].get("aura_ms") for s in available}
@@ -1660,9 +1661,39 @@ class StaggerPoolTests(unittest.TestCase):
         first, second = staggered(0, 4_000_000), staggered(2_000, 1_000_000)
         pools = defensives._stagger_pools(ticks, [first, second])
         self.assertEqual(pools[id(first)], [0])                     # 20 x 200k - 4M: nothing before
-        # The tick before left 200k x 17 = 3.4M; the tick after says 20 x 135k - 1M = 1.7M: a purify
-        # (half) came in between. Both are kept: the replay uses the one that credits least.
-        self.assertEqual(pools[id(second)], [3_400_000, 1_700_000])
+        # The tick before left 200k x 17 = 3.4M; the tick after says 20 x 135k - 1M = 1.7M. A purify
+        # came in between; the share it took reads 1 - 1.7M / 3.4M = 0.5000 if it came before the hit,
+        # 1 - 2.7M / 4.4M = 0.386 if after: Purifying Brew's 50%, before. The tick after is right.
+        self.assertEqual(pools[id(second)], [1_700_000])
+
+    def test_a_purifying_brew_cast_says_which_side(self):
+        ticks = [pool_tick(500, 200_000, 0), pool_tick(1_000, 200_000, 0), pool_tick(1_500, 200_000, 0),
+                 pool_tick(2_500, 120_000, 0)]
+        first, second = staggered(0, 4_000_000), staggered(2_000, 1_000_000)
+        # 20 x 120k - 1M = 1.4M: 0.588 before, 0.4545 after, neither a known share: can't tell.
+        self.assertEqual(defensives._stagger_pools(ticks, [first, second])[id(second)], [3_400_000, 1_400_000])
+        cast = lambda t: {"timestamp": t, "type": "cast", "abilityGameID": defensives.PURIFYING_BREW}
+        self.assertEqual(defensives._stagger_pools(ticks, [first, second], [cast(1_800)])[id(second)], [1_400_000])
+        self.assertEqual(defensives._stagger_pools(ticks, [first, second], [cast(2_200)])[id(second)], [3_400_000])
+
+    def test_undecided_pool_that_decides_the_verdict_is_cant_tell(self):
+        # Before the second (fully staggered) hit the pool was 665k (tick before) or 350k (tick after:
+        # 20 x 52.5k - 700k); the shares 0.474 and 0.231 match no purify, and no cast says which. Diffuse
+        # Magic, ready only after the first hit, cuts 60% of the 700k: 0.308 or 0.4 of the pool, 32.3k or
+        # 42k off the two ticks after, against 35k overkill. Saves with one reading, not the other.
+        first = dict(hit(80_000, 300_000, 935_000, absorbed=700_000), sourceID=50)
+        second = dict(hit(90_000, 0, 70_000, absorbed=700_000), sourceID=50)
+        ticks = [pool_tick(80_500, 35_000, 900_000)]
+        after = [pool_tick(90_500, 52_500, 17_500), pool_tick(91_000, 52_500, 0, overkill=35_000)]
+        ins = [staggered(80_000, 700_000), staggered(90_000, 700_000)]
+        pools = defensives._stagger_pools(ticks + after, ins)
+        self.assertEqual(pools[id(ins[1])], [665_000, 350_000])
+        r = defensives.assess_survival([first, second] + ins + ticks + after, 91_000, ready(DIFFUSE_MAGIC), [],
+                                       NAMES, SCHOOLS, aura_ms={"Diffuse Magic": 30_000}, spec="Brewmaster",
+                                       ready_since={"Diffuse Magic": 85_000})
+        self.assertIsNone(r["wouldSave"]["Diffuse Magic"])
+        self.assertEqual(r["details"]["Diffuse Magic"]["why"], "staggerUnknown")
+        self.assertIsNone(r["allTogetherWouldSave"])
 
     def test_a_reduction_before_a_staggered_hit_shrinks_every_later_tick(self):
         # A 1M Frost hit from full: 300k taken at once, 700k staggered (absorbed event), then 20 ticks
@@ -1711,3 +1742,33 @@ class AttackedUnitsTests(unittest.TestCase):
     def test_only_patches_with_an_effect_on_the_enemy_fetch_them(self):
         self.assertTrue(defensives.brands_enemies(defensives._CATALOGS["11.0.7"]))
         self.assertFalse(defensives.brands_enemies(defensives._CATALOGS["12.0.0"]))
+
+
+class StaggerWindowFetchTests(unittest.TestCase):
+    def test_the_extras_block_reads_the_stagger_pool_from_before_the_window(self):
+        # A Brewmaster's staggered amounts, ticks and Purifying Brew casts (no target: by caster) from
+        # STAGGER_LOOKBACK_MS before the window; ticks inside it come once, with the hits.
+        queries = []
+        tick = lambda t: {"timestamp": t, "type": "damage", "sourceID": 1, "targetID": 1,
+                          "abilityGameID": STAGGER_TICK, "amount": 5, "unmitigatedAmount": 5}
+
+        def fake(token, q, v):
+            queries.append(q)
+            report = {a: {"data": [tick(50_000), dict(tick(59_990), overkill=1, hitPoints=0)]}
+                      for a in __import__("re").findall(r"(p\d+): events", q)}
+            report["extras"] = {"data": [
+                tick(40_000), tick(50_000), tick(30_000),       # before the lookback: dropped
+                {"timestamp": 41_000, "type": "absorbed", "sourceID": 1, "targetID": 1,
+                 "abilityGameID": defensives.STAGGER_AURA, "attackerID": 9, "extraAbilityGameID": 7, "amount": 100},
+                {"timestamp": 42_000, "type": "cast", "sourceID": 1, "targetID": -1,
+                 "abilityGameID": defensives.PURIFYING_BREW},
+                {"timestamp": 43_000, "type": "applydebuff", "targetID": 1, "abilityGameID": STAGGER_TICK}]}
+            return {"reportData": {"report": report}}
+        with __import__("unittest.mock").mock.patch.object(defensives, "graphql_query", side_effect=fake):
+            hits = defensives.fetch_death_windows("t", "R", [(3, [(60_000, "A")])])
+        self.assertIn(f"type = 'cast' and ability.id = {defensives.PURIFYING_BREW}", queries[0])
+        self.assertIn("startTime: 34500", queries[0])
+        self.assertEqual([(h["type"], h["timestamp"]) for h in hits[1]],
+                         [("damage", 40_000), ("absorbed", 41_000), ("cast", 42_000), ("damage", 50_000),
+                          ("damage", 59_990)])
+        self.assertEqual(hits[1][1]["attackerID"], 9)

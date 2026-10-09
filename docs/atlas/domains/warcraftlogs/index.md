@@ -20,8 +20,8 @@ anchors:
   deaths_bulk: backend/analysis.py:357
   combatants: backend/defensives.py:246
   defensive_raw: backend/defensives.py:257
-  death_windows: backend/defensives.py:965
-  instakills: backend/defensives.py:1070
+  death_windows: backend/defensives.py:977
+  instakills: backend/defensives.py:1087
   analyze_credentials: backend/app.py:125
   analyze_token: backend/app.py:158
   report_fetch: backend/app.py:340
@@ -42,7 +42,7 @@ invariants:
   - "NEVER: a guild-reports query filters by zoneID; mixed raid and dungeon reports would be dropped."
 flows:
   - request-path
-content_hash: sha256:abca6497ddc3c5d27c81e6dde978872df78e5af9179f690db1ba7448bf2f9ed0
+content_hash: sha256:32948eef29824c46e461cc28c7b7e45b4ce7a6b836a126ed896dc568d4ded328
 ---
 ## Summary
 
@@ -77,7 +77,7 @@ One Analyze request walks through the WCL reads below, in the order `generate()`
 - title: Defensive data | short: Defensives | sub: three queries, one at a time
   body: Only when at least one death in the report can count (backend/app.py:389-392). fetch_defensive_raw then runs Casts, Buffs and Healing one after another, reusing the loadouts already read (backend/defensives.py:293-307). Casts cover the time range from cast_lookback (3 minutes before the first pull, or back to the last boss encounter's end for long cooldowns, at most the longest tracked cooldown), buffs from 3 minutes before it; heals are scoped to the boss pulls.
 - title: Hits before deaths | short: Death windows | sub: DamageTaken by name
-  body: For the deaths that can count, fetch_death_windows asks for DamageTaken events filtered by target.name, one block per group of pulls within 15 minutes, many blocks per request (backend/defensives.py:965-1043). fetch_instakills adds instant-kill events from the All stream (backend/defensives.py:1070-1075). One more block in the same request, from the All stream over all those pulls, reads on the players who died the heals a killing hit can set off (features.KILLING_HIT_HEAL_IDS: Defy Fate, Cauterize, Guardian Spirit, Ardent Defender, Embrace the Shadow, Void Reconstitution; Last Resort's absorb and Metamorphosis heal) and the stack changes of stacking max-health auras (Sentinel): measured 15.0 -> 19.4 points on a 27-pull report, warm cache. The All stream can't replace DamageTaken: it leaves the aura list off damage events. The windows' cache key (app.py) carries those ID lists, so windows cached without them are not reused; CACHE_VERSION is unchanged, so a report's other cached data stays valid.
+  body: For the deaths that can count, fetch_death_windows asks for DamageTaken events filtered by target.name, one block per group of pulls within 15 minutes, many blocks per request (backend/defensives.py:977-1058). fetch_instakills adds instant-kill events from the All stream (backend/defensives.py:1087-1092). One more block in the same request, from the All stream over all those pulls, reads on the players who died the heals a killing hit can set off (features.KILLING_HIT_HEAL_IDS: Defy Fate, Cauterize, Guardian Spirit, Ardent Defender, Embrace the Shadow, Void Reconstitution; Last Resort's absorb and Metamorphosis heal) and the stack changes of stacking max-health auras (Sentinel): measured 15.0 -> 19.4 points on a 27-pull report, warm cache. The All stream can't replace DamageTaken: it leaves the aura list off damage events. The windows' cache key (app.py) carries those ID lists, so windows cached without them are not reused; CACHE_VERSION is unchanged, so a report's other cached data stays valid.
 ```
 
 ## Diagram
@@ -122,8 +122,8 @@ What is read from WCL, and where.
 | Deaths and cheat deaths {events} | `report.events` (Deaths, Debuffs, Healing) | `get_report_deaths_bulk` (`backend/analysis.py:357`) |
 | Talent loadouts {events} | `report.events` (CombatantInfo) | `fetch_combatants` (`backend/defensives.py:246`) |
 | Defensive casts, buffs, heals {events} | `report.events` (Casts, Buffs, Healing) | `fetch_defensive_raw` (`backend/defensives.py:257`) |
-| Hits before deaths {events} | `report.events` (DamageTaken; All for killing-hit heals and max-health stacks) | `fetch_death_windows` (`backend/defensives.py:965`) |
-| Instant kills {events} | `report.events` (All, `type = 'instakill'`) | `fetch_instakills` (`backend/defensives.py:1070`) |
+| Hits before deaths {events} | `report.events` (DamageTaken; All for killing-hit heals and max-health stacks) | `fetch_death_windows` (`backend/defensives.py:977`) |
+| Instant kills {events} | `report.events` (All, `type = 'instakill'`) | `fetch_instakills` (`backend/defensives.py:1087`) |
 | Top kills per boss {scripts} | `worldData.encounter.fightRankings` | `build_armor_constants.py:118`, `build_raid_wide.py:33` |
 
 ## Standing it up
