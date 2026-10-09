@@ -441,7 +441,7 @@ class MitigationCheckTests(unittest.TestCase):
         # hits and 0.20 + 0.30 x off a hit of x max health after the player's other reductions (Atlai,
         # Undermine: 0.285 at x = 0.285, 0.350 at 0.500; Weavi: 0.383 at 0.610).
         from checks import source_mitigation
-        entries = {122278: {"name": "Dampen Harm", "kind": "personal", "class": "Monk", "mitigation": [{"dr": 0.2}]}}
+        entries = {122278: {"name": "Dampen Harm", "kind": "personal", "class": "Monk", "mitigation": [{"dr": 0.2, "dr_hit": 0.5}]}}
         friendlies = [{"id": 2, "name": "Weavi", "type": "Monk"}]
 
         def hit(ability, raw, through, buffs, health=True):
@@ -458,7 +458,7 @@ class MitigationCheckTests(unittest.TestCase):
         with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
             self.assertEqual(source_mitigation.check(run).status, "pass")
         # The same hits against a catalog value of 0.30 at no damage: flagged.
-        wrong = {122278: dict(entries[122278], mitigation=[{"dr": 0.3}])}
+        wrong = {122278: dict(entries[122278], mitigation=[{"dr": 0.3, "dr_hit": 0.5}])}
         run = self._wave1_run(wrong, friendlies, {122278: "Dampen Harm"})
         with mock.patch.object(source_mitigation.defensives, "_paged", return_value=hits):
             o = source_mitigation.check(run)
@@ -471,7 +471,7 @@ class MitigationCheckTests(unittest.TestCase):
 
     def test_dampen_harm_size_is_after_other_reductions_and_capped_at_half(self):
         from checks import source_mitigation
-        entries = {122278: {"name": "Dampen Harm", "kind": "personal", "class": "Monk", "mitigation": [{"dr": 0.2}]}}
+        entries = {122278: {"name": "Dampen Harm", "kind": "personal", "class": "Monk", "mitigation": [{"dr": 0.2, "dr_hit": 0.5}]}}
         friendlies = [{"id": 2, "name": "Weavi", "type": "Monk"}]
 
         def hit(ability, raw, through, buffs):

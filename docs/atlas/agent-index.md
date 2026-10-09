@@ -219,16 +219,16 @@
   - one_shot_share: backend/defensives.py:860
   - setup_hit_share: backend/defensives.py:863
   - rot_thresholds: backend/defensives.py:867
-  - classify: backend/defensives.py:2142
-  - one_shot_hit: backend/defensives.py:2154
-  - biggest_hit: backend/defensives.py:2162
-  - rot: backend/defensives.py:2169
-  - burst: backend/defensives.py:2209
+  - classify: backend/defensives.py:2152
+  - one_shot_hit: backend/defensives.py:2164
+  - biggest_hit: backend/defensives.py:2172
+  - rot: backend/defensives.py:2179
+  - burst: backend/defensives.py:2219
   - raid_wide: backend/raid_wide_damage.py:5
   - raid_wide_share: backend/scripts/build_raid_wide.py:29
   - text_for: backend/boss_spell_text.py:7853
   - ability_text: backend/app.py:674
-  - death_row_ctx: frontend/src/DeathRow.js:256
+  - death_row_ctx: frontend/src/DeathRow.js:257
 - links: backend-defensive-analysis, backend-death-counting, game-data, warcraftlogs, frontend-results-view, feat-results
 
 ## Defensive Analysis
@@ -251,11 +251,11 @@
   - NEVER: assume a player carries a Healthstone or potion they never used in the log, unless a Warlock in the pull had a Soulwell.
 - anchors:
   - analyze_death: backend/defensives.py:591
-  - assess_survival: backend/defensives.py:1998
-  - simulate: backend/defensives.py:1519
+  - assess_survival: backend/defensives.py:2008
+  - simulate: backend/defensives.py:1528
   - lethal_window: backend/defensives.py:850
   - reaction_ms: backend/defensives.py:854
-  - press_times: backend/defensives.py:1728
+  - press_times: backend/defensives.py:1738
   - catalog_for: backend/defensives.py:150
   - has_ability: backend/defensives.py:418
   - index_events: backend/defensives.py:369
@@ -486,7 +486,7 @@
   - kill_counts: frontend/src/App.js:1276
   - wcl_link: frontend/src/App.js:1336
   - player_list: frontend/src/App.js:2101
-  - death_row: frontend/src/DeathRow.js:240
+  - death_row: frontend/src/DeathRow.js:241
   - defensive_summary: frontend/src/DefensivePanel.js:20
   - result_shape: backend/app.py:647
   - death_event: backend/app.py:559
@@ -699,10 +699,10 @@
   - results_route: frontend/src/App.js:1595
   - cutoff_select: frontend/src/App.js:1696
   - player_list: frontend/src/App.js:2102
-  - death_row: frontend/src/DeathRow.js:240
-  - death_context: frontend/src/DeathRow.js:256
-  - ready_tip: frontend/src/DeathRow.js:321
-  - tip: frontend/src/DeathRow.js:203
+  - death_row: frontend/src/DeathRow.js:241
+  - death_context: frontend/src/DeathRow.js:257
+  - ready_tip: frontend/src/DeathRow.js:322
+  - tip: frontend/src/DeathRow.js:204
   - summarize_defensives: frontend/src/DefensivePanel.js:20
   - summary_chip: frontend/src/DefensivePanel.js:43
 - links: frontend, frontend-pages-and-routing, frontend-landing-and-art, backend-death-counting, backend-defensive-analysis, backend-death-descriptions, feat-results, feat-analyze, feat-share, feat-saved
@@ -731,9 +731,9 @@
   - raid_wide_shares: backend/scripts/build_raid_wide.py:49
   - raid_wide_main: backend/scripts/build_raid_wide.py:78
   - icons_main: backend/scripts/build_spell_icons.py:58
-  - use_immunity: backend/defensives.py:1407
+  - use_immunity: backend/defensives.py:1411
   - use_armor: backend/defensives.py:1123
-  - use_rot: backend/defensives.py:2176
+  - use_rot: backend/defensives.py:2186
   - use_icons: backend/defensives.py:159
   - use_text: backend/app.py:675
   - icon_url: frontend/src/DeathRow.js:22
@@ -759,19 +759,19 @@
   - baseline: backend/scripts/build_defensive_catalog.py:122
   - mitigation: backend/scripts/build_defensive_catalog.py:141
   - effects: backend/scripts/build_defensive_catalog.py:199
-  - talent_effects: backend/scripts/build_defensive_catalog.py:264
-  - talents_reviewed: backend/scripts/build_defensive_catalog.py:291
-  - potion_typical: backend/scripts/build_defensive_catalog.py:345
-  - first_patch: backend/scripts/build_defensive_catalog.py:408
-  - wago_cache: backend/scripts/build_defensive_catalog.py:411
-  - table: backend/scripts/build_defensive_catalog.py:419
-  - patches: backend/scripts/build_defensive_catalog.py:434
-  - potion_ranks: backend/scripts/build_defensive_catalog.py:720
-  - unreviewed: backend/scripts/build_defensive_catalog.py:956
-  - build_catalog: backend/scripts/build_defensive_catalog.py:975
-  - rename_check: backend/scripts/build_defensive_catalog.py:1014
-  - main: backend/scripts/build_defensive_catalog.py:1116
-  - fail_latest: backend/scripts/build_defensive_catalog.py:1127
+  - talent_effects: backend/scripts/build_defensive_catalog.py:269
+  - talents_reviewed: backend/scripts/build_defensive_catalog.py:296
+  - potion_typical: backend/scripts/build_defensive_catalog.py:350
+  - first_patch: backend/scripts/build_defensive_catalog.py:413
+  - wago_cache: backend/scripts/build_defensive_catalog.py:416
+  - table: backend/scripts/build_defensive_catalog.py:424
+  - patches: backend/scripts/build_defensive_catalog.py:439
+  - potion_ranks: backend/scripts/build_defensive_catalog.py:725
+  - unreviewed: backend/scripts/build_defensive_catalog.py:968
+  - build_catalog: backend/scripts/build_defensive_catalog.py:987
+  - rename_check: backend/scripts/build_defensive_catalog.py:1026
+  - main: backend/scripts/build_defensive_catalog.py:1128
+  - fail_latest: backend/scripts/build_defensive_catalog.py:1139
   - output_patches: backend/defensive_catalog.py:7
   - output_catalogs: backend/defensive_catalog.py:22
   - catalog_for: backend/defensives.py:150
@@ -801,7 +801,7 @@
   - imports_defensives: backend/defensives.py:25
   - import_app: backend/app.py:33
   - raid_encounters: backend/analysis.py:234
-  - wago_table: backend/scripts/build_defensive_catalog.py:419
+  - wago_table: backend/scripts/build_defensive_catalog.py:424
 - links: game-data-defensive-catalog, game-data-boss-and-raid-data, backend, backend-defensive-analysis, backend-death-descriptions, warcraftlogs, warcraftlogs-point-budget, operations, testing
 
 ## Operations & New Tier
@@ -838,8 +838,8 @@
   - wcl_endpoints: backend/warcraftlogs.py:15
   - report_failure: backend/app.py:440
   - analyze_error_event: backend/app.py:683
-  - catalog_build: backend/scripts/build_defensive_catalog.py:1116
-  - wago_cache: backend/scripts/build_defensive_catalog.py:411
+  - catalog_build: backend/scripts/build_defensive_catalog.py:1128
+  - wago_cache: backend/scripts/build_defensive_catalog.py:416
 - links: testing, game-data, backend, frontend-landing-and-art, deployment, backend-caching-and-limits, warcraftlogs, data-model, overview
 
 ## Overview
@@ -950,7 +950,7 @@
   - check_participation: backend/checks/source_participation.py:24
   - check_state: backend/checks/source_state.py:281
   - check_durations: backend/checks/source_durations.py:30
-  - check_mitigation: backend/checks/source_mitigation.py:136
+  - check_mitigation: backend/checks/source_mitigation.py:138
   - check_slots: backend/checks/rules_slots.py:40
   - check_counting: backend/checks/rules_counting.py:27
   - check_labels: backend/checks/rules_labels.py:433

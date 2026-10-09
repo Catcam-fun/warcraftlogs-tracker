@@ -26,7 +26,7 @@ anchors:
   check_participation: backend/checks/source_participation.py:24
   check_state: backend/checks/source_state.py:281
   check_durations: backend/checks/source_durations.py:30
-  check_mitigation: backend/checks/source_mitigation.py:136
+  check_mitigation: backend/checks/source_mitigation.py:138
   check_slots: backend/checks/rules_slots.py:40
   check_counting: backend/checks/rules_counting.py:27
   check_labels: backend/checks/rules_labels.py:433
@@ -46,7 +46,7 @@ links:
   - game-data
   - warcraftlogs
   - operations
-content_hash: sha256:4e5498a09f3067e57c61e874fff29c16e5076a08e502414b41ccf148fb229f57
+content_hash: sha256:6534cede47ae7ba8210340fbe2755f5c89c0b916e1cee1ef53cddb2135c9e650
 ---
 ## Summary
 
@@ -81,7 +81,7 @@ Every test file and check script. Filter by kind.
 | `backend/checks/source_participation.py` {check} | `participation` (source): Who was in each kept pull, and who counts as roster, match WCL (`backend/checks/source_participation.py:24`) | run with `python -m checks participation <target>` |
 | `backend/checks/source_state.py` {check} | `state` (source): Active, ready and health at death match WCL's auras, casts and Deaths table (`backend/checks/source_state.py:281`) | run with `python -m checks state <target>` |
 | `backend/checks/source_durations.py` {check} | `durations` (source): Defensive durations (catalog + talents) match real aura uses (`backend/checks/source_durations.py:30`) | run with `python -m checks durations <target>` |
-| `backend/checks/source_mitigation.py` {check} | `mitigation` (source): Catalog damage reductions match real hits with and without the defensive (`backend/checks/source_mitigation.py:136`) | run with `python -m checks mitigation <target>` |
+| `backend/checks/source_mitigation.py` {check} | `mitigation` (source): Catalog damage reductions match real hits with and without the defensive (`backend/checks/source_mitigation.py:138`) | run with `python -m checks mitigation <target>` |
 | `backend/checks/rules_slots.py` {check} | `slots` (rules): Slots and wipes follow the owner's rules (`backend/checks/rules_slots.py:40`) | run with `python -m checks slots <target>` |
 | `backend/checks/rules_counting.py` {check} | `counting` (rules): A death counts when slot <= X and not in a wipe; defensives exist exactly on deaths that can count (`backend/checks/rules_counting.py:27`) | run with `python -m checks counting <target>` |
 | `backend/checks/rules_labels.py` {check} | `labels` (rules): Death labels follow the rules: one-shot, burst, rot (raid-wide only) or set up by (`backend/checks/rules_labels.py:433`) | run with `python -m checks labels <target>` |
