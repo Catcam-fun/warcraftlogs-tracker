@@ -50,9 +50,14 @@ DEATH_AURA_GRACE_MS = 250
 AURA_DURATION_HEADROOM = 1.5
 
 # Demonic Healthstone heals more in the logs than the game data says (a
-# server-side change the data files don't carry). Measured medians per tier,
-# used only for Warlocks who didn't use one in the report: (first patch, share of max health).
-DEMONIC_HEALTHSTONE_MEASURED = [("11.0.2", 0.35), ("11.1.0", 0.65), ("12.0.0", 0.60)]
+# server-side change the data files don't carry). Measured per tier without a
+# Soulburn cast first (which adds its own share: catalog "soulburn"), used only
+# for Warlocks who didn't use one in the report: (first patch, share of max health).
+# Seven Mythic logs, Nerub-ar Palace to the Midnight raids (2026-10-09): every one of
+# 166 heals with no Soulburn cast in the 20 s before it healed 0.35 in The War Within
+# (all of those Warlocks had Sweet Souls) and 0.30 in Midnight; the 0.65 / 0.60 measured
+# before were heals after a Soulburn cast.
+DEMONIC_HEALTHSTONE_MEASURED = [("11.0.2", 0.35), ("12.0.0", 0.30)]
 
 # The potion most raiders drank on bosses in each tier (from real logs). When a
 # player's own potion heals aren't in the boss pulls (they drank only on trash,
@@ -103,7 +108,11 @@ class Catalog:
         self.tracked = self.personal
         # Spells that bring a tracked defensive back early (Cold Snap, Black Ox Brew): their casts are read too.
         self.reset_ids = frozenset(r["spell"] for d in self.tracked.values() for r in d.get("reset_by", ()))
-        self.cast_ids = sorted(set(self.tracked) | set(self.consumable) | self.reset_ids)
+        # Soulburn's benefit on a Healthstone (the Healthstones' "soulburn": build_defensive_catalog.soulburn):
+        # its casts are read too, for its cooldown and to tell which Healthstones had it.
+        self.soulburn = next((d["soulburn"] for d in self.consumable.values() if d.get("soulburn")), None)
+        self.soulburn_ids = frozenset({self.soulburn["spell"]}) if self.soulburn else frozenset()
+        self.cast_ids = sorted(set(self.tracked) | set(self.consumable) | self.reset_ids | self.soulburn_ids)
         # Casts that lengthen a tracked defensive (Zealot's Paragon: Judgment and Hammer of Wrath on
         # Sentinel), read from the death windows (fetch_death_windows), not the report-wide casts.
         self.extend_ids = frozenset(c for d in self.tracked.values() for c in (d.get("extended_by") or {}).get("casts", ()))
@@ -132,6 +141,7 @@ class Catalog:
             entries.update(((d.get("needs_form") or {}).get("unless") or {}).get("entries", ()))
             entries.update((d.get("needs") or {}).get("entries", ()))
             entries.update((d.get("extended_by") or {}).get("entries", ()))
+            entries.update((d.get("soulburn") or {}).get("entries", ()))
             for c in d.get("mitigation") or []:
                 if isinstance(c, dict) and c.get("needs"):
                     entries.update(c["needs"].get("entries", ()))
@@ -418,7 +428,8 @@ def index_defensive_events(raw, cat=None):
     casts = defaultdict(list)           # sourceID -> [(ts, spellID)]
     for e in raw.get("casts", []):
         sid = e.get("abilityGameID")
-        if e.get("type") == "cast" and (sid in cat.all or sid in cat.reset_ids) and e.get("sourceID") is not None:
+        if e.get("type") == "cast" and (sid in cat.all or sid in cat.reset_ids or sid in cat.soulburn_ids) \
+                and e.get("sourceID") is not None:
             casts[e["sourceID"]].append((e["timestamp"], sid))
     buffs = defaultdict(list)           # targetID -> [(ts, type, abilityGameID, sourceID, shield size)]
     for e in raw.get("buffs", []):
@@ -688,7 +699,7 @@ def _auras(hit):
 def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts,
                   indexed, ability_names, actor_names, hits=None, ability_schools=None, cat=None,
                   aoe_known=True, armor_k=None, soulwell=False, pull_starts=None, encounters=None,
-                  attackable=None, aoe_abilities=None, aoe_unknown=frozenset()):
+                  attackable=None, aoe_abilities=None, aoe_unknown=frozenset(), soulburn_events=None):
     """Defensive picture for one death. All timestamps are report-relative ms.
 
     `pull_starts`: {fight ID: start} of the report's kept pulls, so presses in other pulls are
@@ -717,6 +728,8 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
     there for everyone, used in this log or not.
     `attackable`: the units the raid damaged in the report's pulls (fetch_attacked_units), for an
     effect cast on an enemy (The War Within's Fiery Brand); None when not fetched.
+    `soulburn_events`: a Warlock's casts and Soulburn buff before this death (fetch_soulburn_windows),
+    for a Healthstone with Soulburn first (needs_soulburn); None when not fetched (can't tell).
     """
     cat = cat or _LATEST
     own_casts = indexed["casts"].get(player_id, [])
@@ -936,7 +949,9 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
     if hits is not None:
         death_mult = _heal_taken_mult(_auras(killing), cat) if killing is not None else 1.0
         own_heals = (indexed.get("heals") or {}).get(player_id, [])
-        consumables = [consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec, talents_by_fight)
+        burns = casts_by_spell.get(cat.soulburn["spell"], []) if cat.soulburn else []
+        consumables = [consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec, talents_by_fight,
+                                           soulburn_casts=burns)
                        for sid in unused_consumables]
         for sid, c in zip(unused_consumables, consumables):
             if sid == from_soulwell:
@@ -951,7 +966,9 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
                                              aura_size=_aura_sizer(cat, player_class, spec, talent_entries,
                                                                    ability_names, player_id, caster_loadout),
                                              friendly_ids=set(actor_names or ()) | {player_id},
-                                             attackable=attackable, stagger_purify=cat.stagger_purify)
+                                             attackable=attackable, stagger_purify=cat.stagger_purify,
+                                             soulburn=SoulburnTimeline(soulburn_events, cat.soulburn)
+                                             if any(c.get("withSoulburn") for c in consumables) else None)
 
     for key in ("active", "available", "cooldown"):
         result[key].sort(key=lambda d: (not d.get("major", True), d["name"]))
@@ -1229,6 +1246,147 @@ def fetch_death_windows(token, report_code, pulls, heals=True):
     for hits in out.values():
         hits.sort(key=lambda e: e["timestamp"])
     return out
+
+
+# WCL's classResources type for Soul Shards; amounts and costs in tenths of a shard (Destruction's fragments).
+SOUL_SHARDS = 7
+
+
+def needs_soulburn(cat, talents, spec=None):
+    """Could Soulburn first have added to this player's Healthstone (consumable_estimate's
+    "withSoulburn")? With the Soulburn talent and without Gorebound Fortitude (which always gives it),
+    in a loadout the log recorded."""
+    sb = cat.soulburn
+    if not sb or talents is None or not _mod_rank(sb, talents, spec):
+        return False
+    stone = next(d for d in cat.consumable.values() if d.get("soulburn"))
+    return not _gorebound_rank(stone, talents, spec)
+
+
+def soulburn_pulls(indexed, counted, friendlies, cat):
+    """The counted deaths (counted_by_fight: {fightID: [(death_ts, log name)]}) of Warlocks for whom
+    needs_soulburn holds in that pull, as fetch_soulburn_windows takes them."""
+    if not cat.soulburn or not indexed:
+        return []
+    by_name = {f.get("logName") or f.get("name"): f for f in friendlies or ()}
+    out = []
+    for fid, deaths in sorted((counted or {}).items()):
+        keep = []
+        for ts, name in deaths:
+            f = by_name.get(name) or {}
+            if f.get("type") == "Warlock" and needs_soulburn(
+                    cat, indexed["talents"].get((fid, f.get("id"))), pull_spec(indexed, fid, f.get("id"))):
+                keep.append((ts, name))
+        if keep:
+            out.append((fid, keep))
+    return out
+
+
+def fetch_soulburn_windows(token, report_code, pulls, sb):
+    """For Warlocks whose Healthstone Soulburn could have improved (catalog "soulburn"): their casts and
+    Soulburn buff events (387626) before their deaths, for SoulburnTimeline.
+
+    `pulls`: [(fightID, [(death_ts, log name)])]. Each death's span: from its replay window less
+    Soulburn's buff (20 s, longer than its 6 s cooldown) up to the death, read by name like the hits.
+    Pulls within WINDOW_BLOCK_SPAN_MS of each other share a block (WCL charges at least a point a
+    block: measured on 2VtyDR4CF6PGLjbd, 7 Warlock deaths in 7 pulls, 7.0 points with one block a
+    pull, 5.0 with them shared, the same events kept), and only the events inside a death's span are kept.
+    A cast that spent Soul Shards carries them as WCL logs them (classResources type 7: the amount
+    before the cost, and the cost), kept as "shards": [amount, cost]; WCL logs no shard total on any
+    other event, and Destruction's fragment gains not at all, so the spends are what tells the shards.
+    Returns {playerID: [events, by time]}.
+    """
+    pulls = sorted(((fid, sorted(d)) for fid, d in pulls if any(n for _, n in d)), key=lambda p: p[1][0][0])
+    lead = LETHAL_WINDOW_MS + sb["buff_ms"]
+    groups = []
+    for fid, deaths in pulls:
+        if groups and deaths[-1][0] - (groups[-1][0][1][0][0] - lead) <= WINDOW_BLOCK_SPAN_MS:
+            groups[-1].append((fid, deaths))
+        else:
+            groups.append([(fid, deaths)])
+    blocks, spans = {}, []
+    for group in groups:
+        deaths = [d for _, ds in group for d in ds]
+        who = ", ".join(json.dumps(n, ensure_ascii=False) for n in sorted({n for _, n in deaths if n}))
+        flt = (f"(source.name in ({who}) and type = 'cast')"
+               f" or (target.name in ({who}) and ability.id = {sb['buff']})")
+        start = max(min(t for t, _ in deaths) - lead, 0)
+        end = max(t for t, _ in deaths) + KILLING_BLOW_AFTER_MS + 1
+        blocks[f"s{group[0][0]}"] = ([fid for fid, _ in group], start, end, "All", flt)
+        spans += [(t - lead, t + KILLING_BLOW_AFTER_MS) for t, _ in deaths]
+    if not blocks:
+        return {}
+
+    def keep(e):
+        return any(a <= e.get("timestamp", 0) <= b for a, b in spans)
+    out = defaultdict(list)
+    for events in _fetch_blocks(token, report_code, blocks, keep).values():
+        for e in events:
+            kept = {k: e[k] for k in ("timestamp", "type", "abilityGameID", "sourceID", "targetID") if k in e}
+            if e.get("type") == "cast":
+                shard = next((c for c in e.get("classResources") or () if c.get("type") == SOUL_SHARDS), None)
+                if shard is not None:
+                    kept["shards"] = [shard.get("amount") or 0, shard.get("cost") or 0]
+                who = e.get("sourceID")
+            else:
+                who = e.get("targetID")
+            if who is not None:
+                out[who].append(kept)
+    return {p: sorted(evs, key=lambda e: e["timestamp"]) for p, evs in out.items()}
+
+
+class SoulburnTimeline:
+    """Could a Warlock have cast Soulburn at a moment? state(t): True, False, or None (the log can't tell).
+
+    True while its buff (387626) is up (it was cast; the Healthstone gets it with no shard). Otherwise
+    False within its cooldown after a cast; else it needs a Soul Shard (the catalog's cost, in tenths).
+    Shards only go up between two casts that spend them (no other event takes any), so the amount left
+    after the last spend at or before t is a floor and the amount before the next spend after t a
+    ceiling: at least one shard at the floor is True, under one at the ceiling is False, anything else
+    None. Nothing known (`events` None: not fetched) is None. Built from fetch_soulburn_windows' events.
+    """
+
+    def __init__(self, events, sb):
+        self.known = events is not None and sb is not None
+        events = sorted(events or (), key=lambda e: e["timestamp"]) if self.known else []
+        self.cost = sb["cost"] if sb else 0
+        self.cooldown = sb["cooldown_ms"] if sb else 0
+        self.spends = [(e["timestamp"], e["shards"][0], e["shards"][1]) for e in events
+                       if e.get("type") == "cast" and e.get("shards")]
+        self.casts = [e["timestamp"] for e in events if e.get("type") == "cast" and e.get("abilityGameID") == sb["spell"]]
+        self.buff, since, last = [], None, None
+        for e in events:
+            if e.get("abilityGameID") != (sb or {}).get("buff") or e.get("type") == "cast":
+                continue
+            if e["type"] in ("applybuff", "refreshbuff"):
+                since = e["timestamp"] if since is None else since
+                last = e["timestamp"]
+            elif e["type"] == "removebuff" and since is not None:
+                self.buff.append((since, e["timestamp"]))
+                since = None
+        if since is not None:
+            self.buff.append((since, last + sb["buff_ms"]))
+        self.changes = sorted({t for t, _, _ in self.spends} | {x for c in self.casts for x in (c, c + self.cooldown)}
+                              | {x for a, b in self.buff for x in (a, b)})
+
+    def marks(self):
+        """The moments worth trying a press at: each change, and just before it."""
+        return {x for c in self.changes for x in (c - 1, c)}
+
+    def state(self, t):
+        if not self.known:
+            return None
+        if any(a <= t < b for a, b in self.buff):
+            return True
+        if any(c <= t < c + self.cooldown for c in self.casts):
+            return False
+        before = [sp for sp in self.spends if sp[0] <= t]
+        after = [sp for sp in self.spends if sp[0] > t]
+        if before and before[-1][1] - before[-1][2] >= self.cost:
+            return True
+        if after and after[0][1] < self.cost:
+            return False
+        return None
 
 
 def brands_enemies(cat):
@@ -1790,7 +1948,8 @@ def potion_rank(sid, cat, own_heals, talent_entries, spec, talents_by_fight=None
             "bonus": round((base / ranks[i]["heal"] - 1) * 100, 1)}
 
 
-def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec, talents_by_fight=None):
+def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec, talents_by_fight=None,
+                        soulburn_casts=()):
     """How much an unused Healthstone or potion would have healed this player, as a scorable entry.
 
     From the player's own uses of it in the same report when there are any:
@@ -1803,6 +1962,11 @@ def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec, t
     Otherwise from the catalog: the Healthstone's game-data share with talents
     (Demonic Healthstone: the share measured in real logs of that tier), or a
     potion's typical heal with the player's healing-taken talents and buffs.
+    Soulburn (catalog "soulburn"): its share is on every Healthstone of a Warlock with Gorebound
+    Fortitude; for one with only the Soulburn talent, the entry is without it and "withSoulburn" holds
+    the Healthstone with it, which the replay credits only when Soulburn could have been cast first
+    (SoulburnTimeline). Their own heals are read without it: a heal after a Soulburn cast (within its
+    buff, `soulburn_casts`) or under Gorebound has its share taken off.
     """
     entry = cat.all[sid]
     # Their own uses of this exact potion or Healthstone. The log names only the
@@ -1812,20 +1976,33 @@ def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec, t
     own = [h for h in own_heals if h[1] == sid]
     out = {"name": entry["name"], "kind": entry["kind"], "estimated": True, "boostedBy": []}
     if entry["kind"] == "healthstone":
+        sb = entry.get("soulburn")
+        gore = _gorebound_rank(entry, talent_entries, spec)
+        burned = _with_soulburn(entry, sb, own, soulburn_casts, talents_by_fight, talent_entries, spec)
         shares = [h[2] / h[3] for h in own if h[3]]
-        extra = [c for c in (entry.get("mitigation") or []) if "hp" in c]     # Soulburn: Healthstone
+        # Their own heals without Soulburn's share (a heal with it has it taken off).
+        plain = [s - (sb["heal"] if b else 0) for s, b in zip(shares, burned)]
+        extra = [c for c in (entry.get("mitigation") or []) if "hp" in c]     # Gorebound: Soulburn: Healthstone
         extra, boosted = _resolve({"mitigation": extra, "name": entry["name"]}, talent_entries, {}, spec)
+        gore_heal = sb["heal"] * gore if sb and gore else 0.0
         if shares:
-            out["mitigation"] = [{"heal": statistics.median(shares)}] + (extra or [])
+            out["mitigation"] = [{"heal": statistics.median(plain) + gore_heal}] + (extra or [])
             out["source"] = "log"
             out["samples"] = {"n": len(shares), "minShare": round(min(shares), 3), "maxShare": round(max(shares), 3)}
         elif entry["name"] == "Demonic Healthstone" and cat.demonic_healthstone:
-            out["mitigation"] = [{"heal": cat.demonic_healthstone}] + (extra or [])
+            out["mitigation"] = [{"heal": cat.demonic_healthstone + gore_heal}] + (extra or [])
             out["source"] = "typical"
         else:
             out["applied"] = []
             out["mitigation"], out["boostedBy"] = _resolve(entry, talent_entries, {}, spec, out["applied"])
             out["source"] = "gameData"
+        if sb and not gore and _mod_rank(sb, talent_entries, spec) and out["mitigation"]:
+            # Soulburn pressed first: its share on the heal, and its max health for its duration.
+            heal = [dict(c, heal=c["heal"] + sb["heal"]) if "heal" in c else c for c in out["mitigation"]]
+            out["withSoulburn"] = {
+                "mitigation": heal + [{"hp": sb["hp"], "dur_ms": sb["dur_ms"]}],
+                "applied": [{"talent": sb["talent"], "field": "heal", "rank": 1, "add": sb["heal"]},
+                            {"talent": sb["talent"], "field": "hp", "rank": 1, "add": sb["hp"]}]}
         return out
     if own:
         heals = [h[2] / (h[4] or 1.0) for h in own]
@@ -1859,6 +2036,32 @@ def consumable_estimate(sid, cat, own_heals, death_mult, talent_entries, spec, t
     out["mitigation"] = [{"heal_amount": typical * talent_mult * death_mult}]
     out["applied"], out["typical"] = applied, typical
     out["boostedBy"], out["source"] = boosted, "typical"
+    return out
+
+
+def _gorebound_rank(entry, talent_entries, spec):
+    """Gorebound Fortitude's rank for this Healthstone (its max health mod in the catalog), 0 without it."""
+    for c in entry.get("mitigation") or ():
+        for m in c.get("mods", ()) if "hp" in c else ():
+            rank = _mod_rank(m, talent_entries, spec)
+            if rank:
+                return rank
+    return 0
+
+
+def _with_soulburn(entry, sb, own, soulburn_casts, talents_by_fight, talent_entries, spec):
+    """For each of their own Healthstone heals: did it have Soulburn's share? Yes after a Soulburn cast
+    within its buff (387626, 20 s; pressed on the same millisecond in the logs), or with Gorebound
+    Fortitude in that heal's pull (their loadout at death when that pull's isn't known)."""
+    out = []
+    for h in own:
+        if not sb:
+            out.append(False)
+            continue
+        cast = any(0 <= h[0] - t <= sb["buff_ms"] for t in soulburn_casts)
+        talents = (talents_by_fight or {}).get(h[6]) if len(h) > 6 else None
+        talents = talent_entries if talents is None else talents
+        out.append(cast or bool(_gorebound_rank(entry, talents, spec)))
     return out
 
 
@@ -2326,7 +2529,7 @@ def _lethal_hits(hits, killing):
     return out
 
 
-def _press_times(earliest, win, kb_index, options=None):
+def _press_times(earliest, win, kb_index, options=None, extra=()):
     """Moments worth trying to press at, from `earliest` up to REACTION_MS before the killing blow.
 
     Health only rises between hits, so these are just after each hit (most
@@ -2334,11 +2537,13 @@ def _press_times(earliest, win, kb_index, options=None):
     each (covers the most for effects that run out), plus the earliest and
     latest moments allowed. Given the options, only the moments that can
     matter for them: effects that last until the death and nothing else are
-    best pressed as early as possible.
+    best pressed as early as possible. `extra`: more moments to try (where
+    whether it can be pressed changes: SoulburnTimeline.changes).
     """
     latest = win.hits[kb_index]["timestamp"] - REACTION_MS
     if earliest > latest:
         return []
+    extra = {t for t in extra if earliest <= t <= latest}
     after = before = True
     if options is not None:
         heals = any(o["instant"] or o["hots"] for o in options)
@@ -2348,8 +2553,8 @@ def _press_times(earliest, win, kb_index, options=None):
         after = heals or shield_or_hp
         before = timed or shield_or_hp
         if not after and not before:
-            return [earliest]            # up until the death either way: the earliest covers the most
-    times = {earliest, latest}
+            return sorted({earliest} | extra)   # up until the death either way: the earliest covers the most
+    times = {earliest, latest} | extra
     for h in win.hits[:kb_index]:
         if before and earliest <= h["timestamp"] - 1 <= latest:
             times.add(h["timestamp"] - 1)
@@ -2358,14 +2563,17 @@ def _press_times(earliest, win, kb_index, options=None):
     return sorted(times)
 
 
-def _best_press(options, earliest, win, kb_index, credit="least"):
+def _best_press(options, earliest, win, kb_index, credit="least", allowed=None, extra=()):
     """(extra health, press time, HoT ticks) for the best moment to press (_press_times);
-    None when it can't be pressed in time."""
+    None when it can't be pressed in time. `allowed(t)`: only the moments it is true of
+    (with `extra` moments to try)."""
     best = None
-    for t in _press_times(earliest, win, kb_index, options):
-        extra, ticks = _simulate(options, t, win, kb_index, credit)
-        if best is None or extra >= best[0] - 1e-6:
-            best = (extra, t, ticks)          # the latest press that saves the most
+    for t in _press_times(earliest, win, kb_index, options, extra):
+        if allowed is not None and not allowed(t):
+            continue
+        saved, ticks = _simulate(options, t, win, kb_index, credit)
+        if best is None or saved >= best[0] - 1e-6:
+            best = (saved, t, ticks)          # the latest press that saves the most
     return best
 
 
@@ -2617,7 +2825,7 @@ def _brand(win, unit):
 def assess_survival(hits, death_ts, available, consumables, ability_names, ability_schools,
                     talent_entries=None, observed_absorbs=None, spec=None, aoe_known=True,
                     aoe_abilities=None, aoe_unknown=frozenset(), ready_since=None, aura_ms=None, forms=None, armor_k=None, form_armor=None,
-                    aura_size=None, friendly_ids=None, attackable=None, stagger_purify=None):
+                    aura_size=None, friendly_ids=None, attackable=None, stagger_purify=None, soulburn=None):
     """How they died, and whether the defensives they had ready would have saved them.
 
     `hits`: this player's hits (lethal windows, instant kills); the killing blow
@@ -2633,6 +2841,10 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     `hits` may also hold the heals a killing hit can set off (fetch_death_windows, type "heal" /
     "absorbed"), read only for that, and a Brewmaster's Stagger pool (staggered amounts, ticks from
     before the window, Purifying Brew casts: _stagger_pools, with the patch's `stagger_purify`).
+    A Healthstone with "withSoulburn" (consumable_estimate) is also replayed with Soulburn pressed first,
+    at the moments `soulburn` (SoulburnTimeline; None: nothing known) says it could have been: it counts
+    where it could, and where that can't be told and only it would save them, the verdict is "can't
+    tell" (why "soulburnUnknown").
     """
     heal_events = [h for h in hits or () if h.get("type") in ("heal", "absorbed")
                    or (h.get("type") in AURA_EVENTS and h.get("abilityGameID") in WINDOW_HEAL_IDS)]
@@ -2766,13 +2978,30 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
                 best = _best_press(opts, earliest, win, kb_index)
         else:
             best = _best_press(opts, earliest, win, kb_index)
+        alt, maybe, burned, base_opts = None, None, False, opts
+        if entry.get("withSoulburn"):
+            # Soulburn pressed first (instant, off the global cooldown): only where the log shows it could
+            # have been; the moments it can't tell are tried apart, for a "can't tell".
+            timeline = soulburn if soulburn is not None else SoulburnTimeline(None, None)
+            alt = ([_option(name, entry["withSoulburn"]["mitigation"], dur, legacy)], timeline)
+            marks = timeline.marks()
+            yes = _best_press(alt[0], earliest, win, kb_index, allowed=lambda t: timeline.state(t) is True,
+                              extra=marks)
+            maybe = _best_press(alt[0], earliest, win, kb_index, allowed=lambda t: timeline.state(t) is None,
+                                extra=marks)
+            if yes is not None and (best is None or yes[0] > best[0] + 1e-6):
+                best, opts, burned = yes, alt[0], True
+                comps = entry["withSoulburn"]["mitigation"]
+                applied = applied + (entry.get("applied") or []) + entry["withSoulburn"]["applied"]
         amount = best[0] if best else 0.0
-        scored.append((opts, earliest))
+        scored.append((base_opts, earliest, alt))
         cause = None
         if best is None or amount > overkill:
             per_button[name] = best is not None
         else:
             cause = unknown(comps)
+            if cause is None and maybe is not None and maybe[0] > overkill:
+                cause = {"why": "soulburnUnknown"}     # only with Soulburn, and the shards aren't known
             per_button[name] = None if cause else False
             if per_button[name] is False and pool_unsure:
                 # The Stagger pool before a hit has two readings (a purify on a side the log doesn't
@@ -2783,6 +3012,8 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
                     stagger_unknown.add(name)
         details[name] = _explain(entry, comps, applied, killing, amount, max_hp, missing_at_reaction,
                                  ability_schools, missing_at_kb=max(max_hp - hp_before, 0))
+        if burned:
+            details[name]["soulburn"] = True
         if name in stagger_unknown:
             details[name]["why"] = "staggerUnknown"
         if best is None:
@@ -2809,21 +3040,32 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
         # enemy on the unit where it saved most alone.
         _brand(win, brand_choice)
         best_all = 0.0
-        everything = [o for os, _ in scored for o in os]
-        for t in _press_times(min(e for _, e in scored), win, kb_index, everything):
-            opts = [o for os, e in scored if e <= t for o in os]
+        everything = [o for os, _, alt in scored for o in os + (alt[0] if alt else [])]
+        marks = {m for _, _, alt in scored if alt for m in alt[1].marks()}
+        first = min(e for _, e, _ in scored)
+
+        def pressed(t, state=True):
+            # Everything ready by t; a Healthstone with Soulburn first where it could (`state`) be cast.
+            return [o for os, e, alt in scored if e <= t
+                    for o in (alt[0] if alt and alt[1].state(t) is state else os)]
+        for t in _press_times(first, win, kb_index, everything, marks):
+            opts = pressed(t)
             if opts:
                 best_all = max(best_all, _simulate(opts, t, win, kb_index)[0])
-        all_comps = [c for os, _ in scored for o in os
+        all_comps = [c for os, _, _ in scored for o in os
                      for c in [x for x, _ in o["lasting"]] + o["instant"] + [x for x, _, _ in o["hots"]]]
         if best_all <= overkill and pool_unsure:
-            for t in _press_times(min(e for _, e in scored), win, kb_index, everything):
-                opts = [o for os, e in scored if e <= t for o in os]
+            for t in _press_times(first, win, kb_index, everything, marks):
+                opts = pressed(t)
                 if opts and _simulate(opts, t, win, kb_index, "most")[0] > overkill:
                     pool_unsure = None          # can't tell
                     break
+        burn_unsure = best_all <= overkill and any(
+            opts and _simulate(opts, t, win, kb_index)[0] > overkill
+            for t in _press_times(first, win, kb_index, everything, marks) for opts in [pressed(t, None)]
+            if any(alt and alt[1].state(t) is None for _, e, alt in scored if e <= t))
         together = True if best_all > overkill else \
-            (None if unknown(all_comps) or brand_unknown or pool_unsure is None else False)
+            (None if unknown(all_comps) or brand_unknown or pool_unsure is None or burn_unsure else False)
 
     # How they died, from the hits since they were last at high health:
     #   - one-shot: that was BURST_WINDOW_MS ago or less and a single hit took

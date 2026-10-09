@@ -2329,3 +2329,186 @@ class StaggerWindowFetchTests(unittest.TestCase):
                          [("damage", 40_000), ("absorbed", 41_000), ("cast", 42_000), ("damage", 50_000),
                           ("damage", 59_990)])
         self.assertEqual(hits[1][1]["attackerID"], 9)
+
+
+DEMONIC_HS, SOULBURN_SPELL, SOULBURN_BUFF = 452930, 385899, 387626
+SOULBURN_TALENT, GOREBOUND_TALENT = 91469, 117447
+
+
+def spend(ts, amount, cost=10, ability=105174):
+    """A Warlock's cast that spent Soul Shards: WCL's classResources amount is before the cost (tenths)."""
+    return {"timestamp": ts, "type": "cast", "sourceID": 1, "abilityGameID": ability, "shards": [amount, cost]}
+
+
+def soulburn_cast(ts, amount=30):
+    return [spend(ts, amount, 10, SOULBURN_SPELL),
+            {"timestamp": ts, "type": "applybuff", "targetID": 1, "abilityGameID": SOULBURN_BUFF}]
+
+
+class SoulburnTests(unittest.TestCase):
+    """Soulburn (385899, a Soul Shard, 6 s cooldown, off the global cooldown) makes the next Healthstone add
+    30% of max health to its heal and +20% max health for 12 s. A Warlock with the talent (without Gorebound
+    Fortitude, which always gives it) gets it only when the log shows Soulburn could have been cast first:
+    its buff (387626) already up, or Soulburn off cooldown and a Soul Shard in hand. Shards are read from
+    WCL's casts that spent some (classResources: the amount before the cost, in tenths): between two
+    spends they only go up, so after the earlier one is a floor and before the later one a ceiling."""
+    cat = defensives.catalog_for(None)
+    sb = cat.soulburn
+
+    def tl(self, events):
+        return defensives.SoulburnTimeline(events, self.sb)
+
+    def test_the_catalog_reads_soulburn_casts_and_talents(self):
+        self.assertEqual(self.sb["spell"], SOULBURN_SPELL)
+        self.assertIn(SOULBURN_SPELL, self.cat.cast_ids)
+        self.assertIn(SOULBURN_TALENT, self.cat.relevant_talent_entries)
+        out = defensives.index_defensive_events({"casts": [
+            {"type": "cast", "timestamp": 5, "sourceID": 1, "abilityGameID": SOULBURN_SPELL}]}, self.cat)
+        self.assertEqual(out["casts"][1], [(5, SOULBURN_SPELL)])
+
+    def test_the_typical_demonic_healthstone_has_no_soulburn_in_it(self):
+        # Measured without a Soulburn cast: 0.30 of max health (0.35 with Sweet Souls in The War Within's
+        # logs); with one, 0.60 / 0.65 in every log.
+        self.assertEqual(defensives._CATALOGS["12.0.0"].demonic_healthstone, 0.30)
+        self.assertEqual(defensives._CATALOGS["11.1.0"].demonic_healthstone, 0.35)
+
+    def test_shards_from_the_spends_around_the_moment(self):
+        self.assertIs(self.tl([spend(1_000, 30)]).state(2_000), True)            # 2 left after it
+        self.assertIs(self.tl([spend(1_000, 10), spend(5_000, 5)]).state(2_000), False)   # under 1 before the next
+        self.assertIsNone(self.tl([spend(1_000, 10), spend(5_000, 30)]).state(2_000))    # 0 to 3: can't tell
+        self.assertIs(self.tl([spend(5_000, 5)]).state(2_000), False)
+        self.assertIsNone(self.tl([spend(5_000, 30)]).state(2_000))
+        self.assertIsNone(self.tl([]).state(2_000))
+        self.assertIsNone(defensives.SoulburnTimeline(None, self.sb).state(2_000))     # not fetched
+
+    def test_soulburn_cooldown_and_buff(self):
+        events = soulburn_cast(1_000, amount=30)        # 2 shards left, buff up
+        self.assertIs(self.tl(events).state(1_500), True)
+        consumed = events + [{"timestamp": 1_400, "type": "removebuff", "targetID": 1, "abilityGameID": SOULBURN_BUFF}]
+        self.assertIs(self.tl(consumed).state(1_500), False)          # on its 6 s cooldown
+        self.assertIs(self.tl(consumed).state(7_000), True)           # ready again, shards left
+        self.assertIn(7_000, self.tl(consumed).changes)
+
+    def estimate(self, sid, heals=(), talents=None, casts=()):
+        return defensives.consumable_estimate(sid, self.cat, list(heals), 1.0, talents or {}, "Demonology",
+                                              soulburn_casts=list(casts))
+
+    def test_estimate_with_and_without_soulburn(self):
+        e = self.estimate(HEALTHSTONE, talents={SOULBURN_TALENT: 1})
+        self.assertAlmostEqual(e["mitigation"][0]["heal"], 0.25)
+        self.assertFalse([c for c in e["mitigation"] if c.get("hp")])
+        with_ = e["withSoulburn"]["mitigation"]
+        self.assertAlmostEqual(next(c["heal"] for c in with_ if "heal" in c), 0.55)
+        self.assertEqual([(c["hp"], c["dur_ms"]) for c in with_ if c.get("hp")], [(0.2, 12_000)])
+        self.assertNotIn("withSoulburn", self.estimate(HEALTHSTONE))           # no talent
+
+    def test_own_heals_are_split_by_a_soulburn_cast_before_them(self):
+        heals = [(10_000, DEMONIC_HS, 300_000, 1_000_000, 1.0), (80_000, DEMONIC_HS, 600_000, 1_000_000, 1.0),
+                 (150_000, DEMONIC_HS, 600_000, 1_000_000, 1.0)]
+        e = self.estimate(DEMONIC_HS, heals, {SOULBURN_TALENT: 1}, casts=[79_999, 150_000])
+        self.assertAlmostEqual(e["mitigation"][0]["heal"], 0.30)
+        self.assertAlmostEqual(e["withSoulburn"]["mitigation"][0]["heal"], 0.60)
+        only = self.estimate(DEMONIC_HS, heals[1:], {SOULBURN_TALENT: 1}, casts=[79_999, 150_000])
+        self.assertAlmostEqual(only["mitigation"][0]["heal"], 0.30)
+
+    def test_gorebound_always_has_it(self):
+        both = {SOULBURN_TALENT: 1, GOREBOUND_TALENT: 1}
+        e = self.estimate(HEALTHSTONE, talents=both)
+        self.assertAlmostEqual(e["mitigation"][0]["heal"], 0.55)               # 25% + 30%, not x1.3
+        self.assertNotIn("withSoulburn", e)
+        typical = self.estimate(DEMONIC_HS, talents=both)
+        self.assertAlmostEqual(typical["mitigation"][0]["heal"], 0.60)
+        self.assertEqual([(c["hp"], c["dur_ms"]) for c in typical["mitigation"] if c.get("hp")], [(0.2, 12_000)])
+        own = self.estimate(DEMONIC_HS, [(10_000, DEMONIC_HS, 600_000, 1_000_000, 1.0)], both)
+        self.assertAlmostEqual(own["mitigation"][0]["heal"], 0.60)
+
+    def survive(self, events):
+        # At 400k of 1M after a hit 10 s before; the killing blow takes 750k. A Healthstone's 25% leaves
+        # them 100k short; with Soulburn (55%, +20% max health) they live.
+        hits = [hit(90_000, 600_000, 400_000), hit(100_000, 400_000, 0, overkill=350_000)]
+        hs = self.estimate(HEALTHSTONE, talents={SOULBURN_TALENT: 1})
+        timeline = defensives.SoulburnTimeline(events, self.sb)
+        return defensives.assess_survival(hits, 100_000, [], [hs], NAMES, SCHOOLS,
+                                          talent_entries={SOULBURN_TALENT: 1}, soulburn=timeline)
+
+    def test_credited_only_when_it_could_have_been_cast(self):
+        yes = self.survive([spend(85_000, 30)])
+        self.assertTrue(yes["wouldSave"]["Healthstone"])
+        self.assertTrue(yes["details"]["Healthstone"]["soulburn"])
+        self.assertTrue(yes["allTogetherWouldSave"])
+        no = self.survive([spend(85_000, 10), spend(99_500, 5)])
+        self.assertFalse(no["wouldSave"]["Healthstone"])
+        self.assertNotIn("soulburn", no["details"]["Healthstone"])
+        self.assertFalse(no["allTogetherWouldSave"])
+
+    def test_cant_tell_when_the_shards_are_not_known(self):
+        for events in ([spend(85_000, 10), spend(99_500, 30)], [], None):
+            r = self.survive(events)
+            self.assertIsNone(r["wouldSave"]["Healthstone"])
+            self.assertEqual(r["details"]["Healthstone"]["why"], "soulburnUnknown")
+            self.assertIsNone(r["allTogetherWouldSave"])
+
+    def test_a_press_is_never_credited_with_a_shard_gained_too_late(self):
+        # Below a shard until a spend at 99,300 that shows 2 (gained after the latest press, 99,000).
+        r = self.survive([spend(85_000, 10), spend(99_100, 5, cost=0), spend(99_300, 20)])
+        self.assertFalse(r["wouldSave"]["Healthstone"])
+
+    def test_the_fetch_reads_the_warlocks_casts_and_soulburn_buff(self):
+        from unittest import mock
+        queries = []
+
+        def fake(token, q, v):
+            queries.append(q)
+            return {"reportData": {"report": {"s3": {"data": [
+                {"timestamp": 50_000, "type": "cast", "sourceID": 1, "abilityGameID": 105174,
+                 "classResources": [{"amount": 240000, "max": 250000, "type": 0},
+                                    {"amount": 30, "max": 50, "type": 7, "cost": 30}]},
+                {"timestamp": 50_100, "type": "cast", "sourceID": 1, "abilityGameID": 686,
+                 "classResources": [{"amount": 240000, "max": 250000, "type": 0, "cost": 100}]},
+                {"timestamp": 51_000, "type": "applybuff", "sourceID": 1, "targetID": 1,
+                 "abilityGameID": SOULBURN_BUFF}]}}}}
+        with mock.patch.object(defensives, "graphql_query", side_effect=fake):
+            got = defensives.fetch_soulburn_windows("t", "R", [(3, [(60_000, "Wl")])], self.sb)
+        self.assertIn("startTime: 25000", queries[0])
+        self.assertIn("source.name in (\\\"Wl\\\") and type = 'cast'", queries[0])
+        self.assertIn(f"ability.id = {SOULBURN_BUFF}", queries[0])
+        self.assertIn("includeResources: true", queries[0])
+        self.assertEqual([(e["type"], e.get("shards")) for e in got[1]],
+                         [("cast", [30, 30]), ("cast", None), ("applybuff", None)])
+
+    def death(self, events, talents=None):
+        indexed = {"casts": {1: [(10_000, HEALTHSTONE)]}, "talents": {(7, 1): talents or {SOULBURN_TALENT: 1}},
+                   "heals": {}}
+        hits = [hit(90_000, 600_000, 400_000), hit(100_000, 400_000, 0, overkill=350_000)]
+        return defensives.analyze_death(1, "Warlock", "Demonology", 7, 50_000, 100_000, indexed, NAMES, {1: "Wl"},
+                                        hits=hits, ability_schools=SCHOOLS, cat=self.cat,
+                                        soulburn_events=events)["survival"]
+
+    def test_a_death_reads_its_soulburn_events(self):
+        self.assertTrue(self.death([spend(88_000, 30)])["wouldSave"]["Healthstone"])
+        self.assertEqual(self.death(None)["details"]["Healthstone"]["why"], "soulburnUnknown")
+        gore = self.death(None, {SOULBURN_TALENT: 1, GOREBOUND_TALENT: 1})
+        self.assertTrue(gore["wouldSave"]["Healthstone"])                    # always has it
+
+    def test_which_deaths_fetch_soulburn_data(self):
+        indexed = {"talents": {(3, 1): {SOULBURN_TALENT: 1}, (3, 2): {SOULBURN_TALENT: 1, GOREBOUND_TALENT: 1},
+                               (3, 4): {SOULBURN_TALENT: 1}, (4, 1): {}}, "specs": {}}
+        friendlies = [{"id": 1, "name": "Wl", "type": "Warlock"}, {"id": 2, "name": "Gb", "type": "Warlock"},
+                      {"id": 3, "name": "Nl", "type": "Warlock"}, {"id": 4, "name": "Pr", "type": "Priest"}]
+        counted = {3: [(1, "Wl"), (2, "Gb"), (3, "Nl"), (4, "Pr")], 4: [(5, "Wl")]}
+        self.assertEqual(defensives.soulburn_pulls(indexed, counted, friendlies, self.cat), [(3, [(1, "Wl")])])
+
+    def test_pulls_close_together_share_a_block_and_only_death_spans_are_kept(self):
+        from unittest import mock
+        queries = []
+
+        def fake(token, q, v):
+            queries.append(q)
+            cast = lambda t: {"timestamp": t, "type": "cast", "sourceID": 1, "abilityGameID": 686}
+            return {"reportData": {"report": {"s3": {"data": [cast(30_000), cast(70_000), cast(130_000)]}}}}
+        with mock.patch.object(defensives, "graphql_query", side_effect=fake):
+            got = defensives.fetch_soulburn_windows("t", "R", [(3, [(60_000, "Wl")]), (4, [(150_000, "Wl")])],
+                                                    self.sb)
+        self.assertEqual(len(queries), 1)
+        self.assertIn("fightIDs: [3, 4]", queries[0])
+        self.assertEqual([e["timestamp"] for e in got[1]], [30_000, 130_000])     # 70,000 is in no span
