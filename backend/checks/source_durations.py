@@ -45,6 +45,17 @@ def check(run):
     casts = defaultdict(list)
     for e in raw["casts"]:
         casts[(e.get("sourceID"), meta["abilities"].get(e.get("abilityGameID")))].append(e["timestamp"])
+    # Casts that lengthen a defensive while it is up (Zealot's Paragon: Judgment and Hammer of Wrath on
+    # Sentinel), which the site reads only inside death windows: one more Casts query over the pulls.
+    lengthening = defaultdict(list)          # (player, spell) -> cast times
+    extend_ids = getattr(cat, "extend_ids", None)
+    extend_ids = sorted(extend_ids) if isinstance(extend_ids, (set, frozenset)) else []
+    if extend_ids:
+        for e in defensives._paged(run.token, run.code, "Casts",
+                                   f"type = \"cast\" and ability.id in ({', '.join(map(str, extend_ids))})",
+                                   fight_ids=ids, start_time=min(f["start_time"] for f in fights),
+                                   end_time=max(f["end_time"] for f in fights) + 1):
+            lengthening[(e.get("sourceID"), e.get("abilityGameID"))].append(e["timestamp"])
     res = defaultdict(lambda: {"n": 0, "exact": 0, "early": 0, "extended": 0, "longer": []})
     up = {}
     for e in sorted(raw["buffs"], key=lambda e: e["timestamp"]):
@@ -70,6 +81,11 @@ def check(run):
                 continue
             spec = defensives.pull_spec(idx, fid, pid, (meta["player_details"].get(pid) or {}).get("spec"))
             want = defensives._talented_duration(entry, talents, spec)
+            ext = entry.get("extended_by")
+            rank = defensives._mod_rank(ext, talents, spec) if ext else 0
+            if rank:
+                want = defensives._extended_ms(want, ext["ms"] * rank,
+                                               [t for c in ext["casts"] for t in lengthening[(pid, c)]], presses[-1])
             carried = carried_over(presses, want)
             got = e["timestamp"] - presses[-1]
             r = res[name]
