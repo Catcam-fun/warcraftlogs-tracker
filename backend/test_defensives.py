@@ -1530,29 +1530,47 @@ class FieryBrandTests(unittest.TestCase):
       damage you take by 40%": every hit. Felvix, Voidspire (Lightblinded Vanguard, 3 bosses): 207771 is a
       buff on him; hits from the branded boss read 0.585 of unbranded, the other bosses' 0.564."""
 
-    def assess(self, hits, patch="11.0.7", friendlies=()):
+    def assess(self, hits, patch="11.0.7", friendlies=(), attackable=(50, 60)):
         entry = defensives._CATALOGS[patch].all[FIERY_BRAND]
         return defensives.assess_survival(hits, 100_000, [entry], [], NAMES, SCHOOLS,
-                                          aura_ms={"Fiery Brand": entry["aura_ms"]}, friendly_ids=set(friendlies))
+                                          aura_ms={"Fiery Brand": entry["aura_ms"]}, friendly_ids=set(friendlies),
+                                          attackable=None if attackable is None else set(attackable))
 
     def test_the_catalog_follows_the_patch(self):
         self.assertEqual(defensives._CATALOGS["11.0.7"].all[FIERY_BRAND]["mitigation"],
                          [{"dr": 0.4, "from_target": BRANDED}])
         self.assertEqual(defensives._CATALOGS["12.0.0"].all[FIERY_BRAND]["mitigation"], [{"dr": 0.4}])
 
-    def test_the_war_within_brands_only_the_killing_blows_unit(self):
+    def test_the_war_within_brands_one_enemy_the_best(self):
         # A 600k hit from the boss (unit 50), then a 500k hit from an add (unit 60) kills (100k overkill).
         hits = [enemy_hit(97_000, 600_000, 400_000, source=50),
                 enemy_hit(100_000, 400_000, 0, source=60, overkill=100_000)]
+        # Branded, the boss's hit is 240k smaller, the add's 200k: the boss is the better target. Never both.
         r = self.assess(hits)
-        # Branding the add saves 40% of its 500k hit only, 200k: enough. Never 40% of the boss's too.
-        self.assertAlmostEqual(r["details"]["Fiery Brand"]["amount"], 200_000, delta=1)
+        self.assertAlmostEqual(r["details"]["Fiery Brand"]["amount"], 240_000, delta=1)
         self.assertTrue(r["wouldSave"]["Fiery Brand"])
         # In Midnight it is on the Demon Hunter: 40% of both hits.
         mid = self.assess(hits, patch="12.0.0")
         self.assertAlmostEqual(mid["details"]["Fiery Brand"]["amount"], 0.4 * 1_100_000, delta=1)
 
-    def test_another_instance_of_the_same_add_is_not_branded(self):
+    def test_only_an_enemy_the_raid_attacked_can_be_branded(self):
+        # The killing hit came from a rocket nobody damaged (Goblin Guided Rocket): the boss is the only target.
+        hits = [enemy_hit(97_000, 600_000, 400_000, source=50),
+                enemy_hit(100_000, 400_000, 0, source=60, overkill=300_000)]
+        r = self.assess(hits, attackable=(50,))
+        self.assertAlmostEqual(r["details"]["Fiery Brand"]["amount"], 240_000, delta=1)
+        self.assertFalse(r["wouldSave"]["Fiery Brand"])
+        # Nobody it could brand hit them: it helps nothing.
+        r = self.assess(hits, attackable=())
+        self.assertEqual(r["details"]["Fiery Brand"]["amount"], 0)
+        self.assertEqual(r["details"]["Fiery Brand"]["why"], "notBranded")
+        self.assertFalse(r["wouldSave"]["Fiery Brand"])
+        # Which units the raid attacked isn't known: can't tell.
+        r = self.assess(hits, attackable=None)
+        self.assertIsNone(r["wouldSave"]["Fiery Brand"])
+        self.assertEqual(r["details"]["Fiery Brand"]["why"], "brandUnknown")
+
+    def test_another_instance_of_the_same_add_is_branded_on_its_own(self):
         hits = [enemy_hit(97_000, 600_000, 400_000, source=60, instance=2),
                 enemy_hit(100_000, 400_000, 0, source=60, instance=1, overkill=300_000)]
         r = self.assess(hits)
@@ -1562,7 +1580,7 @@ class FieryBrandTests(unittest.TestCase):
     def test_nothing_to_brand_for_the_environment_or_a_friend(self):
         for source, friends in ((-1, ()), (None, ()), (7, (7,))):
             hits = [enemy_hit(100_000, 400_000, 0, source=source, overkill=100_000)]
-            r = self.assess(hits, friendlies=friends)
+            r = self.assess(hits, friendlies=friends, attackable=(-1, 7))
             self.assertEqual(r["details"]["Fiery Brand"]["amount"], 0, source)
             self.assertEqual(r["details"]["Fiery Brand"]["why"], "notBranded", source)
             self.assertFalse(r["wouldSave"]["Fiery Brand"], source)
@@ -1667,3 +1685,20 @@ class StaggerPoolTests(unittest.TestCase):
                                        aura_ms={"Diffuse Magic": 30_000}, spec="Brewmaster")
         share = 0.6 * 700_000 / 1_365_000
         self.assertAlmostEqual(r["details"]["Diffuse Magic"]["amount"], 180_000 + 2 * 66_500 * share, delta=2)
+
+
+class AttackedUnitsTests(unittest.TestCase):
+    def test_units_the_raid_damaged_from_the_damage_done_table(self):
+        from unittest import mock
+        table = {"reportData": {"report": {"table": {"data": {"entries": [
+            {"id": 876, "name": "Chrome King Gallywix", "total": 1561920441},
+            {"id": 883, "name": "1500-Pound Dud", "total": 712},
+            {"id": 900, "name": "Nothing", "total": 0}]}}}}}
+        with mock.patch.object(defensives, "graphql_query", return_value=table) as q:
+            self.assertEqual(defensives.fetch_attacked_units("t", "R", [1, 2], 0, 10), [876, 883])
+        self.assertIn("dataType: DamageDone", q.call_args[0][1])
+        self.assertIn("viewBy: Target", q.call_args[0][1])
+
+    def test_only_patches_with_an_effect_on_the_enemy_fetch_them(self):
+        self.assertTrue(defensives.brands_enemies(defensives._CATALOGS["11.0.7"]))
+        self.assertFalse(defensives.brands_enemies(defensives._CATALOGS["12.0.0"]))

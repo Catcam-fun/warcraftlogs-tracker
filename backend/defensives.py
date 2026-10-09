@@ -590,7 +590,8 @@ def _auras(hit):
 
 def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts,
                   indexed, ability_names, actor_names, hits=None, ability_schools=None, cat=None,
-                  aoe_known=True, armor_k=None, soulwell=False, pull_starts=None, encounters=None):
+                  aoe_known=True, armor_k=None, soulwell=False, pull_starts=None, encounters=None,
+                  attackable=None):
     """Defensive picture for one death. All timestamps are report-relative ms.
 
     `pull_starts`: {fight ID: start} of the report's kept pulls, so presses in other pulls are
@@ -609,6 +610,8 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
     `armor_k`: the boss's armor constant (armor_constant), for armor increases.
     `soulwell`: a Warlock was in this pull, so a Soulwell's Healthstones were
     there for everyone, used in this log or not.
+    `attackable`: the units the raid damaged in the report's pulls (fetch_attacked_units), for an
+    effect cast on an enemy (The War Within's Fiery Brand); None when not fetched.
     """
     cat = cat or _LATEST
     own_casts = indexed["casts"].get(player_id, [])
@@ -822,7 +825,8 @@ def analyze_death(player_id, player_class, spec, fight_id, fight_start, death_ts
                                              forms=forms, armor_k=armor_k, form_armor=form_armor,
                                              aura_size=_aura_sizer(cat, player_class, spec, talent_entries,
                                                                    ability_names, player_id, caster_loadout),
-                                             friendly_ids=set(actor_names or ()) | {player_id})
+                                             friendly_ids=set(actor_names or ()) | {player_id},
+                                             attackable=attackable)
 
     for key in ("active", "available", "cooldown"):
         result[key].sort(key=lambda d: (not d.get("major", True), d["name"]))
@@ -1042,6 +1046,24 @@ def fetch_death_windows(token, report_code, pulls, heals=True):
     for hits in out.values():
         hits.sort(key=lambda e: e["timestamp"])
     return out
+
+
+def brands_enemies(cat):
+    """Does this patch's catalog have an effect cast on an enemy (`from_target`: The War Within's
+    Fiery Brand)? Only then are the attacked units fetched (fetch_attacked_units)."""
+    return any(c.get("from_target") for d in cat.all.values() for c in d.get("mitigation") or [])
+
+
+def fetch_attacked_units(token, report_code, fight_ids, start_time, end_time):
+    """IDs of the units the raid damaged in the given pulls: WCL's DamageDone table by target, one
+    request. A unit nobody damaged (a rocket, a bomb, a cloud) can't be targeted, so it can't be
+    branded (_brand_targets)."""
+    query = ("query($c: String!, $ids: [Int], $s: Float, $e: Float) { reportData { report(code: $c) { "
+             "table(dataType: DamageDone, fightIDs: $ids, startTime: $s, endTime: $e, viewBy: Target) } } }")
+    data = graphql_query(token, query, {"c": report_code, "ids": list(fight_ids), "s": start_time, "e": end_time})
+    table = ((data.get("reportData") or {}).get("report") or {}).get("table") or {}
+    entries = (table.get("data") or {}).get("entries") or []
+    return sorted({e["id"] for e in entries if e.get("id") is not None and (e.get("total") or 0) > 0})
 
 
 def fetch_instakills(token, report_code, fight_ids, start_time, end_time):
@@ -2097,21 +2119,38 @@ def _max_hp_before(window, kb_index, aura_size=None, heals=(), aura_events=()):
     return max(round(value), kb_max, health), health
 
 
-def _brand_target(killing, friendly_ids):
-    """(sourceID, sourceInstance) of the unit a replayed press of an effect on the enemy (Fiery Brand
-    in The War Within) goes on: the killing blow's, when an enemy dealt it. Fiery Brand is a cast on an
-    enemy target, and the unit that dealt the killing blow is the one that killed them. None for the
-    environment (sourceID -1), a hit without a source, their own damage or a friendly player's."""
-    src = killing.get("sourceID")
-    if src is None or src < 0 or src == killing.get("targetID") or src in (friendly_ids or ()):
+def _brand_targets(window, friendly_ids, attackable):
+    """The units a replayed press of an effect on the enemy (Fiery Brand in The War Within) could go
+    on: every enemy that hit them in the replayed seconds, (sourceID, sourceInstance), that the raid
+    attacked in the pull's report (`attackable`: fetch_attacked_units). Fiery Brand is a cast on an
+    enemy target: a rocket, a bomb or a cloud nobody can target is never one (Lunchay, Undermine: Goblin
+    Guided Rocket, Discharged Giga Bomb, Stormfury Cloud, Unstable Crawler Mine took no damage from
+    players). Never the environment (sourceID -1), a hit without a source, their own damage or a
+    friendly player's. None when `attackable` isn't known."""
+    if attackable is None:
         return None
-    return (src, killing.get("sourceInstance"))
+    out = []
+    for h in window:
+        src = h.get("sourceID")
+        unit = (src, h.get("sourceInstance"))
+        if src is None or src < 0 or src == h.get("targetID") or src in (friendly_ids or ())                 or src not in attackable or unit in out:
+            continue
+        out.append(unit)
+    return out
+
+
+def _brand(win, unit):
+    """Tag the window's hits from `unit` (fromTarget) and drop what the replay remembered."""
+    for h in win.hits:
+        h["fromTarget"] = unit is not None and (h.get("sourceID"), h.get("sourceInstance")) == unit
+    win._keep.clear()
+    win._applies.clear()
 
 
 def assess_survival(hits, death_ts, available, consumables, ability_names, ability_schools,
                     talent_entries=None, observed_absorbs=None, spec=None, aoe_known=True,
                     ready_since=None, aura_ms=None, forms=None, armor_k=None, form_armor=None,
-                    aura_size=None, friendly_ids=None):
+                    aura_size=None, friendly_ids=None, attackable=None):
     """How they died, and whether the defensives they had ready would have saved them.
 
     `hits`: this player's hits (lethal windows, instant kills); the killing blow
@@ -2121,8 +2160,9 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     REACTION_MS before the killing blow. `available` / `consumables`: catalog
     entries ready at death (consumables only if carried and unused this pull).
     `aura_size` (_aura_sizer): for the max health they had just before the killing blow
-    (_max_hp_before). `friendly_ids`: the report's players, whose hits no effect on the enemy covers
-    (_brand_target). `hits` may hold the heals a killing hit can set off (fetch_death_windows,
+    (_max_hp_before). `friendly_ids`: the report's players, whose hits no effect on the enemy covers;
+    `attackable`: the units the raid attacked (_brand_targets). An effect on the enemy is replayed on
+    each unit it could go on, and the one that saves most counts, as the best press time does. `hits` may hold the heals a killing hit can set off (fetch_death_windows,
     type "heal" / "absorbed"); they are read only for that.
     """
     heal_events = [h for h in hits or () if h.get("type") in ("heal", "absorbed")
@@ -2157,9 +2197,7 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     hit_size = _full_hit(killing)
 
     tag = {"armorK": armor_k, "formArmor": form_armor, **({} if aoe_known else {"aoeKnown": False})}
-    brand = _brand_target(killing, friendly_ids)
-    window = [dict(h, **tag, fromTarget=brand is not None and (h.get("sourceID"), h.get("sourceInstance")) == brand)
-              for h in _lethal_hits(hits, killing)]
+    window = [dict(h, **tag, fromTarget=False) for h in _lethal_hits(hits, killing)]
     kb_index = len(window) - 1
     # The killing blow's own max health is logged after the death stripped their auras; every
     # figure below (and the replay's health points) uses the max they had just before it.
@@ -2191,6 +2229,7 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
                    if not ("heal" in m or "heal_amount" in m))
 
     per_button, scored, details = {}, [], {}
+    brand_choice, brand_unknown = None, False
     for entry in list(available) + list(consumables):
         applied = []
         comps, _ = _resolve(entry, talent_entries, observed_absorbs or {}, spec, applied)
@@ -2207,7 +2246,25 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
             opts.append(_option(forms[name]["name"], form_comps or [], forms[name].get("aura_ms")))
             comps = comps + (form_comps or [])
         earliest = max((ready_since or {}).get(name, window_start), window_start)
-        best = _best_press(opts, earliest, win, kb_index)
+        if any(c.get("from_target") for c in comps):
+            # On each enemy it could go on; the one that saves most.
+            units = _brand_targets(window, friendly_ids, attackable)
+            if units is None:
+                per_button[name] = None      # which enemies could be branded isn't known
+                details[name] = {"amount": 0, "why": "brandUnknown"}
+                brand_unknown = True
+                continue
+            best, brand_choice = None, None
+            for unit in units:
+                _brand(win, unit)
+                got = _best_press(opts, earliest, win, kb_index)
+                if got is not None and (best is None or got[0] > best[0]):
+                    best, brand_choice = got, unit
+            _brand(win, brand_choice)
+            if best is None:                 # no unit to brand, or ready too late: as any button
+                best = _best_press(opts, earliest, win, kb_index)
+        else:
+            best = _best_press(opts, earliest, win, kb_index)
         amount = best[0] if best else 0.0
         scored.append((opts, earliest))
         if best is None or amount > overkill:
@@ -2232,7 +2289,9 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
 
     together = None
     if scored:
-        # Everything pressed at once, at the best moment (each only once it was ready).
+        # Everything pressed at once, at the best moment (each only once it was ready); an effect on the
+        # enemy on the unit where it saved most alone.
+        _brand(win, brand_choice)
         best_all = 0.0
         everything = [o for os, _ in scored for o in os]
         for t in _press_times(min(e for _, e in scored), win, kb_index, everything):
@@ -2241,7 +2300,7 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
                 best_all = max(best_all, _simulate(opts, t, win, kb_index)[0])
         all_comps = [c for os, _ in scored for o in os
                      for c in [x for x, _ in o["lasting"]] + o["instant"] + [x for x, _, _ in o["hots"]]]
-        together = True if best_all > overkill else (None if unknown(all_comps) else False)
+        together = True if best_all > overkill else (None if unknown(all_comps) or brand_unknown else False)
 
     # How they died, from the hits since they were last at high health:
     #   - one-shot: that was BURST_WINDOW_MS ago or less and a single hit took

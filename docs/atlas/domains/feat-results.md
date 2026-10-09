@@ -21,11 +21,11 @@ anchors:
   kill_counts: "frontend/src/App.js:1276"
   wcl_link: "frontend/src/App.js:1336"
   player_list: "frontend/src/App.js:2101"
-  death_row: "frontend/src/DeathRow.js:241"
+  death_row: "frontend/src/DeathRow.js:242"
   defensive_summary: "frontend/src/DefensivePanel.js:20"
-  result_shape: "backend/app.py:647"
-  death_event: "backend/app.py:559"
-  defensives_gate: "backend/app.py:583"
+  result_shape: "backend/app.py:664"
+  death_event: "backend/app.py:575"
+  defensives_gate: "backend/app.py:599"
 links:
   - frontend
   - frontend-results-view
@@ -44,15 +44,15 @@ flows:
 invariants:
   - "MUST: a death count only when slot <= the chosen cutoff and inWipe is false (frontend/src/deathCounting.js:22)."
   - "NEVER: let a cheat death take a real death's slot; it is counted separately as +N cheat (frontend/src/deathCounting.js:31)."
-  - "MUST: defensive analysis exist only for deaths that could count (slot <= maxCutoff, not in a wipe, not a cheat death) (backend/app.py:583)."
+  - "MUST: defensive analysis exist only for deaths that could count (slot <= maxCutoff, not in a wipe, not a cheat death) (backend/app.py:599)."
   - "NEVER: call the server when a filter changes; every table is recomputed from the loaded result (frontend/src/App.js:1266)."
-content_hash: sha256:2b0d096ab5a8de48ac44eee862f5e7139a01ffeb2d38e5c0767fa79ca640ae78
+content_hash: sha256:fdac8ecb6741e20f0a6bcbcf230ce82a6488b7f0e0a26b357e740c1648e17f37
 ---
 ## Summary
 
 - **What it is.** The `/results` route (`frontend/src/App.js:1595`) shows the analysis held in app state: a filter bar, a collapsible death-rate matrix, and a player list whose rows expand into a per-boss death log.
-- **Where the numbers come from.** The server sends every guild-member death with a `slot` and `inWipe` (`backend/app.py:559`). The browser decides what counts with `isCounted` (`frontend/src/deathCounting.js:22`), so changing "Deaths to count" re-scores instantly.
-- **What a death row shows.** `DeathRow` (`frontend/src/DeathRow.js:241`) draws the killing blow, health before it, the defensive strip and a "View log" link.
+- **Where the numbers come from.** The server sends every guild-member death with a `slot` and `inWipe` (`backend/app.py:575`). The browser decides what counts with `isCounted` (`frontend/src/deathCounting.js:22`), so changing "Deaths to count" re-scores instantly.
+- **What a death row shows.** `DeathRow` (`frontend/src/DeathRow.js:242`) draws the killing blow, health before it, the defensive strip and a "View log" link.
 - **What it leaves alone.** Results never refetch. Saved, shared and recent runs all render through the same page from stored data.
 
 ## How it works
@@ -67,17 +67,17 @@ You arrive here after an analysis, a saved report, a share link, or a Recent run
   body: Boss chips (frontend/src/App.js:1729), a minimum-pulls box (frontend/src/App.js:1743), a player search (frontend/src/App.js:1758), per-player Hide (frontend/src/App.js:2130) and "Group characters" to merge alts into a main (frontend/src/App.js:1805). Both tables are memoized on these inputs (frontend/src/App.js:1266).
   gotcha: Alt groups made here live only in page state; they are not part of the result that gets saved or shared.
 - title: Read the matrix | short: Matrix | sub: player x boss
-  body: computeOverviewData builds a death rate per player per boss and overall (frontend/src/App.js:1143). Rates are counted deaths over pulls the player was in (pullParticipation and bossParticipation from backend/app.py:641). Colors scale around the median with outliers clamped (frontend/src/App.js:1341).
+  body: computeOverviewData builds a death rate per player per boss and overall (frontend/src/App.js:1143). Rates are counted deaths over pulls the player was in (pullParticipation and bossParticipation from backend/app.py:658). Colors scale around the median with outliers clamped (frontend/src/App.js:1341).
 - title: Read the player list | short: Players | sub: rate, preventable
   body: computeFilteredStats sorts players by real death rate (frontend/src/App.js:1140). Each row shows deaths over pulls, the rate, +N cheat when cheat deaths count (frontend/src/App.js:2127), and a defensive chip such as "3/5 preventable" from summarizeDefensives (frontend/src/DefensivePanel.js:20).
 - title: Expand a player | short: Death log | sub: per boss, per death
-  body: Expanding lists bosses in Adventure Guide order (frontend/src/App.js:153), each with top killing abilities and one DeathRow per counted death (frontend/src/App.js:2180). The row text describes the death as one-shot, burst, worn down by a raid-wide ability (rot), or the biggest hit before it (frontend/src/DeathRow.js:257).
+  body: Expanding lists bosses in Adventure Guide order (frontend/src/App.js:153), each with top killing abilities and one DeathRow per counted death (frontend/src/App.js:2180). The row text describes the death as one-shot, burst, worn down by a raid-wide ability (rot), or the biggest hit before it (frontend/src/DeathRow.js:258).
 - title: Hover the killing blow | short: Killing blow | sub: spell text, kill count
-  body: The tooltip shows the ability's icon (abilityIcons by spell ID), its in-game description (abilityText, backend/app.py:674), the hit size, and "Killed N raiders in these pulls" from killCounts (frontend/src/App.js:1276).
+  body: The tooltip shows the ability's icon (abilityIcons by spell ID), its in-game description (abilityText, backend/app.py:691), the hit size, and "Killed N raiders in these pulls" from killCounts (frontend/src/App.js:1276).
 - title: Hover a defensive | short: Defensive verdict | sub: saves, not enough, can't tell
-  body: Ready abilities and consumables are green when the server's replay says they would have saved the player, red otherwise, with the amount and press time (frontend/src/DeathRow.js:328). Active and on-cooldown abilities have their own tooltips (frontend/src/DeathRow.js:384).
+  body: Ready abilities and consumables are green when the server's replay says they would have saved the player, red otherwise, with the amount and press time (frontend/src/DeathRow.js:329). Active and on-cooldown abilities have their own tooltips (frontend/src/DeathRow.js:385).
 - title: Open the log | short: View log | sub: WarcraftLogs deaths view
-  body: Each row links to https://www.warcraftlogs.com/reports/<report>#fight=<fight>&type=deaths (frontend/src/App.js:1336), opened in a new tab (frontend/src/DeathRow.js:453).
+  body: Each row links to https://www.warcraftlogs.com/reports/<report>#fight=<fight>&type=deaths (frontend/src/App.js:1336), opened in a new tab (frontend/src/DeathRow.js:454).
 ```
 
 ## Diagram
@@ -125,33 +125,33 @@ relied-on-by: [[feat-share]] — share links open here
 
 | Field or piece {kind} | Where | Meaning |
 |---|---|---|
-| `meta` {result} | `backend/app.py:648` | guild, maxCutoff, dates, difficulty, cheatDeathEnabled, rosterOnly, failedReports |
-| `events` {result} | `backend/app.py:663` | player to list of death events |
-| `pullParticipation` {result} | `backend/app.py:664` | player to pulls they were in |
-| `bossParticipation` {result} | `backend/app.py:665` | boss to player to pulls |
-| `pullCutoffTimestamps` {result} | `backend/app.py:666` | legacy per-pull cutoffs |
-| `icons`, `abilityIcons` {result} | `backend/app.py:668` | defensive icons by name; killing-blow icons by spell ID |
-| `abilityInfo`, `abilityText` {result} | `backend/app.py:672` | defensive effects; killing-blow spell descriptions |
-| `slot`, `inWipe` {event} | `backend/app.py:575` | where the death falls in the pull |
-| `isCheatDeath` {event} | `backend/app.py:574` | a save from a lethal hit, not a death |
-| `defensives` {event} | `backend/app.py:608` | only for deaths that could count |
-| `pullNo`, `absTs` {event} | `backend/app.py:568` | pull number per boss; absolute time |
+| `meta` {result} | `backend/app.py:665` | guild, maxCutoff, dates, difficulty, cheatDeathEnabled, rosterOnly, failedReports |
+| `events` {result} | `backend/app.py:680` | player to list of death events |
+| `pullParticipation` {result} | `backend/app.py:681` | player to pulls they were in |
+| `bossParticipation` {result} | `backend/app.py:682` | boss to player to pulls |
+| `pullCutoffTimestamps` {result} | `backend/app.py:683` | legacy per-pull cutoffs |
+| `icons`, `abilityIcons` {result} | `backend/app.py:685` | defensive icons by name; killing-blow icons by spell ID |
+| `abilityInfo`, `abilityText` {result} | `backend/app.py:689` | defensive effects; killing-blow spell descriptions |
+| `slot`, `inWipe` {event} | `backend/app.py:591` | where the death falls in the pull |
+| `isCheatDeath` {event} | `backend/app.py:590` | a save from a lethal hit, not a death |
+| `defensives` {event} | `backend/app.py:625` | only for deaths that could count |
+| `pullNo`, `absTs` {event} | `backend/app.py:584` | pull number per boss; absolute time |
 | `isCounted` {code} | `frontend/src/deathCounting.js:22` | the counting rule |
 | `computeFilteredStats` {code} | `frontend/src/App.js:993` | player list |
 | `computeOverviewData` {code} | `frontend/src/App.js:1143` | matrix |
-| `DeathRow` {code} | `frontend/src/DeathRow.js:241` | one death |
+| `DeathRow` {code} | `frontend/src/DeathRow.js:242` | one death |
 | `DefensiveSummaryChip` {code} | `frontend/src/DefensivePanel.js:43` | preventable and one-shot chips |
 
 ## Invariants
 
-- **MUST** a death count only when `slot <= cutoff` and `inWipe` is false (`frontend/src/deathCounting.js:22`). The server computes both with `rank_pull_deaths` (`backend/app.py:543`).
+- **MUST** a death count only when `slot <= cutoff` and `inWipe` is false (`frontend/src/deathCounting.js:22`). The server computes both with `rank_pull_deaths` (`backend/app.py:559`).
 - **NEVER** let a cheat death take a real death's slot; it is counted separately as "+N cheat" (`frontend/src/deathCounting.js:31`, `frontend/src/App.js:2127`).
-- **MUST** defensive analysis exist only for deaths that could count: slot within `maxCutoff`, not in a wipe, not a cheat death (`backend/app.py:583`).
+- **MUST** defensive analysis exist only for deaths that could count: slot within `maxCutoff`, not in a wipe, not a cheat death (`backend/app.py:599`).
 - **NEVER** call the server when a filter changes; every table is recomputed from the loaded result (`frontend/src/App.js:1266`).
 
 ## Gotchas
 
-- **"Analyzed" is when the analysis ran**: the header shows the result's `meta.generatedAt` (`frontend/src/App.js:1672`, `frontend/src/analyzedAt.js`), which the backend stamps in UTC (`backend/app.py:656`), so a saved or shared report keeps its original date. Older results stamped without a zone are read as UTC; a result with no stamp shows no date rather than today's.
+- **"Analyzed" is when the analysis ran**: the header shows the result's `meta.generatedAt` (`frontend/src/App.js:1672`, `frontend/src/analyzedAt.js`), which the backend stamps in UTC (`backend/app.py:673`), so a saved or shared report keeps its original date. Older results stamped without a zone are read as UTC; a result with no stamp shows no date rather than today's.
 - **Older results have older shapes**: `isCurrentShape` skips defensive data saved before the current format (`frontend/src/DefensivePanel.js:17`), and rows fall back to "Off cooldown when they died".
 - **Cheat deaths need the flag**: the matrix only adds cheat deaths when `config.enableCheatDeath` is true (`frontend/src/App.js:1198`), which is synced from `meta.cheatDeathEnabled` after a run (`frontend/src/App.js:763`).
 - **Debug globals**: a finished run sets `window.deathTrackerData` and export helpers on `window` (`frontend/src/App.js:769`).
