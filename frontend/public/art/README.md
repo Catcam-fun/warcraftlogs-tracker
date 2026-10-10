@@ -18,4 +18,4 @@ Everything here is committed and served by the site itself; nothing is hotlinked
 The footer carries the Blizzard non-affiliation, trademark and key-art notice.
 If the site ever becomes commercial, revisit the use of this art.
 
-Full detail: `docs/atlas`, page "Landing Page and Art" (frontend).
+Where each piece is used: `frontend/src/LandingPage.js` (backgrounds, boss strip), `frontend/src/AnalyzeConfig.js` (raid cards and lineups) and `frontend/src/App.js` (the loader).
