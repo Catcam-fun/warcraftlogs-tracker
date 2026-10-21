@@ -1,6 +1,7 @@
 import unittest
 from unittest import mock
 
+import testenv  # noqa: F401  (before any backend import)
 import cache
 import supabase_client
 
