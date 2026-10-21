@@ -1726,15 +1726,17 @@ export default function WarcraftLogsApp() {
                 <div className="fpx-flabel" style={{ marginLeft: '4px' }}>
                   <Filter size={14} /> Boss filters
                 </div>
-                {sortBossesByOrder(Object.keys(data.bossParticipation), config.selectedRaid).map(boss => (
-                  <button
-                    key={boss}
-                    onClick={() => toggleBoss(boss)}
-                    className={`fpx-chip${selectedBosses.has(boss) ? ' on' : ''}`}
-                  >
-                    {boss}
-                  </button>
-                ))}
+                <div className="fpx-chiprow">
+                  {sortBossesByOrder(Object.keys(data.bossParticipation), config.selectedRaid).map(boss => (
+                    <button
+                      key={boss}
+                      onClick={() => toggleBoss(boss)}
+                      className={`fpx-chip${selectedBosses.has(boss) ? ' on' : ''}`}
+                    >
+                      {boss}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {/* Minimum Pulls Filter */}
@@ -2114,7 +2116,7 @@ export default function WarcraftLogsApp() {
                     <div key={player} className={`fpx-prow${isExpanded ? ' open' : ''}`}>
                       <div onClick={() => togglePlayer(player)} className="fpx-prow-h">
                         {isExpanded ? <ChevronDown size={14} className="chev" /> : <ChevronRight size={14} className="chev" />}
-                        <div style={{ flex: 1, display: 'flex', alignItems: 'baseline', gap: '7px', flexWrap: 'wrap' }}>
+                        <div className="fpx-pline">
                           <span className="fpx-pname" style={{ color: WOW_CLASS_COLORS[playerClass] || 'var(--fpx-ink)' }}>
                             {player}{characterGroups[player] && characterGroups[player].length > 0 && ' (grouped)'}
                           </span>

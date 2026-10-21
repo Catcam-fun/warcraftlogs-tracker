@@ -47,6 +47,16 @@
 .fpx-atmos.artimg{
   background-size:cover;background-position:center 14%;background-repeat:no-repeat;
   filter:saturate(.94);
+  background-image:var(--bg),var(--bg-fallback);
+}
+/* the browser downloads only the size that matches the screen (set per page load in LandingPage.js) */
+@media (max-aspect-ratio:3/4){
+  .fpx-atmos.artimg{background-image:var(--bg-portrait),var(--bg-fallback)}
+}
+@media (min-aspect-ratio:3/4) and (min-width:2640px),
+       (min-aspect-ratio:3/4) and (min-width:1760px) and (min-resolution:1.5dppx),
+       (min-aspect-ratio:3/4) and (min-width:1320px) and (min-resolution:2dppx){
+  .fpx-atmos.artimg{background-image:var(--bg-xl),var(--bg-fallback)}
 }
 .fpx-atmos.scrim{
   background:
@@ -338,7 +348,7 @@
 .fpx-field label{display:block;font-size:12px;font-weight:600;color:var(--fpx-ink-dim);
   margin-bottom:7px;letter-spacing:.02em}
 /* scoped + !important to override legacy .analysis-shell input !important */
-.fpx-analyze .fpx-field input,
+.fpx-analyze .fpx-field input:not([type=checkbox]),
 .fpx-analyze .fpx-field select,
 .fpx-analyze .fpx-daterow input{
   width:100%;padding:11px 13px;border-radius:9px!important;font-family:var(--fpx-sans);
@@ -348,10 +358,10 @@
   outline:none;transition:.15s var(--fpx-ease);box-sizing:border-box;
 }
 .fpx-analyze .fpx-field input::placeholder{color:var(--fpx-ink-faint)}
-.fpx-analyze .fpx-field input:hover,
+.fpx-analyze .fpx-field input:not([type=checkbox]):hover,
 .fpx-analyze .fpx-field select:hover,
 .fpx-analyze .fpx-daterow input:hover{border-color:rgba(255,255,255,.34)!important}
-.fpx-analyze .fpx-field input:focus,
+.fpx-analyze .fpx-field input:not([type=checkbox]):focus,
 .fpx-analyze .fpx-field select:focus,
 .fpx-analyze .fpx-daterow input:focus{
   border-color:var(--fpx-kill)!important;background:rgba(255,255,255,.08)!important;
@@ -891,3 +901,74 @@ table.fpx-mtx{width:100%;border-collapse:collapse;font-size:12px;
 .fpx-qual{position:absolute;left:-3px;top:-3px;z-index:2;height:15px;width:auto;pointer-events:none;
   filter:drop-shadow(0 0 1px rgba(0,0,0,.9))}
 .fpx-qual-inline{height:13px;width:auto;vertical-align:-1px;margin-right:5px}
+
+/* ============================================================
+   PHONES
+   ============================================================ */
+/* Results boss filters: one group; on phones a single swipeable row */
+.fpx-chiprow{display:contents}
+/* player row header: name · deaths/pulls · rate · tags on one wrapping line */
+.fpx-pline{flex:1;display:flex;align-items:baseline;gap:7px;flex-wrap:wrap;min-width:0}
+/* bottom tab bar: replaces the left rail on phones */
+.fpx-tabbar{display:none}
+
+/* Light mode for phones and touch screens. iOS kills a tab that holds too much
+   graphics memory, and Brave/Safari then reload it in a loop. The heavy parts are
+   the auto-scrolling boss strip (84 tiles, each with a filtered shadow, a drifting
+   glow and a sheen), the rising embers, the blended grain and the backdrop blurs. */
+@media (max-width:760px), (hover:none) and (pointer:coarse){
+  .fpx-embers,.fpx-atmos.grain{display:none}
+  .fpx-atmos.artimg{filter:none}
+  .fpx-land *{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
+  .fpx-boss::after,.fpx-boss::before{display:none}
+  .fpx-boss .art{filter:none}
+  /* the strip becomes a row you swipe: one copy of the tiles, no auto-scroll */
+  .fpx-strip{-webkit-mask-image:none;mask-image:none;overflow:visible}
+  .fpx-track{animation:none;width:auto;overflow-x:auto;scroll-snap-type:x mandatory;
+    -webkit-overflow-scrolling:touch;scrollbar-width:none;padding-bottom:2px}
+  .fpx-track::-webkit-scrollbar{display:none}
+  .fpx-boss.dup{display:none}
+  .fpx-track .fpx-boss{scroll-snap-align:start}
+}
+
+@media (max-width:760px){
+  .fpx-tabbar{display:grid;grid-template-columns:repeat(4,1fr);position:fixed;left:0;right:0;bottom:0;
+    z-index:60;background:#070910;border-top:1px solid var(--fpx-line-strong);
+    padding:4px 4px calc(4px + env(safe-area-inset-bottom))}
+  .fpx-tab{display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 0 5px;
+    background:none;border:none;cursor:pointer;color:var(--fpx-ink-dim);
+    font-family:var(--fpx-sans);font-size:10.5px;font-weight:600;letter-spacing:.02em}
+  .fpx-tab svg{width:20px;height:20px}
+  .fpx-tab.on{color:var(--fpx-kill)}
+  .fpx-land{padding-bottom:calc(62px + env(safe-area-inset-bottom))}
+
+  .fpx-main{padding:18px 18px 36px}
+  .fpx-footwrap{padding:0 18px}
+  .fpx-top{flex-wrap:wrap;gap:12px;margin-bottom:30px}
+  .fpx-crumbs{white-space:nowrap}
+  .fpx-auth{flex-wrap:wrap;gap:8px}
+  .fpx-hero{padding-top:28px}
+  .fpx-strip{margin:36px 0 44px}
+  .fpx-track .fpx-boss{width:150px;height:128px}
+
+  /* Analyze */
+  .fpx-lineup{display:flex;overflow-x:auto;gap:8px;scroll-snap-type:x mandatory;
+    scrollbar-width:none;margin:0 -18px;padding:0 18px}
+  .fpx-lineup::-webkit-scrollbar{display:none}
+  .fpx-lineup .fpx-boss{flex:none;width:104px;height:104px;scroll-snap-align:start}
+  .fpx-runrow .fpx-btn{width:100%;justify-content:center}
+
+  /* Results */
+  .fpx-chiprow{display:flex;gap:8px;flex-basis:100%;overflow-x:auto;scrollbar-width:none;
+    margin:0 -16px;padding:2px 16px}
+  .fpx-chiprow::-webkit-scrollbar{display:none}
+  .fpx-search{margin-left:0;min-width:0;flex-basis:100%}
+  .fpx-mtx .fpx-rowhide{display:none}
+  .fpx-pline .fpx-pdot{display:none}
+  .fpx-pline::before{content:"";order:3;flex-basis:100%;height:0}
+  .fpx-pline .fpx-pname{order:1;flex:1 1 auto;min-width:0}
+  .fpx-pline .fpx-prate{order:2}
+  .fpx-pline .fpx-pmeta{order:4}
+  .fpx-pline .fpx-pcheat{order:5}
+  .fpx-pline .fpx-pdef{order:6}
+}
