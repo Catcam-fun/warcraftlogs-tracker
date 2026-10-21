@@ -93,6 +93,11 @@ const BACKGROUNDS = [
   'cinematic-1', 'cinematic-2', 'cinematic-3', 'cinematic-4', 'immolation-1',
   'supremacy-1', 'supremacy-2', 'supremacy-3', 'supremacy-4',
 ];
+/* Every background also has portrait/<slug>.jpg (upright phones and tablets);
+   the ones listed here also have xl/<slug>.jpg (3840px, for big screens).
+   Both are made by frontend/scripts/make-background-sizes.py. */
+const XL_BACKGROUNDS = new Set([]);
+const artUrl = (path) => `url(${process.env.PUBLIC_URL}/art/backgrounds/${path}.jpg)`;
 
 const UPDATES = [
   ['Defensives judged on the whole burst', 'Each death replays the seconds before it, so a big hit followed by a finishing tick counts; analyses run about twice as fast.', 'OCT 1'],
@@ -123,9 +128,10 @@ export default function LandingPage({
       <div
         className="fpx-atmos artimg"
         style={{
-          backgroundImage:
-            `url(${process.env.PUBLIC_URL}/art/backgrounds/${bg}.jpg), ` +
-            `url(${process.env.PUBLIC_URL}/art/landing-keyart.svg)`,
+          '--bg': artUrl(bg),
+          '--bg-portrait': artUrl(`portrait/${bg}`),
+          '--bg-xl': artUrl(XL_BACKGROUNDS.has(bg) ? `xl/${bg}` : bg),
+          '--bg-fallback': `url(${process.env.PUBLIC_URL}/art/landing-keyart.svg)`,
         }}
       />
       <div className="fpx-atmos scrim" />
@@ -206,7 +212,7 @@ export default function LandingPage({
                   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
                   return (
                     <div
-                      className={`fpx-boss${COUNCIL.has(slug) ? ' council' : ''}`} key={i}
+                      className={`fpx-boss${COUNCIL.has(slug) ? ' council' : ''}${i >= BOSS_STRIP.length ? ' dup' : ''}`} key={i}
                       style={{ '--img': `url(${process.env.PUBLIC_URL}/art/bosses/${slug}.webp)` }}
                     >
                       <div className="art" />
