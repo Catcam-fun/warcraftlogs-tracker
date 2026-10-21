@@ -2,6 +2,7 @@ import os
 import unittest
 from unittest import mock
 
+import testenv  # noqa: F401  (before any backend import)
 from checks.registry import CHECKS, select
 from checks.verdict import PASS, Verdict, exit_code, fail, format_lines, skip
 from checks.rules_counting import counts
