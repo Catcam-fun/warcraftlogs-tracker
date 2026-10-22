@@ -33,6 +33,7 @@ import defensives
 import boss_spell_text
 from features import CHEAT_DEATH_ABILITY_IDS
 from auth import require_user, verify_token, forget_token, _bearer_token
+import user_errors
 from cache import (report_meta_cache, report_fights_cache, report_deaths_cache as deaths_lru,
                    report_defensive_cache as defensive_lru, report_recap_cache as recap_lru, flush_writes)
 from ratelimit import RateLimiter, limit
@@ -158,7 +159,9 @@ def analyze():
             try:
                 token = get_access_token(client_id, client_secret)
             except Exception as e:
-                yield f"data: {json.dumps({'error': f'Authentication failed: {str(e)}'})}\n\n"
+                # Details stay in the log; the visitor gets a plain summary (user_errors.py).
+                print(f"WarcraftLogs sign-in failed: {e}")
+                yield f"data: {json.dumps({'error': user_errors.for_sign_in(e)})}\n\n"
                 return
             
             # Get guild roster for filtering (skipped when the roster filter is off)
@@ -771,7 +774,7 @@ def analyze():
             print(f"Error in analyze: {str(e)}")
             import traceback
             traceback.print_exc()
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            yield f"data: {json.dumps({'error': user_errors.for_analysis(e)})}\n\n"
     
     return Response(with_heartbeat(generate()), mimetype='text/event-stream', headers={
         'Cache-Control': 'no-cache',

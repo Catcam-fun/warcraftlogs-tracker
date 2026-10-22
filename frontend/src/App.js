@@ -23,6 +23,7 @@ import { prefersReducedMotion } from './reducedMotion';
 import { shareNote } from './shareNote';
 import { DefensiveSummaryChip, DefensiveTopUnused, summarizeDefensives } from './DefensivePanel';
 import { DeathRow } from './DeathRow';
+import { friendlyError } from './friendlyError';
 
 
 
@@ -327,7 +328,7 @@ export default function WarcraftLogsApp() {
       if (location.pathname !== '/results') navigate(`/results${location.search}`, { replace: true });
     } catch (err) {
       console.error('[Share] Error loading shared results:', err);
-      setError(`Failed to load shared results: ${err.message}`);
+      setError(friendlyError(err, "Couldn't load the shared results."));
     } finally {
       setLoading(false);
       setLoadingStage('');
@@ -642,7 +643,7 @@ export default function WarcraftLogsApp() {
       setShareWarning(shareNote(body));
       setShowShareModal(true);
     } catch (err) {
-      setShareError(`Couldn't create a share link: ${err.message}`);
+      setShareError(friendlyError(err, "Couldn't create a share link. Please try again."));
     } finally {
       setSharingData(false);
     }
@@ -955,7 +956,7 @@ export default function WarcraftLogsApp() {
       if (err.name === 'AbortError') {
         setError('Analysis cancelled');
       } else {
-        setError(err.message);
+        setError(friendlyError(err, 'Something went wrong while running the analysis. Please try again.'));
       }
       setLoadingStage('');
       setLoading(false);

@@ -11,6 +11,7 @@ import hashlib
 import threading
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from user_errors import UpstreamError
 
 # API Endpoints. Traffic goes through our WarcraftLogs proxy, whose address is
 # the WCL_PROXY_URL setting (kept out of the repo; the deploy sets it on the
@@ -48,6 +49,7 @@ def make_request_with_retry(method, url, max_retries=MAX_RETRIES, timeout=120, *
     away since retrying can't fix them; 429 and 5xx/network errors back off.
     """
     last_exception = None
+    status = None
     for attempt in range(max_retries + 1):
         try:
             if method.lower() == 'post':
@@ -70,11 +72,12 @@ def make_request_with_retry(method, url, max_retries=MAX_RETRIES, timeout=120, *
                 time.sleep(backoff or min(RETRY_BACKOFF_BASE * (2 ** attempt), RETRY_BACKOFF_MAX))
         except requests.exceptions.RequestException as e:
             last_exception = e
+            status = None
             if attempt < max_retries:
                 backoff = min(RETRY_BACKOFF_BASE * (2 ** attempt), RETRY_BACKOFF_MAX)
                 print(f"[Retry] {type(e).__name__} attempt {attempt + 1}, waiting {backoff}s")
                 time.sleep(backoff)
-    raise Exception(f"Request failed after {attempt + 1} attempt(s): {last_exception}")
+    raise UpstreamError(f"Request failed after {attempt + 1} attempt(s): {last_exception}", status)
 
 def normalize_character_name(name):
     """
@@ -148,7 +151,7 @@ def get_access_token(client_id, client_secret):
             }
         return token
     except Exception as e:
-        raise Exception(f"Failed to get access token: {str(e)}")
+        raise Exception(f"Failed to get access token: {str(e)}") from e
 
 
 def graphql_query(token, query, variables=None, timeout=120, max_retries=3):
@@ -185,7 +188,7 @@ def graphql_query(token, query, variables=None, timeout=120, max_retries=3):
         
         return data.get("data", {})
     except Exception as e:
-        raise Exception(f"GraphQL query failed: {str(e)}")
+        raise Exception(f"GraphQL query failed: {str(e)}") from e
 
 def get_guild_reports(token, guild_name, server, region, start_date=None, end_date=None):
     """Fetch guild reports via V2 GraphQL, scoped server-side by a date window.
@@ -260,7 +263,7 @@ def get_guild_reports(token, guild_name, server, region, start_date=None, end_da
             page += 1
         return out
     except Exception as e:
-        raise Exception(f"Failed to fetch guild reports: {str(e)}")
+        raise Exception(f"Failed to fetch guild reports: {str(e)}") from e
 
 
 def get_guild_roster(token, guild_name, server, region):
