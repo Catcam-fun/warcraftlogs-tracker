@@ -53,9 +53,14 @@
 @media (max-aspect-ratio:3/4){
   .fpx-atmos.artimg{background-image:var(--bg-portrait),var(--bg-fallback)}
 }
-@media (min-aspect-ratio:3/4) and (min-width:2640px),
-       (min-aspect-ratio:3/4) and (min-width:1760px) and (min-resolution:1.5dppx),
-       (min-aspect-ratio:3/4) and (min-width:1320px) and (min-resolution:2dppx){
+/* big screens (in device pixels: wider than 2400 or taller than 1300; the wide
+   cinematic stills are only 916px tall at 2200px, so height counts too) */
+@media (min-aspect-ratio:3/4) and (min-width:2400px),
+       (min-aspect-ratio:3/4) and (min-height:1300px),
+       (min-aspect-ratio:3/4) and (min-resolution:1.5dppx) and (min-width:1600px),
+       (min-aspect-ratio:3/4) and (min-resolution:1.5dppx) and (min-height:867px),
+       (min-aspect-ratio:3/4) and (min-resolution:2dppx) and (min-width:1200px),
+       (min-aspect-ratio:3/4) and (min-resolution:2dppx) and (min-height:650px){
   .fpx-atmos.artimg{background-image:var(--bg-xl),var(--bg-fallback)}
 }
 .fpx-atmos.scrim{

@@ -96,7 +96,12 @@ const BACKGROUNDS = [
 /* Every background also has portrait/<slug>.jpg (upright phones and tablets);
    the ones listed here also have xl/<slug>.jpg (3840px, for big screens).
    Both are made by frontend/scripts/make-background-sizes.py. */
-const XL_BACKGROUNDS = new Set([]);
+const XL_BACKGROUNDS = new Set([
+  'curse-of-ulatek', 'the-mantle-vault', 'the-worldcore', 'the-worldcore-entrance',
+  'against-the-void', 'hope-shall-rise', 'darkness-devours',
+  'cinematic-1', 'cinematic-2', 'cinematic-3', 'cinematic-4', 'immolation-1',
+  'supremacy-1', 'supremacy-2', 'supremacy-3', 'supremacy-4',
+]); // stand-as-one: Blizzard published it at 1920px only
 const artUrl = (path) => `url(${process.env.PUBLIC_URL}/art/backgrounds/${path}.jpg)`;
 
 const UPDATES = [

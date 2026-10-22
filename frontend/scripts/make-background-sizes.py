@@ -22,6 +22,9 @@ import sys
 
 from PIL import Image
 
+# press-kit key art can be huge (Against the Void is 13500x9300)
+Image.MAX_IMAGE_PIXELS = None
+
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'public', 'art', 'backgrounds')
 PORTRAIT = 3 / 4
 XL_WIDTH = 3840
