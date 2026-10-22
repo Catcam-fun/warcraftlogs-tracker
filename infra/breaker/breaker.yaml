@@ -286,5 +286,5 @@ Resources:
 
 Outputs:
   TopicArn:
-    Description: Publish a test message here to try the breaker (infra/README.md).
+    Description: Publish a test message here to try the breaker.
     Value: !Ref Topic
