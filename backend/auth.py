@@ -1,7 +1,10 @@
 """
 auth.py - Verify the caller's Supabase session on protected endpoints.
 
-The frontend sends `Authorization: Bearer <supabase access token>`. We ask
+The frontend sends the Supabase access token in `X-Session-Token` (CloudFront's
+origin access control signs API requests with its own `Authorization` header,
+so the token can't travel there); `Authorization: Bearer <token>` is still
+read for local development and pages loaded before the switch. We ask
 Supabase who that token belongs to (GET /auth/v1/user) instead of trusting a
 user_id from the URL or body, so one user can never read, delete, or save
 data as another. Verified tokens are cached briefly so a burst of requests
@@ -27,6 +30,9 @@ _lock = threading.Lock()
 
 
 def _bearer_token():
+    token = request.headers.get('X-Session-Token', '').strip()
+    if token:
+        return token
     header = request.headers.get('Authorization', '')
     if header.lower().startswith('bearer '):
         return header[7:].strip() or None

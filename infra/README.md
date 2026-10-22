@@ -62,11 +62,12 @@ AWS console and in the repository secrets below.
 | Piece | Where to find it | Settings |
 |---|---|---|
 | API | Lambda function (secret `LAMBDA_FUNCTION`) | Python 3.12, x86_64, handler `run.sh`, layer `LambdaAdapterLayerX86:30`, 3008 MB, 15 min; env vars as in `template.yaml` plus the Supabase keys, `ORIGIN_VERIFY_SECRET` and `WCL_PROXY_URL` (the deploy sets this one) |
-| API URL | the function's URL, on an `api-*` alias of `$LATEST` | auth NONE, RESPONSE_STREAM. If it leaks, run Actions > *Rotate API URL* |
+| API URL | the function's URL, on an `api-*` alias of `$LATEST` | RESPONSE_STREAM. Auth AWS_IAM with CloudFront signing (origin access control `floorpov-api-lambda`) once Actions > *API URL lock* has run; NONE before that. If it leaks, run Actions > *Rotate API URL* |
 | Site files | S3 bucket (secret `SITE_BUCKET`) | private, read by CloudFront only |
 | CDN | CloudFront distribution (secret `CF_DISTRIBUTION_ID`), aliases `floorpov.gg` and `www.floorpov.gg` | origins: the bucket, and `floorpov-api` (the Lambda URL, custom header `X-Origin-Verify`, response and keep-alive timeouts 60 s); behaviors: `/api/*` (CachingDisabled, AllViewerExceptHostHeader, no compression, viewer-request function `floorpov-viewer-ip`) and Default (`floorpov-spa-rewrite`) |
 | Warm-up | EventBridge schedule | every 5 min, payload `{"source": "floorpov.warm"}` |
 | Budget | AWS Budgets | $10/month, email alerts at 50/80/100% |
+| Circuit breaker | CloudFormation stack `floorpov-breaker` (`infra/breaker/breaker.yaml`) | see *Cost guards* below |
 
 Repository secrets (Settings > Secrets and variables > Actions), all read by
 `deploy-aws.yml`:
@@ -80,8 +81,9 @@ Repository secrets (Settings > Secrets and variables > Actions), all read by
 
 The account is on AWS's Free account plan (credits; no charges until it is
 upgraded). Account-wide Lambda concurrency is 10, so reserved concurrency
-can't be set (that 10 is itself the ceiling); a budget kill switch, once the
-account is upgraded, should switch the function URL's auth to AWS_IAM instead.
+can't be set (that 10 is itself the ceiling). The cost guards below keep a
+flood from burning the credits (the account closes when they run out) or,
+once upgraded, from running up a bill.
 
 ### Deploying an update by hand
 
@@ -95,3 +97,61 @@ account is upgraded, should switch the function URL's auth to AWS_IAM instead.
 - Sessions read the deploy key from `FLOORPOV_AWS_ACCESS_KEY_ID` /
   `FLOORPOV_AWS_SECRET_ACCESS_KEY` (environment variables; the plain
   `AWS_*` names are taken by the sandbox's proxy placeholders).
+
+## Cost guards
+
+### Art caching
+
+The deploy uploads `art/` (backgrounds, boss tiles, loader video) with
+`Cache-Control: public,max-age=604800`, so browsers keep it a week instead of
+asking CloudFront again on every visit (`deploy-aws.yml`). A changed picture
+reaches returning visitors within a week; give it a new file name to make it
+immediate.
+
+### API URL lock
+
+Actions > *API URL lock* > Run workflow > `lock` (`infra/api-url-lock.sh`).
+CloudFront then signs every `/api` request (origin access control) and the
+Lambda URL refuses anything unsigned, so requests sent straight to the URL are
+turned away by AWS before the function runs and cost nothing. The browser sends
+its session in `X-Session-Token` (CloudFront's signature takes the
+`Authorization` header) and a SHA-256 of every request body in
+`x-amz-content-sha256`, which Lambda requires on signed POSTs
+(`frontend/src/api.js`). The workflow checks the API through floorpov.gg after
+each step and undoes the step if it stops answering. Run it again with
+`unlock` to go back to a public URL guarded by `X-Origin-Verify` only.
+*Rotate API URL* keeps a locked URL locked.
+
+### Circuit breaker
+
+`infra/breaker/breaker.yaml`, a CloudFormation stack (it uses SNS, CloudWatch
+and Budgets, which the deploy role can't manage, so it's created by hand once).
+
+- **Triggers**, all on the SNS topic `floorpov-breaker`: CloudFront requests
+  over `RequestsPerMinute` (default 5,000) in 2 of 3 minutes; API Lambda
+  invocations over `ApiCallsPerMinute` (default 300) in 2 of 3 minutes; and
+  this month's actual cost over `MonthlyBudget` (default $10), credits left out.
+  Costs reach AWS Budgets 8-12 hours late, so the two alarms do the fast work.
+- **What it does**: emails you, and the `floorpov-breaker` Lambda
+  (`infra/breaker/handler.js`) sets the API Lambda's reserved concurrency to 0
+  (it can't run) and disables the CloudFront distribution (floorpov.gg is
+  down). Nothing turns it back on by itself.
+- **Reset**: Actions > *Reset breaker* > Run workflow. It removes the API's
+  reserved concurrency and re-enables the distribution (about 5 minutes). By
+  hand: Lambda console > the API function > Configuration > Concurrency > Edit
+  > "Use unreserved account concurrency", and CloudFront console > the
+  distribution > Enable. A budget trip doesn't fire again in the same month
+  after a reset; the alarms re-arm once traffic is back to normal.
+- **Install** (us-east-1): CloudFormation > Create stack > Upload
+  `infra/breaker/breaker.yaml`, stack name `floorpov-breaker`, with the
+  distribution ID and API function name (the `CF_DISTRIBUTION_ID` and
+  `LAMBDA_FUNCTION` secrets) and your email. Tick the IAM acknowledgement.
+  Confirm the subscription link AWS emails you.
+- **Test** (switches the site off for a few minutes): CloudFormation > the
+  stack > Outputs > `TopicArn`, then
+  `aws sns publish --region us-east-1 --topic-arn <TopicArn> --message "breaker test"`.
+  floorpov.gg goes down within a few minutes (the breaker's log group
+  `/aws/lambda/floorpov-breaker` shows what it did); then run *Reset breaker*.
+- **Code**: edit `handler.js`, then `node infra/breaker/build.mjs` copies it
+  into the template; `node --test infra/breaker/handler.test.mjs` (run by the
+  deploy) checks both.

@@ -1,4 +1,4 @@
-import { apiFetch, stripSecrets, loadLocalCredentials, saveLocalCredentials } from './api';
+import { apiFetch, bodyHash, stripSecrets, loadLocalCredentials, saveLocalCredentials } from './api';
 import { supabase } from './supabaseClient';
 
 jest.mock('./supabaseClient', () => ({
@@ -6,6 +6,12 @@ jest.mock('./supabaseClient', () => ({
 }));
 
 const session = (s) => supabase.auth.getSession.mockResolvedValue({ data: { session: s } });
+
+// jsdom has no Web Crypto or TextEncoder; Node's are the same APIs the browser has.
+const { webcrypto } = require('crypto');
+const { TextEncoder } = require('util');
+Object.defineProperty(globalThis, 'crypto', { value: webcrypto, configurable: true });
+globalThis.TextEncoder = TextEncoder;
 
 beforeEach(() => {
   global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ success: true }) });
@@ -17,10 +23,24 @@ test('stripSecrets removes WarcraftLogs credentials only', () => {
   expect(cfg.clientSecret).toBe('secret'); // original untouched
 });
 
-test('authenticated calls carry the session token', async () => {
+test('authenticated calls carry the session token outside Authorization', async () => {
   session({ access_token: 'tok' });
   await apiFetch('/api/saved', { auth: true });
-  expect(global.fetch.mock.calls[0][1].headers.Authorization).toBe('Bearer tok');
+  const { headers } = global.fetch.mock.calls[0][1];
+  expect(headers['X-Session-Token']).toBe('tok');
+  expect(headers.Authorization).toBeUndefined(); // CloudFront's signature goes there
+});
+
+test('bodies carry the SHA-256 Lambda needs behind CloudFront', async () => {
+  // The standard SHA-256 test vector for "abc".
+  expect(await bodyHash('abc')).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+  session(null);
+  await apiFetch('/api/share', { method: 'POST', auth: 'optional', body: { a: 1 } });
+  const { headers, body } = global.fetch.mock.calls[0][1];
+  expect(headers['x-amz-content-sha256']).toBe(await bodyHash(body));
+  global.fetch.mockClear();
+  await apiFetch('/api/shared/abc');
+  expect(global.fetch.mock.calls[0][1].headers['x-amz-content-sha256']).toBeUndefined();
 });
 
 test('authenticated calls fail fast without a session', async () => {
@@ -34,7 +54,7 @@ test('optional auth still sends anonymous requests', async () => {
   session(null);
   const res = await apiFetch('/api/share', { method: 'POST', auth: 'optional', body: { a: 1 } });
   expect(res.ok).toBe(true);
-  expect(global.fetch.mock.calls[0][1].headers.Authorization).toBeUndefined();
+  expect(global.fetch.mock.calls[0][1].headers['X-Session-Token']).toBeUndefined();
 });
 
 test('network failures resolve with a readable error', async () => {

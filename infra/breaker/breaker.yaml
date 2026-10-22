@@ -1,0 +1,290 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Floor Pov circuit breaker: switches floorpov.gg off when traffic or spend
+  gets abnormal, so a flood can't run up the bill (or burn the account's credits).
+
+# How it works
+#   Three triggers publish to one SNS topic (floorpov-breaker):
+#   - Requests alarm (fast): CloudFront requests above RequestsPerMinute in 2 of
+#     3 minutes.
+#   - API calls alarm (fast): API Lambda invocations above ApiCallsPerMinute in
+#     2 of 3 minutes.
+#   - Budget (slow): this month's actual cost passes MonthlyBudget dollars.
+#     Credits are left out (IncludeCredit false), so on the Free account plan it
+#     counts usage the credits paid for. AWS updates costs only every 8-12 hours,
+#     which is why the alarms exist.
+#   The topic emails AlertEmail (confirm the subscription link AWS sends) and
+#   runs the floorpov-breaker Lambda, which stops the API Lambda (reserved
+#   concurrency 0) and disables the CloudFront distribution. The site is then
+#   down until it's reset; nothing turns it back on by itself.
+#
+# Recovery
+#   GitHub > Actions > "Reset breaker" > Run workflow. It removes the API's
+#   reserved concurrency and re-enables the distribution (about 5 minutes).
+#   By hand instead: Lambda console > the API function > Configuration >
+#   Concurrency > Edit > "Use unreserved account concurrency"; CloudFront
+#   console > the distribution > Enable.
+#
+# Install (once, in us-east-1, where CloudFront's metrics live):
+#   CloudFormation > Create stack > Upload this file. Stack name: floorpov-breaker.
+#   Parameters: the distribution ID and API function name (repository secrets
+#   CF_DISTRIBUTION_ID and LAMBDA_FUNCTION), and your email.
+#   The Lambda code below is generated from infra/breaker/handler.js by
+#   `node infra/breaker/build.mjs`; edit handler.js, not this copy.
+
+Parameters:
+  DistributionId:
+    Type: String
+    Description: The CloudFront distribution that serves floorpov.gg.
+  ApiFunctionName:
+    Type: String
+    Description: The API's Lambda function name.
+  AlertEmail:
+    Type: String
+    Description: Where the breaker's alerts go.
+  RequestsPerMinute:
+    Type: Number
+    Default: 5000
+    Description: CloudFront requests per minute that trip the breaker.
+  ApiCallsPerMinute:
+    Type: Number
+    Default: 300
+    Description: API Lambda invocations per minute that trip the breaker.
+  MonthlyBudget:
+    Type: Number
+    Default: 10
+    Description: Monthly cost in USD that trips the breaker.
+
+Resources:
+  Topic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: floorpov-breaker
+
+  TopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics: [!Ref Topic]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AlarmsAndBudgetsOnly
+            Effect: Allow
+            Principal:
+              Service: [cloudwatch.amazonaws.com, budgets.amazonaws.com]
+            Action: sns:Publish
+            Resource: !Ref Topic
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+
+  EmailSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref Topic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  RequestsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: floorpov-breaker-requests
+      AlarmDescription: floorpov.gg is getting far more requests than usual; the breaker switches the site off.
+      Namespace: AWS/CloudFront
+      MetricName: Requests
+      Dimensions:
+        - Name: DistributionId
+          Value: !Ref DistributionId
+        - Name: Region
+          Value: Global
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 2
+      Threshold: !Ref RequestsPerMinute
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref Topic]
+
+  ApiCallsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: floorpov-breaker-api-calls
+      AlarmDescription: The API Lambda is being called far more than usual; the breaker switches the site off.
+      Namespace: AWS/Lambda
+      MetricName: Invocations
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ApiFunctionName
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 2
+      Threshold: !Ref ApiCallsPerMinute
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref Topic]
+
+  Budget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: floorpov-breaker
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref MonthlyBudget
+          Unit: USD
+        CostTypes:
+          IncludeCredit: false
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref Topic
+            - SubscriptionType: EMAIL
+              Address: !Ref AlertEmail
+
+  BreakerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/floorpov-breaker
+      RetentionInDays: 14
+
+  BreakerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: switch-the-site-off
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: DisableTheDistribution
+                Effect: Allow
+                Action:
+                  - cloudfront:GetDistributionConfig
+                  - cloudfront:UpdateDistribution
+                Resource: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${DistributionId}'
+              - Sid: StopTheApi
+                Effect: Allow
+                Action: lambda:PutFunctionConcurrency
+                Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${ApiFunctionName}'
+              - Sid: OwnLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub '${BreakerLogGroup.Arn}'
+
+  # No reserved concurrency: this account's Lambda limit is 10 in total, and
+  # AWS refuses a reservation that leaves fewer than 10 unreserved.
+  Breaker:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: floorpov-breaker
+      Description: Switches floorpov.gg off when the breaker topic fires.
+      Runtime: nodejs22.x
+      Architectures: [arm64]
+      MemorySize: 128
+      Timeout: 30
+      Handler: index.handler
+      Role: !GetAtt BreakerRole.Arn
+      LoggingConfig:
+        LogGroup: !Ref BreakerLogGroup
+      Environment:
+        Variables:
+          DISTRIBUTION_ID: !Ref DistributionId
+          API_FUNCTION: !Ref ApiFunctionName
+      Code:
+        ZipFile: |
+          // generated from infra/breaker/handler.js
+          // Floor Pov circuit breaker (infra/breaker/breaker.yaml). Any message on the
+          // breaker topic, from a traffic alarm or the budget, stops the API Lambda
+          // (reserved concurrency 0) and disables the CloudFront distribution.
+          // Reset: GitHub Actions > "Reset breaker".
+          'use strict';
+
+          // Alarm messages are JSON; budget messages are plain text. Only an alarm
+          // going back to OK is ignored; anything else trips.
+          function isRecovery(message) {
+            try { return JSON.parse(message).NewStateValue === 'OK'; } catch { return false; }
+          }
+
+          function makeHandler({ cf, lambda, distId, apiFunction, log = console.log }) {
+            return async (event) => {
+              const messages = (event.Records || []).map((r) => (r.Sns && r.Sns.Message) || '');
+              if (messages.length && messages.every(isRecovery)) {
+                log('Alarm back to OK: nothing to do.');
+                return { tripped: false };
+              }
+              log('Tripping on: ' + messages.map((m) => m.slice(0, 300)).join(' | '));
+              const errors = [];
+              try {
+                await lambda.putFunctionConcurrency({ FunctionName: apiFunction, ReservedConcurrentExecutions: 0 });
+                log('API stopped (reserved concurrency 0).');
+              } catch (e) {
+                errors.push(e);
+                log('Stopping the API failed: ' + e.message);
+              }
+              try {
+                const { DistributionConfig: config, ETag } = await cf.getDistributionConfig({ Id: distId });
+                if (!config.Enabled) {
+                  log('CloudFront already disabled.');
+                } else {
+                  config.Enabled = false;
+                  await cf.updateDistribution({ Id: distId, IfMatch: ETag, DistributionConfig: config });
+                  log('CloudFront disabled.');
+                }
+              } catch (e) {
+                errors.push(e);
+                log('Disabling CloudFront failed: ' + e.message);
+              }
+              if (errors.length) throw errors[0]; // the failed delivery is retried
+              return { tripped: true };
+            };
+          }
+
+          exports.isRecovery = isRecovery;
+          exports.makeHandler = makeHandler;
+          exports.handler = (event) => {
+            // The AWS SDK ships with the Lambda Node.js runtime.
+            const { CloudFront } = require('@aws-sdk/client-cloudfront');
+            const { Lambda } = require('@aws-sdk/client-lambda');
+            return makeHandler({
+              cf: new CloudFront({}),
+              lambda: new Lambda({}),
+              distId: process.env.DISTRIBUTION_ID,
+              apiFunction: process.env.API_FUNCTION,
+            })(event);
+          };
+
+  BreakerSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref Topic
+      Protocol: lambda
+      Endpoint: !GetAtt Breaker.Arn
+
+  BreakerInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref Breaker
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref Topic
+
+Outputs:
+  TopicArn:
+    Description: Publish a test message here to try the breaker (infra/README.md).
+    Value: !Ref Topic

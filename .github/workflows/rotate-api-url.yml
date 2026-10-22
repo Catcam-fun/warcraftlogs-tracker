@@ -38,25 +38,50 @@ jobs:
 
       - name: New alias and function URL
         run: |
-          echo "::add-mask::$(aws sts get-caller-identity --query Account --output text)"
+          acct=$(aws sts get-caller-identity --query Account --output text)
+          echo "::add-mask::$acct"
+          # Locked (API URL lock workflow): CloudFront signs requests to the
+          # API origin, so the new URL takes signed requests from CloudFront only.
+          oac=$(aws cloudfront get-distribution-config --id "$DISTRIBUTION" \
+            --query "DistributionConfig.Origins.Items[?Id=='$ORIGIN_ID'].OriginAccessControlId | [0]" --output text)
+          if [ -n "$oac" ] && [ "$oac" != None ]; then auth=AWS_IAM; else auth=NONE; fi
           alias="api-$(date -u +%Y%m%d%H%M%S)"
           aws lambda create-alias --function-name "$FUNCTION" --name "$alias" \
             --function-version '$LATEST' > /dev/null
           url=$(aws lambda create-function-url-config --function-name "$FUNCTION" \
-            --qualifier "$alias" --auth-type NONE --invoke-mode RESPONSE_STREAM \
+            --qualifier "$alias" --auth-type "$auth" --invoke-mode RESPONSE_STREAM \
             --query FunctionUrl --output text)
           echo "::add-mask::$url"
-          aws lambda add-permission --function-name "$FUNCTION" --qualifier "$alias" \
-            --statement-id FunctionURLAllowPublicAccess --action lambda:InvokeFunctionUrl \
-            --principal '*' --function-url-auth-type NONE > /dev/null
-          aws lambda add-permission --function-name "$FUNCTION" --qualifier "$alias" \
-            --statement-id FunctionURLInvokeAllowPublicAccess --action lambda:InvokeFunction \
-            --principal '*' --invoked-via-function-url > /dev/null
+          if [ "$auth" = AWS_IAM ]; then
+            src="arn:aws:cloudfront::$acct:distribution/$DISTRIBUTION"
+            aws lambda add-permission --function-name "$FUNCTION" --qualifier "$alias" \
+              --statement-id CloudFrontInvokeFunctionUrl --action lambda:InvokeFunctionUrl \
+              --principal cloudfront.amazonaws.com --source-arn "$src" > /dev/null
+            aws lambda add-permission --function-name "$FUNCTION" --qualifier "$alias" \
+              --statement-id CloudFrontInvokeFunction --action lambda:InvokeFunction \
+              --principal cloudfront.amazonaws.com --source-arn "$src" > /dev/null
+          else
+            aws lambda add-permission --function-name "$FUNCTION" --qualifier "$alias" \
+              --statement-id FunctionURLAllowPublicAccess --action lambda:InvokeFunctionUrl \
+              --principal '*' --function-url-auth-type NONE > /dev/null
+            aws lambda add-permission --function-name "$FUNCTION" --qualifier "$alias" \
+              --statement-id FunctionURLInvokeAllowPublicAccess --action lambda:InvokeFunction \
+              --principal '*' --invoked-via-function-url > /dev/null
+          fi
           echo "NEW_ALIAS=$alias" >> "$GITHUB_ENV"
           echo "NEW_URL=$url" >> "$GITHUB_ENV"
+          echo "NEW_AUTH=$auth" >> "$GITHUB_ENV"
 
       - name: Check the new URL before switching
         run: |
+          if [ "$NEW_AUTH" = AWS_IAM ]; then
+            # Only CloudFront's signed requests get in; they're checked
+            # through floorpov.gg after the switch below.
+            code=$(curl -s -o /dev/null -w '%{http_code}' "${NEW_URL}api/health")
+            [ "$code" = 403 ] || { echo "locked URL answered an unsigned request: $code"; exit 1; }
+            echo "new URL refuses unsigned requests"
+            exit 0
+          fi
           for i in 1 2 3 4 5 6; do
             code=$(curl -s -o /dev/null -w '%{http_code}' "${NEW_URL}api/health") && [ "$code" = 200 ] && break
             sleep 10
