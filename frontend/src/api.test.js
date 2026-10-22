@@ -10,8 +10,8 @@ const session = (s) => supabase.auth.getSession.mockResolvedValue({ data: { sess
 // jsdom has no Web Crypto or TextEncoder; Node's are the same APIs the browser has.
 const { webcrypto } = require('crypto');
 const { TextEncoder } = require('util');
-Object.defineProperty(globalThis, 'crypto', { value: webcrypto, configurable: true });
-globalThis.TextEncoder = TextEncoder;
+Object.defineProperty(window, 'crypto', { value: webcrypto, configurable: true });
+window.TextEncoder = TextEncoder;
 
 beforeEach(() => {
   global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ success: true }) });

@@ -82,7 +82,7 @@ async function gzipText(text) {
    browser supplies this hash of its body in x-amz-content-sha256. Null where
    the browser has no Web Crypto (plain http other than localhost). */
 export async function bodyHash(payload) {
-  const subtle = globalThis.crypto && globalThis.crypto.subtle;
+  const subtle = typeof window !== 'undefined' && window.crypto && window.crypto.subtle;
   if (!subtle || payload === undefined || payload === null) return null;
   const bytes = typeof payload === 'string' ? new TextEncoder().encode(payload) : payload;
   const digest = new Uint8Array(await subtle.digest('SHA-256', bytes));
