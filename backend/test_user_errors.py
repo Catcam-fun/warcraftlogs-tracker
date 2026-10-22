@@ -8,7 +8,7 @@ import user_errors as ue
 import warcraftlogs
 from user_errors import UpstreamError
 
-LEAKY = "Request failed after 3 attempt(s): 500 Server Error for url: https://proxy.example.workers.dev/oauth/token"
+LEAKY = "Request failed after 3 attempt(s): 500 Server Error for url: https://upstream.example.test/oauth/token"
 
 
 def wrapped(inner, outer="Failed to get access token"):
@@ -61,7 +61,7 @@ class NoInfrastructureInTheStreamTests(unittest.TestCase):
         self.assertEqual(errors, [expected])
         for text in errors:
             self.assertNotIn("http", text)
-            self.assertNotIn("workers", text)
+            self.assertNotIn("example.test", text)
 
     def test_a_failed_sign_in_shows_a_plain_message(self):
         with mock.patch.object(app_module, 'get_access_token',

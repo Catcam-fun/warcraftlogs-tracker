@@ -6,7 +6,7 @@ test('network failures read as a connection problem', () => {
 });
 
 test('messages naming addresses or services are replaced by the fallback', () => {
-  const leaky = new Error('Request failed for url: https://proxy.example.workers.dev/oauth/token');
+  const leaky = new Error('Request failed for url: https://upstream.example.test/oauth/token');
   expect(friendlyError(leaky, 'Please try again.')).toBe('Please try again.');
   expect(friendlyError(new Error('AuthApiError from Supabase'), 'Please try again.')).toBe('Please try again.');
   expect(friendlyError(undefined, 'Please try again.')).toBe('Please try again.');
