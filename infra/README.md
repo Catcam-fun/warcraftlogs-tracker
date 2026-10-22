@@ -144,12 +144,14 @@ and Budgets, which the deploy role can't manage, so it's created by hand once).
   after a reset; the alarms re-arm once traffic is back to normal.
 - **Install** (us-east-1): CloudFormation > Create stack > Upload
   `infra/breaker/breaker.yaml`, stack name `floorpov-breaker`, with the
-  distribution ID and API function name (the `CF_DISTRIBUTION_ID` and
-  `LAMBDA_FUNCTION` secrets) and your email. Tick the IAM acknowledgement.
-  Confirm the subscription link AWS emails you.
-- **Test** (switches the site off for a few minutes): CloudFormation > the
-  stack > Outputs > `TopicArn`, then
-  `aws sns publish --region us-east-1 --topic-arn <TopicArn> --message "breaker test"`.
+  distribution ID (CloudFront console, the ID column of the floorpov.gg
+  distribution), the API function name (Lambda console > Functions) and your
+  email. Tick the IAM acknowledgement. Confirm the subscription link AWS
+  emails you.
+- **Test** (switches the site off for a few minutes): SNS console > Topics >
+  `floorpov-breaker` > Publish message, any text (or
+  `aws sns publish --region us-east-1 --topic-arn <TopicArn> --message "breaker test"`,
+  with `TopicArn` from the stack's Outputs).
   floorpov.gg goes down within a few minutes (the breaker's log group
   `/aws/lambda/floorpov-breaker` shows what it did); then run *Reset breaker*.
 - **Code**: edit `handler.js`, then `node infra/breaker/build.mjs` copies it
