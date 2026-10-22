@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 import { apiFetch, saveLocalCredentials } from './api';
 import { X, Save, Eye, EyeOff, Key, Mail, Trash2 } from 'lucide-react';
+import { friendlyError } from './friendlyError';
 
 export default function Settings({ user, onClose, onCredentialsUpdate, onShowPrivacy }) {
   const [loading, setLoading] = useState(false);
@@ -110,7 +111,7 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
         setMessage('');
       }, 3000);
     } catch (err) {
-      setMessage(err.message || 'Error saving credentials');
+      setMessage(friendlyError(err, "Couldn't save your credentials. Please try again."));
     } finally {
       setLoading(false);
     }
@@ -147,7 +148,7 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
         setPasswordMessage('');
       }, 3000);
     } catch (err) {
-      setPasswordMessage(err.message || 'Error updating password');
+      setPasswordMessage(friendlyError(err, "Couldn't update your password. Please try again."));
     } finally {
       setPasswordLoading(false);
     }
@@ -178,7 +179,7 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
         setEmailMessage('');
       }, 5000);
     } catch (err) {
-      setEmailMessage(err.message || 'Error updating email');
+      setEmailMessage(friendlyError(err, "Couldn't update your email. Please try again."));
     } finally {
       setEmailLoading(false);
     }
@@ -211,7 +212,7 @@ export default function Settings({ user, onClose, onCredentialsUpdate, onShowPri
       }, 1000);
     } catch (err) {
       console.error('[Delete Account] Error:', err);
-      setDeleteMessage(err.message || 'Error deleting account. Please contact support.');
+      setDeleteMessage(friendlyError(err, "Couldn't delete your account. Please try again or contact support."));
     } finally {
       setDeleteLoading(false);
     }

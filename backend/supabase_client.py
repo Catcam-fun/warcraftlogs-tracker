@@ -88,7 +88,7 @@ def _purge_expired_saves(user_id):
 
 def save_analysis(user_id, analysis_name, guild_name, analysis_data, config=None, retention_days=30):
     if not db:
-        return {"error": "Database not configured"}
+        return {"error": "This isn't available right now. Please try again later."}
     try:
         retention_days = max(1, min(int(retention_days or 30), 30))
         _purge_expired_saves(user_id)
@@ -128,7 +128,7 @@ def save_analysis(user_id, analysis_name, guild_name, analysis_data, config=None
 
 def get_user_analyses(user_id):
     if not db:
-        return {"error": "Database not configured"}
+        return {"error": "This isn't available right now. Please try again later."}
     try:
         _purge_expired_saves(user_id)
         result = db.table('saved_analyses').select(
@@ -142,7 +142,7 @@ def get_user_analyses(user_id):
 
 def load_analysis(analysis_id, user_id):
     if not db:
-        return {"error": "Database not configured"}
+        return {"error": "This isn't available right now. Please try again later."}
     try:
         # An expired save is gone, even when opened directly by its id.
         _purge_expired_saves(user_id)
@@ -171,7 +171,7 @@ def load_analysis(analysis_id, user_id):
 
 def delete_analysis(analysis_id, user_id):
     if not db:
-        return {"error": "Database not configured"}
+        return {"error": "This isn't available right now. Please try again later."}
     try:
         db.table('saved_analyses').delete().eq('id', analysis_id).eq('user_id', user_id).execute()
         return {"success": True}
@@ -182,7 +182,7 @@ def delete_analysis(analysis_id, user_id):
 
 def delete_all_analyses(user_id):
     if not db:
-        return {"error": "Database not configured"}
+        return {"error": "This isn't available right now. Please try again later."}
     try:
         db.table('saved_analyses').delete().eq('user_id', user_id).execute()
         return {"success": True}
@@ -417,9 +417,9 @@ def evict_report_cache(budget=None):
 def delete_user_account(user_id):
     """Delete every row we hold for `user_id`, then the auth user itself."""
     if not db:
-        return {"error": "Database not configured"}
+        return {"error": "This isn't available right now. Please try again later."}
     if not SUPABASE_SERVICE_ROLE_KEY:
-        return {"error": "Account deletion isn't configured on the server."}
+        return {"error": "Account deletion isn't available right now. Please try again later."}
 
     errors = []
     for table in ('saved_analyses', 'api_credentials'):

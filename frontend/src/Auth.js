@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase, setSessionOnly } from './supabaseClient';
 import { X } from 'lucide-react';
+import { friendlyError } from './friendlyError';
 
 const TURNSTILE_SITE_KEY = process.env.REACT_APP_TURNSTILE_SITE_KEY || '';
 
@@ -87,7 +88,7 @@ export default function Auth({ onClose }) {
       if (error) throw error;
       setMessage('Success! If that email has an account, a reset link is on its way.');
     } catch (error) {
-      setMessage(error.message || 'An error occurred');
+      setMessage(friendlyError(error, 'Something went wrong. Please try again.'));
     } finally {
       setLoading(false);
       resetCaptcha();
@@ -135,7 +136,7 @@ export default function Auth({ onClose }) {
       }
     } catch (error) {
       console.error('Auth error:', error);
-      setMessage(error.message || 'An error occurred');
+      setMessage(friendlyError(error, 'Something went wrong. Please try again.'));
     } finally {
       setLoading(false);
       resetCaptcha();
