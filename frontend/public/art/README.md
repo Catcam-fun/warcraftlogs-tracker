@@ -8,6 +8,12 @@ Everything here is committed and served by the site itself; nothing is hotlinked
   from `BACKGROUNDS` (both in `src/LandingPage.js`). To add one, drop the file
   here and add its slug to the right list; when a new tier ships, move the
   previous tier's slugs down into `BACKGROUNDS`.
+  - `backgrounds/portrait/` — the middle 3:4 strip of each background at full
+    height, for upright phones and tablets (they only show that strip anyway).
+  - `backgrounds/xl/` — up to 3840px wide, from the press-kit original, for big
+    screens; listed in `XL_BACKGROUNDS`.
+  - Both are made by `frontend/scripts/make-background-sizes.py`; CSS picks one
+    per screen, so a browser downloads only one size.
 - `landing-keyart.svg` — fallback shown only if the chosen background fails to load.
 - `bosses/` — boss tiles for the landing strip and the Analyze page; see
   `bosses/README.md`.
