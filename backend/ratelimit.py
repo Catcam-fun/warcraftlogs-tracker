@@ -16,10 +16,9 @@ from origin import from_cloudfront
 
 
 def client_ip():
-    # On AWS, a CloudFront Function writes the viewer's IP into
-    # X-Viewer-Ip on every /api request, replacing any value the client sent
-    # (infra/template.yaml); it is trusted only on requests carrying the
-    # origin secret, which only CloudFront sends. Headers a client can set
+    # In production the CDN writes the viewer's IP into X-Viewer-Ip on every
+    # /api request, replacing any value the client sent; it is trusted only on
+    # requests carrying the origin secret, which only the CDN sends. Headers a client can set
     # (X-Forwarded-For, CF-Connecting-IP) are never used, so the key can't be
     # forged. Otherwise (local dev), use the socket.
     if from_cloudfront():

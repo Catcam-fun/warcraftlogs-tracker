@@ -1,7 +1,7 @@
 #!/bin/bash
-# Lambda entry point (infra/template.yaml): the Lambda Web Adapter layer starts
-# this, then forwards each request to gunicorn on $PORT. gunicorn.conf.py in
-# this folder supplies the rest of the server settings.
+# Server entry point: the host starts this, then forwards each request to
+# gunicorn on $PORT. gunicorn.conf.py in this folder supplies the rest of the
+# server settings.
 # MALLOC_ARENA_MAX: glibc gives each of the many request and fetch threads its
 # own memory arena and keeps them; two arenas take a Phoenix-sized analysis's
 # peak from about 1.3 GB to about 0.8 GB at the same speed.
