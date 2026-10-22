@@ -178,6 +178,17 @@ class EndpointAuthTests(unittest.TestCase):
         listed.assert_called_once_with('real-user')
         deleted.assert_called_once_with('real-user')
 
+    def test_session_token_header_is_read_before_authorization(self):
+        # Behind CloudFront's origin access control the Authorization header
+        # carries CloudFront's signature, so the session travels in X-Session-Token.
+        with mock.patch.object(auth, 'verify_token', return_value='real-user') as verify, \
+                mock.patch.object(supabase_client, 'get_user_analyses',
+                                  return_value={"success": True, "analyses": []}):
+            self.client.get('/api/saved', headers={'X-Session-Token': 'session',
+                                                   'Authorization': 'AWS4-HMAC-SHA256 Credential=x'})
+            self.client.get('/api/saved', headers={'Authorization': 'Bearer old-page'})
+        self.assertEqual([c.args[0] for c in verify.call_args_list], ['session', 'old-page'])
+
     def test_share_route_reports_memory_only_links_and_real_status(self):
         payload = {"data": ANALYSIS, "config": {}}
         with mock.patch.object(app_module.supabase_client, 'store_share',

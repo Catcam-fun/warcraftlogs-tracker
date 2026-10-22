@@ -76,6 +76,23 @@ async function gzipText(text) {
   return out;
 }
 
+/* Hex SHA-256 of the exact bytes a request sends (a string or bytes).
+   CloudFront signs every API request it forwards to the Lambda URL (origin
+   access control), and Lambda refuses a signed POST or PUT unless the
+   browser supplies this hash of its body in x-amz-content-sha256. Null where
+   the browser has no Web Crypto (plain http other than localhost). */
+export async function bodyHash(payload) {
+  const subtle = globalThis.crypto && globalThis.crypto.subtle;
+  if (!subtle || payload === undefined || payload === null) return null;
+  const bytes = typeof payload === 'string' ? new TextEncoder().encode(payload) : payload;
+  const digest = new Uint8Array(await subtle.digest('SHA-256', bytes));
+  return Array.from(digest, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/* The session travels in X-Session-Token, not Authorization: CloudFront puts
+   its own signature in Authorization on the way to the API. */
+export const SESSION_HEADER = 'X-Session-Token';
+
 export async function apiFetch(path, { auth = false, method = 'GET', body, signal, compress = false } = {}) {
   const headers = {};
   if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -89,9 +106,11 @@ export async function apiFetch(path, { auth = false, method = 'GET', body, signa
   }
   if (auth) {
     const { data: { session } } = await supabase.auth.getSession();
-    if (session) headers.Authorization = `Bearer ${session.access_token}`;
+    if (session) headers[SESSION_HEADER] = session.access_token;
     else if (auth !== 'optional') return { ok: false, status: 401, body: { error: 'Please sign in again.' } };
   }
+  const hash = await bodyHash(payload);
+  if (hash) headers['x-amz-content-sha256'] = hash;
   let response;
   try {
     response = await fetch(`${API_URL}${path}`, {

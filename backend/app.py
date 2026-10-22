@@ -67,7 +67,8 @@ app.config['MAX_CONTENT_LENGTH'] = 25 * 1024 * 1024
 _origins = [o.strip() for o in os.environ.get('ALLOWED_ORIGINS', '*').split(',') if o.strip()]
 CORS(app,
      resources={r"/api/*": {"origins": _origins}},
-     allow_headers=["Content-Type", "Authorization"],
+     allow_headers=["Content-Type", "Content-Encoding", "Authorization", "X-Session-Token",
+                    "x-amz-content-sha256"],
      methods=["GET", "POST", "DELETE", "OPTIONS"])
 
 

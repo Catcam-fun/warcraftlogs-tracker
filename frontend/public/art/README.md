@@ -1,4 +1,4 @@
-# Site art (self-hosted)
+# Site art
 
 Everything here is committed and served by the site itself; nothing is hotlinked.
 

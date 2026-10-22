@@ -12,7 +12,7 @@ import FpxRail from './FpxRail';
 import TermsOfService from './TermsOfService';
 import PrivacyPolicy from './PrivacyPolicy';
 import { MOCK_RESULTS, MOCK_CONFIG } from './mockResults';
-import { API_URL, apiFetch, stripSecrets, loadLocalCredentials, saveLocalCredentials } from './api';
+import { API_URL, apiFetch, bodyHash, SESSION_HEADER, stripSecrets, loadLocalCredentials, saveLocalCredentials } from './api';
 import SavedReports from './SavedReports';
 import SaveReportDialog from './SaveReportDialog';
 import { countedDeaths, isCounted } from './deathCounting';
@@ -718,12 +718,15 @@ export default function WarcraftLogsApp() {
       // Signed-in runs send the session so the server allows cheat-death detection.
       const headers = { 'Content-Type': 'application/json' };
       const { data: { session } } = await supabase.auth.getSession();
-      if (session) headers.Authorization = `Bearer ${session.access_token}`;
+      if (session) headers[SESSION_HEADER] = session.access_token;
+      const requestBody = JSON.stringify(payload);
+      const hash = await bodyHash(requestBody);
+      if (hash) headers['x-amz-content-sha256'] = hash;
 
       const response = await fetch(`${API_URL}/api/analyze`, {
         method: 'POST',
         headers,
-        body: JSON.stringify(payload),
+        body: requestBody,
         signal: controller.signal
       });
 

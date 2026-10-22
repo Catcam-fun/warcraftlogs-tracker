@@ -1,4 +1,4 @@
-# Deploy Floor Pov to the hand-built AWS setup (infra/README.md, "What's live
+# Deploy Floor Pov to the hand-built AWS setup (the private ops notes, "What's live
 # now"): the Flask API to the Lambda function, the React site to the S3
 # bucket, then a CloudFront refresh. Runs on every push to main (a merged pull
 # request), and by hand: Actions > "Deploy to AWS" > Run workflow.
@@ -6,9 +6,9 @@
 # Only the code changes. The function's settings and secrets (Supabase keys,
 # ORIGIN_VERIFY_SECRET) stay as set in the AWS console.
 #
-# Setup, once (infra/README.md): the deploy role from
+# Setup, once (the private ops notes): the deploy role from
 # infra/github-deploy-role.yaml, its RoleArn in the repository secret
-# AWS_DEPLOY_ROLE_ARN, and the resource secrets listed in infra/README.md.
+# AWS_DEPLOY_ROLE_ARN, and the resource secrets listed in the private ops notes.
 # No resource ID lives in this file: this repo and its Actions logs are
 # public, and GitHub hides secret values in the logs.
 name: Deploy to AWS
@@ -61,6 +61,9 @@ jobs:
           npm ci
           CI=true npx react-scripts test --watchAll=false
 
+      - name: Circuit breaker tests
+        run: node --test infra/breaker/handler.test.mjs
+
       - name: Build the API zip and the site
         env:
           REACT_APP_SUPABASE_URL: ${{ secrets.REACT_APP_SUPABASE_URL }}
@@ -68,7 +71,7 @@ jobs:
           REACT_APP_TURNSTILE_SITE_KEY: ${{ secrets.REACT_APP_TURNSTILE_SITE_KEY }}
         run: |
           for v in FUNCTION BUCKET DISTRIBUTION REACT_APP_SUPABASE_URL               REACT_APP_SUPABASE_ANON_KEY REACT_APP_TURNSTILE_SITE_KEY; do
-            [ -n "${!v}" ] || { echo "Repository secret for $v is not set (infra/README.md)"; exit 1; }
+            [ -n "${!v}" ] || { echo "Repository secret for $v is not set (see the private ops notes)"; exit 1; }
           done
           infra/build-api-zip.sh api.zip
           cd frontend && REACT_APP_API_URL=same-origin npm run build
@@ -107,9 +110,14 @@ jobs:
           # (no --delete) so a page loaded before the deploy keeps working.
           aws s3 sync build/static "s3://$BUCKET/static" \
             --cache-control "public,max-age=31536000,immutable"
-          # Everything else (index.html, art, manifest): always revalidate.
+          # Art (backgrounds, boss tiles, loader video) rarely changes: browsers
+          # keep it a week instead of re-asking on every visit. A changed
+          # picture needs a new file name to reach returning visitors sooner.
+          aws s3 sync build/art "s3://$BUCKET/art" \
+            --cache-control "public,max-age=604800" --delete
+          # Everything else (index.html, manifest): always revalidate.
           aws s3 sync build "s3://$BUCKET" \
-            --exclude "static/*" --exclude "_redirects.txt" \
+            --exclude "static/*" --exclude "art/*" --exclude "_redirects.txt" \
             --cache-control "public,max-age=0,must-revalidate" --delete
           aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION" \
             --paths "/*" --query Invalidation.Id --output text
