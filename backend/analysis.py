@@ -39,6 +39,34 @@ def get_main_character(player_name, character_groups):
     return player_name
 
 
+def current_names(metas):
+    """{report ID: {actor ID: newest name}} for players logged under an older name.
+
+    WoW keeps a character's ID through a rename (not a server transfer), and WCL
+    logs it as the player's `gameID`: the same ID and server in the guild's
+    reports under two names is one character, renamed (checked 2026-10-23 on 21
+    renames in three guilds' logs: WCL's own character lookup returns the same
+    character for both names). Its newest name is the one in the latest report.
+    Players without an ID or server (reports cached before they were read) keep
+    the name in their log.
+    """
+    newest = {}   # (gameID, server) -> (report start, name)
+    for meta in metas.values():
+        start = meta.get("report_start") or 0
+        for f in meta.get("friendlies") or []:
+            key = (f.get("gameID"), f.get("server"))
+            if all(key) and f.get("name") and start >= newest.get(key, (-1, None))[0]:
+                newest[key] = (start, f["name"])
+    out = {}
+    for rid, meta in metas.items():
+        for f in meta.get("friendlies") or []:
+            key = (f.get("gameID"), f.get("server"))
+            name = newest.get(key, (None, None))[1] if all(key) else None
+            if name and name != f.get("name"):
+                out.setdefault(rid, {})[f.get("id")] = name
+    return out
+
+
 def get_raid_participants(friendlies):
     """Get normalized participant names."""
     return [normalize_character_name(f["name"]) for f in friendlies]

@@ -478,6 +478,47 @@ class AnalyzeFlowTests(unittest.TestCase):
             self.assertFalse(result["meta"]["rosterOnly"])
             self.assertEqual(roster.call_count, 1)
 
+    def test_renamed_player_counts_under_their_newest_name(self):
+        for c in (app_module.report_meta_cache, app_module.report_fights_cache, app_module.deaths_lru, app_module.defensive_lru, app_module.recap_lru):
+            c._data.clear()
+
+        def fights(token, rid):
+            meta = self._fights(token, rid)
+            # Bob was "Bobold" in the older report: same character (WoW ID and server), renamed since.
+            meta["friendlies"] = [{"id": 10, "name": "Bobold" if rid == "R1" else "Bob", "type": "Mage",
+                                   "gameID": 4242, "server": "Area 52"},
+                                  {"id": 11, "name": "Amy", "type": "Priest", "gameID": 99, "server": "Area 52"}]
+            return meta
+
+        def bulk(_token, rid, *_a, **_k):
+            return {1: [{"timestamp": 5_000, "targetName": "Bobold" if rid == "R1" else "Bob", "targetID": 10,
+                         "abilityName": "Zap"}]}
+        # The roster only knows the newest name.
+        result, _, _ = self._run(fights_effect=fights, bulk_effect=bulk)
+        self.assertEqual(sorted(e["reportId"] for e in result["events"]["Bob"]), ["R1", "R2"])
+        self.assertNotIn("Bobold", result["events"])
+        self.assertEqual(sorted(e["originalCharacter"] for e in result["events"]["Bob"]), ["Bob", "Bobold"])
+        self.assertEqual(len(result["pullParticipation"]["Bob"]), 2)
+        self.assertNotIn("Bobold", result["pullParticipation"])
+        # The hits before the old name's death are still asked for by the name in that log.
+        self.assertIn((1, [(5_000, "Bobold")]), [p for c in self.window_calls for p in c.args[2]])
+
+    def test_alt_group_counts_when_its_main_is_on_the_roster(self):
+        for c in (app_module.report_meta_cache, app_module.report_fights_cache, app_module.deaths_lru, app_module.defensive_lru, app_module.recap_lru):
+            c._data.clear()
+
+        def fights(token, rid):
+            meta = self._fights(token, rid)
+            meta["friendlies"][0]["name"] = "Bobalt"
+            return meta
+
+        def bulk(*_a, **_k):
+            return {1: [{"timestamp": 5_000, "targetName": "Bobalt", "targetID": 10, "abilityName": "Zap"}]}
+        # Bobalt left the guild (not on the roster); the group puts it under Bob, who is.
+        result, _, _ = self._run(fights_effect=fights, bulk_effect=bulk, characterGroups={"Bob": ["Bobalt"]})
+        self.assertEqual(len(result["events"]["Bob"]), 2)
+        self.assertEqual(len(result["pullParticipation"]["Bob"]), 2)
+
     def test_unreadable_report_adds_no_pulls(self):
         for c in (app_module.report_meta_cache, app_module.report_fights_cache, app_module.deaths_lru, app_module.defensive_lru, app_module.recap_lru):
             c._data.clear()

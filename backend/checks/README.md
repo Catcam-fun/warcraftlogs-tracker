@@ -52,7 +52,7 @@ The environment needs `WCL_CLIENT_ID` and `WCL_CLIENT_SECRET` (the WarcraftLogs 
 | --- | --- | --- |
 | deaths | source | Deaths the site reads match WCL's Deaths table |
 | selection | source | The pulls and kills the site kept match the guild's reports on WCL |
-| participation | source | Who was in each kept pull, and who counts as roster, match WCL |
+| participation | source | Who was in each kept pull, and who counts as roster, match WCL (renamed players under their newest name) |
 | state | source | Active, ready and health at death match WCL's auras, casts and Deaths table |
 | durations | source | Defensive durations (catalog + talents) match real aura uses |
 | mitigation | source | Catalog damage reductions match real hits with and without the defensive |
@@ -84,6 +84,7 @@ Each run prints how many WCL points it spent. The budget is 9000 an hour (measur
 
 - Mythic only (difficulty 5).
 - The end-to-end run sends no alt groups (`characterGroups`), so alt merging is not covered.
+- `participation` expects a renamed player under their newest name: the same WoW ID (`gameID`) and server under another name in a later report of the run's pulls is one character. WCL's own character lookup returns the same character for both names (21 renames in three guilds' logs, 2026-10-23).
 - Cheat deaths are switched off in the run.
 - `mitigation` measures each hit taken with a defensive up against the nearest hit without it: from the same enemy unit with the same ability, at most 10 seconds away, with the same other auras listed, and with the player missing within 5% of max health of the same share. Ten seconds judges about twice the rows of three and moved no row by more than the 0.03 it flags at; thirty let the drift back in. A hit that dealt damage without the player's own health on it is left out. Comparing with the pull's typical hit read too low or too high: an effect no hit lists drifted over a Cauldron of Carnage pull (Unending Resolve read 0.37 for 0.40), and Blessing of Dusk, a Protection Paladin passive that grows as health drops and is on no aura list, made Ardent Defender, pressed at low health, read 0.33 for 0.30.
 - An AoE-only reduction (Feint) is judged as the site judges it. WCL marks AoE only on hits that dealt damage, so such a hit keeps its own mark; a hit an absorb took whole is never marked, and takes its ability's status in the report (AoE when a hit of it that dealt damage is marked; unknown, and left out, when the ability never dealt damage in the report). The game counts those hits as AoE: Feint took 0.400 off them on Maar and Esra. A log that marks no hit AoE at all leaves AoE-only reductions out.
