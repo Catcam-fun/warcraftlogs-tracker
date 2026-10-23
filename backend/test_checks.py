@@ -1310,11 +1310,26 @@ class ParticipationTests(unittest.TestCase):
         run = mock.Mock(); run.guild = ("G", "S", "US"); run.token = "t"
         run.result = {"pullParticipation": {"\u00d1anda": ["R_1"], "Bob": ["R_1"]}}
         run.summary.return_value = {"composition": [{"name": "\u00d1anda"}, {"name": "Bob"}, {"name": "Pug"}]}
+        run.meta_for.return_value = {"report_start": 0, "friendlies": []}
         with mock.patch("checks.source_participation.get_guild_roster", return_value={"nanda", "bob"}):
             self.assertEqual(source_participation.check(run).status, "pass")
         with mock.patch("checks.source_participation.get_guild_roster", return_value=set()):
             o = source_participation.check(run)
             self.assertEqual(o.status, "fail"); self.assertIn("pug", o.items[0])
+
+    def test_renamed_player_is_expected_under_their_newest_name(self):
+        run = mock.Mock(); run.guild = ("G", "S", "US"); run.token = "t"
+        run.result = {"pullParticipation": {"Bob": ["R1_1", "R2_1"]}}
+        names = {"R1": "Bobold", "R2": "Bob"}
+        run.summary.side_effect = lambda rid, fid: {"composition": [{"name": names[rid], "id": 10}]}
+        run.meta_for.side_effect = lambda rid: {"report_start": {"R1": 1, "R2": 9}[rid], "friendlies": [
+            {"id": 10, "name": names[rid], "gameID": 4242, "server": "Area 52"}]}
+        with mock.patch("checks.source_participation.get_guild_roster", return_value={"bob"}):
+            self.assertEqual(source_participation.check(run).status, "pass")
+        # Without the shared ID they are two characters, and Bobold isn't on the roster.
+        run.meta_for.side_effect = lambda rid: {"report_start": 0, "friendlies": []}
+        with mock.patch("checks.source_participation.get_guild_roster", return_value={"bob"}):
+            self.assertEqual(source_participation.check(run).status, "fail")
 
     def test_skips(self):
         run = mock.Mock(); run.guild = None

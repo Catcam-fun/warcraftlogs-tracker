@@ -425,7 +425,9 @@ def get_fights(token, report_code):
           masterData {
             actors(type: "Player") {
               id
+              gameID
               name
+              server
               type
               subType
             }
@@ -468,6 +470,9 @@ def get_fights(token, report_code):
             "name": normalize_character_name(a.get("name")),
             "logName": a.get("name"),  # as in the log, for filter expressions
             "type": a.get("subType"),  # class name
+            # The character's WoW ID and server: they stay the same through a rename (current_names).
+            "gameID": a.get("gameID"),
+            "server": a.get("server"),
         } for a in master.get("actors") or [] if a.get("type") == "Player"]
 
         abilities = {a["gameID"]: a["name"] for a in master.get("abilities") or []

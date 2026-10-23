@@ -25,7 +25,7 @@ from warcraftlogs import (
     get_fights, get_report_fights, normalize_character_name
 )
 from analysis import (
-    get_report_deaths_bulk, get_main_character,
+    get_report_deaths_bulk, get_main_character, current_names,
     analyze_fights, dedup_pulls,
     find_mass_death_start, rank_pull_deaths, resolve_report_window, drop_saves_that_died
 )
@@ -181,11 +181,15 @@ def analyze():
                     yield f"data: {json.dumps({'stage': 'roster', 'message': 'Could not fetch guild roster - processing all reports'})}\n\n"
 
             # Only count players who are on the guild roster. With the filter
-            # off, or if the roster couldn't be fetched, everyone counts.
+            # off, or if the roster couldn't be fetched, everyone counts. A
+            # character grouped under a main counts when anyone in its group is
+            # on the roster (an alt that left the guild still counts for its main).
             def is_guild_member(nm):
                 if not guild_roster:
                     return True
-                return normalize_character_name(nm or "").lower() in guild_roster
+                main = get_main_character(nm, character_groups)
+                return any(normalize_character_name(n or "").lower() in guild_roster
+                           for n in (nm, main, *(character_groups.get(main) or [])))
 
             # Get guild reports. The tier's hard date window scopes the fetch
             # (user dates may narrow it but never widen past the tier); we no
@@ -227,13 +231,16 @@ def analyze():
                 return rep, light
 
             def fetch_report_meta(rid):
+                # "actor-ids": players carry their WoW ID and server (current_names), so rows
+                # cached without them are not reused.
+                meta_key = (rid, "actor-ids")
                 if report_finished[rid]:
-                    cached = report_meta_cache.get(rid)
+                    cached = report_meta_cache.get(meta_key)
                     if cached is not None:
                         return rid, cached
                 meta = get_fights(token, rid)
                 if report_finished[rid] and meta.get("fights"):
-                    report_meta_cache.set(rid, meta)
+                    report_meta_cache.set(meta_key, meta)
                 return rid, meta
 
             with ThreadPoolExecutor(max_workers=REPORT_FETCH_WORKERS) as executor:
@@ -288,12 +295,16 @@ def analyze():
                 yield f"data: {json.dumps({'error': f'No {diff_label} fights found in the reports. Check that the selected difficulty is available for this raid.'})}\n\n"
                 return
 
+            # Renamed players count under their newest name: {report: {actor ID: name}}. The
+            # report's own friendlies keep the names in the log (WCL filters and cached rows use them).
+            renamed = current_names(metas)
             for fd in all_fights_deduped:
                 meta = metas[fd['reportId']]
                 full = {f['id']: f for f in meta.get("fights", [])}
                 fd.update({
                     'fight': full.get(fd['fight']['id'], fd['fight']),
                     'friendlies': meta.get("friendlies", []),
+                    'current_names': renamed.get(fd['reportId'], {}),
                     'ability_map': meta.get("abilities", {}),
                     'ability_schools': meta.get("ability_schools", {}),
                     'ability_icons': meta.get("ability_icons", {}),
@@ -326,7 +337,7 @@ def analyze():
             yield f"data: {json.dumps({'stage': 'deaths', 'message': f'Fetching deaths for {len(fights_by_report)} reports...'})}\n\n"
             report_deaths_cache = {}
             
-            def counted_by_fight(deaths, friendlies):
+            def counted_by_fight(deaths, friendlies, renamed_ids):
                 """{fightID: [(death ts, log name)]}: the deaths that can count (within the deaths
                 tracked, not in a wipe, guild members), the only ones whose defensives are shown."""
                 log_names = {f.get("id"): f.get("logName") or f.get("name") for f in friendlies}
@@ -336,7 +347,8 @@ def analyze():
                     out[fid] = [(d["timestamp"], log_names.get(d.get("targetID")))
                                 for d, (slot, in_wipe) in zip(ds, rank_pull_deaths(ds))
                                 if slot <= max_cutoff and not in_wipe and not d.get("isCheatDeath")
-                                and is_guild_member(normalize_character_name(d.get("targetName") or ""))]
+                                and is_guild_member(renamed_ids.get(d.get("targetID"))
+                                                    or normalize_character_name(d.get("targetName") or ""))]
                 return out
 
             report_attacked = {}         # rid -> units the raid attacked (fetch_attacked_units)
@@ -392,7 +404,7 @@ def analyze():
                             deaths_lru.set(cache_key, deaths)
                         def_data = defensive_lru.get(def_key(dead_in(deaths))) if finished else None
 
-                    counted = counted_by_fight(deaths, friendlies)
+                    counted = counted_by_fight(deaths, friendlies, sample_fight_data['current_names'])
                     if not any(counted.values()):
                         # No death here can count, so nothing reads this report's defensives or hits.
                         return rid, deaths, defensives.filter_defensive_raw({}, ()), {}, None
@@ -579,8 +591,9 @@ def analyze():
                 report_abs_start = fight_data['report_abs_start']
                 friendlies = fight_data['friendlies']
                 player_details = fight_data.get("player_details", {})
+                renamed_ids = fight_data['current_names']
                 friendly_class = {f.get("id"): f.get("type") for f in friendlies}
-                friendly_names_by_id = {f.get("id"): f.get("name") for f in friendlies}
+                friendly_names_by_id = {f.get("id"): renamed_ids.get(f.get("id")) or f.get("name") for f in friendlies}
                 
                 pull_counter_by_boss[boss_id] += 1
                 seq_no = pull_counter_by_boss[boss_id]
@@ -598,13 +611,13 @@ def analyze():
                     # Use the specific player IDs from this fight
                     for friendly in friendlies:
                         if friendly.get('id') in friendly_player_ids:
-                            name = friendly.get('name')
+                            name = friendly_names_by_id.get(friendly.get('id'))
                             if name:
                                 fight_parts.add(name)
                 else:
                     # Fallback: if friendlyPlayers not available, use all friendlies
                     for friendly in friendlies:
-                        name = friendly.get('name')
+                        name = friendly_names_by_id.get(friendly.get('id'))
                         if name:
                             fight_parts.add(name)
                 
@@ -628,10 +641,12 @@ def analyze():
                 slots = rank_pull_deaths(deaths_sorted_all)
                 
                 for ev, (slot, in_wipe) in zip(deaths_sorted_all, slots):
-                    target_name = normalize_character_name(ev.get("targetName", "Unknown"))
+                    target_name = renamed_ids.get(ev.get("targetID")) \
+                        or normalize_character_name(ev.get("targetName", "Unknown"))
                     if not is_guild_member(target_name):
                         continue
-                    original_char = target_name
+                    # The character as named in this log (before a rename or alt grouping).
+                    original_char = normalize_character_name(ev.get("targetName", "Unknown"))
                     main_char = get_main_character(target_name, character_groups)
                     target_id = ev.get("targetID")
                     
