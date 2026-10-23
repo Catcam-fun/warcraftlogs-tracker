@@ -363,15 +363,10 @@ def max_at(hits, i, kb_index, max_hp):
     return max_hp
 
 
-def label(hits, kb_index, max_hp=None, health=None):
-    """{"deathType", "rot", "biggestHit", "oneShotHit"} for the killing blow at hits[kb_index] (hits: one player's,
-    time order). `max_hp` / `health`: what they had just before it (default: max_hp_before without the patch's
-    aura sizes). Every hit is measured against the max HP they had when it landed (max_at)."""
-    kb = hits[kb_index]
-    if max_hp is None:
-        max_hp, health, _ = max_hp_before(hits, kb_index)
-    health = (kb.get("amount") or 0) if health is None else health
-    share = {id(h): full_hit(h) / (max_at(hits, i, kb_index, max_hp) or 1) for i, h in enumerate(hits)}
+def last_high(hits, kb_index, max_hp, health):
+    """(index of the last hit before the stretch, its time): the last moment before the killing blow at
+    `max_hp` / `health` with health >= HIGH of max. The stretch is hits[since_i + 1:kb_index + 1]; since_ts is
+    None when they weren't at high health anywhere in `hits`."""
     # The last moment they were at high health, in log order (hits on one millisecond keep the
     # log's order): just before a hit, at its time (one with their health: after + amount; one
     # without: what the last hit with their health left, as only heals land between hits; the
@@ -393,6 +388,19 @@ def label(hits, kb_index, max_hp=None, health=None):
             last = (h.get("hitPoints") or 0, h["maxHitPoints"])
             if last[0] >= HIGH * last[1]:
                 since_i, since_ts = i, h["timestamp"]                 # high just after this hit
+    return since_i, since_ts
+
+
+def label(hits, kb_index, max_hp=None, health=None):
+    """{"deathType", "rot", "biggestHit", "oneShotHit"} for the killing blow at hits[kb_index] (hits: one player's,
+    time order). `max_hp` / `health`: what they had just before it (default: max_hp_before without the patch's
+    aura sizes). Every hit is measured against the max HP they had when it landed (max_at)."""
+    kb = hits[kb_index]
+    if max_hp is None:
+        max_hp, health, _ = max_hp_before(hits, kb_index)
+    health = (kb.get("amount") or 0) if health is None else health
+    share = {id(h): full_hit(h) / (max_at(hits, i, kb_index, max_hp) or 1) for i, h in enumerate(hits)}
+    since_i, since_ts = last_high(hits, kb_index, max_hp, health)
     run = hits[since_i + 1:kb_index + 1]
     quick = since_ts is not None and kb["timestamp"] - since_ts <= BURST_WINDOW_MS
     one_shot = quick and any(share[id(h)] >= ONE_SHOT for h in run)
