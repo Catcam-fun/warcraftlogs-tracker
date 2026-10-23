@@ -273,6 +273,7 @@ def get_share(share_id):
 REPORT_CACHE_BUDGET_BYTES = 200 * 1024 * 1024
 REPORT_CACHE_MAX_ROW_BYTES = 4 * 1024 * 1024
 _EVICT_EVERY = 20                  # writes between size checks
+EVICT_PAGE_ROWS = 1000             # Supabase's most rows per request
 _cache_writes = 0
 _cache_lock = threading.Lock()
 _cache_disabled_until = 0.0        # back off after errors (e.g. table not created yet)
@@ -396,7 +397,18 @@ def evict_report_cache(budget=None):
     """Delete least recently used rows until the table fits the budget."""
     budget = REPORT_CACHE_BUDGET_BYTES if budget is None else budget
     try:
-        rows = db.table('report_cache').select('key, size_bytes').order('last_used_at', desc=True).execute().data or []
+        # Supabase serves at most 1,000 rows per request: read the table page by page (newest
+        # first, ties by key so pages don't overlap), or the rows past the first page are
+        # never counted and the table outgrows the budget (2026-10-23: 1,942 rows, 90 MB, of
+        # which one request saw 1,000 and 49.5 MB).
+        rows, start = [], 0
+        while True:
+            page = db.table('report_cache').select('key, size_bytes').order('last_used_at', desc=True) \
+                .order('key').range(start, start + EVICT_PAGE_ROWS - 1).execute().data or []
+            rows += page
+            if len(page) < EVICT_PAGE_ROWS:
+                break
+            start += EVICT_PAGE_ROWS
         total, drop = 0, []
         for row in rows:
             total += row.get('size_bytes') or 0

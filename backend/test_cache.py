@@ -51,6 +51,73 @@ class SharedReportCacheTests(unittest.TestCase):
             supabase_client.db = orig
 
 
+class CappedCacheTable:
+    """The `report_cache` table as Supabase serves it: at most 1,000 rows per request."""
+    MAX_ROWS = 1000
+
+    def __init__(self, rows):
+        self.rows = rows
+
+    def table(self, _name):
+        return _CappedQuery(self)
+
+
+class _CappedQuery:
+    def __init__(self, db):
+        self.db, self.op, self.orders, self.span, self.keys = db, 'select', [], None, None
+
+    def select(self, *_a, **_k):
+        return self
+
+    def order(self, col, desc=False):
+        self.orders.append((col, desc))
+        return self
+
+    def range(self, start, end):
+        self.span = (start, end)
+        return self
+
+    def delete(self):
+        self.op = 'delete'
+        return self
+
+    def in_(self, col, values):
+        self.keys = (col, set(values))
+        return self
+
+    def execute(self):
+        if self.op == 'delete':
+            col, values = self.keys
+            self.db.rows[:] = [r for r in self.db.rows if r[col] not in values]
+            return mock.Mock(data=[])
+        rows = list(self.db.rows)
+        for col, desc in reversed(self.orders):
+            rows.sort(key=lambda r: r[col], reverse=desc)
+        start, end = self.span or (0, len(rows) - 1)
+        end = min(end, start + CappedCacheTable.MAX_ROWS - 1)
+        return mock.Mock(data=[dict(r) for r in rows[start:end + 1]])
+
+
+class ReportCacheEvictionTests(unittest.TestCase):
+    def test_eviction_sees_every_row_past_the_first_thousand(self):
+        # 2,500 rows of 100 KB (250 MB): the 452 least recently used must go to fit 200 MB.
+        size = 100 * 1024
+        rows = [{"key": f"k{i:04d}", "size_bytes": size, "last_used_at": f"2026-10-{1 + i // 100:02d}T{i % 100:02d}"}
+                for i in range(2500)]
+        db = CappedCacheTable(rows)
+        with mock.patch.object(supabase_client, 'db', db):
+            supabase_client.evict_report_cache()
+        self.assertEqual(len(db.rows), supabase_client.REPORT_CACHE_BUDGET_BYTES // size)
+        self.assertEqual(min(r["key"] for r in db.rows), "k0452")   # the oldest ones went
+
+    def test_eviction_keeps_a_table_under_budget(self):
+        rows = [{"key": f"k{i}", "size_bytes": 1024, "last_used_at": str(i)} for i in range(1500)]
+        db = CappedCacheTable(rows)
+        with mock.patch.object(supabase_client, 'db', db):
+            supabase_client.evict_report_cache()
+        self.assertEqual(len(db.rows), 1500)
+
+
 if __name__ == "__main__":
     unittest.main()
 
