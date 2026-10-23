@@ -22,6 +22,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
+import avoidable
 from armor_constants import ARMOR_K, IGNORES_ARMOR, REDUCED_BY_ARMOR
 from boss_spell_flags import IGNORES_IMMUNITY
 from raid_wide_damage import RAID_WIDE
@@ -2867,6 +2868,47 @@ def _brand(win, unit):
     win._applies.clear()
 
 
+def _avoidable(window, win, kb_index, overkill, first, limited, spec, ability_names, max_hp):
+    """Was the death decided by damage they could have avoided (owner's rule B′, 2026-10-23)? The hits
+    since they were last at FULL_HEALTH (from `first`; `limited`: they weren't in the window, so the
+    whole window) are replayed without the avoidable ones (avoidable.judge_hit): verdict True when the
+    health they took (never a shield's part) would have kept them alive, as in _simulate only while they
+    were missing health (real heals stay as they were). A hit that can't be judged (a tank-soak rule
+    with no spec) is listed "unsure"; the verdict is None when it alone would decide."""
+    sure, unsure = set(), set()
+    for k in range(first, kb_index + 1):
+        judged = avoidable.judge_hit(window[k], spec)
+        (sure if judged else unsure if judged is None else set()).add(k)
+
+    def lives_without(removed):
+        extra = 0.0
+        for k in range(first, kb_index + 1):
+            hp_before, max_k = win.before[k]
+            if win.known[k]:
+                extra = min(extra, max(max_k - hp_before, 0))
+            if k in removed:
+                extra += (window[k].get("amount") or 0) + (window[k].get("overkill") or 0)
+        return extra > overkill
+
+    verdict = lives_without(sure)
+    if unsure and not verdict and lives_without(sure | unsure):
+        verdict = None
+    by_ability = {}
+    for k in sorted(sure | unsure):
+        a = window[k].get("abilityGameID")
+        row = by_ability.setdefault(a, {"name": ability_names.get(a, "Unknown"), "id": a, "times": 0, "total": 0})
+        row["times"] += 1
+        row["total"] += _full_hit(window[k])
+        if k in unsure:
+            row["unsure"] = True
+    hits = [{**{k: v for k, v in r.items() if k != "total"}, "pctOfMax": round(100 * r["total"] / max_hp)}
+            for r in sorted(by_ability.values(), key=lambda r: -r["total"])]
+    for h in hits:
+        if "unsure" in h:
+            h["unsure"] = h.pop("unsure")      # last, after pctOfMax
+    return {"verdict": verdict, "hits": hits, "windowLimited": limited}
+
+
 def assess_survival(hits, death_ts, available, consumables, ability_names, ability_schools,
                     talent_entries=None, observed_absorbs=None, spec=None, aoe_known=True,
                     aoe_abilities=None, aoe_unknown=frozenset(), ready_since=None, aura_ms=None, forms=None, armor_k=None, form_armor=None,
@@ -2915,6 +2957,8 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
             "allTogetherWouldSave": False,
             "ignoresReduction": False,
             "ignoresImmunity": False,
+            # The game killed them outright: avoidable when the mechanic was (no replay).
+            "avoidable": {"verdict": avoidable.judge_hit(killing, spec), "hits": [], "windowLimited": False},
         }
     if killing is None or killing.get("resourceActor") != 2:
         return None   # no recorded killing blow with health data
@@ -3185,6 +3229,8 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
                    "seconds": round((kb_ts - hs[0]["timestamp"]) / 1000, 1)}
             biggest = None
     result = {
+        "avoidable": _avoidable(window, win, kb_index, overkill, start if high else 0, not high, spec,
+                                ability_names, max_hp),
         "deathType": death_type,
         "killingHit": {
             "name": ability_names.get(killing.get("abilityGameID"), "Unknown"),
