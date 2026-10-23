@@ -8,7 +8,9 @@ import React from 'react';
      survival?: { deathType: 'oneShot'|'burst'|'wasLow'|'instakill', killingHit: {name, size, pctOfMax, school},
                   hpBeforePct, overkill, maxHp, ignoresReduction, ignoresImmunity,
                   wouldSave: {name: true|false|null}, allTogetherWouldSave,
-                  window: {hits, fromAgo}, biggestHit?, oneShotHit?, fromPct?, burstMs? } }
+                  window: {hits, fromAgo}, biggestHit?, oneShotHit?, fromPct?, burstMs?,
+                  avoidable?: {verdict: true|false|null, hits: [{name, id, times, pctOfMax, unsure?}],
+                               windowLimited} } }
    Verdicts replay the seconds before the death (a one-shot: high health at
    most 1.5s before it). Only deaths that can count carry this.
    Available entries may carry boostedBy: [talent names that strengthen it]. */
@@ -18,7 +20,8 @@ const isCurrentShape = (d) => d && Array.isArray(d.active) && Array.isArray(d.av
 
 /* Per-player rollup over the deaths that count toward their death rate. */
 export function summarizeDefensives(deaths) {
-  const summary = { withData: 0, withUnused: 0, unused: {}, assessed: 0, preventable: 0, oneShots: 0, savers: {} };
+  const summary = { withData: 0, withUnused: 0, unused: {}, assessed: 0, preventable: 0, oneShots: 0, savers: {},
+    avoidable: 0, avoidableAssessed: 0 };
   deaths.forEach((death) => {
     const d = death.defensives;
     if (!isCurrentShape(d)) return;
@@ -34,6 +37,10 @@ export function summarizeDefensives(deaths) {
     const savers = Object.entries(s.wouldSave || {}).filter(([, v]) => v === true).map(([n]) => n);
     if (savers.length > 0 || s.allTogetherWouldSave) summary.preventable += 1;
     savers.forEach((n) => { summary.savers[n] = (summary.savers[n] || 0) + 1; });
+    // Results from before avoidable deaths, and deaths it couldn't judge, aren't counted.
+    const verdict = s.avoidable?.verdict;
+    if (verdict === true || verdict === false) summary.avoidableAssessed += 1;
+    if (verdict === true) summary.avoidable += 1;
   });
   summary.topUnused = Object.entries(summary.unused).sort((a, b) => b[1] - a[1]).slice(0, 3);
   summary.topSavers = Object.entries(summary.savers).sort((a, b) => b[1] - a[1]).slice(0, 3);
@@ -59,6 +66,12 @@ export function DefensiveSummaryChip({ s }) {
         title="Deaths where a defensive, Healthstone or potion they had ready would have covered the killing blow">
         {s.preventable}/{s.assessed} preventable
       </span>
+      {s.avoidableAssessed > 0 && (
+        <span className={`fpx-pdef ${s.avoidable === 0 ? 'good' : s.avoidable / s.avoidableAssessed >= 0.5 ? 'bad' : 'warn'}`}
+          title="Deaths where damage they could have dodged, taken since they were last at 85% health, decided the death">
+          {s.avoidable}/{s.avoidableAssessed} avoidable
+        </span>
+      )}
       {s.oneShots > 0 && (
         <span className="fpx-pdef neutral" title="A single hit of 80%+ of max health from high health, within 1.5 seconds of death, or an instant kill by a mechanic">
           {s.oneShots} one-shot{s.oneShots !== 1 ? 's' : ''}

@@ -311,6 +311,12 @@ export const activeTip = (a, inf, icons) => () => {
 
 /* ---------- the row ---------- */
 
+/* The avoidable hits since they were last at 85% health, most damage first: "Caustic Waves ×2 · 38%". */
+export function avoidableLine(a) {
+  return (a?.hits || []).map((h) => `${h.name}${h.times > 1 ? ` ×${h.times}` : ''} · ${h.pctOfMax}%${h.unsure ? ' (unsure)' : ''}`)
+    .join(', ');
+}
+
 export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText, killCounts, logHref, timeLabel }) {
   const d = death.defensives;
   const current = isCurrentShape(d);
@@ -372,6 +378,14 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
               <small>{s.biggestHit.times > 1
                 ? `${s.biggestHit.times} hits, ${fmt(s.biggestHit.total)} ${s.biggestHit.over >= 0.1 ? `over ${s.biggestHit.over}s` : 'at once'}`
                 : s.biggestHit.ago >= 0.1 ? `${s.biggestHit.ago}s before` : 'same moment'}</small></span>} />
+          )}
+          {s.avoidable?.hits?.length > 0 && (
+            <Row a={s.avoidable.verdict ? 'Avoidable damage' : 'Avoidable damage taken'} b={<span className="stack">
+              <span>{avoidableLine(s.avoidable)}</span>
+              <small>{s.avoidable.verdict === true ? 'Without it they would have lived'
+                : s.avoidable.verdict === false ? 'They would have died without it too'
+                : "Can't tell: their spec in this pull isn't known"}
+                {s.avoidable.windowLimited ? ' · checked the last 15 s only' : ''}</small></span>} />
           )}
           <Row a="Health before it" b={<>{fmt(s.maxHp * s.hpBeforePct / 100)} <i>· {s.hpBeforePct}%</i></>} />
           <Row a="Died by" b={fmt(s.overkill)} />
@@ -495,7 +509,7 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
       <Tip className="kb" content={killTip}>
         <Icon name={notLogged ? '?' : death.abilityName} icon={kbIcon} className="big" />
         <span className="kbt">
-          <span className="an">#{death.pullNo} · {hitName}{death.isCheatDeath && <span className="fpx-cheatbadge">CHEAT</span>}</span>
+          <span className="an">#{death.pullNo} · {hitName}{death.isCheatDeath && <span className="fpx-cheatbadge">CHEAT</span>}{s?.avoidable?.verdict === true && <span className="fpx-avoidbadge">AVOIDABLE</span>}</span>
           {ctx && <span className="cx">{ctx}{s?.ignoresImmunity ? <em> · through immunities</em> : null}</span>}
         </span>
       </Tip>
