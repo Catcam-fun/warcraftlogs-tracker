@@ -2946,6 +2946,10 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     heal_events = [h for h in hits or () if h.get("type") in ("heal", "absorbed")
                    or (h.get("type") in AURA_EVENTS and h.get("abilityGameID") in WINDOW_HEAL_IDS)]
     aura_events = [h for h in hits or () if h.get("type") in AURA_EVENTS]
+    # Debuffs judged for the avoidable rules: only this death's own window. The player's events hold every
+    # death window of the report, and an application from an earlier one (its removal outside every window)
+    # would read as still on.
+    window_auras = [h for h in aura_events if h.get("timestamp", 0) >= death_ts - LETHAL_WINDOW_MS]
     purifies = [h for h in hits or () if h.get("type") == "cast" and h.get("abilityGameID") in STAGGER_CAST_IDS]
     # The player's own casts that lengthen a defensive (fetch_death_windows: Judgment, Hammer of Wrath).
     own_casts = [h for h in hits or () if h.get("type") == "cast"]
@@ -2968,7 +2972,7 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
             "ignoresReduction": False,
             "ignoresImmunity": False,
             # The game killed them outright: avoidable when the mechanic was (no replay).
-            "avoidable": {"verdict": avoidable.judge_hit(killing, spec, avoidable.had_aura_from(aura_events)),
+            "avoidable": {"verdict": avoidable.judge_hit(killing, spec, avoidable.had_aura_from(window_auras)),
                           "hits": [], "windowLimited": False},
         }
     if killing is None or killing.get("resourceActor") != 2:
@@ -3241,7 +3245,7 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
             biggest = None
     result = {
         "avoidable": _avoidable(window, win, kb_index, overkill, start if high else 0, not high, spec,
-                                ability_names, max_hp, avoidable.had_aura_from(aura_events)),
+                                ability_names, max_hp, avoidable.had_aura_from(window_auras)),
         "deathType": death_type,
         "killingHit": {
             "name": ability_names.get(killing.get("abilityGameID"), "Unknown"),

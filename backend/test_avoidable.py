@@ -122,6 +122,13 @@ class AvoidableAuraTests(AvoidableDeathTests.__bases__[0]):
         a = self.judge([mark, hit(95_000, 400_000, 600_000, MARKED), hit(100_000, 600_000, 0, overkill=200_000)])
         self.assertIs(a["verdict"], False)
 
+    def test_debuffs_from_an_earlier_death_window_are_ignored(self):
+        # Live 2026-10-24 (Voidspire, Arzoker pull 46): the player's events hold every death window of the
+        # report; an application 483 s earlier, whose removal fell outside every window, read as still on.
+        old_mark = {"timestamp": 10_000, "type": "applydebuff", "targetID": 1, "abilityGameID": 971}
+        a = self.judge([old_mark, hit(95_000, 400_000, 600_000, MARKED), hit(100_000, 600_000, 0, overkill=200_000)])
+        self.assertIs(a["verdict"], True)
+
     def test_ticks_keep_their_mark_in_the_windows(self):
         self.assertIn("tick", defensives.HIT_FIELDS)
 
