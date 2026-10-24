@@ -1238,10 +1238,13 @@ def fetch_death_windows(token, report_code, pulls, heals=True):
 
     fetched = _fetch_blocks(token, report_code, blocks, keep)
     events = [e for alias, evs in fetched.items() if alias != "extras" for e in evs]
-    # The extras block's Stagger ticks add those before the hits' blocks start (the rest are in them).
+    # The extras block's Stagger ticks add those before the hits' blocks start (the rest are in them). Its
+    # other damage events are hits the hits' blocks already have: an ability whose aura is read here can
+    # share its ID with its damage (Starshard 1254385), and counting those again doubled the killing blow.
     seen = {(e.get("targetID"), e.get("timestamp")) for e in events if stagger_pool(e)}
     events += [e for e in fetched.get("extras", ())
-               if e.get("type") != "damage" or (e.get("targetID"), e.get("timestamp")) not in seen]
+               if e.get("type") != "damage"
+               or (stagger_pool(e) and (e.get("targetID"), e.get("timestamp")) not in seen)]
     out = index_hits(events)
     for e in events:
         if e.get("type") == "cast":

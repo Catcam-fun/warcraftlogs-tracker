@@ -1238,6 +1238,22 @@ class LethalWindowTests(unittest.TestCase):
             self.assertEqual([h["type"] for h in defensives.fetch_death_windows("t", "R", [(3, [(60_000, "A")])],
                                                                                  heals=False)[1]], ["damage"])
 
+    def test_extras_block_never_doubles_a_hit(self):
+        # Live 2026-10-24 (Manaforge g2R9GZcd1rP6JKpw pull 52): Starshard's debuff and its damage share ID
+        # 1254385, so once the debuff was read in the extras block (All events), its hits came back there too
+        # and every Starshard hit was counted twice: the doubled killing blow cut the window to one hit.
+        dmg = {"timestamp": 59_990, "type": "damage", "targetID": 1, "abilityGameID": 1254385, "amount": 5,
+               "overkill": 3, "hitPoints": 0, "maxHitPoints": 100, "resourceActor": 2, "fight": 3}
+        aura = {"timestamp": 59_000, "type": "applydebuff", "targetID": 1, "abilityGameID": 1254385, "sourceID": 9}
+
+        def fake(_t, q, _v=None, **_k):
+            report = {a: {"data": [dmg]} for a in __import__("re").findall(r"(p\d+): events", q)}
+            report["extras"] = {"data": [aura, dict(dmg)]}
+            return {"reportData": {"report": report}}
+        with __import__("unittest.mock").mock.patch.object(defensives, "graphql_query", side_effect=fake):
+            hits = defensives.fetch_death_windows("t", "R", [(3, [(60_000, "A")])])
+        self.assertEqual([(h["type"], h["timestamp"]) for h in hits[1]], [("applydebuff", 59_000), ("damage", 59_990)])
+
     def test_identical_hits_at_the_same_moment_all_count(self):
         # Two droplets soaked in the same millisecond for the same amount are two hits.
         same = [hit(99_978, 301_233, 698_767), hit(99_978, 301_233, 397_534)]      # from full health
