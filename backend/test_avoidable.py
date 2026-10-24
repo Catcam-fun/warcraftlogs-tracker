@@ -9,8 +9,10 @@ import defensives
 
 MAX = 1_000_000
 WAVE, RAID, BURN, TANK_SOAK = 900, 800, 950, 960
-RULES = {WAVE: {"rule": "always"}, BURN: {"rule": "always", "source": WAVE}, TANK_SOAK: {"rule": "non_tank"}}
-NAMES = {WAVE: "Caustic Waves", RAID: "Rage of the Sleeper", BURN: "Venom Burn", TANK_SOAK: "Crushing Slam"}
+MARKED = 970
+RULES = {WAVE: {"rule": "always"}, BURN: {"rule": "always", "source": WAVE}, TANK_SOAK: {"rule": "non_tank"},
+         MARKED: {"rule": "bystander", "auras": [971]}}
+NAMES = {MARKED: "Plague Froth", WAVE: "Caustic Waves", RAID: "Rage of the Sleeper", BURN: "Venom Burn", TANK_SOAK: "Crushing Slam"}
 
 
 def hit(ts, amount, hp_after, ability=RAID, overkill=0, absorbed=0):
@@ -100,6 +102,32 @@ class AvoidableDeathTests(unittest.TestCase):
                                       "unsure": True}])
         self.assertIs(self.judge(hits, spec="Protection")["verdict"], False)
         self.assertIs(self.judge(hits, spec="Fire")["verdict"], True)
+
+
+class AvoidableAuraTests(AvoidableDeathTests.__bases__[0]):
+    def setUp(self):
+        p = mock.patch.object(avoidable, "rule_for", lambda a: RULES.get(a))
+        p.start()
+        self.addCleanup(p.stop)
+
+    def judge(self, hits):
+        return defensives.assess_survival(hits, hits[-1]["timestamp"], [], [], NAMES, {}, spec="Fire")["avoidable"]
+
+    def test_bystander_hit_is_avoidable(self):
+        a = self.judge([hit(95_000, 400_000, 600_000, MARKED), hit(100_000, 600_000, 0, overkill=200_000)])
+        self.assertIs(a["verdict"], True)
+
+    def test_the_targeted_player_did_not_avoid_it(self):
+        mark = {"timestamp": 93_000, "type": "applydebuff", "targetID": 1, "abilityGameID": 971}
+        a = self.judge([mark, hit(95_000, 400_000, 600_000, MARKED), hit(100_000, 600_000, 0, overkill=200_000)])
+        self.assertIs(a["verdict"], False)
+
+    def test_ticks_keep_their_mark_in_the_windows(self):
+        self.assertIn("tick", defensives.HIT_FIELDS)
+
+    def test_windows_read_the_rules_debuffs(self):
+        with mock.patch.object(avoidable, "aura_ids", lambda: [971]):
+            self.assertIn(971, defensives.window_extras_ids())
 
 
 if __name__ == "__main__":

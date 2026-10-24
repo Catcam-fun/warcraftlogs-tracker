@@ -50,3 +50,47 @@ class RulesTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AuraAndTickRulesTests(unittest.TestCase):
+    """bystander: avoidable unless they had the target's debuff when hit; while_debuffed: avoidable only if
+    they had it (soak once); ticks_only / impact_only: by WCL's tick mark."""
+    ENTRIES = {10: {"rule": "bystander", "auras": [100]}, 11: {"rule": "while_debuffed", "auras": [200]},
+               12: {"rule": "ticks_only"}, 13: {"rule": "impact_only"}}
+
+    def setUp(self):
+        for name, value in (("AVOIDABLE", self.ENTRIES), ("OVERRIDES", {}), ("RAID_WIDE", {})):
+            p = mock.patch.object(avoidable, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_bystander(self):
+        had = lambda auras, t: 100 in auras and t > 5_000      # marked from 5 s on
+        self.assertIs(avoidable.judge_hit({"abilityGameID": 10, "timestamp": 6_000}, "Fire", had), False)
+        self.assertIs(avoidable.judge_hit({"abilityGameID": 10, "timestamp": 4_000}, "Fire", had), True)
+        self.assertIsNone(avoidable.judge_hit({"abilityGameID": 10, "timestamp": 4_000}, "Fire", None))
+
+    def test_while_debuffed(self):
+        had = lambda auras, t: 200 in auras
+        self.assertIs(avoidable.judge_hit({"abilityGameID": 11, "timestamp": 1}, "Fire", had), True)
+        self.assertIs(avoidable.judge_hit({"abilityGameID": 11, "timestamp": 1}, "Fire", lambda a, t: False), False)
+
+    def test_ticks_and_impact(self):
+        self.assertIs(avoidable.judge_hit({"abilityGameID": 12, "tick": True}, "Fire"), True)
+        self.assertIs(avoidable.judge_hit({"abilityGameID": 12}, "Fire"), False)
+        self.assertIs(avoidable.judge_hit({"abilityGameID": 13}, "Fire"), True)
+        self.assertIs(avoidable.judge_hit({"abilityGameID": 13, "tick": True}, "Fire"), False)
+
+    def test_aura_ids_lists_every_debuff_a_rule_needs(self):
+        self.assertEqual(avoidable.aura_ids(), [100, 200])
+
+    def test_had_aura_from_events(self):
+        events = [{"type": "applydebuff", "abilityGameID": 100, "timestamp": 1_000},
+                  {"type": "removedebuff", "abilityGameID": 100, "timestamp": 3_000},
+                  {"type": "removedebuff", "abilityGameID": 200, "timestamp": 9_000}]   # applied before the window
+        had = avoidable.had_aura_from(events)
+        self.assertTrue(had([100], 2_000))
+        self.assertFalse(had([100], 3_500))
+        self.assertFalse(had([100], 1_000))       # the hit that applies it: not "before"
+        self.assertTrue(had([200], 5_000))        # removed later, never applied in the window: was on
+        self.assertFalse(had([300], 5_000))

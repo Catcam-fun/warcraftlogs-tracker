@@ -6,6 +6,10 @@ Rules:
     "always"    every hit is avoidable (a pool, a frontal, a wave)
     "never"     no hit is (a group soak, damage the raid must take)
     "non_tank"  avoidable for anyone not in a tank spec that pull (a tank soak)
+    "bystander"       aimed at chosen players, hitting others near them: avoidable unless the player had
+                      the target's debuff ("auras": [IDs]) before the hit
+    "while_debuffed"  soak once: avoidable only if the player still had the soak's debuff ("auras")
+    "ticks_only"      only the DoT ticks are avoidable (WCL marks them tick); "impact_only": only the first hit
 """
 
 OVERRIDES = {

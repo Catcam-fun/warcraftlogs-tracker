@@ -1937,6 +1937,30 @@ class AvoidableCheckTests(unittest.TestCase):
         self.assertEqual(o.status, "fail")
         self.assertIn("Bob pull 3", o.items[0])
 
+    def targeted_run(self, site_verdict, marked):
+        from checks import rules_avoidable
+        run = mock.Mock()
+        ev = {"reportId": "R", "fightId": 3, "timestamp": 100_000, "originalCharacter": "Bob", "slot": 1,
+              "inWipe": False, "isCheatDeath": False,
+              "defensives": {"survival": {"deathType": "wasLow",
+                                          "avoidable": {"verdict": site_verdict, "hits": [], "windowLimited": False}}}}
+        run.counted_deaths.return_value = [ev]
+        run.actor_id.return_value = 7
+        run.fight.return_value = {"start_time": 0}
+        run.hits_before.return_value = [self.hit(95_000, 400_000, 600_000, 970),
+                                        self.hit(100_000, 600_000, 0, overkill=200_000)]
+        run.aura_events.return_value = [{"timestamp": 93_000, "type": "applydebuff", "abilityGameID": 971}] if marked else []
+        with mock.patch.object(rules_avoidable, "run_max_hp_before", return_value=(self.MAX, 600_000, None)),                 mock.patch.object(rules_avoidable, "pull_spec", return_value="Fire"),                 mock.patch.object(rules_avoidable, "rule_for",
+                                  lambda a: {"rule": "bystander", "auras": [971]} if a == 970 else None):
+            return rules_avoidable.check(run)
+
+    def test_bystander_counted_as_avoidable(self):
+        self.assertEqual(self.targeted_run(True, marked=False).status, "pass")
+
+    def test_targeted_player_is_not_counted_as_avoidable(self):
+        self.assertEqual(self.targeted_run(False, marked=True).status, "pass")
+        self.assertEqual(self.targeted_run(True, marked=True).status, "fail")
+
     def test_always_ability_hitting_most_of_the_raid_fails(self):
         from checks import source_avoidable
         run = mock.Mock()

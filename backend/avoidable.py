@@ -19,13 +19,55 @@ def rule_for(ability_id):
     return OVERRIDES.get(ability_id) or AVOIDABLE.get(ability_id)
 
 
-def judge_hit(hit, spec):
-    """True when the hit was avoidable for this player, False when not, None when it can't be told
-    (a tank-soak rule with no spec for the pull). `spec`: the spec they played in that pull."""
+def aura_ids():
+    """Every aura a rule needs to know about (the target's debuff, a soak's debuff): the death windows
+    read these players' events of them (defensives.WINDOW_EXTRAS_IDS)."""
+    return sorted({a for e in list(AVOIDABLE.values()) + list(OVERRIDES.values()) for a in e.get("auras", ())})
+
+
+def had_aura_from(events):
+    """had(aura_ids, t): whether the player had one of the auras just before t, from their aura events in
+    the window. An aura removed in the window with no application before it was on from before the window."""
+    by_aura = {}
+    for e in sorted(events or (), key=lambda e: e.get("timestamp", 0)):
+        by_aura.setdefault(e.get("abilityGameID"), []).append((e.get("timestamp", 0), e.get("type", "")))
+
+    def had(auras, t):
+        for a in auras:
+            on = None
+            for ts, kind in by_aura.get(a, ()):
+                if ts >= t:
+                    if on is None and kind.startswith("remove") and not kind.endswith("stack"):
+                        on = True          # removed later, never applied before t in the window
+                    break
+                if kind.startswith("apply"):
+                    on = True
+                elif kind.startswith("remove") and not kind.endswith("stack"):
+                    on = False
+            if on:
+                return True
+        return False
+    return had
+
+
+def judge_hit(hit, spec, had_aura=None):
+    """True when the hit was avoidable for this player, False when not, None when it can't be told (a
+    tank-soak rule with no spec for the pull, an aura rule with no aura events). `spec`: the spec they
+    played in that pull; `had_aura(aura_ids, t)`: whether they had one of those auras just before t."""
     entry = rule_for(hit.get("abilityGameID"))
     rule = entry and entry["rule"]
     if rule == "always":
         return True
     if rule == "non_tank":
         return None if not spec else spec not in TANK_SPECS
+    if rule == "ticks_only":
+        return bool(hit.get("tick"))
+    if rule == "impact_only":
+        return not hit.get("tick")
+    if rule in ("bystander", "while_debuffed"):
+        if had_aura is None:
+            return None
+        had = had_aura(entry.get("auras", ()), hit.get("timestamp", 0))
+        # The target's own debuff: not avoidable for them. A soak's debuff: avoidable to soak again.
+        return (not had) if rule == "bystander" else had
     return False

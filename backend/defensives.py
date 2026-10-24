@@ -1083,7 +1083,14 @@ WINDOW_HEAL_IDS = frozenset(set(KILLING_HIT_HEALS) | {a for a in KILLING_HIT_HEA
 # stacks) and of auras sized by a loadout (who cast them).
 # And a Brewmaster's Stagger pool: their staggered amounts (STAGGER_AURA absorbs) and ticks, from up to
 # STAGGER_LOOKBACK_MS before each window (the ticks inside it come with the hits).
-WINDOW_EXTRAS_IDS = sorted(WINDOW_HEAL_IDS | STACK_SIZED | LOADOUT_SIZED | {STAGGER_AURA, STAGGER_TICK})
+# And the debuffs the avoidable rules ask about (avoidable.aura_ids: a targeted player's mark, a soak's debuff).
+
+
+def window_extras_ids():
+    return sorted(WINDOW_HEAL_IDS | STACK_SIZED | LOADOUT_SIZED | {STAGGER_AURA, STAGGER_TICK} | set(avoidable.aura_ids()))
+
+
+WINDOW_EXTRAS_IDS = window_extras_ids()
 # And the dying players' own casts of buttons that lengthen a defensive while it is up (Zealot's Paragon:
 # Judgment and Hammer of Wrath on Sentinel), in any patch's catalog: the replay presses inside the window,
 # so only the casts inside it matter.
@@ -1100,7 +1107,7 @@ HEAL_FIELDS = ("timestamp", "type", "sourceID", "targetID", "abilityGameID", "fi
                "attackerID", "extraAbilityGameID")
 HIT_FIELDS = ("timestamp", "type", "sourceID", "sourceInstance", "targetID", "abilityGameID", "fight", "buffs",
               "hitType", "amount", "overkill", "absorbed", "mitigated", "unmitigatedAmount",
-              "isAoE", "resourceActor", "hitPoints", "maxHitPoints", "armor")
+              "isAoE", "resourceActor", "hitPoints", "maxHitPoints", "armor", "tick")
 # For the windows' cache key in app.py: windows cached with other extras or without a field kept
 # here (sourceInstance, for Fiery Brand's unit) are not reused.
 WINDOW_EXTRAS_KEY = hashlib.sha1(repr((WINDOW_EXTRAS_IDS, WINDOW_CAST_IDS, HIT_FIELDS, HEAL_FIELDS,
@@ -2868,7 +2875,7 @@ def _brand(win, unit):
     win._applies.clear()
 
 
-def _avoidable(window, win, kb_index, overkill, first, limited, spec, ability_names, max_hp):
+def _avoidable(window, win, kb_index, overkill, first, limited, spec, ability_names, max_hp, had_aura=None):
     """Was the death decided by damage they could have avoided (owner's rule B′, 2026-10-23)? The hits
     since they were last at FULL_HEALTH (from `first`; `limited`: they weren't in the window, so the
     whole window) are replayed without the avoidable ones (avoidable.judge_hit): verdict True when the
@@ -2877,7 +2884,7 @@ def _avoidable(window, win, kb_index, overkill, first, limited, spec, ability_na
     with no spec) is listed "unsure"; the verdict is None when it alone would decide."""
     sure, unsure = set(), set()
     for k in range(first, kb_index + 1):
-        judged = avoidable.judge_hit(window[k], spec)
+        judged = avoidable.judge_hit(window[k], spec, had_aura)
         (sure if judged else unsure if judged is None else set()).add(k)
 
     def lives_without(removed):
@@ -2958,7 +2965,8 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
             "ignoresReduction": False,
             "ignoresImmunity": False,
             # The game killed them outright: avoidable when the mechanic was (no replay).
-            "avoidable": {"verdict": avoidable.judge_hit(killing, spec), "hits": [], "windowLimited": False},
+            "avoidable": {"verdict": avoidable.judge_hit(killing, spec, avoidable.had_aura_from(aura_events)),
+                          "hits": [], "windowLimited": False},
         }
     if killing is None or killing.get("resourceActor") != 2:
         return None   # no recorded killing blow with health data
@@ -3230,7 +3238,7 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
             biggest = None
     result = {
         "avoidable": _avoidable(window, win, kb_index, overkill, start if high else 0, not high, spec,
-                                ability_names, max_hp),
+                                ability_names, max_hp, avoidable.had_aura_from(aura_events)),
         "deathType": death_type,
         "killingHit": {
             "name": ability_names.get(killing.get("abilityGameID"), "Unknown"),
