@@ -50,6 +50,14 @@ class MergeTests(unittest.TestCase):
         self.assertEqual([r["id"] for r in review], [30])
         self.assertIn("sources disagree", review[0]["why"])
 
+    def test_own_id_is_never_a_targeted_marker(self):
+        # Avenger's Shield 1246502: its own DoT goes on with the hit, so it can't mark the target first.
+        overrides = {7: {"rule": "bystander", "name": "Shield", "boss": "Boss", "auras": [7]},
+                     8: {"rule": "bystander", "name": "Breath", "boss": "Boss", "auras": [8, 80]}}
+        entries, _ = ba.merge({7: ability("Shield"), 8: ability("Breath")}, overrides, {}, set())
+        self.assertEqual(entries[7], {"rule": "never", "name": "Shield", "boss": "Boss"})
+        self.assertEqual(entries[8]["auras"], [80])
+
     def test_raid_wide_excluded(self):
         entries, review = ba.merge({5: ability("Pulse", share=0.9)}, {}, {}, {5})
         self.assertNotIn(5, entries)

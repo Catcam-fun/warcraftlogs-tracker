@@ -40,6 +40,13 @@ def merge(abilities, overrides, dots, raid_wide):
             continue
         if aid in overrides:
             entries[aid] = dict(overrides[aid])
+            if entries[aid]["rule"] == "bystander":
+                # The ability's own ID can't mark its target: a DoT the hit puts on comes with the hit.
+                marks = [m for m in entries[aid].get("auras", ()) if m != aid]
+                if marks:
+                    entries[aid]["auras"] = marks
+                else:
+                    entries[aid] = {"rule": "never", "name": entries[aid]["name"], "boss": entries[aid]["boss"]}
             if overrides[aid]["rule"] == "always" and (a.get("median_share") or 0) > MOST_OF_RAID:
                 item(aid, f"answered always, but it hits most of the raid ({a['median_share']:.0%})")
         elif a["kind"] == "unavoidable":

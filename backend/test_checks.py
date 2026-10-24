@@ -1954,6 +1954,16 @@ class AvoidableCheckTests(unittest.TestCase):
                                   lambda a: {"rule": "bystander", "auras": [971]} if a == 970 else None):
             return rules_avoidable.check(run)
 
+    def test_debuff_applied_by_the_hit_itself_was_not_had_before_it(self):
+        from checks.rules_avoidable import had_before
+        # Live 2026-10-24 (Voidspire, Avenger's Shield 1246502): applied at the hit's own moment, removed later.
+        events = [{"timestamp": 95_000, "type": "applydebuff", "abilityGameID": 971},
+                  {"timestamp": 99_000, "type": "removedebuff", "abilityGameID": 971}]
+        self.assertFalse(had_before([971], 95_000, events))
+        self.assertTrue(had_before([971], 97_000, events))
+        # Removed later with nothing applied in between: on from before the window.
+        self.assertTrue(had_before([971], 90_000, [{"timestamp": 99_000, "type": "removedebuff", "abilityGameID": 971}]))
+
     def test_bystander_counted_as_avoidable(self):
         self.assertEqual(self.targeted_run(True, marked=False).status, "pass")
 

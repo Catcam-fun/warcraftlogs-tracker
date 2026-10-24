@@ -8,7 +8,8 @@ Rules:
     "never"     no hit is (a group soak, damage the raid must take)
     "non_tank"  avoidable for anyone not in a tank spec that pull (a tank soak)
     "bystander"       aimed at chosen players, hitting others near them: avoidable unless the player had
-                      the target's debuff ("auras": [IDs]) before the hit
+                      the target's debuff ("auras": [IDs]) before the hit. The ability's own ID is no marker
+                      (a DoT the hit itself puts on is applied with the hit, never before it)
     "while_debuffed"  soak once: avoidable only if the player still had the soak's debuff ("auras")
     "ticks_only"      only the DoT ticks are avoidable (WCL marks them tick); "impact_only": only the first hit
 """
@@ -31,7 +32,7 @@ OVERRIDES = {
     1241841: {'rule': 'always', 'name': 'Void Patch', 'boss': "Belo'ren, Child of Al'ar"},
     1242094: {'rule': 'never', 'name': 'Void Quill', 'boss': "Belo'ren, Child of Al'ar"},
     1243866: {'rule': 'always', 'name': 'Voidlight Rupture', 'boss': "Belo'ren, Child of Al'ar"},
-    442660: {'rule': 'bystander', 'name': 'Experimental Dosage', 'boss': "Broodtwister Ovi'nax", 'auras': [442660]},
+    442660: {'rule': 'never', 'name': 'Experimental Dosage', 'boss': "Broodtwister Ovi'nax"},
     442250: {'rule': 'never', 'name': 'Fixate', 'boss': "Broodtwister Ovi'nax"},
     442257: {'rule': 'never', 'name': 'Infest', 'boss': "Broodtwister Ovi'nax"},
     446700: {'rule': 'never', 'name': 'Poison Burst', 'boss': "Broodtwister Ovi'nax"},
@@ -40,7 +41,7 @@ OVERRIDES = {
     438807: {'rule': 'never', 'name': 'Vicious Bite', 'boss': "Broodtwister Ovi'nax"},
     441612: {'rule': 'always', 'name': 'Vile Discharge', 'boss': "Broodtwister Ovi'nax"},
     441362: {'rule': 'never', 'name': 'Volatile Concoction', 'boss': "Broodtwister Ovi'nax"},
-    446351: {'rule': 'bystander', 'name': 'Web Eruption', 'boss': "Broodtwister Ovi'nax", 'auras': [446351]},
+    446351: {'rule': 'never', 'name': 'Web Eruption', 'boss': "Broodtwister Ovi'nax"},
     1214190: {'rule': 'never', 'name': 'Eruption Stomp', 'boss': 'Cauldron of Carnage'},
     465466: {'rule': 'always', 'name': 'Fiery Wave', 'boss': 'Cauldron of Carnage'},
     463798: {'rule': 'never', 'name': 'Lightning Bash', 'boss': 'Cauldron of Carnage'},
@@ -58,7 +59,7 @@ OVERRIDES = {
     1262059: {'rule': 'never', 'name': 'Colossal Strikes', 'boss': 'Chimaerus, the Undreamt God'},
     1257087: {'rule': 'never', 'name': 'Consuming Miasma', 'boss': 'Chimaerus, the Undreamt God'},
     1249207: {'rule': 'never', 'name': 'Discordant Roar', 'boss': 'Chimaerus, the Undreamt God'},
-    1258192: {'rule': 'bystander', 'name': 'Lingering Miasma', 'boss': 'Chimaerus, the Undreamt God', 'auras': [1258192]},
+    1258192: {'rule': 'never', 'name': 'Lingering Miasma', 'boss': 'Chimaerus, the Undreamt God'},
     1272726: {'rule': 'non_tank', 'name': 'Rending Tear', 'boss': 'Chimaerus, the Undreamt God'},
     1258610: {'rule': 'never', 'name': 'Rift Emergence', 'boss': 'Chimaerus, the Undreamt God'},
     1264782: {'rule': 'bystander', 'name': 'Rift Madness', 'boss': 'Chimaerus, the Undreamt God', 'auras': [1264756, 1264757]},
@@ -186,7 +187,7 @@ OVERRIDES = {
     1260718: {'rule': 'always', 'name': "Oblivion's Wrath", 'boss': 'Imperator Averzian'},
     1253691: {'rule': 'always', 'name': "Shadow's Advance", 'boss': 'Imperator Averzian'},
     1261249: {'rule': 'always', 'name': 'Void Rupture', 'boss': 'Imperator Averzian'},
-    1246502: {'rule': 'bystander', 'name': "Avenger's Shield", 'boss': 'Lightblinded Vanguard', 'auras': [1246502]},
+    1246502: {'rule': 'never', 'name': "Avenger's Shield", 'boss': 'Lightblinded Vanguard'},
     1249047: {'rule': 'always', 'name': 'Divine Hammer', 'boss': 'Lightblinded Vanguard'},
     1246765: {'rule': 'always', 'name': 'Divine Storm', 'boss': 'Lightblinded Vanguard'},
     1272310: {'rule': 'always', 'name': 'Divine Storm', 'boss': 'Lightblinded Vanguard'},
@@ -624,8 +625,8 @@ OVERRIDES = {
     435328: {'rule': 'never', 'name': 'Hulking Crash', 'boss': 'Ulgrax the Devourer'},
     435341: {'rule': 'never', 'name': 'Hulking Crash', 'boss': 'Ulgrax the Devourer'},
     439502: {'rule': 'always', 'name': "Stalker's Webbing", 'boss': 'Ulgrax the Devourer'},
-    1244225: {'rule': 'bystander', 'name': 'Dread Breath', 'boss': 'Vaelgor & Ezzorak', 'auras': [1255612, 1255979]},
-    1255979: {'rule': 'bystander', 'name': 'Dread Breath', 'boss': 'Vaelgor & Ezzorak', 'auras': [1255979]},
+    1244225: {'rule': 'bystander', 'name': 'Dread Breath', 'boss': 'Vaelgor & Ezzorak', 'auras': [1255612]},
+    1255979: {'rule': 'never', 'name': 'Dread Breath', 'boss': 'Vaelgor & Ezzorak'},
     1245421: {'rule': 'always', 'name': 'Gloomfield', 'boss': 'Vaelgor & Ezzorak'},
     1283711: {'rule': 'bystander', 'name': 'Gloomtouched', 'boss': 'Vaelgor & Ezzorak', 'auras': [1245554]},
     1283712: {'rule': 'bystander', 'name': 'Gloomtouched', 'boss': 'Vaelgor & Ezzorak', 'auras': [1245554]},
@@ -660,7 +661,7 @@ OVERRIDES = {
     468223: {'rule': 'always', 'name': 'Incendiary Fire', 'boss': 'Vexie and the Geargrinders'},
     1216740: {'rule': 'while_debuffed', 'name': 'Oil Canister', 'boss': 'Vexie and the Geargrinders', 'auras': [473507]},
     459683: {'rule': 'always', 'name': 'Oil Slick', 'boss': 'Vexie and the Geargrinders'},
-    459678: {'rule': 'bystander', 'name': 'Spew Oil', 'boss': 'Vexie and the Geargrinders', 'auras': [459678]},
+    459678: {'rule': 'never', 'name': 'Spew Oil', 'boss': 'Vexie and the Geargrinders'},
     459627: {'rule': 'never', 'name': 'Tank Buster', 'boss': 'Vexie and the Geargrinders'},
     474061: {'rule': 'never', 'name': 'Tank Buster', 'boss': 'Vexie and the Geargrinders'},
     1276584: {'rule': 'always', 'name': 'Aftershock', 'boss': 'Vorasius'},

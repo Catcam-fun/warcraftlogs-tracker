@@ -22,15 +22,19 @@ def pull_spec(run, rid, fid, pid):
 
 def had_before(auras, t, events):
     """Whether the player had one of the auras just before t: the last application or removal of it before
-    t, or, with none before t, a removal after t (it was on from before the window)."""
+    t, or, with none before t, a removal as the next event (it was on from before the window)."""
     for a in auras:
         evs = sorted((e for e in events if e.get("abilityGameID") == a), key=lambda e: e["timestamp"])
         before = [e for e in evs if e["timestamp"] < t and not e["type"].endswith("stack")]
         if before:
             if before[-1]["type"].startswith("apply"):
                 return True
-        elif any(e["type"].startswith("remove") and not e["type"].endswith("stack") for e in evs if e["timestamp"] >= t):
-            return True
+        else:
+            # Nothing before t: on from before the window only if the next thing at or after t is its
+            # removal (an application at the hit's own moment means the hit put it on).
+            after = [e for e in evs if e["timestamp"] >= t and not e["type"].endswith("stack")]
+            if after and after[0]["type"].startswith("remove"):
+                return True
     return False
 
 
