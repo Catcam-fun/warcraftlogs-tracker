@@ -129,6 +129,13 @@ class AvoidableAuraTests(AvoidableDeathTests.__bases__[0]):
         a = self.judge([old_mark, hit(95_000, 400_000, 600_000, MARKED), hit(100_000, 600_000, 0, overkill=200_000)])
         self.assertIs(a["verdict"], True)
 
+    def test_debuffs_from_a_later_death_window_are_ignored(self):
+        # Review 2026-10-24: a removal in a later window (the player dies again) read as "on from before".
+        later = {"timestamp": 500_000, "type": "removedebuff", "targetID": 1, "abilityGameID": 971}
+        hits = [hit(95_000, 400_000, 600_000, MARKED), hit(100_000, 600_000, 0, overkill=200_000), later]
+        a = defensives.assess_survival(hits, 100_000, [], [], NAMES, {}, spec="Fire")["avoidable"]
+        self.assertIs(a["verdict"], True)
+
     def test_ticks_keep_their_mark_in_the_windows(self):
         self.assertIn("tick", defensives.HIT_FIELDS)
 

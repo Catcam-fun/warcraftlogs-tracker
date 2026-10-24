@@ -2947,9 +2947,10 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
                    or (h.get("type") in AURA_EVENTS and h.get("abilityGameID") in WINDOW_HEAL_IDS)]
     aura_events = [h for h in hits or () if h.get("type") in AURA_EVENTS]
     # Debuffs judged for the avoidable rules: only this death's own window. The player's events hold every
-    # death window of the report, and an application from an earlier one (its removal outside every window)
-    # would read as still on.
-    window_auras = [h for h in aura_events if h.get("timestamp", 0) >= death_ts - LETHAL_WINDOW_MS]
+    # death window of the report: an application from an earlier one (its removal outside every window), or a
+    # removal in a later one, would read as on.
+    window_auras = [h for h in aura_events
+                    if death_ts - LETHAL_WINDOW_MS <= h.get("timestamp", 0) <= death_ts + KILLING_BLOW_AFTER_MS]
     purifies = [h for h in hits or () if h.get("type") == "cast" and h.get("abilityGameID") in STAGGER_CAST_IDS]
     # The player's own casts that lengthen a defensive (fetch_death_windows: Judgment, Hammer of Wrath).
     own_casts = [h for h in hits or () if h.get("type") == "cast"]

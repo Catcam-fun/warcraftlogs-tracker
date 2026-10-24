@@ -63,6 +63,8 @@ def merge(abilities, overrides, dots, raid_wide):
             rule, src = min(rules, key=lambda x: x[1])
             name, boss = (abilities.get(d) or {}).get("name", str(d)), (abilities.get(d) or {}).get("boss", "")
             entries[d] = {"rule": rule, "name": name, "boss": boss, "source": src}
+            if overrides[src].get("auras"):
+                entries[d]["auras"] = list(overrides[src]["auras"])
         elif d in abilities:
             item(d, "DoT whose sources disagree: " + ", ".join(f"{s} {r}" for r, s in sorted(rules)))
     for aid in abilities:
@@ -110,7 +112,7 @@ def write(entries):
                 'WarcraftLogs and the\nowner\'s answers (avoidable_overrides.py). Boss abilities and how '
                 'they are avoidable (avoidable.py)."""\n\nAVOIDABLE = {\n')
         for aid, e in sorted(entries.items(), key=lambda x: (x[1].get("boss", ""), x[1].get("name", ""), x[0])):
-            body = {k: e[k] for k in ("rule", "name", "boss", "source") if k in e}
+            body = {k: e[k] for k in ("rule", "name", "boss", "source", "auras") if k in e}
             f.write(f"    {aid}: {body!r},\n")
         f.write("}\n")
 

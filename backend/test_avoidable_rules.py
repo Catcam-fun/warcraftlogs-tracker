@@ -56,7 +56,8 @@ class AuraAndTickRulesTests(unittest.TestCase):
     """bystander: avoidable unless they had the target's debuff when hit; while_debuffed: avoidable only if
     they had it (soak once); ticks_only / impact_only: by WCL's tick mark."""
     ENTRIES = {10: {"rule": "bystander", "auras": [100]}, 11: {"rule": "while_debuffed", "auras": [200]},
-               12: {"rule": "ticks_only"}, 13: {"rule": "impact_only"}}
+               12: {"rule": "ticks_only"}, 13: {"rule": "impact_only"}, 14: {"rule": "bystander", "auras": [14]},
+               15: {"rule": "bystander", "auras": [15, 150]}, 16: {"rule": "while_debuffed"}}
 
     def setUp(self):
         for name, value in (("AVOIDABLE", self.ENTRIES), ("OVERRIDES", {}), ("RAID_WIDE", {})):
@@ -82,7 +83,15 @@ class AuraAndTickRulesTests(unittest.TestCase):
         self.assertIs(avoidable.judge_hit({"abilityGameID": 13, "tick": True}, "Fire"), False)
 
     def test_aura_ids_lists_every_debuff_a_rule_needs(self):
-        self.assertEqual(avoidable.aura_ids(), [100, 200])
+        self.assertEqual(avoidable.aura_ids(), [100, 150, 200])
+
+    def test_own_id_is_never_a_marker_at_runtime(self):
+        # The overrides file wins at runtime, so the build's own-ID cleanup must hold here too.
+        self.assertEqual(avoidable.rule_for(14), {"rule": "never"})
+        self.assertEqual(avoidable.rule_for(15)["auras"], [150])
+
+    def test_aura_rule_without_auras_is_unsure(self):
+        self.assertIsNone(avoidable.judge_hit({"abilityGameID": 16, "timestamp": 1}, "Fire", lambda a, t: True))
 
     def test_had_aura_from_events(self):
         events = [{"type": "applydebuff", "abilityGameID": 100, "timestamp": 1_000},

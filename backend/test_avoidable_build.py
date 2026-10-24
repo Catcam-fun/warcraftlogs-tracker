@@ -58,6 +58,20 @@ class MergeTests(unittest.TestCase):
         self.assertEqual(entries[7], {"rule": "never", "name": "Shield", "boss": "Boss"})
         self.assertEqual(entries[8]["auras"], [80])
 
+    def test_dot_inherits_source_markers(self):
+        overrides = {3: {"rule": "bystander", "name": "Froth", "boss": "Boss", "auras": [33]}}
+        entries, _ = ba.merge({3: ability("Froth"), 30: ability("Froth Burn")}, overrides, {3: {30}}, set())
+        self.assertEqual(entries[30]["auras"], [33])
+
+    def test_written_list_keeps_markers(self):
+        import tempfile, importlib.util
+        out = os.path.join(tempfile.mkdtemp(), "avoidable_damage.py")
+        with __import__("unittest.mock").mock.patch.object(ba, "OUT", out):
+            ba.write({3: {"rule": "bystander", "name": "Froth", "boss": "Boss", "auras": [33]}})
+        spec = importlib.util.spec_from_file_location("written", out)
+        mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+        self.assertEqual(mod.AVOIDABLE[3]["auras"], [33])
+
     def test_raid_wide_excluded(self):
         entries, review = ba.merge({5: ability("Pulse", share=0.9)}, {}, {}, {5})
         self.assertNotIn(5, entries)

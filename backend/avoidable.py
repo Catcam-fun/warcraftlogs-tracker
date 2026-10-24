@@ -16,13 +16,18 @@ def rule_for(ability_id):
     """The ability's entry ({"rule": ...}), or None when it isn't listed (not avoidable)."""
     if ability_id in RAID_WIDE:
         return {"rule": "never"}
-    return OVERRIDES.get(ability_id) or AVOIDABLE.get(ability_id)
+    entry = OVERRIDES.get(ability_id) or AVOIDABLE.get(ability_id)
+    if entry and entry.get("rule") == "bystander":
+        # The ability's own ID can't mark its target: a DoT the hit puts on comes with the hit.
+        marks = [a for a in entry.get("auras", ()) if a != ability_id]
+        entry = {**entry, "auras": marks} if marks else {"rule": "never"}
+    return entry
 
 
 def aura_ids():
     """Every aura a rule needs to know about (the target's debuff, a soak's debuff): the death windows
     read these players' events of them (defensives.WINDOW_EXTRAS_IDS)."""
-    return sorted({a for e in list(AVOIDABLE.values()) + list(OVERRIDES.values()) for a in e.get("auras", ())})
+    return sorted({a for i in set(AVOIDABLE) | set(OVERRIDES) for a in (rule_for(i) or {}).get("auras", ())})
 
 
 def had_aura_from(events):
@@ -65,7 +70,7 @@ def judge_hit(hit, spec, had_aura=None):
     if rule == "impact_only":
         return not hit.get("tick")
     if rule in ("bystander", "while_debuffed"):
-        if had_aura is None:
+        if had_aura is None or not entry.get("auras"):
             return None
         had = had_aura(entry.get("auras", ()), hit.get("timestamp", 0))
         # The target's own debuff: not avoidable for them. A soak's debuff: avoidable to soak again.
