@@ -1,4 +1,6 @@
-import { summarizeDefensives } from './DefensivePanel';
+import React from 'react';
+import { render, screen } from '@testing-library/react';
+import { DeathLegend, summarizeDefensives } from './DefensivePanel';
 import { avoidableLine } from './DeathRow';
 
 const death = (avoidable) => ({
@@ -37,4 +39,13 @@ test('the avoidable damage line names hits with times and share of max health', 
   expect(avoidableLine({ verdict: null, hits: [{ ...wave, unsure: true }] }))
     .toBe('Caustic Waves ×2 · 38% (unsure)');
   expect(avoidableLine({ verdict: false, hits: [] })).toBe('');
+});
+
+test('the legend explains every term on the results page', () => {
+  render(<DeathLegend />);
+  for (const term of ['Death rate', 'Which deaths count', 'Wipe', 'One-shot', 'Burst', 'Worn down', 'Set up by',
+    'Preventable', 'Avoidable', 'Ready (✓)', 'On cooldown', 'All together ✓', 'CHEAT']) {
+    expect(screen.getByText(term)).toBeTruthy();
+  }
+  expect(screen.getByText(/could have dodged by moving/)).toBeTruthy();
 });

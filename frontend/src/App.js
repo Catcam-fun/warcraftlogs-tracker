@@ -21,7 +21,7 @@ import { groupPulls } from './groupPulls';
 import { fitFiltersToResult } from './resultFilters';
 import { prefersReducedMotion } from './reducedMotion';
 import { shareNote } from './shareNote';
-import { DefensiveSummaryChip, DefensiveTopUnused, summarizeDefensives } from './DefensivePanel';
+import { DeathLegend, DefensiveSummaryChip, DefensiveTopUnused, summarizeDefensives } from './DefensivePanel';
 import { DeathRow } from './DeathRow';
 import { friendlyError } from './friendlyError';
 
@@ -2105,6 +2105,7 @@ export default function WarcraftLogsApp() {
 
             {/* Players Section */}
             <div className="fpx-rsec fpx-rv"><h3>PLAYERS</h3><span className="sub">expand for the per-boss death log</span><div className="rule" /></div>
+            <DeathLegend />
             {(() => {
               const filteredStats = getFilteredStats();
               // Calculate all percentage values for color scaling
