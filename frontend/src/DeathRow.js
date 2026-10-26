@@ -18,8 +18,7 @@ import { createPortal } from 'react-dom';
      icons:       {defensive name: icon file name} for render.worldofwarcraft.com.
      abilityIcons: {spell ID: icon file name} for killing blows (death.abilityId).
      abilityInfo: {name: {kind, cooldownMs, auraMs, charges, effect, typicalHeal?, description?}}.
-     abilityText: {spell ID: in-game description} for killing blows (death.abilityId).
-     killCounts:  {"boss|ability": counted deaths to it in these results}. */
+     abilityText: {spell ID: in-game description} for killing blows (death.abilityId). */
 
 const ICON_URL = (icon) => `https://render.worldofwarcraft.com/us/icons/56/${icon}.jpg`;
 const isCurrentShape = (d) => d && Array.isArray(d.active) && Array.isArray(d.available);
@@ -332,12 +331,6 @@ export const activeTip = (a, inf, icons) => () => {
 
 /* ---------- the row ---------- */
 
-/* The avoidable hits since they were last at 85% health, most damage first: "Caustic Waves ×2 · 38%". */
-export function avoidableLine(a) {
-  return (a?.hits || []).map((h) => `${h.name}${h.times > 1 ? ` ×${h.times}` : ''} · ${h.pctOfMax}%${h.unsure ? ' (unsure)' : ''}`)
-    .join(', ');
-}
-
 /* How they died, as the killing-blow tooltip says it: the kind of death (backend assess_survival's rules),
    with what it means on its ⓘ. */
 const DEATH_KINDS = {
@@ -443,7 +436,7 @@ export function DeathTableHead() {
   );
 }
 
-export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText, killCounts, logHref, timeLabel }) {
+export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText, logHref, timeLabel }) {
   const d = death.defensives;
   const current = isCurrentShape(d);
   const s = current ? d.survival : null;

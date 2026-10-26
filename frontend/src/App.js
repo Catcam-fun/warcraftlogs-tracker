@@ -1276,16 +1276,6 @@ export default function WarcraftLogsApp() {
     config.selectedRaid, hiddenPlayers, minPulls,
   ]);
   /* eslint-enable react-hooks/exhaustive-deps */
-  // Deaths that count, per boss ability, for the killing-blow tooltips.
-  const killCounts = useMemo(() => {
-    const counts = {};
-    Object.values(data?.events || {}).forEach((evs) => evs.forEach((ev) => {
-      if (ev.isCheatDeath || !isCounted(ev, cutoff, data.pullCutoffTimestamps)) return;
-      const key = `${ev.boss}|${ev.abilityName}`;
-      counts[key] = (counts[key] || 0) + 1;
-    }));
-    return counts;
-  }, [data, cutoff]);
   const getFilteredStats = () => filteredStatsMemo;
   const getOverviewData = () => overviewDataMemo;
 
@@ -2194,7 +2184,7 @@ export default function WarcraftLogsApp() {
                                 {(showBothStats ? [...totalBossDeaths].sort((a, b) => a.absTs - b.absTs) : bossDeaths)
                                   .map((death, idx) => (
                                   <DeathRow key={idx} death={death} icons={data.icons} abilityIcons={data.abilityIcons} abilityInfo={data.abilityInfo} abilityText={data.abilityText}
-                                    killCounts={killCounts} logHref={getWCLLink(death.reportId, death.fightId)}
+                                    logHref={getWCLLink(death.reportId, death.fightId)}
                                     timeLabel={formatTimestamp(death.absTs)} />
                                 ))}
                               </div>

@@ -1907,9 +1907,6 @@ class FetchMetaTests(unittest.TestCase):
         self.assertEqual(meta["fights"], [{"id": 1}])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class AvoidableCheckTests(unittest.TestCase):
     """rules_avoidable recomputes rule B′ from WCL's hits; source_avoidable checks "always" abilities hit few."""
@@ -1995,3 +1992,7 @@ class AvoidableCheckTests(unittest.TestCase):
             o = source_avoidable.check(run)
         self.assertEqual(o.status, "fail")
         self.assertIn("Wave", o.items[0])
+
+
+if __name__ == "__main__":
+    unittest.main()
