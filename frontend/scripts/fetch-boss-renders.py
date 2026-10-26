@@ -21,10 +21,10 @@ BOSSES = [
     "Mug'Zee, Heads of Security", "Chrome King Gallywix", "Imperator Averzian",
     "Vorasius", "Fallen-King Salhadaar", "Vaelgor & Ezzorak", "Lightblinded Vanguard",
     "Crown of the Cosmos", "Chimaerus, the Undreamt God", "Belo'ren", "L'ura",
-    # Midnight Season 2: The Venomous Abyss + Tidebound Grotto
+    # Midnight Season 2: The Venomous Abyss + Tidebound Grotto + The Unbinding of Kith'ix
     "Nek'zali the Soulcoiler", "Entombed Sentinels", "The Lost Explorers",
     "Vashnik the Malignant", "Sszorak", "The Twin Fangs", "The Coiled Altar",
-    "Ula'tek", "Nymrissa Wavecaller",
+    "Ula'tek", "Nymrissa Wavecaller", "Kith'ix",
 ]
 if len(sys.argv) > 1:
     BOSSES = [b for b in BOSSES if b in sys.argv[1:]]

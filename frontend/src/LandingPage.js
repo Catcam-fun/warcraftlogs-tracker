@@ -9,7 +9,7 @@ import FpxRail from './FpxRail';
 /* Real encounters from the live BOSS_ORDER catalog (App.js). Render
    art slots into the --img var per tile once boss renders land. */
 const BOSS_STRIP = [
-  // The Venomous Abyss + Tidebound Grotto (Midnight S2, current tier)
+  // The Venomous Abyss + Tidebound Grotto + The Unbinding of Kith'ix (Midnight S2, current tier)
   ["Nek'zali the Soulcoiler", 'THE VENOMOUS ABYSS'],
   ['Entombed Sentinels', 'THE VENOMOUS ABYSS'],
   ['The Lost Explorers', 'THE VENOMOUS ABYSS'],
@@ -19,6 +19,7 @@ const BOSS_STRIP = [
   ['The Coiled Altar', 'THE VENOMOUS ABYSS'],
   ["Ula'tek", 'THE VENOMOUS ABYSS'],
   ['Nymrissa Wavecaller', 'TIDEBOUND GROTTO'],
+  ["Kith'ix", "THE UNBINDING OF KITH'IX"],
   // Manaforge Omega
   ['Plexus Sentinel', 'MANAFORGE OMEGA'],
   ["Loom'ithar", 'MANAFORGE OMEGA'],
@@ -105,6 +106,7 @@ const XL_BACKGROUNDS = new Set([
 const artUrl = (path) => `url(${process.env.PUBLIC_URL}/art/backgrounds/${path}.jpg)`;
 
 const UPDATES = [
+  ["Kith'ix and avoidable deaths", "Kith'ix joins Midnight Season 2, and deaths decided by damage you could have dodged are marked avoidable.", 'OCT 26'],
   ['Defensives judged on the whole burst', 'Each death replays the seconds before it, so a big hit followed by a finishing tick counts; analyses run about twice as fast.', 'OCT 1'],
   ['Midnight Season 2 support', "The Venomous Abyss and Nymrissa Wavecaller in the Tidebound Grotto are tracked as one combined tier.", 'AUG 18'],
   ['Midnight Season 1 support', "The Voidspire, The Dreamrift, and March on Quel'Danas are wired for raid-night review.", 'MAR 17'],

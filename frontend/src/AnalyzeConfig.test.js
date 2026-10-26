@@ -37,9 +37,10 @@ test('one Season 2 choice combines both raids alongside the existing tiers', () 
   expect(seasonTwo).toHaveAttribute('aria-pressed', 'true');
   expect(seasonOne).toHaveAttribute('aria-pressed', 'false');
   const lineup = screen.getByRole('region', { name: 'MIDNIGHT SEASON 2' });
-  expect(lineup.querySelectorAll('.fpx-boss')).toHaveLength(9);
+  expect(lineup.querySelectorAll('.fpx-boss')).toHaveLength(10);
   expect(within(lineup).getByText("Ula'tek")).toBeInTheDocument();
   expect(within(lineup).getByText('Nymrissa Wavecaller')).toBeInTheDocument();
+  expect(within(lineup).getByText("Kith'ix")).toBeInTheDocument();
 
   fireEvent.click(seasonOne);
   expect(onRaidChange).toHaveBeenLastCalledWith({

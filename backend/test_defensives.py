@@ -2189,8 +2189,8 @@ class StaggerPoolTests(unittest.TestCase):
         # Quick Sip purifies 5% for each 3 s of Shuffle gained, in one event: Keg Smash's 5 s can cross
         # two thresholds (Weavi, Quel'Danas p104: 0.1000 on 10 hits). Pool 3.4M, 37,820 staggered, the
         # tick after 154,891: 3.06M, 0.1000 read before the hit, 0.0989 after. Only the first is a share
-        # the game has (two separate 5% would be 0.0975).
-        self.assertEqual(self.pools(154_891, 37_820), [3_060_000])
+        # the game has (two separate 5% would be 0.0975). Quick Sip is 5% up to 12.1.0 (8% from 12.1.5).
+        self.assertEqual(self.pools(154_891, 37_820, purify=defensives.STAGGER_PURIFY["12.1.0"]), [3_060_000])
         keeps = defensives._purify_keeps(defensives.STAGGER_PURIFY["11.1.0"])
         self.assertEqual(keeps[0], [0.4, 0.5])                       # Purifying Brew, with Mantra of Purity or not
         self.assertEqual(keeps[2], [0.9, 0.95, 1.0])                 # one Quick Sip event: 10%, 5% or none
