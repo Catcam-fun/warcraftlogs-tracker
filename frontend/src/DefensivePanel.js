@@ -1,4 +1,5 @@
 import React from 'react';
+import { Tip } from './DeathRow';
 
 /* Per-player defensive summaries. Each death's own row is DeathRow.js.
    Defensive picture for one death, as computed by backend/defensives.py:
@@ -60,23 +61,21 @@ export function DefensiveSummaryChip({ s }) {
     );
   }
   const tone = s.preventable === 0 ? 'good' : s.preventable / s.assessed >= 0.5 ? 'bad' : 'warn';
+  const chip = (cls, text, meaning) => (
+    <Tip className={`fpx-pdef ${cls}`} content={() => <p>{meaning}</p>}>{text} <i className="fpx-i">i</i></Tip>
+  );
   return (
     <>
-      <span className={`fpx-pdef ${tone}`}
-        title="Deaths where a defensive, Healthstone or potion they had ready would have covered the killing blow">
-        {s.preventable}/{s.assessed} preventable
-      </span>
-      {s.avoidableAssessed > 0 && (
-        <span className={`fpx-pdef ${s.avoidable === 0 ? 'good' : s.avoidable / s.avoidableAssessed >= 0.5 ? 'bad' : 'warn'}`}
-          title="Deaths where damage they could have dodged, taken since they were last at 85% health, decided the death">
-          {s.avoidable}/{s.avoidableAssessed} avoidable
-        </span>
-      )}
-      {s.oneShots > 0 && (
-        <span className="fpx-pdef neutral" title="A single hit of 80%+ of max health from high health, within 1.5 seconds of death, or an instant kill by a mechanic">
-          {s.oneShots} one-shot{s.oneShots !== 1 ? 's' : ''}
-        </span>
-      )}
+      {chip(tone, `${s.preventable}/${s.assessed} preventable`,
+        'Deaths where a defensive, Healthstone or potion they had ready would have kept them alive.')}
+      {s.avoidableAssessed > 0 && chip(
+        s.avoidable === 0 ? 'good' : s.avoidable / s.avoidableAssessed >= 0.5 ? 'bad' : 'warn',
+        `${s.avoidable}/${s.avoidableAssessed} avoidable`,
+        'Deaths decided by damage they could have dodged by moving (pools, frontals, waves, things landing on '
+        + 'the floor), taken since they were last at 85% health: without it they would have lived.')}
+      {s.oneShots > 0 && chip('neutral', `${s.oneShots} one-shot${s.oneShots !== 1 ? 's' : ''}`,
+        'One hit of 80%+ of their max health within 1.5 seconds of being at 85%+ health, a killing blow bigger '
+        + 'than their whole max health, or an instant kill by a mechanic.')}
     </>
   );
 }
