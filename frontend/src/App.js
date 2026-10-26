@@ -22,7 +22,7 @@ import { fitFiltersToResult } from './resultFilters';
 import { prefersReducedMotion } from './reducedMotion';
 import { shareNote } from './shareNote';
 import { DefensiveSummaryChip, DefensiveTopUnused, summarizeDefensives } from './DefensivePanel';
-import { DeathRow } from './DeathRow';
+import { DeathRow, DeathTableHead, InfoTip } from './DeathRow';
 import { friendlyError } from './friendlyError';
 
 
@@ -2131,6 +2131,12 @@ export default function WarcraftLogsApp() {
                             {realRate.toFixed(1)}%
                           </span>
                           {showBothStats && <span className="fpx-pcheat">(+{cheatDeaths} cheat)</span>}
+                          <InfoTip>
+                            <p>Death rate: the deaths that count, divided by the boss pulls they were in.</p>
+                            <p>Only each pull's first deaths count, up to "Deaths to count", and never deaths inside a
+                              wipe (8 or more deaths within 8 seconds: the pull was already lost).</p>
+                            <p>Cheat deaths (Cauterize, Purgatory and the like kept them alive) are counted separately.</p>
+                          </InfoTip>
                           <DefensiveSummaryChip s={defensiveSummary} />
                         </div>
                         <button
@@ -2148,6 +2154,7 @@ export default function WarcraftLogsApp() {
                       {isExpanded && (
                         <div className="fpx-pbody">
                           <DefensiveTopUnused s={defensiveSummary} />
+                          <DeathTableHead />
                           {sortBossesByOrder(Object.keys(showBothStats ? totalDeathsByBoss : deathsByBoss), config.selectedRaid).map(boss => {
                             const bossDeaths = deathsByBoss[boss] || [];
                             const bossPulls = groupPulls(data.bossParticipation[boss], player, characterGroups);

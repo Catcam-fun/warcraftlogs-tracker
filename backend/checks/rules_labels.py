@@ -2,11 +2,14 @@
 
 The owner's rule, from the hits since the player was last at 85%+ health:
   one-shot: that was at most 1.5 s before death and a single hit took 80%+ of max HP; when that hit
-    (the biggest since last high) is not the killing blow, it is named as the one-shot hit (oneShotHit);
+    (the biggest since last high) is not the killing blow, it is named as the one-shot hit (oneShotHit).
+    Also, from any health, a killing blow whose amount + overkill (what went past shields) is their max HP
+    or more (2026-10-26: Oblivion at 4.7x max health after an earlier hit);
   burst: at most 1.5 s, but no single hit that big;
   worn down by (rot): only from a raid-wide ability in raid_wide_damage.py hitting them repeatedly
     (3+ hits of one RAID_WIDE ability, that ability 60%+ of the damage since last high, none of its
-    hits 35%+ of max HP);
+    hits 35%+ of max HP), its first hit more than 1.5 s before death. When they all landed within 1.5 s
+    (2026-10-26: Crushing Gravity, three hits on one millisecond from 71%) it is a burst instead;
   set up by: otherwise (neither one-shot nor burst), the biggest hit (at least 10% of max HP) since they
     were last at high health.
 "Last at high health" is the latest moment before the killing blow with health >= 0.85 * maxHitPoints: just
@@ -363,15 +366,10 @@ def max_at(hits, i, kb_index, max_hp):
     return max_hp
 
 
-def label(hits, kb_index, max_hp=None, health=None):
-    """{"deathType", "rot", "biggestHit", "oneShotHit"} for the killing blow at hits[kb_index] (hits: one player's,
-    time order). `max_hp` / `health`: what they had just before it (default: max_hp_before without the patch's
-    aura sizes). Every hit is measured against the max HP they had when it landed (max_at)."""
-    kb = hits[kb_index]
-    if max_hp is None:
-        max_hp, health, _ = max_hp_before(hits, kb_index)
-    health = (kb.get("amount") or 0) if health is None else health
-    share = {id(h): full_hit(h) / (max_at(hits, i, kb_index, max_hp) or 1) for i, h in enumerate(hits)}
+def last_high(hits, kb_index, max_hp, health):
+    """(index of the last hit before the stretch, its time): the last moment before the killing blow at
+    `max_hp` / `health` with health >= HIGH of max. The stretch is hits[since_i + 1:kb_index + 1]; since_ts is
+    None when they weren't at high health anywhere in `hits`."""
     # The last moment they were at high health, in log order (hits on one millisecond keep the
     # log's order): just before a hit, at its time (one with their health: after + amount; one
     # without: what the last hit with their health left, as only heals land between hits; the
@@ -393,9 +391,23 @@ def label(hits, kb_index, max_hp=None, health=None):
             last = (h.get("hitPoints") or 0, h["maxHitPoints"])
             if last[0] >= HIGH * last[1]:
                 since_i, since_ts = i, h["timestamp"]                 # high just after this hit
+    return since_i, since_ts
+
+
+def label(hits, kb_index, max_hp=None, health=None):
+    """{"deathType", "rot", "biggestHit", "oneShotHit"} for the killing blow at hits[kb_index] (hits: one player's,
+    time order). `max_hp` / `health`: what they had just before it (default: max_hp_before without the patch's
+    aura sizes). Every hit is measured against the max HP they had when it landed (max_at)."""
+    kb = hits[kb_index]
+    if max_hp is None:
+        max_hp, health, _ = max_hp_before(hits, kb_index)
+    health = (kb.get("amount") or 0) if health is None else health
+    share = {id(h): full_hit(h) / (max_at(hits, i, kb_index, max_hp) or 1) for i, h in enumerate(hits)}
+    since_i, since_ts = last_high(hits, kb_index, max_hp, health)
     run = hits[since_i + 1:kb_index + 1]
     quick = since_ts is not None and kb["timestamp"] - since_ts <= BURST_WINDOW_MS
-    one_shot = quick and any(share[id(h)] >= ONE_SHOT for h in run)
+    one_shot = (quick and any(share[id(h)] >= ONE_SHOT for h in run)) \
+        or (kb.get("amount") or 0) + (kb.get("overkill") or 0) >= max_hp
     death_type = "oneShot" if one_shot else "burst" if quick else "wasLow"
     rot = None
     if death_type == "wasLow":
@@ -407,6 +419,8 @@ def label(hits, kb_index, max_hp=None, health=None):
             if aid in RAID_WIDE and len(hs) >= ROT_MIN_HITS \
                     and sum(full_hit(h) for h in hs) >= ROT_SHARE * total \
                     and max(share[id(h)] for h in hs) < ROT_MAX_HIT:
+                if kb["timestamp"] - hs[0]["timestamp"] <= BURST_WINDOW_MS:
+                    return {"deathType": "burst", "rot": None, "biggestHit": None, "oneShotHit": None}
                 rot = aid
         biggest = None
         if rot is None:

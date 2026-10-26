@@ -260,9 +260,10 @@ def find_mass_death_start(cutoff_idx, deaths_list):
 # Mythic+/dungeon bosses out of the raid charts entirely: a dungeon
 # encounter ID is never in any raid's set.
 RAID_ENCOUNTERS = {
-    # Midnight S2. Instance IDs: Venomous Abyss 3004, Tidebound Grotto 2987.
-    # Encounter IDs: BigWigsMods/BigWigs TheVenomousAbyss and MidnightLairs.
-    'midnight-s2-all': {3470, 3445, 3497, 3455, 3420, 3421, 3429, 3492, 3379},
+    # Midnight S2. Instance IDs: Venomous Abyss 3004, Tidebound Grotto 2987, The Unbinding of
+    # Kith'ix 3095 (WCL files Kith'ix under The Venomous Abyss's zone).
+    # Encounter IDs: BigWigsMods/BigWigs TheVenomousAbyss, MidnightLairs and TheUnbindingOfKithix.
+    'midnight-s2-all': {3470, 3445, 3497, 3455, 3420, 3421, 3429, 3492, 3379, 3513},
     # The War Within
     'manaforge':    {3129, 3131, 3130, 3132, 3122, 3133, 3134, 3135},
     'undermine':    {3009, 3010, 3011, 3012, 3013, 3014, 3015, 3016},

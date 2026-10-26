@@ -1085,6 +1085,17 @@ class LabelRuleTests(unittest.TestCase):
         self.assertEqual(label(hits, 5)["rot"], aid)
         not_wide = [dict(h, abilityGameID=999_999) for h in hits]
         self.assertEqual(label(not_wide, 5)["rot"], None)
+        # All its hits within 1.5 s (three on one millisecond from 70%): a burst, not rot.
+        at_once = [self.hit(0, 300, 700, aid=999_999)] + [self.hit(5000, 240, 700 - 240 * i, aid=aid) for i in (1, 2)] \
+            + [self.hit(5000, 220, 0, aid=aid, overkill=10)]
+        self.assertEqual(label(at_once, 3), {"deathType": "burst", "rot": None, "biggestHit": None, "oneShotHit": None})
+
+    def test_a_killing_blow_of_max_health_is_a_one_shot_from_any_health(self):
+        # Oblivion: 44% taken 5 s before, then a killing blow of 4.7x max health.
+        hits = [self.hit(0, 440, 560), self.hit(5000, 560, 0, overkill=4140)]
+        self.assertEqual(label(hits, 1)["deathType"], "oneShot")
+        # 999 past shields from 560 health: set up by the 44% hit.
+        self.assertEqual(label([self.hit(0, 440, 560), self.hit(5000, 560, 0, overkill=439)], 1)["biggestHit"], 1)
 
     def test_threshold_edges(self):
         # "quick" is measured from the last moment at high health (t=0 here) to the killing blow:
@@ -1162,7 +1173,7 @@ class LabelRuleTests(unittest.TestCase):
         # WCL logs the killing hit after the death stripped the player's auras: its max is lower than
         # the max they had (Strikepal live 2026-10-08: 10061382 against 11198315). 800 of a 1000 max is
         # not high health, though it is 89% of the killing hit's 900.
-        kb = dict(self.hit(3000, 800, 0, overkill=500), maxHitPoints=900)
+        kb = dict(self.hit(3000, 800, 0, overkill=100), maxHitPoints=900)
         self.assertEqual(rules_labels.max_hp_before([self.hit(0, 200, 800), kb], 1), (1000, 800, None))
         self.assertEqual(label([self.hit(0, 200, 800), kb], 1)["deathType"], "wasLow")
 
@@ -1864,7 +1875,8 @@ class StateTests(unittest.TestCase):
 class FinalRegistryTests(unittest.TestCase):
     def test_final_order(self):
         self.assertEqual([c[0] for c in CHECKS], ["deaths", "selection", "participation", "state", "durations",
-                                                  "mitigation", "slots", "counting", "labels", "verdicts", "defensives"])
+                                                  "mitigation", "source-avoidable", "slots", "counting", "labels",
+                                                  "verdicts", "defensives", "avoidable"])
 
 
 class FindLogsTests(unittest.TestCase):
@@ -1897,3 +1909,89 @@ class FetchMetaTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AvoidableCheckTests(unittest.TestCase):
+    """rules_avoidable recomputes rule B′ from WCL's hits; source_avoidable checks "always" abilities hit few."""
+    MAX = 1_000_000
+
+    def hit(self, ts, amount, hp_after, ability=800, overkill=0):
+        return {"timestamp": ts, "type": "damage", "sourceID": 7, "targetID": 7, "abilityGameID": ability,
+                "amount": amount, "overkill": overkill, "hitPoints": hp_after, "maxHitPoints": self.MAX,
+                "resourceActor": 2}
+
+    def run_with(self, verdict):
+        from checks import rules_avoidable
+        run = mock.Mock()
+        ev = {"reportId": "R", "fightId": 3, "timestamp": 100_000, "originalCharacter": "Bob", "slot": 1,
+              "inWipe": False, "isCheatDeath": False,
+              "defensives": {"survival": {"deathType": "wasLow",
+                                          "avoidable": {"verdict": verdict, "hits": [], "windowLimited": False}}}}
+        run.counted_deaths.return_value = [ev]
+        run.actor_id.return_value = 7
+        run.fight.return_value = {"start_time": 0}
+        run.hits_before.return_value = [self.hit(95_000, 400_000, 600_000, 900),
+                                        self.hit(100_000, 600_000, 0, overkill=200_000)]
+        patches = [mock.patch.object(rules_avoidable, "run_max_hp_before", return_value=(self.MAX, 600_000, None)),
+                   mock.patch.object(rules_avoidable, "pull_spec", return_value="Fire"),
+                   mock.patch.object(rules_avoidable, "rule_for", lambda a: {"rule": "always"} if a == 900 else None)]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        return rules_avoidable.check(run)
+
+    def test_matching_verdict_passes(self):
+        self.assertEqual(self.run_with(True).status, "pass")
+
+    def test_flipped_verdict_fails_naming_the_death(self):
+        o = self.run_with(False)
+        self.assertEqual(o.status, "fail")
+        self.assertIn("Bob pull 3", o.items[0])
+
+    def targeted_run(self, site_verdict, marked):
+        from checks import rules_avoidable
+        run = mock.Mock()
+        ev = {"reportId": "R", "fightId": 3, "timestamp": 100_000, "originalCharacter": "Bob", "slot": 1,
+              "inWipe": False, "isCheatDeath": False,
+              "defensives": {"survival": {"deathType": "wasLow",
+                                          "avoidable": {"verdict": site_verdict, "hits": [], "windowLimited": False}}}}
+        run.counted_deaths.return_value = [ev]
+        run.actor_id.return_value = 7
+        run.fight.return_value = {"start_time": 0}
+        run.hits_before.return_value = [self.hit(95_000, 400_000, 600_000, 970),
+                                        self.hit(100_000, 600_000, 0, overkill=200_000)]
+        run.aura_events.return_value = [{"timestamp": 93_000, "type": "applydebuff", "abilityGameID": 971}] if marked else []
+        with mock.patch.object(rules_avoidable, "run_max_hp_before", return_value=(self.MAX, 600_000, None)),                 mock.patch.object(rules_avoidable, "pull_spec", return_value="Fire"),                 mock.patch.object(rules_avoidable, "rule_for",
+                                  lambda a: {"rule": "bystander", "auras": [971]} if a == 970 else None):
+            return rules_avoidable.check(run)
+
+    def test_debuff_applied_by_the_hit_itself_was_not_had_before_it(self):
+        from checks.rules_avoidable import had_before
+        # Live 2026-10-24 (Voidspire, Avenger's Shield 1246502): applied at the hit's own moment, removed later.
+        events = [{"timestamp": 95_000, "type": "applydebuff", "abilityGameID": 971},
+                  {"timestamp": 99_000, "type": "removedebuff", "abilityGameID": 971}]
+        self.assertFalse(had_before([971], 95_000, events))
+        self.assertTrue(had_before([971], 97_000, events))
+        # Removed later with nothing applied in between: on from before the window.
+        self.assertTrue(had_before([971], 90_000, [{"timestamp": 99_000, "type": "removedebuff", "abilityGameID": 971}]))
+
+    def test_bystander_counted_as_avoidable(self):
+        self.assertEqual(self.targeted_run(True, marked=False).status, "pass")
+
+    def test_targeted_player_is_not_counted_as_avoidable(self):
+        self.assertEqual(self.targeted_run(False, marked=True).status, "pass")
+        self.assertEqual(self.targeted_run(True, marked=True).status, "fail")
+
+    def test_always_ability_hitting_most_of_the_raid_fails(self):
+        from checks import source_avoidable
+        run = mock.Mock()
+        run.result = {"pullParticipation": {"Bob": ["R_3"]}}
+        run.fight.return_value = {"start_time": 0, "end_time": 60_000, "name": "Boss", "friendlyPlayers": [1, 2, 3, 4]}
+        # Each cast hits 3 of 4 players at once.
+        run.ability_hits.return_value = [{"timestamp": t, "abilityGameID": 900, "targetID": p, "type": "damage"}
+                                         for t in (1_000, 9_000, 17_000) for p in (1, 2, 3)]
+        with mock.patch.object(source_avoidable, "AVOIDABLE", {900: {"rule": "always", "name": "Wave", "boss": "Boss"}}), \
+                mock.patch.object(source_avoidable, "OVERRIDES", {}):
+            o = source_avoidable.check(run)
+        self.assertEqual(o.status, "fail")
+        self.assertIn("Wave", o.items[0])

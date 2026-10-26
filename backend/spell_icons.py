@@ -188,8 +188,8 @@ DESCRIPTIONS = {'Algari Healing Potion': 'Restores health.',
  'Ice Block': 'Encases you in a block of ice, protecting you from all attacks and damage for 10 sec, but '
               'during that time you cannot attack, move, or cast spells. Causes Hypothermia, preventing you '
               'from recasting Ice Block for 30 sec.',
- 'Ice Cold': 'Your blood runs cold, reducing all damage you take by 70% for 6 sec. Causes Hypothermia, '
-             'preventing you from recasting Ice Cold for 30 sec.',
+ 'Ice Cold': 'Your blood runs cold, reducing all damage you take by 70% for 6 sec. Does not incur the Global '
+             'Cooldown. Causes Hypothermia, preventing you from recasting Ice Cold for 30 sec.',
  'Icebound Fortitude': 'Your blood freezes, granting immunity to Stun effects and reducing all damage you '
                        'take by 30% for 8 sec.',
  'Impending Victory': 'Instantly attack the target, causing damage and healing you for 30% of your maximum '

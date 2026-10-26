@@ -1094,6 +1094,42 @@ class LethalWindowTests(unittest.TestCase):
         self.assertEqual(r["deathType"], "oneShot")
         self.assertNotIn("oneShotHit", r)
 
+    def test_a_killing_blow_bigger_than_max_health_is_a_one_shot_from_any_health(self):
+        # Live (Dimensius, Manaforge): Massive Smash took 44%, then Oblivion (4.7x max health) 5s later.
+        hits = [hit(95_000, 440_000, 560_000), hit(100_000, 560_000, 0, overkill=4_140_000)]
+        r = self.assess(hits)
+        self.assertEqual((r["deathType"], r["hpBeforePct"]), ("oneShot", 56))
+        self.assertNotIn("biggestHit", r)
+        # Only what went to health counts: a hit mostly shielded is no one-shot.
+        r = self.assess([hit(95_000, 440_000, 560_000),
+                         hit(100_000, 560_000, 0, overkill=40_000, absorbed=900_000)])
+        self.assertEqual(r["deathType"], "wasLow")
+
+    def test_rot_needs_time_to_wear_them_down(self):
+        # Live (Crushing Gravity, Manaforge): worn down to 71%, then three hits of a raid-wide ability on
+        # one millisecond: a burst from 71%, not rot.
+        wide = __import__("unittest.mock").mock.patch.dict(defensives.RAID_WIDE, {500: 1.0})
+        hits = [hit(90_000, 290_000, 710_000, ability=600), hit(100_000, 240_000, 470_000),
+                hit(100_000, 240_000, 230_000), hit(100_000, 230_000, 0, overkill=10_000)]
+        with wide:
+            r = self.assess(hits)
+        self.assertNotIn("rot", r)
+        self.assertEqual((r["deathType"], r["fromPct"], r["burst"]["hits"], r["burst"]["ms"]), ("burst", 71, 3, 0))
+        self.assertEqual(r["burst"]["abilities"][0]["times"], 3)
+
+    def test_steps_list_their_health_hit_by_hit(self):
+        # From full: a 60% hit, healed back up by 20%, then three ticks of one ability kill them.
+        hits = [hit(95_000, 600_000, 400_000, ability=600), hit(97_000, 100_000, 500_000),
+                hit(98_000, 100_000, 400_000), hit(100_000, 400_000, 0, overkill=85_000)]
+        st = self.assess(hits)["steps"]
+        self.assertEqual(st["from"], 100)
+        self.assertEqual([(s.get("name"), s.get("times"), s.get("took"), s.get("left"), s.get("healedTo"))
+                          for s in st["items"]],
+                         [("Cleave", 1, 60, 40, None), (None, None, None, None, 60),
+                          ("Frost Bolt", 3, 60, None, None)])
+        # The killing blow takes the health they had before it, whatever its amount holds.
+        self.assertEqual(self.assess(hits)["hpBeforePct"], 40)
+
     def test_one_shot_and_burst_need_high_health_within_a_second_and_a_half(self):
         # Owner's rule (2026-10-08): high health no more than 1.5s before the killing blow.
         # The press cutoff (REACTION_MS) stays at 1s.
@@ -1237,6 +1273,22 @@ class LethalWindowTests(unittest.TestCase):
         with __import__("unittest.mock").mock.patch.object(defensives, "graphql_query", side_effect=fake):
             self.assertEqual([h["type"] for h in defensives.fetch_death_windows("t", "R", [(3, [(60_000, "A")])],
                                                                                  heals=False)[1]], ["damage"])
+
+    def test_extras_block_never_doubles_a_hit(self):
+        # Live 2026-10-24 (Manaforge g2R9GZcd1rP6JKpw pull 52): Starshard's debuff and its damage share ID
+        # 1254385, so once the debuff was read in the extras block (All events), its hits came back there too
+        # and every Starshard hit was counted twice: the doubled killing blow cut the window to one hit.
+        dmg = {"timestamp": 59_990, "type": "damage", "targetID": 1, "abilityGameID": 1254385, "amount": 5,
+               "overkill": 3, "hitPoints": 0, "maxHitPoints": 100, "resourceActor": 2, "fight": 3}
+        aura = {"timestamp": 59_000, "type": "applydebuff", "targetID": 1, "abilityGameID": 1254385, "sourceID": 9}
+
+        def fake(_t, q, _v=None, **_k):
+            report = {a: {"data": [dmg]} for a in __import__("re").findall(r"(p\d+): events", q)}
+            report["extras"] = {"data": [aura, dict(dmg)]}
+            return {"reportData": {"report": report}}
+        with __import__("unittest.mock").mock.patch.object(defensives, "graphql_query", side_effect=fake):
+            hits = defensives.fetch_death_windows("t", "R", [(3, [(60_000, "A")])])
+        self.assertEqual([(h["type"], h["timestamp"]) for h in hits[1]], [("applydebuff", 59_000), ("damage", 59_990)])
 
     def test_identical_hits_at_the_same_moment_all_count(self):
         # Two droplets soaked in the same millisecond for the same amount are two hits.
@@ -1630,6 +1682,7 @@ class MaxHealthBeforeKillingBlowTests(unittest.TestCase):
                 self.at(8_002_696, 30_743_644, 0, 29_370_419, overkill=39_340_044, absorbed=58_740_840)]
         r = self.assess(hits)
         self.assertEqual((r["maxHp"], r["hpBeforePct"]), (29_370_419, 65))
+        self.assertEqual(r["steps"]["items"][-1]["took"], 65)          # not the 105% Oblivion read taken
         # A Metamorphosis heal without Last Resort's absorb with it is an ordinary press: not the blow's.
         self.assertEqual(self.assess([h for h in hits if h.get("abilityGameID") != 209258])["hpBeforePct"], 100)
         # Heals before the hit before the killing hit were health they had.
@@ -1639,14 +1692,14 @@ class MaxHealthBeforeKillingBlowTests(unittest.TestCase):
     def test_a_cheat_death_heal_inside_the_killing_hit(self):
         # Live (Arzoker, Quel'Danas p34, k9mC7RxjKPt1TgZW): 339946 / 507980 on his last hit; Defy Fate
         # (404381) healed 136670 inside Terminate and an Ebon Might heal (395152, 92026) landed with it;
-        # Terminate read 507980 taken. Before the blow: 507980 - 136670 = 371310, 73%: not a one-shot
-        # from full health.
+        # Terminate read 507980 taken. Before the blow: 507980 - 136670 = 371310, 73%: not from full
+        # health, though Terminate (3.4M to health) is a one-shot from any health.
         hits = [self.at(23_324_344, 58_669, 339_946, 507_980),
                 self.healed(23_325_226, 1_015_960, 404195, "absorbed"),
                 self.healed(23_325_226, 136_670, 404381), self.healed(23_325_226, 92_026, 395152),
                 self.at(23_325_227, 507_980, 0, 507_980, overkill=2_896_634, absorbed=1_015_960, ability=1)]
         r = self.assess(hits)
-        self.assertEqual((r["maxHp"], r["hpBeforePct"], r["deathType"]), (507_980, 73, "wasLow"))
+        self.assertEqual((r["maxHp"], r["hpBeforePct"], r["deathType"]), (507_980, 73, "oneShot"))
         # Padflash (Manaforge p79): Cauterize (87023) healed 2919591, leaving exactly his hit-before 2903317.
         hits = [self.at(26_609_056, 3_896_114, 2_903_317, 16_636_880), self.healed(26_609_235, 2_919_591, 87023),
                 self.healed(26_609_236, 33_273_760, 86949, "absorbed"),
@@ -2136,8 +2189,8 @@ class StaggerPoolTests(unittest.TestCase):
         # Quick Sip purifies 5% for each 3 s of Shuffle gained, in one event: Keg Smash's 5 s can cross
         # two thresholds (Weavi, Quel'Danas p104: 0.1000 on 10 hits). Pool 3.4M, 37,820 staggered, the
         # tick after 154,891: 3.06M, 0.1000 read before the hit, 0.0989 after. Only the first is a share
-        # the game has (two separate 5% would be 0.0975).
-        self.assertEqual(self.pools(154_891, 37_820), [3_060_000])
+        # the game has (two separate 5% would be 0.0975). Quick Sip is 5% up to 12.1.0 (8% from 12.1.5).
+        self.assertEqual(self.pools(154_891, 37_820, purify=defensives.STAGGER_PURIFY["12.1.0"]), [3_060_000])
         keeps = defensives._purify_keeps(defensives.STAGGER_PURIFY["11.1.0"])
         self.assertEqual(keeps[0], [0.4, 0.5])                       # Purifying Brew, with Mantra of Purity or not
         self.assertEqual(keeps[2], [0.9, 0.95, 1.0])                 # one Quick Sip event: 10%, 5% or none

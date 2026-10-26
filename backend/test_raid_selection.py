@@ -12,6 +12,7 @@ class RaidSelectionTests(unittest.TestCase):
                     for boss in abyss
                 ] + [
                     {"boss": 3379, "difficulty": difficulty, "zoneID": 2987},
+                    {"boss": 3513, "difficulty": difficulty, "zoneID": 3095},
                     {"boss": 3176, "difficulty": difficulty, "zoneID": 2912},
                     {"boss": 99999, "difficulty": difficulty, "zoneID": 3004},
                     {"boss": 0, "difficulty": difficulty, "zoneID": 3004},
@@ -20,11 +21,11 @@ class RaidSelectionTests(unittest.TestCase):
                 ]
                 self.assertEqual(
                     [f["boss"] for f in analyze_fights(fights, "0", difficulty, "midnight-s2-all")],
-                    abyss + [3379],
+                    abyss + [3379, 3513],
                 )
 
     def test_known_encounters_work_without_game_zone(self):
-        for boss in (3470, 3379):
+        for boss in (3470, 3379, 3513):
             with self.subTest(boss=boss):
                 fight = {"boss": boss, "difficulty": 4, "zoneID": None}
                 self.assertEqual(analyze_fights([fight], "0", "4", "midnight-s2-all"), [fight])
@@ -33,6 +34,7 @@ class RaidSelectionTests(unittest.TestCase):
         new_fights = [
             {"boss": 3470, "difficulty": 5, "zoneID": 3004},
             {"boss": 3379, "difficulty": 5, "zoneID": 2987},
+            {"boss": 3513, "difficulty": 5, "zoneID": 3095},
         ]
         for raid, allowed in RAID_ENCOUNTERS.items():
             if raid == "midnight-s2-all":

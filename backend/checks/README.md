@@ -56,11 +56,13 @@ The environment needs `WCL_CLIENT_ID` and `WCL_CLIENT_SECRET` (the WarcraftLogs 
 | state | source | Active, ready and health at death match WCL's auras, casts and Deaths table |
 | durations | source | Defensive durations (catalog + talents) match real aura uses |
 | mitigation | source | Catalog damage reductions match real hits with and without the defensive |
+| source-avoidable | source | Abilities listed "always" avoidable hit only part of the raid at once, on WarcraftLogs |
 | slots | rules | Slots and wipes follow the owner's rules |
 | counting | rules | A death counts when slot <= X and not in a wipe; defensives exist exactly on deaths that can count |
 | labels | rules | Death labels follow the rules: one-shot, burst, rot (raid-wide only) or set up by |
 | verdicts | rules | Would-save verdicts obey the press, overkill, immunity and instant-kill rules |
 | defensives | rules | Talent entry IDs in the log match the catalog |
+| avoidable | rules | Avoidable deaths follow the owner's rule B′, recomputed from WarcraftLogs' hits |
 
 "source" checks compare against what WCL says. "rules" checks recompute the owner's rules separately and compare with what the site shows.
 
@@ -84,6 +86,7 @@ Each run prints how many WCL points it spent. The budget is 9000 an hour (measur
 
 - Mythic only (difficulty 5).
 - The end-to-end run sends no alt groups (`characterGroups`), so alt merging is not covered.
+- `avoidable` recomputes rule B′ (the owner's, 2026-10-23) with its own code: the stretch since the player was last at 85%+ health (`rules_labels.last_high`), the avoidable hits in it by `avoidable.rule_for`, their spec that pull, their debuffs from WCL's Buffs and Debuffs events (an aimed ability is avoidable unless they had the target's debuff before the hit; a soak-once ability only if they still had its debuff) and WCL's tick mark (DoT ticks only / first hit only), and a replay without them that counts only the health they took and only while health was missing. `source-avoidable` reads up to 3 kept pulls, one filtered query each.
 - `participation` expects a renamed player under their newest name: the same WoW ID (`gameID`) and server under another name in a later report of the run's pulls is one character. WCL's own character lookup returns the same character for both names (21 renames in three guilds' logs, 2026-10-23).
 - Cheat deaths are switched off in the run.
 - `mitigation` measures each hit taken with a defensive up against the nearest hit without it: from the same enemy unit with the same ability, at most 10 seconds away, with the same other auras listed, and with the player missing within 5% of max health of the same share. Ten seconds judges about twice the rows of three and moved no row by more than the 0.03 it flags at; thirty let the drift back in. A hit that dealt damage without the player's own health on it is left out. Comparing with the pull's typical hit read too low or too high: an effect no hit lists drifted over a Cauldron of Carnage pull (Unending Resolve read 0.37 for 0.40), and Blessing of Dusk, a Protection Paladin passive that grows as health drops and is on no aura list, made Ardent Defender, pressed at low health, read 0.33 for 0.30.

@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 /* One death as a single row: the killing blow, a health bar, and a strip of
@@ -222,7 +222,7 @@ function sourceText(det, inf) {
 
 /* ---------- tooltip ---------- */
 
-function TipBox({ anchor, children }) {
+function TipBox({ anchor, children, live, onEnter, onLeave }) {
   const ref = useRef(null);
   const [style, setStyle] = useState({ left: anchor.left, top: anchor.bottom + 8, visibility: 'hidden' });
   useLayoutEffect(() => {
@@ -234,22 +234,43 @@ function TipBox({ anchor, children }) {
     const top = below + h > window.innerHeight - 8 ? Math.max(8, anchor.top - h - 8) : below;
     setStyle({ left, top, visibility: 'visible' });
   }, [anchor]);
-  return createPortal(<div ref={ref} className="fpx-tip" style={style} role="tooltip">{children}</div>, document.body);
+  return createPortal(
+    <div ref={ref} className={`fpx-tip${live ? ' live' : ''}`} style={style} role="tooltip"
+      onMouseEnter={live ? onEnter : undefined} onMouseLeave={live ? onLeave : undefined}>{children}</div>,
+    document.body);
 }
 
-export function Tip({ content, className, children }) {
+/* A hover tooltip. `live`: it stays open while the pointer is on it, for an ⓘ inside it to be hovered
+   (the gap between the two is crossed within HIDE_MS). */
+const HIDE_MS = 150;
+export function Tip({ content, className, children, live }) {
   const ref = useRef(null);
+  const timer = useRef(null);
   const [anchor, setAnchor] = useState(null);
-  const show = () => ref.current && setAnchor(ref.current.getBoundingClientRect());
-  const hide = () => setAnchor(null);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const keep = () => clearTimeout(timer.current);
+  const show = () => {
+    keep();
+    if (!anchor && ref.current) setAnchor(ref.current.getBoundingClientRect());
+  };
+  const hide = () => {
+    keep();
+    if (live) timer.current = setTimeout(() => setAnchor(null), HIDE_MS);
+    else setAnchor(null);
+  };
   return (
     <span ref={ref} className={className} tabIndex={0}
       onMouseEnter={show} onMouseLeave={hide} onFocus={show} onBlur={hide}>
       {children}
-      {anchor && <TipBox anchor={anchor}>{content()}</TipBox>}
+      {anchor && <TipBox anchor={anchor} live={live} onEnter={keep} onLeave={hide}>{content()}</TipBox>}
     </span>
   );
 }
+
+/* A small ⓘ that explains the text beside it on hover. */
+export const InfoTip = ({ children, className = '' }) => (
+  <Tip className={`fpx-infotip ${className}`} content={() => children}><i className="fpx-i">i</i></Tip>
+);
 
 // Blizzard's icon server doesn't have every new icon; WarcraftLogs hosts them all.
 const ICON_FALLBACK = (icon) => `https://assets.rpglogs.com/img/warcraft/abilities/${icon}.jpg`;
@@ -311,6 +332,117 @@ export const activeTip = (a, inf, icons) => () => {
 
 /* ---------- the row ---------- */
 
+/* The avoidable hits since they were last at 85% health, most damage first: "Caustic Waves ×2 · 38%". */
+export function avoidableLine(a) {
+  return (a?.hits || []).map((h) => `${h.name}${h.times > 1 ? ` ×${h.times}` : ''} · ${h.pctOfMax}%${h.unsure ? ' (unsure)' : ''}`)
+    .join(', ');
+}
+
+/* How they died, as the killing-blow tooltip says it: the kind of death (backend assess_survival's rules),
+   with what it means on its ⓘ. */
+const DEATH_KINDS = {
+  oneShot: ['ONE-SHOT', 'One hit took 80% or more of their max health within 1.5 seconds of them being at 85%+ '
+    + 'health, or the killing blow alone was more than their whole max health.'],
+  burst: ['BURST', 'Several hits landed within 1.5 seconds and killed them, none of them 80% of their max health.'],
+  rot: ['WORN DOWN', 'A raid-wide ability hit them again and again for more than 1.5 seconds, and the healing '
+    + "couldn't keep up."],
+  setUp: ['SET UP', 'They had been below 85% health for more than 1.5 seconds. This was the biggest hit since '
+    + 'they were last above it, and it left them low for the killing blow.'],
+  low: ['LOW HEALTH', 'They had been below 85% health for more than 1.5 seconds when the killing blow landed.'],
+};
+export const deathKind = (s) => (s.deathType === 'oneShot' ? 'oneShot' : s.deathType === 'burst' ? 'burst'
+  : s.rot ? 'rot' : s.biggestHit ? 'setUp' : 'low');
+
+const healthWord = (p) => (p >= 100 ? 'full health' : `${p}% health`);
+const named = (x) => <School mask={x.school}>{x.name}</School>;
+const timesText = (n) => (n === 2 ? 'twice' : `${n} times`);
+const listOf = (parts) => parts.map((p, i) => (
+  <React.Fragment key={i}>{i > 0 && (i === parts.length - 1 ? ' and ' : ', ')}{p}</React.Fragment>));
+
+/* One plain sentence of how they died, at most one number in it. `kb`: the killing blow {name, school}. */
+export function deathSentence(s, kb) {
+  const kind = deathKind(s);
+  if (kind === 'oneShot') {
+    // Results saved before oneShotHit existed carry a one-shot's big hit as biggestHit.
+    const shot = s.oneShotHit || s.biggestHit;
+    if (shot) {
+      return <>{named(shot)} hit them for {shot.pctOfMax}% of their max health, then {named(kb)} finished them
+        {shot.ago >= 0.1 ? ` ${shot.ago}s later` : ''}.</>;
+    }
+    // What went to their health (past any shield): the health they had plus how far past zero.
+    const times = (s.maxHp * s.hpBeforePct / 100 + s.overkill) / s.maxHp;
+    if (times >= 2) return <>{named(kb)} hit for more than {Math.floor(times)} times their max health. Nothing survives that.</>;
+    if (times >= 1) {
+      return <>One {named(kb)} hit took more than their whole health{(s.fromPct ?? s.hpBeforePct) >= 100 ? ', from full' : ''}.</>;
+    }
+    return <>One {named(kb)} hit for {s.killingHit.pctOfMax}% of their max health, from {healthWord(s.fromPct ?? s.hpBeforePct)}.</>;
+  }
+  if (kind === 'burst' && s.burst) {
+    const when = s.burst.ms < 50 ? 'at the same moment' : `within ${secsFine(s.burst.ms)}`;
+    const from = healthWord(s.fromPct ?? s.hpBeforePct);
+    const abs = s.burst.abilities;
+    if (abs.length === 1) {
+      return <>{named(abs[0])} hit them {abs[0].times > 1 ? `${timesText(abs[0].times)} ` : ''}{when} and took them from {from} to dead.</>;
+    }
+    const parts = abs.slice(0, 3).map((a) => <>{named(a)}{a.times > 1 ? ` ×${a.times}` : ''}</>);
+    if (abs.length > 3) parts.push(<>{abs.length - 3} more</>);
+    return <>{listOf(parts)} hit {when} and took them from {from} to dead.</>;
+  }
+  if (kind === 'rot') return <>{named(s.rot)} hit them {timesText(s.rot.hits)} over {s.rot.seconds}s and wore them down.</>;
+  if (kind === 'setUp') {
+    const b = s.biggestHit;
+    const first = b.times > 1
+      ? <>{named(b)} hit them {timesText(b.times)} and left them low.</>
+      : <>{named(b)} hit them for {b.pctOfMax}% of their max health{b.ago >= 0.1 ? `, ${b.ago}s before they died` : ''}.</>;
+    return <>{first} {named(kb)} finished them at {s.hpBeforePct}% health.</>;
+  }
+  return <>{named(kb)} hit them at {s.hpBeforePct}% health for {s.killingHit.pctOfMax}% of their max health.</>;
+}
+
+/* Their health hit by hit since they were last at high health (backend steps), for the death type's ⓘ. */
+export function HealthSteps({ s }) {
+  const st = s.steps;
+  if (!st?.items?.length) return null;
+  return (
+    <div className="steps">
+      <span><span className="dim">Started at</span> <b className="g">{healthWord(st.from)}</b></span>
+      {st.earlier > 0 && <span className="dim">… {st.earlier} more step{st.earlier === 1 ? '' : 's'} (in the log)</span>}
+      {st.items.map((x, i) => (x.healedTo != null
+        ? <span key={i} className="dim">Healed back up to <b>{x.healedTo}%</b></span>
+        : x.left != null
+          ? <span key={i}>{named(x)}{x.times > 1 ? ` ×${x.times}` : ''} took <b>{x.took}%</b>, leaving <b className="a">{x.left}%</b></span>
+          : <span key={i}>{named(x)}{x.times > 1 ? ` ×${x.times}` : ''} took {x.times > 1 ? '' : 'the last '}<b>{x.took}%</b>{' '}
+              <b className="k">and killed them</b> ({fmt(s.overkill)} past zero)</span>))}
+    </div>
+  );
+}
+
+/* The column headers above a player's deaths, with what each column means on its ⓘ. */
+export function DeathTableHead() {
+  return (
+    <div className="fpx-dhead">
+      <span>Pull</span>
+      <span>Killing blow <InfoTip>
+        <p>What killed them. Hover it for the ability, how they died and their health hit by hit.</p>
+      </InfoTip></span>
+      <span>Health</span>
+      <span>Verdict <InfoTip>
+        <p><b>Avoidable</b>: damage they could have dodged by moving (pools, frontals, waves, things landing on the
+          floor), taken since they were last at 85% health, decided the death: without it they would have lived.</p>
+        <p><b>Preventable</b>: a defensive, Healthstone or potion they had ready would have kept them alive.</p>
+        <p><b>Neither</b>: no avoidable damage decided it, and nothing they had ready would have saved them.</p>
+        <p>Hover a verdict for what decided it.</p>
+      </InfoTip></span>
+      <span>Defensives <InfoTip>
+        <p>Ready when they died: a green ring and ✓ means pressing it would have kept them alive.</p>
+        <p>Greyed out with seconds: on cooldown, back that long after they died. ON: already active.</p>
+        <p>"all together ✓": no single one was enough, but everything ready, used together, would have been.</p>
+      </InfoTip></span>
+      <span />
+    </div>
+  );
+}
+
 export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText, killCounts, logHref, timeLabel }) {
   const d = death.defensives;
   const current = isCurrentShape(d);
@@ -318,7 +450,6 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
   // WarcraftLogs gives no killing ability when the log has no hit or instant kill for the death.
   const notLogged = death.abilityName === 'Unknown';
   const hitName = notLogged ? 'Killing blow not in the log' : death.abilityName;
-  const kills = killCounts?.[`${death.boss}|${death.abilityName}`];
   const info = (n) => abilityInfo?.[n];
   // Killing blows by spell ID: names aren't unique (a boss's Tempest isn't the Shaman's).
   const kbIcon = abilityIcons?.[death.abilityId];
@@ -341,42 +472,60 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
         ? `at ${s.hpBeforePct}% after ${s.biggestHit.name}${s.biggestHit.times > 1 ? ` ×${s.biggestHit.times}` : ` (${s.biggestHit.pctOfMax}%${s.biggestHit.ago >= 0.1 ? `, ${s.biggestHit.ago}s before` : ''})`} · died by ${fmt(s.overkill)}`
         : `at ${s.hpBeforePct}%, hit for ${s.killingHit.pctOfMax}% · died by ${fmt(s.overkill)}`;
 
+  // The verdicts, as the player's summary counts them (summarizeDefensives), each with why on hover.
+  const savers = s ? Object.entries(s.wouldSave || {}).filter(([, v]) => v === true).map(([n]) => n) : [];
+  const preventable = !!s && (savers.length > 0 || s.allTogetherWouldSave === true);
+  const avoidable = s?.avoidable?.verdict === true;
+  const avoidTip = () => (
+    <>
+      <div className="vd gold">Avoidable</div>
+      <p>Damage they could have dodged, taken since they were last at 85% health:</p>
+      <div className="kv">{(s.avoidable.hits || []).map((h, i) => (
+        <Row key={i} a={<>{h.name}{h.times > 1 ? ` ×${h.times}` : ''}</>}
+          b={<><i>hit for</i> {h.pctOfMax}% <i>of max health{h.unsure ? ', unsure' : ''}</i></>} />
+      ))}</div>
+      <p className="desc">Without it they would have lived.{s.avoidable.windowLimited ? ' Only the last 15 seconds were checked.' : ''}</p>
+    </>
+  );
+  const preventTip = () => (
+    <>
+      <div className="vd g">Preventable</div>
+      {savers.length > 0 ? (
+        <>
+          <p>Any one of these, pressed in time, would have kept them alive:</p>
+          <div className="kv">{savers.map((n) => {
+            const det = s.details?.[n];
+            return <Row key={n} a={n} b={det?.amount ? <>{fmt(det.amount - s.overkill)} <i>to spare</i></> : ''} />;
+          })}</div>
+        </>
+      ) : <p>No single one was enough, but everything they had ready, used together, would have kept them alive.</p>}
+    </>
+  );
+  const verdict = death.isCheatDeath ? <span className="v cheat">Cheat death</span>
+    : !s ? <span className="v none">—</span>
+    : avoidable || preventable ? <>
+        {avoidable && <Tip className="v avoid" content={avoidTip}>Avoidable</Tip>}
+        {avoidable && preventable && <span className="v dot"> · </span>}
+        {preventable && <Tip className="v prev" content={preventTip}>Preventable</Tip>}</>
+    : <span className="v none">Neither</span>;
+
   const killTip = () => (
     <>
       <TipHead name={hitName} glyph={notLogged ? '?' : null} icon={kbIcon}
         sub={<>{death.boss}{schoolName(kbSchool) && <> · <School mask={kbSchool}>{schoolName(kbSchool)}</School></>}</>} />
       {abilityText?.[death.abilityId] && <p className="desc">{schoolText(abilityText[death.abilityId])}</p>}
-      {s && !instakill && (
-        <div className="kv">
-          <Row a="Killing blow" b={<>{fmt(s.killingHit.size)} <i>· {s.killingHit.pctOfMax}% of max HP</i></>} />
-          {s.rot && (
-            <Row a="Worn down by" b={<span className="stack">
-              <span><School mask={s.rot.school}>{s.rot.name}</School> <i>· rot</i></span>
-              <small>{s.rot.hits} hits, {fmt(s.rot.total)} over {s.rot.seconds}s</small></span>} />
-          )}
-          {s.deathType === 'burst' && s.burst && (
-            <Row a="Burst" b={<span className="stack">
-              <span>{s.burst.abilities.slice(0, 3).map((x, i) => (
-                <React.Fragment key={i}>{i > 0 && ', '}<School mask={x.school}>{x.name}</School>{x.times > 1 && ` ×${x.times}`}</React.Fragment>
-              ))}{s.burst.abilities.length > 3 && ', …'}</span>
-              <small>{s.burst.hits} hits, {fmt(s.burst.total)} {s.burst.ms < 50 ? 'at once' : `in ${secsFine(s.burst.ms)}`}</small></span>} />
-          )}
-          {shotHit && s.deathType === 'oneShot' && (
-            <Row a="One-shot by" b={<span className="stack">
-              <span><School mask={shotHit.school}>{shotHit.name}</School> {fmt(shotHit.size)} <i>· {shotHit.pctOfMax}%</i></span>
-              <small>{shotHit.ago >= 0.1 ? `${shotHit.ago}s before` : 'same moment'}</small></span>} />
-          )}
-          {s.biggestHit && s.deathType === 'wasLow' && (
-            <Row a="Set up by" b={<span className="stack">
-              <span><School mask={s.biggestHit.school}>{s.biggestHit.name}</School> {fmt(s.biggestHit.size)} <i>· {s.biggestHit.pctOfMax}%</i></span>
-              <small>{s.biggestHit.times > 1
-                ? `${s.biggestHit.times} hits, ${fmt(s.biggestHit.total)} ${s.biggestHit.over >= 0.1 ? `over ${s.biggestHit.over}s` : 'at once'}`
-                : s.biggestHit.ago >= 0.1 ? `${s.biggestHit.ago}s before` : 'same moment'}</small></span>} />
-          )}
-          <Row a="Health before it" b={<>{fmt(s.maxHp * s.hpBeforePct / 100)} <i>· {s.hpBeforePct}%</i></>} />
-          <Row a="Died by" b={fmt(s.overkill)} />
-        </div>
-      )}
+      {s && !instakill && (() => {
+        const kind = deathKind(s);
+        const [tag, meaning] = DEATH_KINDS[kind];
+        return (
+          <div className="how">
+            <Tip className={`fpx-dtype ${kind}`} content={() => (
+              <><b>{tag.charAt(0) + tag.slice(1).toLowerCase()}</b><p>{meaning}</p><HealthSteps s={s} /></>
+            )}><span className="tag">{tag}</span><i className="fpx-i">i</i></Tip>
+            <span className="say">{deathSentence(s, { name: hitName, school: kbSchool })}</span>
+          </div>
+        );
+      })()}
       {instakill && <div className="note warn">Instant kill: the game killed them outright, with no damage to reduce, absorb or heal. Only avoiding the mechanic prevents it.</div>}
       {s?.ignoresImmunity && <div className="note warn">Goes through immunities (Ice Block, Divine Shield…)</div>}
       {s?.staggerTick
@@ -384,12 +533,6 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
         : s?.ignoresReduction && <div className="note warn">Ignores damage reduction (shields and heals still work)</div>}
       {notLogged && <p>WarcraftLogs recorded no hit or instant kill for this death, so what killed them isn't known and defensives can't be checked against it.</p>}
       {!s && current && !notLogged && <p>No hit with health data was recorded for this death, so defensives can't be checked against it.</p>}
-      {(kills > 0 && !notLogged) || (s?.window && !instakill) ? (
-        <div className="src">
-          {kills > 0 && !notLogged && `Killed ${kills} raider${kills === 1 ? '' : 's'} in these pulls. `}
-          {s?.window && !instakill && `Defensives are judged on the last ${Math.round(s.window.fromAgo)}s.`}
-        </div>
-      ) : null}
     </>
   );
 
@@ -492,10 +635,11 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
 
   return (
     <div className={`fpx-drow${death.isCheatDeath ? ' cheat' : ''}`}>
-      <Tip className="kb" content={killTip}>
+      <span className="pull">{death.pullNo}</span>
+      <Tip className="kb" content={killTip} live>
         <Icon name={notLogged ? '?' : death.abilityName} icon={kbIcon} className="big" />
         <span className="kbt">
-          <span className="an">#{death.pullNo} · {hitName}{death.isCheatDeath && <span className="fpx-cheatbadge">CHEAT</span>}</span>
+          <span className="an">{hitName}</span>
           {ctx && <span className="cx">{ctx}{s?.ignoresImmunity ? <em> · through immunities</em> : null}</span>}
         </span>
       </Tip>
@@ -503,6 +647,7 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
         {s && !instakill && <><span className="bar"><i style={{ width: `${Math.min(s.hpBeforePct, 100)}%` }} /></span>
           <small>{s.hpBeforePct}% health before</small></>}
       </span>
+      <span className="verdict">{verdict}</span>
       <span className="strip">
         {strip}
         {s && !saves && s.allTogetherWouldSave && (
@@ -517,8 +662,7 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
         )}
       </span>
       <span className="end">
-        <a href={logHref} target="_blank" rel="noopener noreferrer" className="fpx-wcl">View log ↗</a>
-        <small>{timeLabel}</small>
+        <a href={logHref} target="_blank" rel="noopener noreferrer" className="fpx-wcl" title={timeLabel}>Log ↗</a>
       </span>
     </div>
   );

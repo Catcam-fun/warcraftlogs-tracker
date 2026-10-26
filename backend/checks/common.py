@@ -280,6 +280,24 @@ class Run:
             rid, "DamageTaken", "sourceID", pid, death_ts - LETHAL_WINDOW_MS, death_ts + 50, fight_ids=[fid],
             resources=True))         # hitPoints / maxHitPoints, which the labels read
 
+    def ability_hits(self, rid, fid, ability_ids):
+        """Every hit players took from the given abilities in one pull (one filtered query)."""
+        def make():
+            f = self.fight(rid, fid)
+            q = ("query($c: String!, $f: [Int], $s: Float, $e: Float, $x: String) { reportData { report(code: $c) {"
+                 " events(dataType: DamageTaken, fightIDs: $f, startTime: $s, endTime: $e, filterExpression: $x,"
+                 " limit: 10000) { data nextPageTimestamp } } } }")
+            events, cursor = [], f["start_time"]
+            for _ in range(50):
+                block = _report(self._q(q, {"c": rid, "f": [fid], "s": cursor, "e": f["end_time"],
+                                            "x": f"ability.id in ({', '.join(map(str, ability_ids))})"})).get("events") or {}
+                events += block.get("data") or []
+                cursor = block.get("nextPageTimestamp")
+                if not cursor:
+                    break
+            return events
+        return self._memo(("ability-hits", rid, fid, tuple(ability_ids)), make)
+
     def combatants(self, rid, fid):
         def make():
             f = self.fight(rid, fid)

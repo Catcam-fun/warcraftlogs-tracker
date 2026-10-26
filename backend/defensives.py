@@ -22,6 +22,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
+import avoidable
 from armor_constants import ARMOR_K, IGNORES_ARMOR, REDUCED_BY_ARMOR
 from boss_spell_flags import IGNORES_IMMUNITY
 from raid_wide_damage import RAID_WIDE
@@ -1011,6 +1012,10 @@ SETUP_HIT_SHARE = 0.10
 ROT_MIN_HITS = 3
 ROT_SHARE = 0.6
 ROT_MAX_HIT = 0.35
+# The tooltip's step list shows a heal between two hits when it brought them up this share of max health or more,
+HEALED_STEP = 0.05
+# and at most this many steps (the latest; the rest are counted).
+MAX_STEPS = 8
 # A killing blow can be logged this long after the death event.
 KILLING_BLOW_AFTER_MS = 50
 # Pulls whose death windows fall within this span share one event block.
@@ -1082,7 +1087,14 @@ WINDOW_HEAL_IDS = frozenset(set(KILLING_HIT_HEALS) | {a for a in KILLING_HIT_HEA
 # stacks) and of auras sized by a loadout (who cast them).
 # And a Brewmaster's Stagger pool: their staggered amounts (STAGGER_AURA absorbs) and ticks, from up to
 # STAGGER_LOOKBACK_MS before each window (the ticks inside it come with the hits).
-WINDOW_EXTRAS_IDS = sorted(WINDOW_HEAL_IDS | STACK_SIZED | LOADOUT_SIZED | {STAGGER_AURA, STAGGER_TICK})
+# And the debuffs the avoidable rules ask about (avoidable.aura_ids: a targeted player's mark, a soak's debuff).
+
+
+def window_extras_ids():
+    return sorted(WINDOW_HEAL_IDS | STACK_SIZED | LOADOUT_SIZED | {STAGGER_AURA, STAGGER_TICK} | set(avoidable.aura_ids()))
+
+
+WINDOW_EXTRAS_IDS = window_extras_ids()
 # And the dying players' own casts of buttons that lengthen a defensive while it is up (Zealot's Paragon:
 # Judgment and Hammer of Wrath on Sentinel), in any patch's catalog: the replay presses inside the window,
 # so only the casts inside it matter.
@@ -1099,7 +1111,7 @@ HEAL_FIELDS = ("timestamp", "type", "sourceID", "targetID", "abilityGameID", "fi
                "attackerID", "extraAbilityGameID")
 HIT_FIELDS = ("timestamp", "type", "sourceID", "sourceInstance", "targetID", "abilityGameID", "fight", "buffs",
               "hitType", "amount", "overkill", "absorbed", "mitigated", "unmitigatedAmount",
-              "isAoE", "resourceActor", "hitPoints", "maxHitPoints", "armor")
+              "isAoE", "resourceActor", "hitPoints", "maxHitPoints", "armor", "tick")
 # For the windows' cache key in app.py: windows cached with other extras or without a field kept
 # here (sourceInstance, for Fiery Brand's unit) are not reused.
 WINDOW_EXTRAS_KEY = hashlib.sha1(repr((WINDOW_EXTRAS_IDS, WINDOW_CAST_IDS, HIT_FIELDS, HEAL_FIELDS,
@@ -1230,10 +1242,13 @@ def fetch_death_windows(token, report_code, pulls, heals=True):
 
     fetched = _fetch_blocks(token, report_code, blocks, keep)
     events = [e for alias, evs in fetched.items() if alias != "extras" for e in evs]
-    # The extras block's Stagger ticks add those before the hits' blocks start (the rest are in them).
+    # The extras block's Stagger ticks add those before the hits' blocks start (the rest are in them). Its
+    # other damage events are hits the hits' blocks already have: an ability whose aura is read here can
+    # share its ID with its damage (Starshard 1254385), and counting those again doubled the killing blow.
     seen = {(e.get("targetID"), e.get("timestamp")) for e in events if stagger_pool(e)}
     events += [e for e in fetched.get("extras", ())
-               if e.get("type") != "damage" or (e.get("targetID"), e.get("timestamp")) not in seen]
+               if e.get("type") != "damage"
+               or (stagger_pool(e) and (e.get("targetID"), e.get("timestamp")) not in seen)]
     out = index_hits(events)
     for e in events:
         if e.get("type") == "cast":
@@ -2867,6 +2882,47 @@ def _brand(win, unit):
     win._applies.clear()
 
 
+def _avoidable(window, win, kb_index, overkill, first, limited, spec, ability_names, max_hp, had_aura=None):
+    """Was the death decided by damage they could have avoided (owner's rule B′, 2026-10-23)? The hits
+    since they were last at FULL_HEALTH (from `first`; `limited`: they weren't in the window, so the
+    whole window) are replayed without the avoidable ones (avoidable.judge_hit): verdict True when the
+    health they took (never a shield's part) would have kept them alive, as in _simulate only while they
+    were missing health (real heals stay as they were). A hit that can't be judged (a tank-soak rule
+    with no spec) is listed "unsure"; the verdict is None when it alone would decide."""
+    sure, unsure = set(), set()
+    for k in range(first, kb_index + 1):
+        judged = avoidable.judge_hit(window[k], spec, had_aura)
+        (sure if judged else unsure if judged is None else set()).add(k)
+
+    def lives_without(removed):
+        extra = 0.0
+        for k in range(first, kb_index + 1):
+            hp_before, max_k = win.before[k]
+            if win.known[k]:
+                extra = min(extra, max(max_k - hp_before, 0))
+            if k in removed:
+                extra += (window[k].get("amount") or 0) + (window[k].get("overkill") or 0)
+        return extra > overkill
+
+    verdict = lives_without(sure)
+    if unsure and not verdict and lives_without(sure | unsure):
+        verdict = None
+    by_ability = {}
+    for k in sorted(sure | unsure):
+        a = window[k].get("abilityGameID")
+        row = by_ability.setdefault(a, {"name": ability_names.get(a, "Unknown"), "id": a, "times": 0, "total": 0})
+        row["times"] += 1
+        row["total"] += _full_hit(window[k])
+        if k in unsure:
+            row["unsure"] = True
+    hits = [{**{k: v for k, v in r.items() if k != "total"}, "pctOfMax": round(100 * r["total"] / max_hp)}
+            for r in sorted(by_ability.values(), key=lambda r: -r["total"])]
+    for h in hits:
+        if "unsure" in h:
+            h["unsure"] = h.pop("unsure")      # last, after pctOfMax
+    return {"verdict": verdict, "hits": hits, "windowLimited": limited}
+
+
 def assess_survival(hits, death_ts, available, consumables, ability_names, ability_schools,
                     talent_entries=None, observed_absorbs=None, spec=None, aoe_known=True,
                     aoe_abilities=None, aoe_unknown=frozenset(), ready_since=None, aura_ms=None, forms=None, armor_k=None, form_armor=None,
@@ -2894,6 +2950,11 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     heal_events = [h for h in hits or () if h.get("type") in ("heal", "absorbed")
                    or (h.get("type") in AURA_EVENTS and h.get("abilityGameID") in WINDOW_HEAL_IDS)]
     aura_events = [h for h in hits or () if h.get("type") in AURA_EVENTS]
+    # Debuffs judged for the avoidable rules: only this death's own window. The player's events hold every
+    # death window of the report: an application from an earlier one (its removal outside every window), or a
+    # removal in a later one, would read as on.
+    window_auras = [h for h in aura_events
+                    if death_ts - LETHAL_WINDOW_MS <= h.get("timestamp", 0) <= death_ts + KILLING_BLOW_AFTER_MS]
     purifies = [h for h in hits or () if h.get("type") == "cast" and h.get("abilityGameID") in STAGGER_CAST_IDS]
     # The player's own casts that lengthen a defensive (fetch_death_windows: Judgment, Hammer of Wrath).
     own_casts = [h for h in hits or () if h.get("type") == "cast"]
@@ -2915,6 +2976,9 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
             "allTogetherWouldSave": False,
             "ignoresReduction": False,
             "ignoresImmunity": False,
+            # The game killed them outright: avoidable when the mechanic was (no replay).
+            "avoidable": {"verdict": avoidable.judge_hit(killing, spec, avoidable.had_aura_from(window_auras)),
+                          "hits": [], "windowLimited": False},
         }
     if killing is None or killing.get("resourceActor") != 2:
         return None   # no recorded killing blow with health data
@@ -3148,7 +3212,10 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     run = window[start:] if high else window
     in_run = set(range(start if high else 0, len(window)))
     quick = bool(high) and kb_ts - since <= BURST_WINDOW_MS
-    one_shot = quick and any(share(h) >= ONE_SHOT_SHARE for h in run)
+    # A killing blow that took their whole max health or more past its shields is a one-shot from any
+    # health: no health they could have had would have lived through it (Oblivion, 4.7x max health,
+    # after a hit earlier).
+    one_shot = (quick and any(share(h) >= ONE_SHOT_SHARE for h in run))         or (killing.get("amount") or 0) + overkill >= max_hp
     death_type = "oneShot" if one_shot else "burst" if quick else "wasLow"
     from_pct = round(100 * high[-1][1] / high[-1][2]) if quick else None
     # A one-shot's hit: the biggest since they were last at high health. Named
@@ -3162,29 +3229,71 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     # The hit that set the death up (only when it was neither a one-shot nor a
     # burst): the biggest one since they were last at high health (before
     # that, healers had already undone it).
-    biggest = None if quick else max((h for h in run[:-1] if share(h) >= SETUP_HIT_SHARE),
-                                     key=_full_hit, default=None)
+    biggest = None if quick or one_shot else max((h for h in run[:-1] if share(h) >= SETUP_HIT_SHARE),
+                                                 key=_full_hit, default=None)
     # Rot: worn down by one raid-wide ability's repeated damage (what the
     # healers have to keep up with; raid_wide_damage.py, measured from Mythic
     # kills), not set up by a single hit. Soaks and mechanics a player walks
     # into are never rot, and neither is a one-shot or a burst (high health
-    # within BURST_WINDOW_MS before).
+    # within BURST_WINDOW_MS before). Wearing down takes time: when all of
+    # those hits landed within BURST_WINDOW_MS (Crushing Gravity, three hits on
+    # one millisecond from 71%), it is a burst from the health they had then.
     by_ability = defaultdict(list)
     for h in run:
         by_ability[h.get("abilityGameID")].append(h)
     rot = None
+    burst_run = run
     if by_ability:
         aid, hs = max(by_ability.items(), key=lambda kv: sum(_full_hit(h) for h in kv[1]))
         total = sum(_full_hit(h) for h in run) or 1
-        if not quick and aid in RAID_WIDE and len(hs) >= ROT_MIN_HITS \
+        if not quick and not one_shot and aid in RAID_WIDE and len(hs) >= ROT_MIN_HITS \
                 and sum(_full_hit(h) for h in hs) >= ROT_SHARE * total \
                 and max(share(h) for h in hs) < ROT_MAX_HIT:
-            rot = {"name": ability_names.get(aid, "Unknown"), "abilityId": aid, "school": ability_schools.get(aid),
-                   "hits": len(hs), "total": sum(_full_hit(h) for h in hs),
-                   "pctOfMax": round(100 * sum(share(h) for h in hs)),
-                   "seconds": round((kb_ts - hs[0]["timestamp"]) / 1000, 1)}
             biggest = None
+            if kb_ts - hs[0]["timestamp"] > BURST_WINDOW_MS:
+                rot = {"name": ability_names.get(aid, "Unknown"), "abilityId": aid, "school": ability_schools.get(aid),
+                       "hits": len(hs), "total": sum(_full_hit(h) for h in hs),
+                       "pctOfMax": round(100 * sum(share(h) for h in hs)),
+                       "seconds": round((kb_ts - hs[0]["timestamp"]) / 1000, 1)}
+            else:
+                first_k = next(k for k, h in enumerate(window) if h is hs[0])
+                death_type, since, burst_run = "burst", hs[0]["timestamp"], window[first_k:]
+                from_pct = round(100 * win.before[first_k][0] / (win.before[first_k][1] or max_hp))
+    # Their health hit by hit since they were last at high health (the tooltip's
+    # step list): what each hit took of their health (its `amount`: never the
+    # shielded part) and what it left; a run of one ability with no heal between
+    # is one step, a heal back up of HEALED_STEP or more its own. A hit their
+    # shields took whole is left out.
+    steps, prev_left = [], None
+    for k in range(start if high else 0, len(window)):
+        h, (hp, top) = window[k], win.before[k]
+        if not h.get("amount") and k != kb_index:
+            continue                            # all shielded: it took none of their health
+        top = top or max_hp
+        # The killing blow took all they had (its `amount` can hold what it set off: _max_hp_before).
+        took = 100 * (hp if k == kb_index else h.get("amount") or 0) / top
+        left = None if k == kb_index else 100 * max(hp - (h.get("amount") or 0), 0) / top
+        if prev_left is not None and 100 * hp / top - prev_left >= 100 * HEALED_STEP:
+            steps.append({"healedTo": round(100 * hp / top)})
+        last = steps[-1] if steps else None
+        if last and "healedTo" not in last and last["abilityId"] == h.get("abilityGameID"):
+            last.update(times=last["times"] + 1, took=last["took"] + took, left=left)
+        else:
+            steps.append({"name": ability_names.get(h.get("abilityGameID"), "Unknown"),
+                          "abilityId": h.get("abilityGameID"), "school": ability_schools.get(h.get("abilityGameID")),
+                          "times": 1, "took": took, "left": left,
+                          "ago": round((kb_ts - h["timestamp"]) / 1000, 1)})
+        prev_left = left
+    for st in steps:
+        if "took" in st:
+            st["took"] = round(st["took"])
+            st["left"] = None if st["left"] is None else round(st["left"])
+    first_hp = win.before[start if high else 0]
+    steps_from = round(100 * high[-1][1] / high[-1][2]) if high \
+        else round(100 * first_hp[0] / (first_hp[1] or max_hp))
     result = {
+        "avoidable": _avoidable(window, win, kb_index, overkill, start if high else 0, not high, spec,
+                                ability_names, max_hp, avoidable.had_aura_from(window_auras)),
         "deathType": death_type,
         "killingHit": {
             "name": ability_names.get(killing.get("abilityGameID"), "Unknown"),
@@ -3208,16 +3317,18 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
         # The seconds replayed: how many hits, from how long before the killing blow.
         "window": {"hits": len(window), "fromAgo": round((kb_ts - window[0]["timestamp"]) / 1000, 1)},
     }
-    if quick and from_pct is not None and from_pct > result["hpBeforePct"]:
+    result["steps"] = {"from": steps_from, "items": steps[-MAX_STEPS:], "earlier": max(len(steps) - MAX_STEPS, 0)}
+    if from_pct is not None and from_pct > result["hpBeforePct"]:
         result["fromPct"] = from_pct
         result["burstMs"] = round(kb_ts - since)
     if death_type == "burst":
         # Everything that hit them in it, by ability (most damage first).
         parts = defaultdict(lambda: [0, 0])
-        for h in run:
+        for h in burst_run:
             parts[h.get("abilityGameID")][0] += 1
             parts[h.get("abilityGameID")][1] += _full_hit(h)
-        result["burst"] = {"hits": len(run), "total": sum(_full_hit(h) for h in run), "ms": round(kb_ts - since),
+        result["burst"] = {"hits": len(burst_run), "total": sum(_full_hit(h) for h in burst_run),
+                           "ms": round(kb_ts - since),
                            "abilities": [{"name": ability_names.get(a, "Unknown"), "school": ability_schools.get(a),
                                           "times": n} for a, (n, _) in sorted(parts.items(), key=lambda x: -x[1][1])]}
     if rot:
