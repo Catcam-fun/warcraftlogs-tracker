@@ -1085,6 +1085,17 @@ class LabelRuleTests(unittest.TestCase):
         self.assertEqual(label(hits, 5)["rot"], aid)
         not_wide = [dict(h, abilityGameID=999_999) for h in hits]
         self.assertEqual(label(not_wide, 5)["rot"], None)
+        # All its hits within 1.5 s (three on one millisecond from 70%): a burst, not rot.
+        at_once = [self.hit(0, 300, 700, aid=999_999)] + [self.hit(5000, 240, 700 - 240 * i, aid=aid) for i in (1, 2)] \
+            + [self.hit(5000, 220, 0, aid=aid, overkill=10)]
+        self.assertEqual(label(at_once, 3), {"deathType": "burst", "rot": None, "biggestHit": None, "oneShotHit": None})
+
+    def test_a_killing_blow_of_max_health_is_a_one_shot_from_any_health(self):
+        # Oblivion: 44% taken 5 s before, then a killing blow of 4.7x max health.
+        hits = [self.hit(0, 440, 560), self.hit(5000, 560, 0, overkill=4140)]
+        self.assertEqual(label(hits, 1)["deathType"], "oneShot")
+        # 999 past shields from 560 health: set up by the 44% hit.
+        self.assertEqual(label([self.hit(0, 440, 560), self.hit(5000, 560, 0, overkill=439)], 1)["biggestHit"], 1)
 
     def test_threshold_edges(self):
         # "quick" is measured from the last moment at high health (t=0 here) to the killing blow:
@@ -1162,7 +1173,7 @@ class LabelRuleTests(unittest.TestCase):
         # WCL logs the killing hit after the death stripped the player's auras: its max is lower than
         # the max they had (Strikepal live 2026-10-08: 10061382 against 11198315). 800 of a 1000 max is
         # not high health, though it is 89% of the killing hit's 900.
-        kb = dict(self.hit(3000, 800, 0, overkill=500), maxHitPoints=900)
+        kb = dict(self.hit(3000, 800, 0, overkill=100), maxHitPoints=900)
         self.assertEqual(rules_labels.max_hp_before([self.hit(0, 200, 800), kb], 1), (1000, 800, None))
         self.assertEqual(label([self.hit(0, 200, 800), kb], 1)["deathType"], "wasLow")
 

@@ -1094,6 +1094,42 @@ class LethalWindowTests(unittest.TestCase):
         self.assertEqual(r["deathType"], "oneShot")
         self.assertNotIn("oneShotHit", r)
 
+    def test_a_killing_blow_bigger_than_max_health_is_a_one_shot_from_any_health(self):
+        # Live (Dimensius, Manaforge): Massive Smash took 44%, then Oblivion (4.7x max health) 5s later.
+        hits = [hit(95_000, 440_000, 560_000), hit(100_000, 560_000, 0, overkill=4_140_000)]
+        r = self.assess(hits)
+        self.assertEqual((r["deathType"], r["hpBeforePct"]), ("oneShot", 56))
+        self.assertNotIn("biggestHit", r)
+        # Only what went to health counts: a hit mostly shielded is no one-shot.
+        r = self.assess([hit(95_000, 440_000, 560_000),
+                         hit(100_000, 560_000, 0, overkill=40_000, absorbed=900_000)])
+        self.assertEqual(r["deathType"], "wasLow")
+
+    def test_rot_needs_time_to_wear_them_down(self):
+        # Live (Crushing Gravity, Manaforge): worn down to 71%, then three hits of a raid-wide ability on
+        # one millisecond: a burst from 71%, not rot.
+        wide = __import__("unittest.mock").mock.patch.dict(defensives.RAID_WIDE, {500: 1.0})
+        hits = [hit(90_000, 290_000, 710_000, ability=600), hit(100_000, 240_000, 470_000),
+                hit(100_000, 240_000, 230_000), hit(100_000, 230_000, 0, overkill=10_000)]
+        with wide:
+            r = self.assess(hits)
+        self.assertNotIn("rot", r)
+        self.assertEqual((r["deathType"], r["fromPct"], r["burst"]["hits"], r["burst"]["ms"]), ("burst", 71, 3, 0))
+        self.assertEqual(r["burst"]["abilities"][0]["times"], 3)
+
+    def test_steps_list_their_health_hit_by_hit(self):
+        # From full: a 60% hit, healed back up by 20%, then three ticks of one ability kill them.
+        hits = [hit(95_000, 600_000, 400_000, ability=600), hit(97_000, 100_000, 500_000),
+                hit(98_000, 100_000, 400_000), hit(100_000, 400_000, 0, overkill=85_000)]
+        st = self.assess(hits)["steps"]
+        self.assertEqual(st["from"], 100)
+        self.assertEqual([(s.get("name"), s.get("times"), s.get("took"), s.get("left"), s.get("healedTo"))
+                          for s in st["items"]],
+                         [("Cleave", 1, 60, 40, None), (None, None, None, None, 60),
+                          ("Frost Bolt", 3, 60, None, None)])
+        # The killing blow takes the health they had before it, whatever its amount holds.
+        self.assertEqual(self.assess(hits)["hpBeforePct"], 40)
+
     def test_one_shot_and_burst_need_high_health_within_a_second_and_a_half(self):
         # Owner's rule (2026-10-08): high health no more than 1.5s before the killing blow.
         # The press cutoff (REACTION_MS) stays at 1s.
@@ -1646,6 +1682,7 @@ class MaxHealthBeforeKillingBlowTests(unittest.TestCase):
                 self.at(8_002_696, 30_743_644, 0, 29_370_419, overkill=39_340_044, absorbed=58_740_840)]
         r = self.assess(hits)
         self.assertEqual((r["maxHp"], r["hpBeforePct"]), (29_370_419, 65))
+        self.assertEqual(r["steps"]["items"][-1]["took"], 65)          # not the 105% Oblivion read taken
         # A Metamorphosis heal without Last Resort's absorb with it is an ordinary press: not the blow's.
         self.assertEqual(self.assess([h for h in hits if h.get("abilityGameID") != 209258])["hpBeforePct"], 100)
         # Heals before the hit before the killing hit were health they had.
@@ -1655,14 +1692,14 @@ class MaxHealthBeforeKillingBlowTests(unittest.TestCase):
     def test_a_cheat_death_heal_inside_the_killing_hit(self):
         # Live (Arzoker, Quel'Danas p34, k9mC7RxjKPt1TgZW): 339946 / 507980 on his last hit; Defy Fate
         # (404381) healed 136670 inside Terminate and an Ebon Might heal (395152, 92026) landed with it;
-        # Terminate read 507980 taken. Before the blow: 507980 - 136670 = 371310, 73%: not a one-shot
-        # from full health.
+        # Terminate read 507980 taken. Before the blow: 507980 - 136670 = 371310, 73%: not from full
+        # health, though Terminate (3.4M to health) is a one-shot from any health.
         hits = [self.at(23_324_344, 58_669, 339_946, 507_980),
                 self.healed(23_325_226, 1_015_960, 404195, "absorbed"),
                 self.healed(23_325_226, 136_670, 404381), self.healed(23_325_226, 92_026, 395152),
                 self.at(23_325_227, 507_980, 0, 507_980, overkill=2_896_634, absorbed=1_015_960, ability=1)]
         r = self.assess(hits)
-        self.assertEqual((r["maxHp"], r["hpBeforePct"], r["deathType"]), (507_980, 73, "wasLow"))
+        self.assertEqual((r["maxHp"], r["hpBeforePct"], r["deathType"]), (507_980, 73, "oneShot"))
         # Padflash (Manaforge p79): Cauterize (87023) healed 2919591, leaving exactly his hit-before 2903317.
         hits = [self.at(26_609_056, 3_896_114, 2_903_317, 16_636_880), self.healed(26_609_235, 2_919_591, 87023),
                 self.healed(26_609_236, 33_273_760, 86949, "absorbed"),

@@ -1012,6 +1012,10 @@ SETUP_HIT_SHARE = 0.10
 ROT_MIN_HITS = 3
 ROT_SHARE = 0.6
 ROT_MAX_HIT = 0.35
+# The tooltip's step list shows a heal between two hits when it brought them up this share of max health or more,
+HEALED_STEP = 0.05
+# and at most this many steps (the latest; the rest are counted).
+MAX_STEPS = 8
 # A killing blow can be logged this long after the death event.
 KILLING_BLOW_AFTER_MS = 50
 # Pulls whose death windows fall within this span share one event block.
@@ -3208,7 +3212,10 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     run = window[start:] if high else window
     in_run = set(range(start if high else 0, len(window)))
     quick = bool(high) and kb_ts - since <= BURST_WINDOW_MS
-    one_shot = quick and any(share(h) >= ONE_SHOT_SHARE for h in run)
+    # A killing blow that took their whole max health or more past its shields is a one-shot from any
+    # health: no health they could have had would have lived through it (Oblivion, 4.7x max health,
+    # after a hit earlier).
+    one_shot = (quick and any(share(h) >= ONE_SHOT_SHARE for h in run))         or (killing.get("amount") or 0) + overkill >= max_hp
     death_type = "oneShot" if one_shot else "burst" if quick else "wasLow"
     from_pct = round(100 * high[-1][1] / high[-1][2]) if quick else None
     # A one-shot's hit: the biggest since they were last at high health. Named
@@ -3222,28 +3229,68 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
     # The hit that set the death up (only when it was neither a one-shot nor a
     # burst): the biggest one since they were last at high health (before
     # that, healers had already undone it).
-    biggest = None if quick else max((h for h in run[:-1] if share(h) >= SETUP_HIT_SHARE),
-                                     key=_full_hit, default=None)
+    biggest = None if quick or one_shot else max((h for h in run[:-1] if share(h) >= SETUP_HIT_SHARE),
+                                                 key=_full_hit, default=None)
     # Rot: worn down by one raid-wide ability's repeated damage (what the
     # healers have to keep up with; raid_wide_damage.py, measured from Mythic
     # kills), not set up by a single hit. Soaks and mechanics a player walks
     # into are never rot, and neither is a one-shot or a burst (high health
-    # within BURST_WINDOW_MS before).
+    # within BURST_WINDOW_MS before). Wearing down takes time: when all of
+    # those hits landed within BURST_WINDOW_MS (Crushing Gravity, three hits on
+    # one millisecond from 71%), it is a burst from the health they had then.
     by_ability = defaultdict(list)
     for h in run:
         by_ability[h.get("abilityGameID")].append(h)
     rot = None
+    burst_run = run
     if by_ability:
         aid, hs = max(by_ability.items(), key=lambda kv: sum(_full_hit(h) for h in kv[1]))
         total = sum(_full_hit(h) for h in run) or 1
-        if not quick and aid in RAID_WIDE and len(hs) >= ROT_MIN_HITS \
+        if not quick and not one_shot and aid in RAID_WIDE and len(hs) >= ROT_MIN_HITS \
                 and sum(_full_hit(h) for h in hs) >= ROT_SHARE * total \
                 and max(share(h) for h in hs) < ROT_MAX_HIT:
-            rot = {"name": ability_names.get(aid, "Unknown"), "abilityId": aid, "school": ability_schools.get(aid),
-                   "hits": len(hs), "total": sum(_full_hit(h) for h in hs),
-                   "pctOfMax": round(100 * sum(share(h) for h in hs)),
-                   "seconds": round((kb_ts - hs[0]["timestamp"]) / 1000, 1)}
             biggest = None
+            if kb_ts - hs[0]["timestamp"] > BURST_WINDOW_MS:
+                rot = {"name": ability_names.get(aid, "Unknown"), "abilityId": aid, "school": ability_schools.get(aid),
+                       "hits": len(hs), "total": sum(_full_hit(h) for h in hs),
+                       "pctOfMax": round(100 * sum(share(h) for h in hs)),
+                       "seconds": round((kb_ts - hs[0]["timestamp"]) / 1000, 1)}
+            else:
+                first_k = next(k for k, h in enumerate(window) if h is hs[0])
+                death_type, since, burst_run = "burst", hs[0]["timestamp"], window[first_k:]
+                from_pct = round(100 * win.before[first_k][0] / (win.before[first_k][1] or max_hp))
+    # Their health hit by hit since they were last at high health (the tooltip's
+    # step list): what each hit took of their health (its `amount`: never the
+    # shielded part) and what it left; a run of one ability with no heal between
+    # is one step, a heal back up of HEALED_STEP or more its own. A hit their
+    # shields took whole is left out.
+    steps, prev_left = [], None
+    for k in range(start if high else 0, len(window)):
+        h, (hp, top) = window[k], win.before[k]
+        if not h.get("amount") and k != kb_index:
+            continue                            # all shielded: it took none of their health
+        top = top or max_hp
+        # The killing blow took all they had (its `amount` can hold what it set off: _max_hp_before).
+        took = 100 * (hp if k == kb_index else h.get("amount") or 0) / top
+        left = None if k == kb_index else 100 * max(hp - (h.get("amount") or 0), 0) / top
+        if prev_left is not None and 100 * hp / top - prev_left >= 100 * HEALED_STEP:
+            steps.append({"healedTo": round(100 * hp / top)})
+        last = steps[-1] if steps else None
+        if last and "healedTo" not in last and last["abilityId"] == h.get("abilityGameID"):
+            last.update(times=last["times"] + 1, took=last["took"] + took, left=left)
+        else:
+            steps.append({"name": ability_names.get(h.get("abilityGameID"), "Unknown"),
+                          "abilityId": h.get("abilityGameID"), "school": ability_schools.get(h.get("abilityGameID")),
+                          "times": 1, "took": took, "left": left,
+                          "ago": round((kb_ts - h["timestamp"]) / 1000, 1)})
+        prev_left = left
+    for st in steps:
+        if "took" in st:
+            st["took"] = round(st["took"])
+            st["left"] = None if st["left"] is None else round(st["left"])
+    first_hp = win.before[start if high else 0]
+    steps_from = round(100 * high[-1][1] / high[-1][2]) if high \
+        else round(100 * first_hp[0] / (first_hp[1] or max_hp))
     result = {
         "avoidable": _avoidable(window, win, kb_index, overkill, start if high else 0, not high, spec,
                                 ability_names, max_hp, avoidable.had_aura_from(window_auras)),
@@ -3270,16 +3317,18 @@ def assess_survival(hits, death_ts, available, consumables, ability_names, abili
         # The seconds replayed: how many hits, from how long before the killing blow.
         "window": {"hits": len(window), "fromAgo": round((kb_ts - window[0]["timestamp"]) / 1000, 1)},
     }
-    if quick and from_pct is not None and from_pct > result["hpBeforePct"]:
+    result["steps"] = {"from": steps_from, "items": steps[-MAX_STEPS:], "earlier": max(len(steps) - MAX_STEPS, 0)}
+    if from_pct is not None and from_pct > result["hpBeforePct"]:
         result["fromPct"] = from_pct
         result["burstMs"] = round(kb_ts - since)
     if death_type == "burst":
         # Everything that hit them in it, by ability (most damage first).
         parts = defaultdict(lambda: [0, 0])
-        for h in run:
+        for h in burst_run:
             parts[h.get("abilityGameID")][0] += 1
             parts[h.get("abilityGameID")][1] += _full_hit(h)
-        result["burst"] = {"hits": len(run), "total": sum(_full_hit(h) for h in run), "ms": round(kb_ts - since),
+        result["burst"] = {"hits": len(burst_run), "total": sum(_full_hit(h) for h in burst_run),
+                           "ms": round(kb_ts - since),
                            "abilities": [{"name": ability_names.get(a, "Unknown"), "school": ability_schools.get(a),
                                           "times": n} for a, (n, _) in sorted(parts.items(), key=lambda x: -x[1][1])]}
     if rot:

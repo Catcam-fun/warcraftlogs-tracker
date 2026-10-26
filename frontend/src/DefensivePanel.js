@@ -47,37 +47,6 @@ export function summarizeDefensives(deaths) {
   return summary;
 }
 
-/* What the results page's numbers, labels and icons mean, shown once above the player list. */
-const LEGEND = [
-  ['Death rate', 'Deaths that count, divided by the boss pulls the player was in.'],
-  ['Which deaths count', "Only a pull's first deaths, up to \"Deaths to count\", and never deaths inside a wipe."],
-  ['Wipe', '8 or more deaths within 8 seconds. The pull was lost, so nothing in it counts.'],
-  ['One-shot', 'At high health under 1.5 seconds before dying, and one hit took 80% or more of their health.'],
-  ['Burst', 'At high health under 1.5 seconds before dying, from several hits with none that big.'],
-  ['Worn down', 'Raid-wide damage hit them again and again while they were low (rot).'],
-  ['Set up by', 'The biggest hit since they were last at high health, which left them low for the killing blow.'],
-  ['Preventable', 'A defensive, Healthstone or potion they had ready would have kept them alive.'],
-  ['Avoidable', 'Damage they could have dodged by moving (pools, frontals, waves, things landing on the floor), '
-    + 'taken since they were last at 85% health, decided the death: without it they would have lived.'],
-  ['Ready (✓)', 'Off cooldown when they died. A green ring and ✓ means pressing it would have kept them alive.'],
-  ['On cooldown', 'Greyed out, with the seconds until it was ready again. ON marks one that was already active.'],
-  ['All together ✓', 'No single one was enough, but everything they had ready, used together, would have been.'],
-  ['CHEAT', 'A cheat death: an effect like Cauterize or Purgatory kept them alive. Counted separately.'],
-];
-
-export function DeathLegend() {
-  return (
-    <details className="fpx-legend" open>
-      <summary>How to read these results</summary>
-      <dl>
-        {LEGEND.map(([term, text]) => (
-          <React.Fragment key={term}><dt>{term}</dt><dd>{text}</dd></React.Fragment>
-        ))}
-      </dl>
-    </details>
-  );
-}
-
 export function DefensiveSummaryChip({ s }) {
   if (!s || s.withData === 0) return null;
   if (s.assessed === 0) {
