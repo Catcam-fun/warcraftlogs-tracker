@@ -655,44 +655,49 @@ select option,select optgroup{background:#141a26;color:#f3f4f6}
   background:linear-gradient(150deg,var(--fpx-best),#3fae54)}
 .fpx-merge:hover{filter:brightness(1.07)}
 
-/* matrix */
-.fpx-matrix{border:1px solid var(--fpx-line);border-radius:var(--fpx-r);overflow:hidden;
+/* results tabs: Players · Abilities, a pill switch like the boss filters (the filters above apply to both) */
+.fpx-rtabs{display:inline-flex;gap:4px;margin:28px 0 0;padding:4px;border-radius:11px;
+  background:rgba(255,255,255,.04);border:1px solid var(--fpx-line-strong)}
+.fpx-rtab{display:inline-flex;align-items:center;padding:7px 16px;border:none;border-radius:8px;background:none;
+  cursor:pointer;color:var(--fpx-ink-dim);font-family:var(--fpx-sans);font-size:13px;font-weight:600;white-space:nowrap;
+  transition:.14s var(--fpx-ease)}
+.fpx-rtab:hover{color:var(--fpx-ink);background:rgba(255,255,255,.04)}
+.fpx-rtab.on{background:linear-gradient(150deg,var(--fpx-kill),var(--fpx-kill-2));color:#1a0e00;font-weight:700}
+.fpx-rtab .n{margin-left:7px;font-size:11px;font-weight:600;opacity:.7;font-variant-numeric:tabular-nums}
+.fpx-rtab:focus-visible{outline:2px solid var(--fpx-kill);outline-offset:2px}
+.fpx-tabnote{display:flex;align-items:center;flex-wrap:wrap;margin:14px 0 16px;font-size:12px;color:var(--fpx-ink-faint)}
+
+/* Abilities tab: one card per boss ability, players ranked inside */
+.fpx-abgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px}
+.fpx-abcard{border:1px solid var(--fpx-line);border-radius:var(--fpx-r);padding:12px 14px 10px;
   background:linear-gradient(180deg,rgba(13,17,28,.74),rgba(10,13,22,.74))}
-.fpx-matrix-head{display:flex;align-items:center;gap:9px;width:100%;padding:13px 16px;
-  background:none;border:none;cursor:pointer;color:var(--fpx-ink);
-  font-family:var(--fpx-display);font-size:13px;letter-spacing:.14em;text-align:left;
-  transition:.15s var(--fpx-ease)}
-.fpx-matrix-head:hover{background:rgba(255,255,255,.03)}
-.fpx-matrix-head .hint{margin-left:8px;font-family:var(--fpx-sans);font-size:11px;
-  letter-spacing:0;font-weight:500;color:var(--fpx-ink-faint)}
-.fpx-mtx-wrap{overflow-x:auto;border-top:1px solid var(--fpx-line)}
-table.fpx-mtx{width:100%;border-collapse:collapse;font-size:12px;
-  font-variant-numeric:tabular-nums}
-.fpx-mtx th,.fpx-mtx td{padding:10px 12px;white-space:nowrap}
-.fpx-mtx thead th{position:sticky;top:0;background:#090c14;
-  border-bottom:1px solid var(--fpx-line-strong);font-size:10px;font-weight:700;
-  letter-spacing:.1em;color:var(--fpx-ink-dim);text-transform:uppercase;
-  cursor:pointer;user-select:none;text-align:center}
-.fpx-mtx thead th:hover{color:var(--fpx-ink)}
-.fpx-mtx thead th:first-child,
-.fpx-mtx tbody td:first-child{position:sticky;left:0;text-align:left}
-.fpx-mtx thead th:first-child{z-index:3;background:#090c14}
-.fpx-mtx thead th:not(:first-child){z-index:2}
-.fpx-mtx tbody td:first-child{background:#0b0e17;z-index:1;font-weight:700}
-.fpx-mtx tbody tr{border-bottom:1px solid var(--fpx-line)}
-.fpx-mtx tbody tr:last-child{border-bottom:none}
-.fpx-mtx tbody tr:hover td{background:rgba(255,255,255,.022)}
-.fpx-mtx tbody tr:hover td:first-child{background:#11151f}
-.fpx-mtx td{text-align:center;color:var(--fpx-ink-faint)}
-.fpx-mtx td.val{font-weight:700;color:var(--fpx-ink)}
-.fpx-mtx td.ov{font-weight:800}
-.fpx-mtx .sortc{display:inline-flex;align-items:center;gap:5px;justify-content:center}
-.fpx-mtx .mini{font-size:10px;font-weight:600;color:var(--fpx-ink-faint)}
-.fpx-rowhide{padding:3px 8px;border-radius:6px;font-size:10px;font-weight:600;
-  cursor:pointer;color:var(--fpx-ink-dim);background:rgba(255,255,255,.04);
-  border:1px solid var(--fpx-line-strong)}
-.fpx-rowhide:hover{color:var(--fpx-ink);border-color:var(--fpx-line)}
-.fpx-cellname{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.fpx-abhead{display:flex;align-items:center;gap:10px;padding-bottom:10px;margin-bottom:4px;border-bottom:1px solid var(--fpx-line)}
+.fpx-abhead .abi{display:block;flex-shrink:0;outline:none;cursor:help;border-radius:5px}
+.fpx-abhead .t{display:flex;flex-direction:column;align-items:flex-start;min-width:0}
+.fpx-abhead .nm{font-weight:700;font-size:14px;color:var(--fpx-ink);outline:none;cursor:help}
+.fpx-abhead .nm:hover{text-decoration:underline dotted;text-underline-offset:3px}
+.fpx-abhead .abi:focus-visible,.fpx-abhead .nm:focus-visible{box-shadow:0 0 0 2px var(--fpx-kill)}
+.fpx-abhead .tot{font-size:11.5px;color:var(--fpx-ink-dim)}
+.fpx-abhead .tot b{color:var(--fpx-kill);font-weight:700}
+.fpx-abrow{display:grid;grid-template-columns:minmax(0,1fr) 68px 48px 62px;gap:8px;align-items:center;padding:5px 2px;
+  font-size:12.5px;font-variant-numeric:tabular-nums}
+.fpx-abrow > span:not(.pl),.fpx-abrow .sortc{text-align:right;white-space:nowrap}
+.fpx-abrow .pl{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fpx-abrow .n{font-weight:700;color:var(--fpx-ink)}
+.fpx-abrow .pu{color:var(--fpx-ink-faint)}
+.fpx-abrow .rt{color:var(--fpx-ink-dim)}
+.fpx-abrow.lead .n{color:var(--fpx-kill)}
+.fpx-abrow.h{padding:6px 2px 4px;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--fpx-ink-faint)}
+.fpx-abrow.h .sortc{background:none;border:none;padding:0;cursor:pointer;color:inherit;font:inherit;letter-spacing:inherit;
+  text-transform:inherit}
+.fpx-abrow.h .sortc:hover,.fpx-abrow.h .sortc.on{color:var(--fpx-ink)}
+.fpx-abrow + .fpx-abrow:not(.h){border-top:1px solid rgba(255,255,255,.04)}
+.fpx-abmore{display:block;margin:6px auto 0;background:none;border:none;cursor:pointer;font-family:var(--fpx-sans);
+  font-size:11.5px;font-weight:600;color:var(--fpx-ink-dim)}
+.fpx-abmore:hover{color:var(--fpx-ink)}
+.fpx-abempty{padding:28px;text-align:center;color:var(--fpx-ink-faint);border:1px dashed var(--fpx-line-strong);
+  border-radius:var(--fpx-r)}
+@media (max-width:420px){.fpx-abgrid{grid-template-columns:1fr}.fpx-rtab{padding:7px 13px}}
 
 /* player list */
 .fpx-plist{display:flex;flex-direction:column;gap:6px}
@@ -748,8 +753,12 @@ table.fpx-mtx{width:100%;border-collapse:collapse;font-size:12px;
 .fpx-drow .verdict .cheat{color:var(--fpx-best)}
 .fpx-drow:first-child{border-top:0}
 .fpx-drow.cheat{background:rgba(84,211,106,.05)}
-.fpx-drow .kb{display:flex;align-items:center;gap:10px;min-width:0;outline:none;cursor:help}
-.fpx-drow .an{display:flex;align-items:center;gap:7px;font-weight:600;color:var(--fpx-ink);font-size:13px}
+.fpx-drow .kb{display:flex;align-items:center;gap:10px;min-width:0}
+/* only the ability (icon, name) opens the killing-blow tooltip */
+.fpx-drow .kbi{display:block;flex-shrink:0;outline:none;cursor:help;border-radius:5px}
+.fpx-drow .an{display:inline-flex;align-items:center;gap:7px;font-weight:600;color:var(--fpx-ink);font-size:13px;outline:none;cursor:help}
+.fpx-drow .an:hover{text-decoration:underline dotted;text-underline-offset:3px}
+.fpx-drow .kbi:focus-visible,.fpx-drow .an:focus-visible{box-shadow:0 0 0 2px var(--fpx-kill)}
 .fpx-drow .kbt{min-width:0}
 .fpx-drow .cx{display:block;color:var(--fpx-ink-dim);font-size:11.5px;line-height:1.35}
 .fpx-drow .cx em{font-style:normal;color:var(--fpx-kill)}
@@ -829,12 +838,13 @@ table.fpx-mtx{width:100%;border-collapse:collapse;font-size:12px;
   font-family:var(--fpx-sans);font-size:9px;font-weight:700;font-style:normal;line-height:1;opacity:.8;flex-shrink:0}
 .fpx-infotip{display:inline-flex;align-items:center;margin-left:6px;color:var(--fpx-ink-dim);cursor:help}
 .fpx-infotip:hover,.fpx-infotip:focus{color:var(--fpx-ink)}
-.fpx-pdef .fpx-i{width:11px;height:11px;font-size:8px;margin-left:2px;vertical-align:-1px}
-.fpx-pdef{cursor:help}
+.fpx-pdef .fpx-i{width:11px;height:11px;font-size:8px;margin-left:2px}
+.fpx-pdef .pdi{display:inline-flex;vertical-align:-1px;outline:none;cursor:help}
 /* how they died: the kind of death (its ⓘ explains it) and one plain sentence */
 .fpx-tip .how{display:flex;flex-direction:column;gap:7px;margin-top:9px;padding-top:9px;border-top:1px solid var(--fpx-line)}
 .fpx-tip .how .say{font-size:13.5px;line-height:1.5;color:var(--fpx-ink)}
-.fpx-dtype{display:inline-flex;align-items:center;gap:6px;align-self:flex-start;cursor:help}
+.fpx-dtype{display:inline-flex;align-items:center;gap:6px;align-self:flex-start}
+.fpx-dtype .dti{display:inline-flex;outline:none;cursor:help}
 .fpx-dtype .tag{font-size:10.5px;font-weight:700;letter-spacing:.08em;border-radius:5px;padding:1px 7px}
 .fpx-dtype.oneShot{color:#ff8a80}.fpx-dtype.oneShot .tag{background:rgba(226,73,63,.12)}
 .fpx-dtype.burst{color:var(--fpx-kill)}.fpx-dtype.burst .tag{background:rgba(255,174,59,.12)}
@@ -1006,7 +1016,6 @@ table.fpx-mtx{width:100%;border-collapse:collapse;font-size:12px;
     margin:0 -16px;padding:2px 16px}
   .fpx-chiprow::-webkit-scrollbar{display:none}
   .fpx-search{margin-left:0;min-width:0;flex-basis:100%}
-  .fpx-mtx .fpx-rowhide{display:none}
   .fpx-pline .fpx-pdot{display:none}
   .fpx-pline::before{content:"";order:3;flex-basis:100%;height:0}
   .fpx-pline .fpx-pname{order:1;flex:1 1 auto;min-width:0}

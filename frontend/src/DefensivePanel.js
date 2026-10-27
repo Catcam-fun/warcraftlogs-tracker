@@ -61,8 +61,10 @@ export function DefensiveSummaryChip({ s }) {
     );
   }
   const tone = s.preventable === 0 ? 'good' : s.preventable / s.assessed >= 0.5 ? 'bad' : 'warn';
+  // Only the ⓘ opens the meaning, not the whole chip.
   const chip = (cls, text, meaning) => (
-    <Tip className={`fpx-pdef ${cls}`} content={() => <p>{meaning}</p>}>{text} <i className="fpx-i">i</i></Tip>
+    <span className={`fpx-pdef ${cls}`}>{text}{' '}
+      <Tip className="pdi" content={() => <p>{meaning}</p>}><i className="fpx-i">i</i></Tip></span>
   );
   return (
     <>

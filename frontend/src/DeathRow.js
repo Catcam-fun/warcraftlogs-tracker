@@ -65,7 +65,7 @@ function School({ mask, children }) {
 
 const SCHOOL_WORDS = new RegExp(`\\b(${Object.keys(SCHOOL_MASKS).join('|')})(?= damage\\b)`, 'g');
 /* Description text with each "<school> damage" coloured. */
-function schoolText(text) {
+export function schoolText(text) {
   const parts = [];
   let last = 0;
   text.replace(SCHOOL_WORDS, (m, name, at) => {
@@ -274,7 +274,7 @@ export const InfoTip = ({ children, className = '' }) => (
 // Blizzard's icon server doesn't have every new icon; WarcraftLogs hosts them all.
 const ICON_FALLBACK = (icon) => `https://assets.rpglogs.com/img/warcraft/abilities/${icon}.jpg`;
 
-function Icon({ name, icons, icon: given, className = '', quality }) {
+export function Icon({ name, icons, icon: given, className = '', quality }) {
   const icon = given || icons?.[name];
   const [tries, setTries] = useState(0);
   const img = !icon || tries > 1
@@ -286,7 +286,7 @@ function Icon({ name, icons, icon: given, className = '', quality }) {
   return <span className="fpx-qualwrap">{img}<img className="fpx-qual" src={quality} alt="" /></span>;
 }
 
-const TipHead = ({ name, icons, icon, sub, glyph, quality }) => (
+export const TipHead = ({ name, icons, icon, sub, glyph, quality }) => (
   <div className="th"><Icon name={glyph || name} icons={icons} icon={icon} quality={quality} />
     <div><b>{name}</b>{sub && <small>{sub}</small>}</div></div>
 );
@@ -512,9 +512,10 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
         const [tag, meaning] = DEATH_KINDS[kind];
         return (
           <div className="how">
-            <Tip className={`fpx-dtype ${kind}`} content={() => (
-              <><b>{tag.charAt(0) + tag.slice(1).toLowerCase()}</b><p>{meaning}</p><HealthSteps s={s} /></>
-            )}><span className="tag">{tag}</span><i className="fpx-i">i</i></Tip>
+            <span className={`fpx-dtype ${kind}`}><span className="tag">{tag}</span>
+              <Tip className="dti" content={() => (
+                <><b>{tag.charAt(0) + tag.slice(1).toLowerCase()}</b><p>{meaning}</p><HealthSteps s={s} /></>
+              )}><i className="fpx-i">i</i></Tip></span>
             <span className="say">{deathSentence(s, { name: hitName, school: kbSchool })}</span>
           </div>
         );
@@ -629,13 +630,16 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
   return (
     <div className={`fpx-drow${death.isCheatDeath ? ' cheat' : ''}`}>
       <span className="pull">{death.pullNo}</span>
-      <Tip className="kb" content={killTip} live>
-        <Icon name={notLogged ? '?' : death.abilityName} icon={kbIcon} className="big" />
+      {/* Only the ability itself (icon and name) opens its tooltip, not the context line beside it. */}
+      <span className="kb">
+        <Tip className="kbi" content={killTip} live>
+          <Icon name={notLogged ? '?' : death.abilityName} icon={kbIcon} className="big" />
+        </Tip>
         <span className="kbt">
-          <span className="an">{hitName}</span>
+          <Tip className="an" content={killTip} live>{hitName}</Tip>
           {ctx && <span className="cx">{ctx}{s?.ignoresImmunity ? <em> · through immunities</em> : null}</span>}
         </span>
-      </Tip>
+      </span>
       <span className="hp" title={s ? `${s.hpBeforePct}% health before the killing blow` : undefined}>
         {s && !instakill && <><span className="bar"><i style={{ width: `${Math.min(s.hpBeforePct, 100)}%` }} /></span>
           <small>{s.hpBeforePct}% health before</small></>}
