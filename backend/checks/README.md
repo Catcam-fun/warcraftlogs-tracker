@@ -108,15 +108,17 @@ Each run prints how many WCL points it spent. The budget is 9000 an hour (measur
 
 ## Last known-good logs
 
-| Raid key | Target | Date |
+| Raid key | Target | Passed |
 | --- | --- | --- |
-| midnight-s2-all | `FaC4AgJ8vMTfP1VN:midnight-s2-all:Tony Halme Pro Skater/Stormreaver/EU` | 2026-10-08 |
-| manaforge | `2VtyDR4CF6PGLjbd:manaforge:Honestly/Frostmourne/US` | 2026-10-08 |
-| undermine | `yYZJNhcDk37Tj4AM:undermine:Honestly/Frostmourne/US` | 2026-10-08 |
-| nerubar | `WgYbA1r7fXdZKtPF:nerubar:Advance/Draenor/EU` | 2026-10-08 |
-| voidspire | `P6CwHkgFR9Krf1Bz:voidspire:Honestly/Frostmourne/US` | 2026-10-08 |
-| dreamrift | `k2YL7RG89c3MTWnF:dreamrift:Vindicatum/Icecrown/US` | 2026-10-08 |
-| queldanas | `D6RNkvp9qBZfHXYz:queldanas:Honestly/Frostmourne/US` | 2026-10-08 |
-| midnight-all | `P6CwHkgFR9Krf1Bz:midnight-all:Honestly/Frostmourne/US` | 2026-10-08 |
+| midnight-s2-all (Kith'ix) | `tnC76QcGKYzqkRxH:midnight-s2-all:Honestly/Frostmourne/US` | `all` 2026-10-26 |
+| midnight-s2-all | `QHCgmdVDpxJkNbLT:midnight-s2-all:Rain/Stormreaver/US` | `labels` 2026-10-26, `source-avoidable` 2026-10-24 |
+| midnight-s2-all | `FaC4AgJ8vMTfP1VN:midnight-s2-all:Tony Halme Pro Skater/Stormreaver/EU` | `all` 2026-10-08 |
+| manaforge | `2VtyDR4CF6PGLjbd:manaforge:Honestly/Frostmourne/US` | `labels` 2026-10-26, `source-avoidable` 2026-10-24, `all` 2026-10-08 |
+| undermine | `yYZJNhcDk37Tj4AM:undermine:Honestly/Frostmourne/US` | `labels` 2026-10-26, `source-avoidable` 2026-10-24 (skip), `all` 2026-10-08 |
+| nerubar | `WgYbA1r7fXdZKtPF:nerubar:Advance/Draenor/EU` | `labels` 2026-10-26, `source-avoidable` 2026-10-24, `all` 2026-10-08 |
+| voidspire | `P6CwHkgFR9Krf1Bz:voidspire:Honestly/Frostmourne/US` | `labels` 2026-10-26, `source-avoidable` 2026-10-24, `all` 2026-10-08 |
+| dreamrift | `k2YL7RG89c3MTWnF:dreamrift:Vindicatum/Icecrown/US` | `labels` 2026-10-26, `source-avoidable` 2026-10-24, `all` 2026-10-08 |
+| queldanas | `D6RNkvp9qBZfHXYz:queldanas:Honestly/Frostmourne/US` | `labels` 2026-10-26, `source-avoidable` 2026-10-24, `all` 2026-10-08 |
+| midnight-all | `P6CwHkgFR9Krf1Bz:midnight-all:Honestly/Frostmourne/US` | `labels` 2026-10-26, `source-avoidable` 2026-10-24, `all` 2026-10-08 |
 
-A single `all` run costs about 200-500 WCL points; a sweep of four raids at once costs about 1300-1700, measured on the shared key (each run's own points line includes whatever else the key spent at the same time). `state` reads every counted death (no cap).
+A single `all` run costs about 400-2,500 WCL points (Dreamrift's small log was the low end; the Kith'ix run above cost 1,141, 2026-10-26), more when WCL's cache is cold. Each run's own points line includes whatever else the key spent at the same time, so run only as many at once as the hour's remaining points allow, usually three. `labels` alone costs about 120-1,200. `state` reads every counted death (no cap).

@@ -65,6 +65,12 @@ RAID_WIDE = {
     1249251: 1.0,  # Dark Upheaval (Imperator Averzian)
     1259903: 1.0,  # Dark Upheaval (Imperator Averzian)
     1249262: 1.0,  # Umbral Collapse (Imperator Averzian)
+    1302319: 0.91,  # Digestive Juices (Kith'ix)
+    1305876: 0.88,  # Eightfold Eclipse (Kith'ix)
+    1304424: 0.96,  # Extinguish (Kith'ix)
+    1304047: 0.96,  # Overwhelming Fear (Kith'ix)
+    1303165: 0.96,  # Suffocating Darkness (Kith'ix)
+    1301668: 0.96,  # Voidswarm (Kith'ix)
     1258661: 1.0,  # Light Infusion (Lightblinded Vanguard)
     1246749: 1.0,  # Sacred Toll (Lightblinded Vanguard)
     1255739: 1.0,  # Searing Radiance (Lightblinded Vanguard)
@@ -92,12 +98,6 @@ RAID_WIDE = {
     469719: 1.0,  # Uncontrolled Burn (Mug’Zee, Heads of Security)
     469708: 1.0,  # Uncontrolled Destruction (Mug’Zee, Heads of Security)
     1307939: 1.0,  # Corpse Blight (Nek'zali the Soulcoiler)
-    1302319: 0.91,  # Digestive Juices (Kith'ix)
-    1305876: 0.88,  # Eightfold Eclipse (Kith'ix)
-    1304424: 0.96,  # Extinguish (Kith'ix)
-    1304047: 0.96,  # Overwhelming Fear (Kith'ix)
-    1303165: 0.96,  # Suffocating Darkness (Kith'ix)
-    1301668: 0.96,  # Voidswarm (Kith'ix)
     1294729: 0.88,  # Corpse Blight (Nek'zali the Soulcoiler)
     1289875: 0.55,  # Cremation (Nek'zali the Soulcoiler)
     1293214: 0.75,  # Grasping Depths (Nek'zali the Soulcoiler)
@@ -230,3 +230,8 @@ RAID_WIDE = {
     1272950: 1.0,  # Primordial Power (Vorasius)
     1272328: 1.0,  # Shadowclaw Slam (Vorasius)
 }
+
+# Encounters measured (build_raid_wide.py --new-only skips them).
+MEASURED = [2898, 2902, 2917, 2918, 2919, 2920, 2921, 2922, 3009, 3010, 3011, 3012, 3013, 3014, 3015, 3016, 3122, 3129,
+ 3130, 3131, 3132, 3133, 3134, 3135, 3176, 3177, 3178, 3179, 3180, 3181, 3182, 3183, 3306, 3379, 3420, 3421,
+ 3429, 3445, 3455, 3470, 3492, 3497, 3513]
