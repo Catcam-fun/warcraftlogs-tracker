@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
-import { AlertCircle, Loader2, Filter, ChevronDown, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Share2, Copy, Check, LogOut, Settings as SettingsIcon, Info, X, Crosshair, LogIn, Save } from 'lucide-react';
+import { AlertCircle, Loader2, Filter, ChevronDown, ChevronRight, Share2, Copy, Check, LogOut, Settings as SettingsIcon, Info, X, Crosshair, LogIn, Save } from 'lucide-react';
 import { supabase, sessionEndedByBrowserClose, setSessionOnly } from './supabaseClient';
 import Auth from './Auth';
 import Settings from './Settings';
@@ -23,6 +23,8 @@ import { prefersReducedMotion } from './reducedMotion';
 import { shareNote } from './shareNote';
 import { DefensiveSummaryChip, DefensiveTopUnused, summarizeDefensives } from './DefensivePanel';
 import { DeathRow, DeathTableHead, InfoTip } from './DeathRow';
+import AbilityView from './AbilityView';
+import { abilityStats } from './abilityStats';
 import { friendlyError } from './friendlyError';
 
 
@@ -227,8 +229,7 @@ export default function WarcraftLogsApp() {
   const [selectedBosses, setSelectedBosses] = useState(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedPlayers, setExpandedPlayers] = useState(new Set());
-  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
-  const [overviewCollapsed, setOverviewCollapsed] = useState(true);
+  const [resultsTab, setResultsTab] = useState('players');
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareLink, setShareLink] = useState('');
   const [shareWarning, setShareWarning] = useState(null);
@@ -338,7 +339,6 @@ export default function WarcraftLogsApp() {
   const handleLoadSavedReport = (saved) => {
     setError('');
     setExpandedPlayers(new Set());
-    setSortConfig({ key: null, direction: 'asc' });
     if (saved.config) setConfig((prev) => ({ ...prev, ...stripSecrets(saved.config) }));
     setData(saved.data);
     navigate('/results');
@@ -505,7 +505,6 @@ export default function WarcraftLogsApp() {
     setShowRecentMenu(false);
     setError('');
     setExpandedPlayers(new Set());
-    setSortConfig({ key: null, direction: 'asc' });
     setConfig((prev) => ({ ...prev, ...stripSecrets(record.config) }));
     setData(record.data);
     if (location.pathname !== '/results') navigate('/results');
@@ -1144,178 +1143,29 @@ export default function WarcraftLogsApp() {
     return filteredStats.sort((a, b) => b.realRate - a.realRate || b.realDeaths - a.realDeaths);
   };
 
-  const computeOverviewData = () => {
-    if (!data) return { bosses: [], players: [], grid: {} };
-
-    // Filter bosses based on selection - use proper ordering
-    const allBosses = sortBossesByOrder(Object.keys(data.bossParticipation), config.selectedRaid);
-    const bosses = selectedBosses.size === 0 
-      ? allBosses 
-      : allBosses.filter(boss => selectedBosses.has(boss));
-    
-    // Get all base players
-    const basePlayers = Object.keys(data.events).sort();
-    
-    // Build a map of all characters to their main (for grouped alts)
-    const charToMain = {};
-    Object.entries(characterGroups).forEach(([main, alts]) => {
-      alts.forEach(alt => {
-        charToMain[alt] = main;
-      });
-    });
-    
-    // Get unique players (mains + ungrouped characters)
-    const groupedAlts = new Set(Object.keys(charToMain));
-    const players = basePlayers.filter(p => !groupedAlts.has(p));
-    
-    const grid = {};
-
-    const hasCheatDeaths = config.enableCheatDeath;
-    const pullCutoffTimestamps = data.pullCutoffTimestamps || {};
-
-    players.forEach(player => {
-      grid[player] = {};
-      
-      // Get events for this player and their alts (if any)
-      const alts = characterGroups[player] || [];
-      const allCharacters = [player, ...alts];
-      
-      // Combine events from all characters in the group
-      const allPlayerEvents = allCharacters.flatMap(char => data.events[char] || []);
-      
-      // Extract class/spec from PRIMARY character (not alts) to ensure consistent coloring
-      const primaryCharEvents = data.events[player] || [];
-      const playerClass = primaryCharEvents.length > 0 ? (primaryCharEvents[0].class || "Unknown") : 
-                         (allPlayerEvents.length > 0 ? (allPlayerEvents[0].class || "Unknown") : "Unknown");
-      const playerSpec = primaryCharEvents.length > 0 ? (primaryCharEvents[0].spec || "Unknown") : 
-                        (allPlayerEvents.length > 0 ? (allPlayerEvents[0].spec || "Unknown") : "Unknown");
-      
-      bosses.forEach(boss => {
-        // Combine boss pulls from all characters in the group
-        const bossPulls = allCharacters.reduce((total, char) => {
-          return total + (data.bossParticipation[boss]?.[char]?.length || 0);
-        }, 0);
-        
-        const bossCounted = countedDeaths(
-          allPlayerEvents.filter(ev => ev.boss === boss), cutoff, pullCutoffTimestamps);
-        const bossRealDeaths = bossCounted.real.length;
-        const bossCheatDeaths = hasCheatDeaths ? bossCounted.cheat.length : 0;
-        
-        const bossTotalDeaths = bossRealDeaths + bossCheatDeaths;
-        
-        const realRate = bossPulls > 0 ? (bossRealDeaths / bossPulls * 100) : null;
-        const totalRate = bossPulls > 0 ? (bossTotalDeaths / bossPulls * 100) : null;
-        
-        grid[player][boss] = { 
-          deaths: bossRealDeaths,
-          totalDeaths: bossTotalDeaths,
-          pulls: bossPulls, 
-          rate: realRate,
-          totalRate: totalRate,
-          hasCheatDeaths,
-          class: playerClass,
-          spec: playerSpec
-        };
-      });
-
-      // Calculate overall for selected bosses
-      let totalPulls = 0;
-      let totalRealDeaths = 0;
-      let totalWithCheatDeaths = 0;
-      
-      if (selectedBosses.size === 0) {
-        // Use window-based filtering for all bosses - combine all characters in group
-        totalPulls = allCharacters.reduce((total, char) => {
-          return total + (data.pullParticipation[char]?.length || 0);
-        }, 0);
-        
-        const counted = countedDeaths(allPlayerEvents, cutoff, pullCutoffTimestamps);
-        totalRealDeaths = counted.real.length;
-        const cheatDeathsCount = hasCheatDeaths ? counted.cheat.length : 0;
-        
-        totalWithCheatDeaths = totalRealDeaths + cheatDeathsCount;
-      } else {
-        // For selected bosses, sum up from the grid (already combined for grouped chars)
-        bosses.forEach(boss => {
-          totalPulls += grid[player][boss].pulls;
-          totalRealDeaths += grid[player][boss].deaths;
-          totalWithCheatDeaths += grid[player][boss].totalDeaths;
-        });
-      }
-      
-      grid[player].overall = {
-        deaths: totalRealDeaths,
-        totalDeaths: totalWithCheatDeaths,
-        pulls: totalPulls,
-        rate: totalPulls > 0 ? (totalRealDeaths / totalPulls * 100) : null,
-        totalRate: totalPulls > 0 ? (totalWithCheatDeaths / totalPulls * 100) : null,
-        hasCheatDeaths,
-        class: playerClass,
-        spec: playerSpec
-      };
-    });
-
-    // Filter out hidden players and players below minimum pulls
-    const filteredPlayers = players.filter(player => 
-      !hiddenPlayers.has(player) && grid[player].overall.pulls >= minPulls
-    );
-
-    return { bosses, players: filteredPlayers, grid };
+  // The characters the "Group characters" panel offers: every main or ungrouped character, minus hidden ones
+  // and those below the minimum pulls.
+  const computeGroupablePlayers = () => {
+    if (!data) return [];
+    const groupedAlts = new Set(Object.values(characterGroups).flat());
+    return Object.keys(data.events).sort()
+      .filter(p => !groupedAlts.has(p) && !hiddenPlayers.has(p))
+      .filter(p => groupPulls(data.pullParticipation, p, characterGroups) >= minPulls);
   };
 
-  // Both tables are derived from the full analysis; recompute them only
-  // when an input changes, not on every render (e.g. each keystroke in
+  // Derived from the full analysis; recompute only when an input changes, not on every render (e.g. each keystroke in
   // the search box, or expanding a row).
   /* eslint-disable react-hooks/exhaustive-deps */
   const filteredStatsMemo = useMemo(computeFilteredStats, [
     data, characterGroups, selectedBosses, cutoff, config.enableCheatDeath,
     searchQuery, hiddenPlayers, minPulls,
   ]);
-  const overviewDataMemo = useMemo(computeOverviewData, [
-    data, characterGroups, selectedBosses, cutoff, config.enableCheatDeath,
-    config.selectedRaid, hiddenPlayers, minPulls,
-  ]);
+  const groupablePlayersMemo = useMemo(computeGroupablePlayers, [data, characterGroups, hiddenPlayers, minPulls]);
   /* eslint-enable react-hooks/exhaustive-deps */
+  const abilityStatsMemo = useMemo(
+    () => abilityStats(filteredStatsMemo, data?.bossParticipation, characterGroups),
+    [filteredStatsMemo, data, characterGroups]);
   const getFilteredStats = () => filteredStatsMemo;
-  const getOverviewData = () => overviewDataMemo;
-
-  const sortOverviewData = (bosses, players, grid, key) => {
-    const sorted = [...players].sort((a, b) => {
-      let aVal, bVal;
-
-      if (key === 'player') {
-        return sortConfig.direction === 'asc' 
-          ? a.localeCompare(b) 
-          : b.localeCompare(a);
-      } else if (key === 'overall') {
-        aVal = grid[a].overall.rate ?? -1;
-        bVal = grid[b].overall.rate ?? -1;
-      } else {
-        aVal = grid[a][key]?.rate ?? -1;
-        bVal = grid[b][key]?.rate ?? -1;
-      }
-
-      if (sortConfig.direction === 'asc') {
-        return aVal - bVal;
-      } else {
-        return bVal - aVal;
-      }
-    });
-
-    return sorted;
-  };
-
-  const handleSort = (key) => {
-    setSortConfig(prev => ({
-      key,
-      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
-    }));
-  };
-
-  const getSortIcon = (key) => {
-    if (sortConfig.key !== key) return <ArrowUpDown size={14} />;
-    return sortConfig.direction === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />;
-  };
 
   const formatTimestamp = (absTs) => {
     const date = new Date(absTs);
@@ -1597,8 +1447,8 @@ export default function WarcraftLogsApp() {
                   collapsed={resultsRailCollapsed}
                   onToggle={() => setResultsRailCollapsed((v) => !v)}
                   active="results"
-                  onHome={() => { setData(null); setError(''); setExpandedPlayers(new Set()); setSortConfig({ key: null, direction: 'asc' }); navigate('/'); }}
-                  onAnalyze={() => { setData(null); setError(''); setExpandedPlayers(new Set()); setSortConfig({ key: null, direction: 'asc' }); navigate('/analyze'); }}
+                  onHome={() => { setData(null); setError(''); setExpandedPlayers(new Set()); navigate('/'); }}
+                  onAnalyze={() => { setData(null); setError(''); setExpandedPlayers(new Set()); navigate('/analyze'); }}
                   onResults={() => {}}
                 />
 
@@ -1630,7 +1480,7 @@ export default function WarcraftLogsApp() {
                               )}
                             </div>
                           )}
-                          <button className="fpx-btn ghost sm" onClick={() => { setData(null); setError(''); setExpandedPlayers(new Set()); setSortConfig({ key: null, direction: 'asc' }); navigate('/analyze'); }}>
+                          <button className="fpx-btn ghost sm" onClick={() => { setData(null); setError(''); setExpandedPlayers(new Set()); navigate('/analyze'); }}>
                             <Crosshair size={15} /> New Analysis
                           </button>
                           {user && (
@@ -1814,7 +1664,7 @@ export default function WarcraftLogsApp() {
 
                 {showGroupingUI && (() => {
                   // Get all players from the grid
-                  const { players } = getOverviewData();
+                  const players = groupablePlayersMemo;
 
                   // Filter out already grouped alts
                   const groupedAlts = new Set();
@@ -1940,167 +1790,31 @@ export default function WarcraftLogsApp() {
               </div>
             </div>
 
-            {/* Overview Section - Collapsible */}
-            <div className="fpx-rsec fpx-rv"><h3>DEATH-RATE MATRIX</h3><span className="sub">player × boss</span><div className="rule" /></div>
-            <div className="fpx-matrix fpx-rv">
-              <button
-                onClick={() => setOverviewCollapsed(!overviewCollapsed)}
-                className="fpx-matrix-head"
-              >
-                {overviewCollapsed ? <ChevronRight size={18} /> : <ChevronDown size={18} />}
-                ALL BOSSES OVERVIEW
-                <span className="hint">{overviewCollapsed ? 'click to expand' : 'sortable — click any column'}</span>
-              </button>
-              
-              {!overviewCollapsed && (() => {
-              const { bosses, players, grid } = getOverviewData();
-              
-              // Filter players by search query
-              const searchFilteredPlayers = players.filter(player => 
-                !searchQuery || player.toLowerCase().includes(searchQuery.toLowerCase())
-              );
-              
-              const sortedPlayers = sortConfig.key 
-                ? sortOverviewData(bosses, searchFilteredPlayers, grid, sortConfig.key) 
-                : searchFilteredPlayers;
-              
-              // Calculate all percentage values for color scaling (use all players, not just filtered)
-              const allRealRates = [];
-              const allTotalRates = [];
-              const allBossRealRates = {};
-              const allBossTotalRates = {};
-              
-              bosses.forEach(boss => {
-                allBossRealRates[boss] = [];
-                allBossTotalRates[boss] = [];
-              });
-              
-              players.forEach(player => {
-                // Collect overall rates
-                if (grid[player].overall.rate !== null) {
-                  allRealRates.push(grid[player].overall.rate);
-                }
-                if (grid[player].overall.totalRate !== null) {
-                  allTotalRates.push(grid[player].overall.totalRate);
-                }
-                
-                // Collect per-boss rates
-                bosses.forEach(boss => {
-                  const cellData = grid[player][boss];
-                  if (cellData.rate !== null) {
-                    allBossRealRates[boss].push(cellData.rate);
-                  }
-                  if (cellData.totalRate !== null) {
-                    allBossTotalRates[boss].push(cellData.totalRate);
-                  }
-                });
-              });
-              
-              return (
-                <div className="fpx-mtx-wrap">
-                  <table className="fpx-mtx">
-                    <thead>
-                      <tr>
-                        <th onClick={() => handleSort('player')}>
-                          <span className="sortc">Player {getSortIcon('player')}</span>
-                        </th>
-                        {bosses.map(boss => (
-                          <th key={boss} onClick={() => handleSort(boss)}>
-                            <span className="sortc">{boss} {getSortIcon(boss)}</span>
-                          </th>
-                        ))}
-                        <th onClick={() => handleSort('overall')}>
-                          <span className="sortc">Overall {getSortIcon('overall')}</span>
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sortedPlayers.map(player => (
-                        <tr key={player}>
-                          <td>
-                            <div className="fpx-cellname">
-                              <span style={{ color: WOW_CLASS_COLORS[grid[player].overall?.class] || 'var(--fpx-ink)' }}>
-                                {player}{characterGroups[player] && characterGroups[player].length > 0 && ' (grouped)'}
-                              </span>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  togglePlayerVisibility(player);
-                                }}
-                                className="fpx-rowhide"
-                                title="Hide this player from results"
-                              >
-                                Hide
-                              </button>
-                            </div>
-                          </td>
-                          {bosses.map(boss => {
-                            const cellData = grid[player][boss];
-                            const showBothStats = cellData.hasCheatDeaths && cellData.totalDeaths > cellData.deaths;
-
-                            return (
-                              <td key={boss} className={cellData.rate !== null ? 'val' : undefined}>
-                                {cellData.rate !== null ? (
-                                  showBothStats ? (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
-                                      <span style={{ color: getPercentageColor(cellData.rate, allBossRealRates[boss]) }}>
-                                        {cellData.rate.toFixed(1)}%
-                                      </span>
-                                      <span className="mini" style={{ color: getPercentageColor(cellData.totalRate, allBossTotalRates[boss]) }}>
-                                        ({cellData.totalRate.toFixed(1)}%)
-                                      </span>
-                                    </div>
-                                  ) : (
-                                    <span style={{ color: getPercentageColor(cellData.rate, allBossRealRates[boss]) }}>
-                                      {cellData.rate.toFixed(1)}%
-                                    </span>
-                                  )
-                                ) : (
-                                  <span>—</span>
-                                )}
-                              </td>
-                            );
-                          })}
-                          <td className="ov">
-                            {grid[player].overall.rate !== null ? (
-                              (() => {
-                                const showBothStats = grid[player].overall.hasCheatDeaths && grid[player].overall.totalDeaths > grid[player].overall.deaths;
-                                return showBothStats ? (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', alignItems: 'center' }}>
-                                    <span style={{ color: getPercentageColor(grid[player].overall.rate, allRealRates) }}>
-                                      {grid[player].overall.rate.toFixed(1)}%
-                                    </span>
-                                    <span className="mini" style={{ color: getPercentageColor(grid[player].overall.totalRate, allTotalRates) }}>
-                                      ({grid[player].overall.totalRate.toFixed(1)}%)
-                                    </span>
-                                  </div>
-                                ) : (
-                                  <span style={{ color: getPercentageColor(grid[player].overall.rate, allRealRates) }}>
-                                    {grid[player].overall.rate.toFixed(1)}%
-                                  </span>
-                                );
-                              })()
-                            ) : (
-                              <span>—</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              );
-            })()}
+            {/* Tabs: the filters above apply to both. */}
+            <div className="fpx-rtabs fpx-rv" role="tablist">
+              {[['players', 'Players', filteredStatsMemo.length], ['abilities', 'Abilities', abilityStatsMemo.length]]
+                .map(([key, label, count]) => (
+                <button key={key} type="button" role="tab" aria-selected={resultsTab === key}
+                  className={`fpx-rtab${resultsTab === key ? ' on' : ''}`} onClick={() => setResultsTab(key)}>
+                  {label}<span className="n">{count}</span>
+                </button>
+              ))}
             </div>
 
-            {/* Players Section */}
-            <div className="fpx-rsec fpx-rv"><h3>PLAYERS</h3><span className="sub">expand for the per-boss death log</span><div className="rule" /></div>
-            {(() => {
+            {resultsTab === 'abilities' && (
+              <AbilityView abilities={abilityStatsMemo} abilityIcons={data.abilityIcons} abilityText={data.abilityText}
+                classColors={WOW_CLASS_COLORS} cutoff={cutoff} />
+            )}
+
+            {/* Players: expand one for their per-boss death log */}
+            {resultsTab === 'players' && (() => {
               const filteredStats = getFilteredStats();
               // Calculate all percentage values for color scaling
               const allRealRates = filteredStats.map(s => s.realRate);
 
               return (
+              <>
+              <div className="fpx-tabnote">Highest death rate first. Expand a player to see each of their deaths.</div>
               <div className="fpx-plist fpx-rv">
                 {filteredStats.map(({ player, realDeaths, totalDeaths, cheatDeaths, pulls, realRate, totalRate, hasCheatDeaths, deathsByBoss, cheatDeathsByBoss, totalDeathsByBoss, topAbilitiesByBoss, class: playerClass, spec: playerSpec, defensiveSummary }) => {
                   const isExpanded = expandedPlayers.has(player);
@@ -2197,6 +1911,7 @@ export default function WarcraftLogsApp() {
                   );
                 })}
               </div>
+              </>
               );
             })()}
                     </div>
