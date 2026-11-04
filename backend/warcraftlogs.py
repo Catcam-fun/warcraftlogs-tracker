@@ -9,7 +9,7 @@ import unicodedata
 import base64
 import hashlib
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from user_errors import UpstreamError
 
@@ -190,7 +190,8 @@ def graphql_query(token, query, variables=None, timeout=120, max_retries=3):
     except Exception as e:
         raise Exception(f"GraphQL query failed: {str(e)}") from e
 
-def get_guild_reports(token, guild_name, server, region, start_date=None, end_date=None):
+def get_guild_reports(token, guild_name, server, region, start_date=None, end_date=None,
+                      start_offset=0, end_offset=0):
     """Fetch guild reports via V2 GraphQL, scoped server-side by a date window.
 
     We deliberately do NOT filter by zoneID. WCL assigns each report a single
@@ -200,6 +201,12 @@ def get_guild_reports(token, guild_name, server, region, start_date=None, end_da
     in analyze_fights is the authoritative raid/dungeon separator, so the zone
     filter was redundant and lossy. Date bounds are pushed into the query so we
     only page through one tier's window, not the guild's entire history.
+
+    Dates are days on the visitor's clock: start_offset / end_offset are the
+    browser's getTimezoneOffset() (minutes behind UTC) at the start of the
+    first day and the end of the last, so "today" in New York starts at
+    05:00 UTC, not at UTC midnight (7-8 PM the night before there). A report
+    belongs to the day it started, the date WarcraftLogs shows for it.
     """
     if start_date == "":
         start_date = None
@@ -208,11 +215,14 @@ def get_guild_reports(token, guild_name, server, region, start_date=None, end_da
 
     start_ts = None
     end_ts = None
+    def utc_midnight_ms(day):
+        return int(datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp() * 1000)
+
     if start_date:
-        start_ts = int(datetime.strptime(start_date, "%Y-%m-%d").timestamp() * 1000)
+        start_ts = utc_midnight_ms(start_date) + int(start_offset or 0) * 60000
     if end_date:
         # Inclusive end-of-day for the end date.
-        end_ts = int(datetime.strptime(end_date, "%Y-%m-%d").timestamp() * 1000) + 86400000 - 1
+        end_ts = utc_midnight_ms(end_date) + 86400000 - 1 + int(end_offset or 0) * 60000
 
     query = """
     query($guildName: String!, $serverSlug: String!, $serverRegion: String!,
@@ -252,6 +262,11 @@ def get_guild_reports(token, guild_name, server, region, start_date=None, end_da
             rows = (((data.get("reportData") or {}).get("reports") or {})
                     .get("data")) or []
             for rep in rows:
+                # Keep only reports that started inside the window: one that
+                # began the night before and ran past midnight is that night's log.
+                started = rep.get("startTime") or 0
+                if (start_ts is not None and started < start_ts) or (end_ts is not None and started > end_ts):
+                    continue
                 out.append({
                     "id": rep["code"],
                     "start": rep.get("startTime", 0),

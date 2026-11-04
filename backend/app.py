@@ -140,6 +140,14 @@ def analyze():
             end_date = config.get('endDate')
             if end_date == "" or end_date is None:
                 end_date = None
+            # The browser's UTC offset (minutes) at the start and end of the
+            # chosen days, so the dates are days on the visitor's clock.
+            def tz_offset(key):
+                try:
+                    return min(max(int(config.get(key) or 0), -900), 900)
+                except (TypeError, ValueError):
+                    return 0
+            start_offset, end_offset = tz_offset('startOffset'), tz_offset('endOffset')
             author_filters = config.get('authorFilters', [])
             character_groups = config.get('characterGroups', {})
             enable_cheat_death = bool(config.get('enableCheatDeath', False)) and signed_in
@@ -196,7 +204,8 @@ def analyze():
             # longer filter by zoneID, which dropped mixed raid+dungeon reports.
             win_start, win_end = resolve_report_window(selected_raid, start_date, end_date)
             yield f"data: {json.dumps({'stage': 'reports', 'message': 'Fetching guild reports...'})}\n\n"
-            reports = get_guild_reports(token, guild_name, server, region, win_start, win_end)
+            reports = get_guild_reports(token, guild_name, server, region, win_start, win_end,
+                                        start_offset, end_offset)
             yield f"data: {json.dumps({'stage': 'reports', 'message': f'Found {len(reports)} reports'})}\n\n"
             
             # Filter by author

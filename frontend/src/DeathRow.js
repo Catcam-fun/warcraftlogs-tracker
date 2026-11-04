@@ -659,7 +659,8 @@ export function DeathRow({ death, icons, abilityIcons, abilityInfo, abilityText,
         )}
       </span>
       <span className="end">
-        <a href={logHref} target="_blank" rel="noopener noreferrer" className="fpx-wcl" title={timeLabel}>Log ↗</a>
+        <a href={logHref} target="_blank" rel="noopener noreferrer" className="fpx-wcl">View log ↗</a>
+        <small>{timeLabel}</small>
       </span>
     </div>
   );

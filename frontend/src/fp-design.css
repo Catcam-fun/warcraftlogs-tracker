@@ -737,7 +737,7 @@ select option,select optgroup{background:#141a26;color:#f3f4f6}
 .fpx-ico.big{width:32px;height:32px;border-radius:6px}
 
 /* a player's deaths as a table: pull · killing blow · verdict · defensives · log (headers: .fpx-dhead) */
-.fpx-drow,.fpx-dhead{display:grid;grid-template-columns:32px minmax(200px,1.5fr) 96px minmax(162px,.8fr) minmax(200px,1.6fr) 44px;
+.fpx-drow,.fpx-dhead{display:grid;grid-template-columns:32px minmax(200px,1.5fr) 96px minmax(162px,.8fr) minmax(200px,1.6fr) 100px;
   align-items:center;gap:14px}
 .fpx-drow{padding:9px 6px;border-top:1px solid var(--fpx-line);font-size:12.5px}
 .fpx-dhead{padding:10px 6px 6px;margin-top:10px;border-bottom:1px solid var(--fpx-line-strong);font-size:10.5px;
@@ -784,8 +784,7 @@ select option,select optgroup{background:#141a26;color:#f3f4f6}
 .fpx-drow .note{font-size:11px;color:var(--fpx-ink-faint);border:1px solid var(--fpx-line-strong);border-radius:50%;
   width:16px;height:16px;display:grid;place-items:center;cursor:help}
 .fpx-drow .end{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
-.fpx-drow .fpx-wcl{color:var(--fpx-ink-faint);font-weight:500}
-.fpx-drow .fpx-wcl:hover{color:var(--fpx-kill)}
+.fpx-drow .end small{color:var(--fpx-ink-faint);font-size:10.5px;white-space:nowrap}
 /* too narrow for the table's columns (a phone, a tablet, a small window beside the rail) */
 @container (max-width:820px){
   .fpx-dhead{display:none}
