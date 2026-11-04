@@ -709,10 +709,16 @@ export default function WarcraftLogsApp() {
         }
       }
 
+      // The dates are days on this browser's clock: send its UTC offset at the
+      // start of the first day and the end of the last (they differ across a
+      // daylight-saving change), or the server reads them as UTC days.
+      const tzOffset = (date, time) => (date ? new Date(`${date}T${time}`) : new Date()).getTimezoneOffset();
       const payload = {
         ...config,
         authorFilters: config.authorFilters.split(',').map(s => s.trim()).filter(Boolean),
-        characterGroups
+        characterGroups,
+        startOffset: tzOffset(config.startDate, '00:00'),
+        endOffset: tzOffset(config.endDate, '23:59:59'),
       };
 
       // Signed-in runs send the session so the server allows cheat-death detection.
