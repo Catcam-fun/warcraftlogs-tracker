@@ -1290,6 +1290,25 @@ class LethalWindowTests(unittest.TestCase):
             hits = defensives.fetch_death_windows("t", "R", [(3, [(60_000, "A")])])
         self.assertEqual([(h["type"], h["timestamp"]) for h in hits[1]], [("applydebuff", 59_000), ("damage", 59_990)])
 
+    def test_instant_kills_ride_in_the_extras_block(self):
+        # A mechanic that kills outright (no damage) is read with the windows, in the extras block, not in a
+        # request of its own; it is kept wherever it falls in the block (the replay reads 15 s back from it).
+        dmg = {"timestamp": 50_000, "type": "damage", "targetID": 1, "abilityGameID": 9, "amount": 5,
+               "hitPoints": 50, "maxHitPoints": 100, "resourceActor": 2, "fight": 3}
+        kill = {"timestamp": 60_002, "type": "instakill", "targetID": 1, "abilityGameID": 77, "fight": 3}
+        queries = []
+
+        def fake(_t, q, _v=None, **_k):
+            queries.append(q)
+            report = {a: {"data": [dmg]} for a in __import__("re").findall(r"(p\d+): events", q)}
+            report["extras"] = {"data": [kill]}
+            return {"reportData": {"report": report}}
+        with __import__("unittest.mock").mock.patch.object(defensives, "graphql_query", side_effect=fake):
+            hits = defensives.fetch_death_windows("t", "R", [(3, [(60_000, "A")])])
+        self.assertEqual(len(queries), 1)
+        self.assertIn("type = 'instakill'", queries[0].split("extras: events")[1])
+        self.assertEqual([(h["type"], h["timestamp"]) for h in hits[1]], [("damage", 50_000), ("instakill", 60_002)])
+
     def test_identical_hits_at_the_same_moment_all_count(self):
         # Two droplets soaked in the same millisecond for the same amount are two hits.
         same = [hit(99_978, 301_233, 698_767), hit(99_978, 301_233, 397_534)]      # from full health

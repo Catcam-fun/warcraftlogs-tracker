@@ -412,8 +412,8 @@ def analyze():
                     cache_key = (rid, tuple(fight_ids), bool(enable_cheat_death),
                                  tuple(sorted(CHEAT_DEATH_ABILITY_IDS)) if enable_cheat_death else None)
                     deaths = deaths_lru.get(cache_key) if finished else None
+                    # Instant kills cached apart from the windows (before they rode in the windows' request).
                     ik_key = (rid, tuple(fight_ids), "instakills")
-                    instakills = recap_lru.get(ik_key) if finished else None
 
                     def def_key(dead):
                         # "since-last-encounter": casts now reach back to the last boss encounter's
@@ -455,10 +455,18 @@ def analyze():
                     # max-health auras the hits list: rows cached before them (or with other lists of those
                     # IDs) are not reused. Only this key changes, so the report's other cached data (meta,
                     # fights, deaths, defensives) stays valid.
-                    win_key = (rid, tuple((fid, tuple(c)) for fid, c in sorted(counted.items()) if c),
-                               "lethal-window", defensives.LETHAL_WINDOW_MS,
-                               "window-extras", defensives.WINDOW_EXTRAS_KEY)
+                    old_win_key = (rid, tuple((fid, tuple(c)) for fid, c in sorted(counted.items()) if c),
+                                   "lethal-window", defensives.LETHAL_WINDOW_MS,
+                                   "window-extras", defensives.WINDOW_EXTRAS_KEY)
+                    # The windows now carry the dying players' instant kills (read in their extras block).
+                    win_key = old_win_key + ("instakills",)
                     windows = recap_lru.get(win_key) if finished else None
+                    if windows is None and finished:
+                        # Cached before that: the windows and the report's instant kills, cached apart.
+                        old_windows = recap_lru.get(old_win_key)
+                        old_instakills = recap_lru.get(ik_key) if old_windows is not None else None
+                        if old_instakills is not None:
+                            windows = defensives.merge_hits(old_windows, old_instakills)
                     # One query at a time: after the first one on a report, WCL charges about a
                     # quarter less for the rest sent one by one than all at once.
                     if def_data is None and def_error is None:
@@ -474,14 +482,8 @@ def analyze():
                             # Deaths still count; this report just lacks defensive detail.
                             def_error = e
                             def_data = None
-                    if instakills is None:
-                        try:
-                            instakills = defensives.fetch_instakills(token, rid, fight_ids, first_start, last_end)
-                            if finished:
-                                recap_lru.set(ik_key, instakills)
-                        except Exception as e:
-                            hits_error = e
-                    # The seconds before each death that can count: one request, one block per pull.
+                    # The seconds before each death that can count, and those players' instant kills (a
+                    # mechanic that kills outright: no damage, only in the All stream): one request.
                     if windows is None and hits_error is None:
                         try:
                             windows = defensives.fetch_death_windows(token, rid, sorted(counted.items()))
@@ -537,7 +539,7 @@ def analyze():
 
                     hits = None
                     if hits_error is None:
-                        hits = defensives.merge_hits(windows, instakills)
+                        hits = defensives.merge_hits(windows)
                     else:
                         print(f"[WARN] Hits before deaths unavailable for report {rid}: {hits_error}")
 

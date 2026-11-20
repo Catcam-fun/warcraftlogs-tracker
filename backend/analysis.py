@@ -376,13 +376,14 @@ def analyze_fights(fights, fight_zone, difficulty, selected_raid=None, bosses=No
 # CORE DEATH ANALYSIS
 # =============================================================================
 
-def _fetch_remaining_events(token, report_code, data_type, filter_expr, start_time, end_time, max_pages=50):
+def _fetch_remaining_events(token, report_code, data_type, filter_expr, start_time, end_time, max_pages=50,
+                            fight_ids=None):
     """Follow WCL's nextPageTimestamp for one event type and return the extra events."""
     query = """
-    query($code: String!, $startTime: Float!, $endTime: Float!, $filter: String) {
+    query($code: String!, $startTime: Float!, $endTime: Float!, $filter: String, $fightIDs: [Int]) {
       reportData {
         report(code: $code) {
-          events(startTime: $startTime, endTime: $endTime, dataType: %s,
+          events(startTime: $startTime, endTime: $endTime, fightIDs: $fightIDs, dataType: %s,
                  filterExpression: $filter, limit: 10000) {
             data
             nextPageTimestamp
@@ -395,7 +396,8 @@ def _fetch_remaining_events(token, report_code, data_type, filter_expr, start_ti
     next_ts = start_time
     for _ in range(max_pages):
         data = graphql_query(token, query, {"code": report_code, "startTime": next_ts,
-                                            "endTime": end_time, "filter": filter_expr})
+                                            "endTime": end_time, "filter": filter_expr,
+                                            "fightIDs": fight_ids})
         block = ((data.get("reportData") or {}).get("report") or {}).get("events") or {}
         events.extend(block.get("data") or [])
         next_ts = block.get("nextPageTimestamp")
@@ -432,6 +434,10 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
     # Get the time range for ALL fights we care about
     start_time = min(f['start_time'] for f in fights)
     end_time = max(f['end_time'] for f in fights)
+    # Scoped to those pulls, not the whole span: a death outside them is never read, and WCL charges
+    # less for the pulls alone (measured 2026-11-20 on 8 warm Mythic reports: 1.0 point every time,
+    # against 1.24-2.53 for the span, and 9.8 on one report of the site's own run), same deaths.
+    fight_ids = sorted(f['id'] for f in fights)
     
     # Build query that gets deaths + optionally cheat-death debuffs
     # Use GraphQL aliases to fetch multiple event types at once
@@ -445,11 +451,13 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
     if enable_cheat_death:
         print(f"[ENABLED] Cheat death detection ENABLED - querying deaths AND debuffs in one call...")
         combined_query = """
-        query($code: String!, $startTime: Float!, $endTime: Float!, $cheatFilter: String, $cheatHealFilter: String) {
+        query($code: String!, $startTime: Float!, $endTime: Float!, $fightIDs: [Int], $cheatFilter: String,
+              $cheatHealFilter: String) {
           reportData {
             report(code: $code) {
               deaths: events(
                 startTime: $startTime
+                fightIDs: $fightIDs
                 endTime: $endTime
                 dataType: Deaths
                 limit: 10000
@@ -459,6 +467,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
               }
               debuffs: events(
                 startTime: $startTime
+                fightIDs: $fightIDs
                 endTime: $endTime
                 dataType: Debuffs
                 filterExpression: $cheatFilter
@@ -469,6 +478,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
               }
               saveHeals: events(
                 startTime: $startTime
+                fightIDs: $fightIDs
                 endTime: $endTime
                 dataType: Healing
                 filterExpression: $cheatHealFilter
@@ -486,17 +496,19 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
             "code": report_code,
             "startTime": start_time,
             "endTime": end_time,
+            "fightIDs": fight_ids,
             "cheatFilter": cheat_filter,
             "cheatHealFilter": cheat_heal_filter,
         }
     else:
         # Just deaths (no cheat death detection)
         combined_query = """
-        query($code: String!, $startTime: Float!, $endTime: Float!) {
+        query($code: String!, $startTime: Float!, $endTime: Float!, $fightIDs: [Int]) {
           reportData {
             report(code: $code) {
               deaths: events(
                 startTime: $startTime
+                fightIDs: $fightIDs
                 endTime: $endTime
                 dataType: Deaths
                 limit: 10000
@@ -512,7 +524,8 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
         variables = {
             "code": report_code,
             "startTime": start_time,
-            "endTime": end_time
+            "endTime": end_time,
+            "fightIDs": fight_ids,
         }
     
     try:
@@ -531,7 +544,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
             if block and block.get("nextPageTimestamp"):
                 block["data"] = (block.get("data") or []) + _fetch_remaining_events(
                     token, report_code, data_type, filter_expr,
-                    block["nextPageTimestamp"], end_time)
+                    block["nextPageTimestamp"], end_time, fight_ids=fight_ids)
         
         # Extract death events
         events_data = report_data.get("deaths", {}).get("data", [])

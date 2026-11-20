@@ -285,11 +285,12 @@ def get_guild_roster(token, guild_name, server, region):
     """Fetch the full guild roster.
 
     WoW caps guilds at 1000 members and WCL serves 100/page, so the roster
-    is at most ~10 pages. WCL's guild.members endpoint is slow through the
-    proxy, so pages are fetched CONCURRENTLY: the first FIRST_PAGES at once
-    (most guilds fit), which also tell how many pages the guild has, then any
-    remaining ones at once. Each page costs a WCL point, so pages past the
-    guild's last aren't fetched. Best-effort: a page that fails is skipped
+    is at most ~10 pages. Each page costs a WCL point, even one past the
+    guild's last, so page 1 is read alone: it tells how many pages the guild
+    has, and only those are then read, CONCURRENTLY (WCL's guild.members
+    endpoint is slow through the proxy). Reading three pages at once first
+    spent two points a run on every guild of 100 members or fewer. If page 1
+    can't be read, every page that may exist is. Best-effort: a page that fails is skipped
     (analysis falls back to counting everyone if the whole thing comes back
     empty).
     """
@@ -307,7 +308,6 @@ def get_guild_roster(token, guild_name, server, region):
     """
 
     MAX_PAGES = 12  # 1000-member cap / 100 per page = 10, + margin
-    FIRST_PAGES = 3
     base_vars = {
         "guildName": guild_name,
         "serverSlug": server.lower().replace(" ", "-").replace("'", ""),
@@ -350,9 +350,9 @@ def get_guild_roster(token, guild_name, server, region):
                         if name:
                             all_members.add(name.lower())
 
-    fetch_pages(list(range(1, FIRST_PAGES + 1)))
-    # Pages past the first ones: as many as the guild has (all of them if that wasn't readable).
-    fetch_pages(list(range(FIRST_PAGES + 1, min(last_page if last_page is not None else MAX_PAGES, MAX_PAGES) + 1)))
+    fetch_pages([1])
+    # The rest: as many as the guild has (all of them if page 1 wasn't readable).
+    fetch_pages(list(range(2, min(last_page if last_page is not None else MAX_PAGES, MAX_PAGES) + 1)))
 
     if not all_members:
         print(f"Warning: Guild {guild_name} has no members or roster not available")

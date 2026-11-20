@@ -655,6 +655,11 @@ export default function WarcraftLogsApp() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  // The side menu leaves a running analysis only once the visitor agrees: its WarcraftLogs points are spent
+  // already, and a stopped run has to start over.
+  const confirmStopRun = () => window.confirm(
+    'An analysis is running and has already used WarcraftLogs API points. Stop it and leave this page?');
+
   const handleCancel = () => {
     if (abortController) {
       abortController.abort();
@@ -1391,9 +1396,9 @@ export default function WarcraftLogsApp() {
                 collapsed={resultsRailCollapsed}
                 onToggle={() => setResultsRailCollapsed((v) => !v)}
                 active={null}
-                onHome={() => { handleCancel(); navigate('/'); }}
-                onAnalyze={() => { handleCancel(); navigate('/analyze'); }}
-                onResults={() => { handleCancel(); navigate('/results'); }}
+                onHome={() => { if (confirmStopRun()) { handleCancel(); navigate('/'); } }}
+                onAnalyze={() => { if (confirmStopRun()) { handleCancel(); navigate('/analyze'); } }}
+                onResults={() => { if (confirmStopRun()) { handleCancel(); navigate('/results'); } }}
               />
               <div className="fpx-main fpx-loadmain">
                 <div className="fpx-load">
