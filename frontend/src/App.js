@@ -5,7 +5,7 @@ import { supabase, sessionEndedByBrowserClose, setSessionOnly } from './supabase
 import Auth from './Auth';
 import Settings from './Settings';
 import LandingPage from './LandingPage';
-import AnalyzeConfig from './AnalyzeConfig';
+import AnalyzeConfig, { bossScopeLabel } from './AnalyzeConfig';
 import { SEASON_TWO_RAIDS } from './seasonTwoRaids';
 import InfoModal from './InfoModal';
 import FpxRail from './FpxRail';
@@ -206,6 +206,7 @@ export default function WarcraftLogsApp() {
     selectedRaid: 'manaforge',  // Default to Manaforge Omega
     reportZone: '44',
     fightZone: '2810',
+    selectedBosses: [],  // Encounter IDs to analyze; empty = every boss of the raid
     difficulty: '5',
     maxCutoff: '5',
     startDate: '',  // Optional: leave blank to include all reports from the beginning
@@ -458,7 +459,7 @@ export default function WarcraftLogsApp() {
     title: `${cfg.guildName || 'Unknown guild'} · ${cfg.server || ''}`.trim().replace(/·\s*$/, '').trim(),
     sub: `${RAID_ZONES[cfg.selectedRaid]?.name || cfg.selectedRaid} · ${
       cfg.difficulty === '3' ? 'Normal' : cfg.difficulty === '4' ? 'Heroic' : 'Mythic'
-    }`,
+    }${bossScopeLabel(cfg.selectedRaid, cfg.selectedBosses) && ` · ${bossScopeLabel(cfg.selectedRaid, cfg.selectedBosses)}`}`,
   });
 
   const loadRecentRuns = async () => {
@@ -673,6 +674,7 @@ export default function WarcraftLogsApp() {
     setConfig(prev => ({
       ...prev,
       selectedRaid: raidKey,
+      selectedBosses: [],
       reportZone: raid.reportZone,
       fightZone: raid.fightZone
     }));
@@ -1519,6 +1521,8 @@ export default function WarcraftLogsApp() {
                         <p>{RAID_ZONES[config.selectedRaid]?.name} · {
                           config.difficulty === '3' ? 'Normal' :
                           config.difficulty === '4' ? 'Heroic' : 'Mythic'
+                        }{bossScopeLabel(config.selectedRaid, data?.meta?.selectedBosses ?? config.selectedBosses)
+                          && ` · ${bossScopeLabel(config.selectedRaid, data?.meta?.selectedBosses ?? config.selectedBosses)}`
                         }{analyzedAt(data?.meta) && ` · Analyzed ${analyzedAt(data.meta).toLocaleDateString('en-US', {
                           month: 'short', day: 'numeric', year: 'numeric',
                           hour: 'numeric', minute: '2-digit'

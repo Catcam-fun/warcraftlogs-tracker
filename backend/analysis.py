@@ -328,18 +328,39 @@ def resolve_report_window(selected_raid, user_start, user_end):
     return start, end
 
 
-def analyze_fights(fights, fight_zone, difficulty, selected_raid=None):
+def selected_encounters(selected_raid, bosses=None):
+    """The raid's encounter IDs the visitor chose to analyze (the Analyze page's boss picker).
+
+    `bosses` is a list of encounter IDs (numbers or digit strings). Missing, empty or not a list:
+    every boss of the raid. It can only narrow the raid's own list, never add another raid's
+    boss; a list that names none of them gives an empty set, which the caller reports. None for a
+    raid key the site doesn't know (no allowlist)."""
+    allowed = RAID_ENCOUNTERS.get(selected_raid)
+    if allowed is None:
+        return None
+    if not isinstance(bosses, list) or not bosses:
+        return set(allowed)
+    chosen = set()
+    for b in bosses:
+        if isinstance(b, bool):
+            continue
+        if isinstance(b, int) or (isinstance(b, str) and b.strip().isdigit()):
+            chosen.add(int(b))
+    return chosen & allowed
+
+
+def analyze_fights(fights, fight_zone, difficulty, selected_raid=None, bosses=None):
     """Keep only this raid's boss pulls at the chosen difficulty.
 
     Primary guard is an explicit encounter-ID allowlist per raid
-    (`selected_raid`). This both isolates the chosen raid (critical for
-    Midnight, where 3 raids share one WCL zone) and excludes Mythic+/
-    dungeon bosses outright even when one log mixes raid + dungeons.
+    (`selected_raid`), narrowed to the chosen `bosses` (selected_encounters). This both
+    isolates the chosen raid (critical for Midnight, where 3 raids share one WCL zone) and
+    excludes Mythic+/dungeon bosses outright even when one log mixes raid + dungeons.
     If the raid key is unknown, fall back to the older zone/difficulty
     heuristic so nothing regresses.
     """
     diff = int(difficulty)
-    allowed = RAID_ENCOUNTERS.get(selected_raid)
+    allowed = selected_encounters(selected_raid, None if bosses is None else list(bosses))
     if allowed is not None:
         return [f for f in fights
                 if f.get("boss") in allowed and f.get("difficulty") == diff]

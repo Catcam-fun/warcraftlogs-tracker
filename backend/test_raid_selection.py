@@ -2,7 +2,8 @@ import unittest
 from unittest import mock
 
 import warcraftlogs
-from analysis import RAID_DATE_WINDOWS, RAID_ENCOUNTERS, analyze_fights, resolve_report_window
+from analysis import (RAID_DATE_WINDOWS, RAID_ENCOUNTERS, analyze_fights, resolve_report_window,
+                      selected_encounters)
 
 
 class RaidSelectionTests(unittest.TestCase):
@@ -45,6 +46,31 @@ class RaidSelectionTests(unittest.TestCase):
             with self.subTest(raid=raid):
                 old = {"boss": next(iter(allowed)), "difficulty": 5, "zoneID": None}
                 self.assertEqual(analyze_fights([old] + new_fights, "0", 5, raid), [old])
+
+    def test_chosen_bosses_narrow_the_raid(self):
+        fights = [{"boss": b, "difficulty": 5, "zoneID": None} for b in (3470, 3492, 3513, 3176)]
+        self.assertEqual([f["boss"] for f in analyze_fights(fights, "0", 5, "midnight-s2-all", bosses={3492, 3513})],
+                         [3492, 3513])
+
+    def test_chosen_bosses_never_widen_the_raid(self):
+        # A boss of another raid can't be added through the list.
+        fights = [{"boss": b, "difficulty": 5, "zoneID": None} for b in (3470, 3176)]
+        self.assertEqual([f["boss"] for f in analyze_fights(fights, "0", 5, "midnight-s2-all", bosses={3470, 3176})],
+                         [3470])
+
+    def test_selected_encounters(self):
+        allowed = RAID_ENCOUNTERS["manaforge"]
+        # Missing or empty: every boss of the raid.
+        self.assertEqual(selected_encounters("manaforge", None), allowed)
+        self.assertEqual(selected_encounters("manaforge", []), allowed)
+        # Strings and numbers both read as encounter IDs; other raids' and junk entries drop out.
+        self.assertEqual(selected_encounters("manaforge", ["3135", 3134, 3470, "x", None, 3.5]), {3134, 3135})
+        # A list naming none of the raid's bosses selects nothing (the caller reports it).
+        self.assertEqual(selected_encounters("manaforge", [3470]), set())
+        # A raid key the site doesn't know: no allowlist.
+        self.assertIsNone(selected_encounters("unknown-raid", [3470]))
+        # Not a list: every boss.
+        self.assertEqual(selected_encounters("manaforge", "3135"), allowed)
 
     def test_unknown_raid_retains_instance_fallback(self):
         fights = [

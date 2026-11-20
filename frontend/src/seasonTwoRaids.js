@@ -12,6 +12,8 @@ export const SEASON_TWO_RAIDS = [
     reportZone: null,
     fightZone: '0', // Combined tier: Venomous Abyss (3004), Tidebound Grotto (2987) and The Unbinding of Kith'ix (3095).
     final: "Ula'tek", // raid card art on the Analyze page
+    // Encounter IDs, in the order of `bosses` (sent as the chosen bosses).
+    bossIds: [3470, 3445, 3497, 3455, 3420, 3421, 3429, 3492, 3379, 3513],
     bosses: [
       "Nek'zali the Soulcoiler",
       'Entombed Sentinels',

@@ -287,7 +287,8 @@ class AnalyzeFlowTests(unittest.TestCase):
         return {10: [{"timestamp": 5_000, "type": "damage", "targetID": 10, "abilityGameID": 9, "amount": 900,
                       "overkill": 100, "hitPoints": 0, "maxHitPoints": 900, "resourceActor": 2}]}
 
-    def _run(self, roster_patch=True, bulk_effect=None, fights_effect=None, same_night=False, **extra):
+    def _run(self, roster_patch=True, bulk_effect=None, fights_effect=None, same_night=False, expect_error=False,
+             **extra):
         from analysis import RAID_ENCOUNTERS
         raid = next(k for k, v in RAID_ENCOUNTERS.items() if 3129 in v)
         deaths = {1: [{"timestamp": 5_000, "targetName": "Bob", "targetID": 10,
@@ -316,6 +317,12 @@ class AnalyzeFlowTests(unittest.TestCase):
                 "clientId": "a", "clientSecret": "b", "guildName": "G", "server": "S",
                 "region": "US", "fightZone": 0, "selectedRaid": raid, "difficulty": 5, **extra})
             body = resp.get_data(as_text=True)
+        self.fights_calls = fights.call_count
+        if expect_error:
+            errors = [l for l in body.split("\n\n") if '"error"' in l]
+            self.assertEqual(len(errors), 1, body)
+            import json
+            return json.loads(errors[0][6:])["error"]
         results = [l for l in body.split("\n\n") if '"result"' in l]
         self.assertEqual(len(results), 1, body)
         import json
@@ -440,6 +447,58 @@ class AnalyzeFlowTests(unittest.TestCase):
         self.assertEqual(bulk_calls, 2)
         self.assertNotIn("Bob", result["events"])
         self.assertEqual((self.raw_calls, self.window_calls), ([], []))
+
+    def _clear_caches(self):
+        for c in (app_module.report_meta_cache, app_module.report_fights_cache, app_module.deaths_lru,
+                  app_module.defensive_lru, app_module.recap_lru):
+            c._data.clear()
+
+    def test_chosen_bosses_keep_only_their_pulls(self):
+        self._clear_caches()
+        result, _, _ = self._run(selectedBosses=[3129, "3135"])
+        self.assertEqual(len(result["events"]["Bob"]), 2)
+        self.assertEqual(result["meta"]["selectedBosses"], [3129, 3135])
+
+    def test_every_boss_when_none_are_chosen(self):
+        self._clear_caches()
+        result, _, _ = self._run()
+        from analysis import RAID_ENCOUNTERS
+        self.assertEqual(result["meta"]["selectedBosses"], sorted(RAID_ENCOUNTERS["manaforge"]))
+
+    def test_unchosen_bosses_are_never_read_in_full(self):
+        # Plexus Sentinel (3129) is the only pull in the reports; choosing another boss reads only fight lists.
+        self._clear_caches()
+        error = self._run(selectedBosses=[3135], expect_error=True)
+        self.assertIn("chosen bosses", error)
+        self.assertEqual(self.fights_calls, 0)
+
+    def test_a_chosen_boss_reads_defensives_over_all_the_reports_pulls(self):
+        # A report with Plexus Sentinel (3129, pull 1) and Dimensius (3135, pull 2); only Plexus is chosen.
+        self._clear_caches()
+        one = self._fights
+
+        def two_bosses(token, rid):
+            meta = one(token, rid)
+            meta["fights"] = meta["fights"] + [dict(meta["fights"][0], id=2, start_time=100_000,
+                                                    end_time=160_000, name="Dimensius", boss=3135)]
+            return meta
+        self._fights = two_bosses
+        try:
+            result, _, _ = self._run(selectedBosses=[3129])
+        finally:
+            del self._fights
+        # Deaths and defensive data cover both pulls, as when every boss is analyzed...
+        self.assertEqual(self.combatant_calls[0].args[2], [1, 2])
+        self.assertEqual(self.raw_calls[0].args[2], [1, 2])
+        # ...but only the chosen boss's pull has deaths that count, and only it is shown.
+        self.assertEqual(self.window_calls[0].args[2], [(1, [(5_000, "Bob")])])
+        self.assertEqual({e["bossId"] for e in result["events"]["Bob"]}, {3129})
+        self.assertTrue(all(k.endswith("_1") for p in result["pullParticipation"].values() for k in p))
+
+    def test_bosses_of_another_raid_are_refused(self):
+        self._clear_caches()
+        error = self._run(selectedBosses=[3470], expect_error=True)
+        self.assertIn("Pick at least one boss", error)
 
     def test_only_reports_pulls_are_kept_from_are_read_in_full(self):
         for c in (app_module.report_meta_cache, app_module.report_fights_cache, app_module.deaths_lru, app_module.defensive_lru, app_module.recap_lru):

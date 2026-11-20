@@ -11,12 +11,16 @@ import { SEASON_TWO_RAIDS } from './seasonTwoRaids';
    key is what gets written to config.selectedRaid (handleRaidChange). */
 const RAIDS = [
   { key: 'manaforge', name: 'Manaforge Omega', exp: 'THE WAR WITHIN', final: 'Dimensius, the All-Devouring',
+    bossIds: [3129, 3131, 3130, 3132, 3122, 3133, 3134, 3135],
     bosses: ['Plexus Sentinel', "Loom'ithar", 'Soulbinder Naazindhri', 'Forgeweaver Araz', 'The Soul Hunters', 'Fractillus', 'Nexus-King Salhadaar', 'Dimensius, the All-Devouring'] },
   { key: 'undermine', name: 'Liberation of Undermine', exp: 'THE WAR WITHIN', final: 'Chrome King Gallywix',
+    bossIds: [3009, 3010, 3011, 3012, 3013, 3014, 3015, 3016],
     bosses: ['Vexie and the Geargrinders', 'Cauldron of Carnage', 'Rik Reverb', 'Stix Bunkjunker', 'Sprocketmonger Lockenstock', 'One-Armed Bandit', "Mug'Zee, Heads of Security", 'Chrome King Gallywix'] },
   { key: 'nerubar', name: "Nerub'ar Palace", exp: 'THE WAR WITHIN', final: 'Queen Ansurek',
+    bossIds: [2902, 2917, 2898, 2918, 2919, 2920, 2921, 2922],
     bosses: ['Ulgrax the Devourer', 'The Bloodbound Horror', 'Sikran, Captain of the Sureki', "Rasha'nan", "Broodtwister Ovi'nax", "Nexus-Princess Ky'veza", 'The Silken Court', 'Queen Ansurek'] },
   { key: 'midnight-all', name: 'Midnight Season 1', exp: 'MIDNIGHT', final: "L'ura",
+    bossIds: [3176, 3177, 3179, 3178, 3180, 3181, 3306, 3182, 3183],
     bosses: ['Imperator Averzian', 'Vorasius', 'Fallen-King Salhadaar', 'Vaelgor & Ezzorak', 'Lightblinded Vanguard', 'Crown of the Cosmos', 'Chimaerus, the Undreamt God', "Belo'ren", "L'ura"] },
   ...SEASON_TWO_RAIDS,
 ];
@@ -25,6 +29,24 @@ const COUNCIL = new Set(['the-soul-hunters', 'vaelgor-ezzorak', 'cauldron-of-car
 const slug = (n) => n.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 const bossImg = (n) => `${process.env.PUBLIC_URL}/art/bosses/${slug(n)}.webp`;
 
+/* Each raid's bosses and their encounter IDs (same order), for the boss picker. */
+export const RAID_BOSS_IDS = Object.fromEntries(RAIDS.map((r) => [r.key, { bosses: r.bosses, ids: r.bossIds }]));
+
+/* The chosen bosses of a raid as encounter IDs. config.selectedBosses holds them; an empty list,
+   or one naming none of this raid's bosses (left over from another raid), means every boss. */
+export function chosenBossIds(raidKey, selectedBosses) {
+  const ids = RAID_BOSS_IDS[raidKey]?.ids || [];
+  const picked = ids.filter((id) => (selectedBosses || []).map(Number).includes(id));
+  return picked.length ? picked : ids;
+}
+
+/* "2 of 10 bosses" when some bosses were left out of an analysis, else ''. */
+export function bossScopeLabel(raidKey, selectedBosses) {
+  const ids = RAID_BOSS_IDS[raidKey]?.ids || [];
+  const n = chosenBossIds(raidKey, selectedBosses).length;
+  return ids.length && n < ids.length ? `${n} of ${ids.length} bosses` : '';
+}
+
 export default function AnalyzeConfig({
   config, onChange, onRaidChange, onSubmit, setConfig,
   loading, error, user, onShowAuth, onShowSettings, onLogout, onShowInfo, onHome,
@@ -32,6 +54,19 @@ export default function AnalyzeConfig({
   const navigate = useNavigate();
   const [railCollapsed, setRailCollapsed] = useState(false);
   const selected = RAIDS.find((r) => r.key === config.selectedRaid) || RAIDS[0];
+  const chosen = chosenBossIds(selected.key, config.selectedBosses);
+  // Every boss is stored as an empty list, so a later new boss is in by default.
+  const setChosen = (ids) => setConfig((prev) => ({
+    ...prev,
+    selectedBosses: ids.length === selected.bossIds.length ? [] : selected.bossIds.filter((id) => ids.includes(id)),
+  }));
+  const toggleBoss = (id) => {
+    if (chosen.includes(id)) {
+      if (chosen.length > 1) setChosen(chosen.filter((x) => x !== id));
+    } else {
+      setChosen([...chosen, id]);
+    }
+  };
 
   const raidCard = (raid) => {
     return (
@@ -117,15 +152,36 @@ export default function AnalyzeConfig({
 
             {/* selected raid's lineup */}
             <div className="fpx-slab fpx-rv" style={{ marginTop: 30 }}>
-              <h3 id="selected-raid-heading">{selected.name.toUpperCase()}</h3><span>death-tracked encounters</span><div className="rule" /></div>
+              <h3 id="selected-raid-heading">{selected.name.toUpperCase()}</h3>
+              <span>click a boss to leave it out</span><div className="rule" />
+              <span className="fpx-bosscount">
+                {chosen.length === selected.bossIds.length
+                  ? `All ${chosen.length} bosses`
+                  : `${chosen.length} of ${selected.bossIds.length} bosses`}
+              </span>
+              {chosen.length < selected.bossIds.length && (
+                <button type="button" className="fpx-link" aria-label="Select all bosses"
+                  onClick={() => setChosen(selected.bossIds)}>Select all</button>
+              )}
+            </div>
             <section className="fpx-lineup fpx-rv" aria-labelledby="selected-raid-heading">
-              {selected.bosses.map((b) => (
-                <div key={b} className={`fpx-boss${COUNCIL.has(slug(b)) ? ' council' : ''}`}
-                  style={{ '--img': `url(${bossImg(b)})` }}>
-                  <div className="art" />
-                  <div className="cap"><div className="nm">{b}</div></div>
-                </div>
-              ))}
+              {selected.bosses.map((b, i) => {
+                const id = selected.bossIds[i];
+                const on = chosen.includes(id);
+                return (
+                  <div key={b} className={`fpx-boss pick${COUNCIL.has(slug(b)) ? ' council' : ''}${on ? '' : ' off'}`}
+                    style={{ '--img': `url(${bossImg(b)})` }}>
+                    <div className="art" />
+                    <div className="cap"><div className="nm">{b}</div></div>
+                    <button type="button" className="fpx-boss-toggle" aria-label={b} aria-pressed={on}
+                      title={on ? (chosen.length > 1 ? 'Leave this boss out' : 'At least one boss is analyzed')
+                        : 'Include this boss'}
+                      onClick={() => toggleBoss(id)} />
+                    <button type="button" className="fpx-boss-only" aria-label={`Only ${b}`}
+                      onClick={() => setChosen([id])}>only</button>
+                  </div>
+                );
+              })}
             </section>
 
             {/* CONFIG FORM */}

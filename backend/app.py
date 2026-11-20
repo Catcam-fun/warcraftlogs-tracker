@@ -26,7 +26,7 @@ from warcraftlogs import (
 )
 from analysis import (
     get_report_deaths_bulk, get_main_character, current_names,
-    analyze_fights, dedup_pulls,
+    analyze_fights, dedup_pulls, selected_encounters, RAID_ENCOUNTERS,
     find_mass_death_start, rank_pull_deaths, resolve_report_window, drop_saves_that_died
 )
 import defensives
@@ -153,10 +153,16 @@ def analyze():
             enable_cheat_death = bool(config.get('enableCheatDeath', False)) and signed_in
             # Only players on the guild roster count (configs from before the toggle: on).
             roster_only = config.get('rosterOnly', True) is not False
-            
+            # The bosses chosen on the Analyze page (encounter IDs); none chosen means every boss.
+            chosen_bosses = selected_encounters(selected_raid, config.get('selectedBosses'))
+            some_bosses = chosen_bosses is not None and chosen_bosses != RAID_ENCOUNTERS.get(selected_raid)
+
             # Validate required fields
             if not all([client_id, client_secret, guild_name, server, region]):
                 yield f"data: {json.dumps({'error': 'Missing required fields'})}\n\n"
+                return
+            if chosen_bosses is not None and not chosen_bosses:
+                yield f"data: {json.dumps({'error': 'Pick at least one boss of this raid to analyze.'})}\n\n"
                 return
             
             if config.get('enableCheatDeath') and not signed_in:
@@ -265,6 +271,9 @@ def analyze():
                     # Every boss encounter of the report, kept or not: each one resets long cooldowns.
                     report_encounters[rid] = [(f['start_time'], f['end_time']) for f in fights if f.get('boss')]
                     report_abs_start = light.get("report_start") or rep["start"]
+                    # Every boss of the raid, chosen or not: a report's defensive data is read over
+                    # all its kept pulls (below), so a boss's verdicts don't depend on which other
+                    # bosses were chosen.
                     for fight in analyze_fights(fights, fight_zone, difficulty, selected_raid):
                         all_fights_raw.append({
                             'reportId': rid,
@@ -282,11 +291,17 @@ def analyze():
             # Deduplicate, then read the kept pulls' reports in full. A report that can't
             # be read in full gives its pulls to another log's copy, as if it weren't listed.
             yield f"data: {json.dumps({'stage': 'dedup', 'message': 'Removing duplicate pulls...'})}\n\n"
+            def is_chosen(fd):
+                return chosen_bosses is None or fd['boss_id'] in chosen_bosses
+
             metas, unreadable = {}, set()
             while True:
                 # The earliest copy of each pull (ties by report code, so the copy kept never
-                # depends on which report was read first), unless it was cut short.
-                all_fights_deduped = dedup_pulls([fd for fd in all_fights_raw if fd['reportId'] not in unreadable])
+                # depends on which report was read first), unless it was cut short. Pulls of
+                # every boss are deduplicated alike (per boss), and only the reports holding a
+                # chosen boss's pull are read in full.
+                raid_pulls = dedup_pulls([fd for fd in all_fights_raw if fd['reportId'] not in unreadable])
+                all_fights_deduped = [fd for fd in raid_pulls if is_chosen(fd)]
                 missing = sorted({fd['reportId'] for fd in all_fights_deduped} - set(metas))
                 if not missing:
                     break
@@ -301,13 +316,26 @@ def analyze():
             if not all_fights_deduped:
                 diff_names = {'3': 'Normal', '4': 'Heroic', '5': 'Mythic'}
                 diff_label = diff_names.get(str(difficulty), f'difficulty {difficulty}')
-                yield f"data: {json.dumps({'error': f'No {diff_label} fights found in the reports. Check that the selected difficulty is available for this raid.'})}\n\n"
+                if some_bosses:
+                    msg = (f'No {diff_label} pulls of the chosen bosses found in the reports. '
+                           'Try more bosses or another difficulty.')
+                else:
+                    msg = (f'No {diff_label} fights found in the reports. '
+                           'Check that the selected difficulty is available for this raid.')
+                yield f"data: {json.dumps({'error': msg})}\n\n"
                 return
 
             # Renamed players count under their newest name: {report: {actor ID: name}}. The
             # report's own friendlies keep the names in the log (WCL filters and cached rows use them).
             renamed = current_names(metas)
-            for fd in all_fights_deduped:
+            # Each report read in full, with every one of its kept pulls of the raid (chosen boss
+            # or not): the span its deaths and defensive data are read over, as when every boss is
+            # analyzed, so a death's verdict is the same whichever bosses were chosen.
+            scope_by_report = defaultdict(list)
+            for fd in raid_pulls:
+                if fd['reportId'] in metas:
+                    scope_by_report[fd['reportId']].append(fd)
+            for fd in (fd for fds in scope_by_report.values() for fd in fds):
                 meta = metas[fd['reportId']]
                 full = {f['id']: f for f in meta.get("fights", [])}
                 fd.update({
@@ -413,7 +441,12 @@ def analyze():
                             deaths_lru.set(cache_key, deaths)
                         def_data = defensive_lru.get(def_key(dead_in(deaths))) if finished else None
 
-                    counted = counted_by_fight(deaths, friendlies, sample_fight_data['current_names'])
+                    # Only the chosen bosses' pulls have deaths that count; the report's other pulls
+                    # are read for their defensive data alone.
+                    chosen_fids = {fd['fight']['id'] for fd in fights_by_report.get(rid, [])}
+                    counted = {fid: c for fid, c in
+                               counted_by_fight(deaths, friendlies, sample_fight_data['current_names']).items()
+                               if fid in chosen_fids}
                     if not any(counted.values()):
                         # No death here can count, so nothing reads this report's defensives or hits.
                         return rid, deaths, defensives.filter_defensive_raw({}, ()), {}, None
@@ -559,8 +592,8 @@ def analyze():
             
             with ThreadPoolExecutor(max_workers=8) as executor:
                 future_to_rid = {
-                    executor.submit(fetch_report_deaths, rid, report_fights): rid
-                    for rid, report_fights in fights_by_report.items()
+                    executor.submit(fetch_report_deaths, rid, scope_by_report[rid]): rid
+                    for rid in fights_by_report
                 }
                 
                 for future in as_completed(future_to_rid):
@@ -710,7 +743,7 @@ def analyze():
                             soulwell=soulwell,
                             # Presses in the report's other pulls count with that pull's talents.
                             pull_starts={fd['fight']['id']: fd['fight']['start_time']
-                                         for fd in fights_by_report.get(rid, [])},
+                                         for fd in scope_by_report.get(rid, [])},
                             encounters=report_encounters.get(rid),
                             attackable=report_attacked.get(rid),
                             aoe_abilities=report_aoe.get(rid, (None,))[0],
@@ -772,6 +805,8 @@ def analyze():
                     "reportCount": len(reports),
                     "cheatDeathEnabled": enable_cheat_death,
                     "rosterOnly": roster_only,
+                    # Encounter IDs analyzed (every boss of the raid when none were chosen).
+                    "selectedBosses": sorted(chosen_bosses) if chosen_bosses is not None else None,
                     "failedReports": failed_reports,
                 },
                 "events": counted_death_events,
