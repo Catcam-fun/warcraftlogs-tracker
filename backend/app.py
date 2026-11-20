@@ -34,7 +34,7 @@ import boss_spell_text
 from features import CHEAT_DEATH_ABILITY_IDS
 from auth import require_user, verify_token, forget_token, _bearer_token
 import user_errors
-from cache import (report_meta_cache, report_fights_cache, report_deaths_cache as deaths_lru,
+from cache import (CACHE_VERSION, report_meta_cache, report_fights_cache, report_deaths_cache as deaths_lru,
                    report_defensive_cache as defensive_lru, report_recap_cache as recap_lru, flush_writes)
 from ratelimit import RateLimiter, limit
 import supabase_client
@@ -45,6 +45,28 @@ from bodies import BodyTooLarge, json_body
 # A report whose last event is older than this is treated as finished and
 # its fights/deaths are cached; anything newer may still be live-logging.
 REPORT_CACHE_MIN_AGE_MS = 2 * 60 * 60 * 1000
+
+def report_cache_key_is_stale(key):
+    """True of a stored report-cache key (`<version>:<namespace>:<repr of key>`, cache.SharedReportCache) that
+    this code can never read again: another cache version, a full read from before actor IDs, death windows
+    of another window length or extras list (or from before the extras block), or defensive data of another
+    catalog or cast span. The cache's eviction deletes those rows first (supabase_client.STALE_CACHE_KEY).
+    Keep in step with the keys built in analyze(): a key this calls stale is never read."""
+    version, _, rest = key.partition(":")
+    namespace, _, body = rest.partition(":")
+    if version != CACHE_VERSION:
+        return True
+    if namespace == "meta":
+        return "'actor-ids'" not in body
+    if namespace == "killing-blows" and "'lethal-window'" in body:
+        return (f"'lethal-window', {defensives.LETHAL_WINDOW_MS}, 'window-extras', "
+                f"'{defensives.WINDOW_EXTRAS_KEY}'") not in body
+    if namespace == "defensives":
+        return not (f"'{defensives.CATALOG_FINGERPRINT}', 'pull-specs', 'since-last-encounter'" in body)
+    return False
+
+
+supabase_client.STALE_CACHE_KEY = report_cache_key_is_stale
 
 # Reports read at once per analysis (each runs its own few queries at once).
 # WCL's own rate limit is per API key, so this stays modest.
@@ -444,18 +466,25 @@ def analyze():
                     # Only the chosen bosses' pulls have deaths that count; the report's other pulls
                     # are read for their defensive data alone.
                     chosen_fids = {fd['fight']['id'] for fd in fights_by_report.get(rid, [])}
-                    counted = {fid: c for fid, c in
-                               counted_by_fight(deaths, friendlies, sample_fight_data['current_names']).items()
-                               if fid in chosen_fids}
+                    counted_all = counted_by_fight(deaths, friendlies, sample_fight_data['current_names'])
+                    counted = {fid: c for fid, c in counted_all.items() if fid in chosen_fids}
                     if not any(counted.values()):
                         # No death here can count, so nothing reads this report's defensives or hits.
                         return rid, deaths, defensives.filter_defensive_raw({}, ()), {}, None
+                    # The death windows are read in the blocks a run of every boss would read them in: WCL
+                    # computes each hit's aura list from its block's start, so a chosen boss's deaths get the
+                    # same hits whichever bosses were chosen (a Brewmaster's auras differed on a narrower
+                    # block, 2026-11-20). Only the blocks holding no chosen boss's pull are left out.
+                    window_pulls = [p for g in defensives.window_groups(sorted(counted_all.items()))
+                                    if any(fid in chosen_fids for fid, _ in g) for p in g]
 
                     # The windows carry the heals a killing hit can set off and the aura events of the
                     # max-health auras the hits list: rows cached before them (or with other lists of those
                     # IDs) are not reused. Only this key changes, so the report's other cached data (meta,
                     # fights, deaths, defensives) stays valid.
-                    old_win_key = (rid, tuple((fid, tuple(c)) for fid, c in sorted(counted.items()) if c),
+                    window_fids = {fid for fid, _ in window_pulls}
+                    old_win_key = (rid, tuple((fid, tuple(c)) for fid, c in sorted(counted_all.items())
+                                              if c and fid in window_fids),
                                    "lethal-window", defensives.LETHAL_WINDOW_MS,
                                    "window-extras", defensives.WINDOW_EXTRAS_KEY)
                     # The windows now carry the dying players' instant kills (read in their extras block).
@@ -486,7 +515,7 @@ def analyze():
                     # mechanic that kills outright: no damage, only in the All stream): one request.
                     if windows is None and hits_error is None:
                         try:
-                            windows = defensives.fetch_death_windows(token, rid, sorted(counted.items()))
+                            windows = defensives.fetch_death_windows(token, rid, window_pulls)
                             if finished:
                                 recap_lru.set(win_key, windows)
                         except Exception as e:

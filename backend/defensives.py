@@ -1163,6 +1163,22 @@ def _fetch_blocks(token, report_code, blocks, keep=None, resources=True, stop=No
     return out
 
 
+def window_groups(pulls):
+    """The pulls whose death windows share one event block (fetch_death_windows): in order of their first
+    death, a pull joins the block before it while its last death is within WINDOW_BLOCK_SPAN_MS of that
+    block's start. `pulls`: [(fightID, [(death_ts, log name)])]. A pull's decision depends only on its own
+    block's first pull, and pulls don't overlap in time, so leaving whole blocks out leaves every other
+    block exactly as it was (the boss picker reads only the blocks holding a chosen boss's pull)."""
+    pulls = sorted(((fid, sorted(d)) for fid, d in pulls if d and any(n for _, n in d)), key=lambda p: p[1][0][0])
+    groups = []
+    for fid, deaths in pulls:
+        if groups and deaths[-1][0] - (groups[-1][0][1][0][0] - LETHAL_WINDOW_MS) <= WINDOW_BLOCK_SPAN_MS:
+            groups[-1].append((fid, deaths))
+        else:
+            groups.append([(fid, deaths)])
+    return groups
+
+
 def fetch_death_windows(token, report_code, pulls, heals=True):
     """Every hit the given players took in the seconds before their deaths, their instant kills, and the
     heals a killing hit can set off with their cheat-death auras (features.KILLING_HIT_HEALS).
@@ -1188,13 +1204,7 @@ def fetch_death_windows(token, report_code, pulls, heals=True):
     aura, 17.4 / 20.1 / 18.3 with the second request, 17.2 / 20.5 with this list). The All stream can't replace
     DamageTaken itself: it leaves the aura list off its damage events.
     """
-    pulls = sorted(((fid, sorted(d)) for fid, d in pulls if d and any(n for _, n in d)), key=lambda p: p[1][0][0])
-    groups = []
-    for fid, deaths in pulls:
-        if groups and deaths[-1][0] - (groups[-1][0][1][0][0] - LETHAL_WINDOW_MS) <= WINDOW_BLOCK_SPAN_MS:
-            groups[-1].append((fid, deaths))
-        else:
-            groups.append([(fid, deaths)])
+    groups = window_groups(pulls)
     blocks, windows = {}, []
     for group in groups:
         deaths = [d for _, ds in group for d in ds]

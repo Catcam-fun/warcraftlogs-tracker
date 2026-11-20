@@ -495,6 +495,31 @@ class AnalyzeFlowTests(unittest.TestCase):
         self.assertEqual({e["bossId"] for e in result["events"]["Bob"]}, {3129})
         self.assertTrue(all(k.endswith("_1") for p in result["pullParticipation"].values() for k in p))
 
+    def test_windows_are_read_in_the_blocks_of_a_run_of_every_boss(self):
+        # Pull 1 (Plexus, chosen), pull 2 (Dimensius, 2 min later: same block) and pull 3 (Dimensius, an hour
+        # later: a block of its own). Only Plexus is chosen: pulls 1 and 2's block is read as a run of every boss
+        # reads it, and pull 3's block isn't read.
+        self._clear_caches()
+        one = self._fights
+
+        def three(token, rid):
+            meta = one(token, rid)
+            base = meta["fights"][0]
+            meta["fights"] = [base, dict(base, id=2, start_time=100_000, end_time=160_000, name="Dimensius", boss=3135),
+                              dict(base, id=3, start_time=3_700_000, end_time=3_760_000, name="Dimensius", boss=3135)]
+            return meta
+        deaths = {1: [{"timestamp": 5_000, "targetName": "Bob", "targetID": 10, "abilityName": "Zap"}],
+                  2: [{"timestamp": 120_000, "targetName": "Amy", "targetID": 11, "abilityName": "Zap"}],
+                  3: [{"timestamp": 3_720_000, "targetName": "Amy", "targetID": 11, "abilityName": "Zap"}]}
+        self._fights = three
+        try:
+            result, _, _ = self._run(selectedBosses=[3129], bulk_effect=lambda *a, **k: deaths)
+        finally:
+            del self._fights
+        self.assertEqual(self.window_calls[0].args[2], [(1, [(5_000, "Bob")]), (2, [(120_000, "Amy")])])
+        # Only the chosen boss's deaths are in the result.
+        self.assertEqual({e["bossId"] for evs in result["events"].values() for e in evs}, {3129})
+
     def test_windows_cached_apart_from_instant_kills_are_still_used(self):
         # Rows cached before the instant kills rode in the windows' request: windows under the old key and the
         # report's instant kills apart. Both finished reports reuse them, so no window is fetched.

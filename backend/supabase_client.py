@@ -393,8 +393,15 @@ def cache_put(key, value):
         evict_report_cache()
 
 
+# Set by the app (app.report_cache_key_is_stale): true of a stored key the running code can never read again
+# (an older format of its key). Those rows are deleted first and don't count toward the budget.
+STALE_CACHE_KEY = None
+
+
 def evict_report_cache(budget=None):
-    """Delete least recently used rows until the table fits the budget."""
+    """Delete the rows no code can read again (STALE_CACHE_KEY), then the least recently used rows until the
+    table fits the budget. On 2026-11-20 a quarter of the full 200 MB table was rows of older key formats
+    (292 death-window rows, 89 full reads, 25 defensive rows), pushing readable reports out."""
     budget = REPORT_CACHE_BUDGET_BYTES if budget is None else budget
     try:
         # Supabase serves at most 1,000 rows per request: read the table page by page (newest
@@ -410,14 +417,19 @@ def evict_report_cache(budget=None):
                 break
             start += EVICT_PAGE_ROWS
         total, drop = 0, []
+        stale = STALE_CACHE_KEY
         for row in rows:
+            if stale is not None and stale(row['key']):
+                drop.append(row['key'])
+                continue
             total += row.get('size_bytes') or 0
             if total > budget:
                 drop.append(row['key'])
         for i in range(0, len(drop), 100):
             db.table('report_cache').delete().in_('key', drop[i:i + 100]).execute()
         if drop:
-            print(f"[ReportCache] evicted {len(drop)} rows to stay under {budget // (1024 * 1024)} MB")
+            print(f"[ReportCache] evicted {len(drop)} rows (unreadable formats and least recently used) "
+                  f"to stay under {budget // (1024 * 1024)} MB")
     except Exception as e:
         print(f"[ReportCache] eviction failed: {e}")
 
