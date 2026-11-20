@@ -179,8 +179,6 @@ class StaleKeyTests(unittest.TestCase):
             "v2:meta:('AbC', 'actor-ids')",
             "v2:deaths:('AbC', (1, 2), False, None)",
             f"v2:killing-blows:('AbC', ((1, ((5000, 'Bob'),)),), 'lethal-window', {lw}, 'window-extras', '{x}')",
-            f"v2:killing-blows:('AbC', ((1, ((5000, 'Bob'),)),), 'lethal-window', {lw}, 'window-extras', '{x}', "
-            "'instakills')",
             "v2:killing-blows:('AbC', (1, 2), 'instakills')",
             f"v2:defensives:('AbC', (1, 2), (5,), '12.0', '{fp}', 'pull-specs', 'since-last-encounter')",
         ]

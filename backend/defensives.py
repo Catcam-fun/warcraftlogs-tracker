@@ -1180,8 +1180,8 @@ def window_groups(pulls):
 
 
 def fetch_death_windows(token, report_code, pulls, heals=True):
-    """Every hit the given players took in the seconds before their deaths, their instant kills, and the
-    heals a killing hit can set off with their cheat-death auras (features.KILLING_HIT_HEALS).
+    """Every hit the given players took in the seconds before their deaths, and the heals a
+    killing hit can set off with their cheat-death auras (features.KILLING_HIT_HEALS).
 
     `pulls`: [(fightID, [(death_ts, log name)])], the deaths that can count.
     WCL charges about a point per page of events and at least one per block,
@@ -1227,11 +1227,8 @@ def fetch_death_windows(token, report_code, pulls, heals=True):
         # Casts have no target or the enemy's: read by their caster (a Brewmaster's purifies:
         # STAGGER_CAST_IDS, and the buttons that lengthen a defensive: WINDOW_CAST_IDS).
         casts = ", ".join(map(str, sorted(STAGGER_CAST_IDS | set(WINDOW_CAST_IDS))))
-        # And their instant kills (a mechanic that kills outright: no damage, only in the All stream), which
-        # had a request of their own (fetch_instakills): about a point a report saved.
         flt = (f"(target.name in ({who}) and ability.id in ({', '.join(map(str, WINDOW_EXTRAS_IDS))}))"
-               f" or (source.name in ({who}) and type = 'cast' and ability.id in ({casts}))"
-               f" or (target.name in ({who}) and {INSTAKILL_FILTER})")
+               f" or (source.name in ({who}) and type = 'cast' and ability.id in ({casts}))")
         blocks["extras"] = ([fid for fid, _ in pulls],
                             max(min(t for t, _ in every) - LETHAL_WINDOW_MS - STAGGER_LOOKBACK_MS, 0),
                             max(t for t, _ in every) + KILLING_BLOW_AFTER_MS + 1, "All", flt)
@@ -1247,8 +1244,6 @@ def fetch_death_windows(token, report_code, pulls, heals=True):
             (e.get("type") == "cast" and e.get("abilityGameID") in STAGGER_CAST_IDS)
 
     def keep(e):
-        if e.get("type") == "instakill":
-            return True                  # the dying players' own, anywhere in the block (_lethal_hits reads back)
         if stagger_pool(e):
             return in_a_window(e.get("timestamp", 0), STAGGER_LOOKBACK_MS)
         if e.get("abilityGameID") in (STAGGER_AURA, STAGGER_TICK) and e.get("type") != "damage":

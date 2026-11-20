@@ -520,22 +520,6 @@ class AnalyzeFlowTests(unittest.TestCase):
         # Only the chosen boss's deaths are in the result.
         self.assertEqual({e["bossId"] for evs in result["events"].values() for e in evs}, {3129})
 
-    def test_windows_cached_apart_from_instant_kills_are_still_used(self):
-        # Rows cached before the instant kills rode in the windows' request: windows under the old key and the
-        # report's instant kills apart. Both finished reports reuse them, so no window is fetched.
-        self._clear_caches()
-        from defensives import LETHAL_WINDOW_MS, WINDOW_EXTRAS_KEY
-        hit = {"timestamp": 5_000, "type": "damage", "targetID": 10, "abilityGameID": 9, "amount": 900,
-               "overkill": 100, "hitPoints": 0, "maxHitPoints": 900, "resourceActor": 2}
-        for rid in ("R1", "R2"):
-            old = (rid, ((1, ((5_000, "Bob"),)),), "lethal-window", LETHAL_WINDOW_MS, "window-extras",
-                   WINDOW_EXTRAS_KEY)
-            app_module.recap_lru.set(old, {10: [hit]})
-            app_module.recap_lru.set((rid, (1,), "instakills"), {})
-        result, _, _ = self._run()
-        self.assertEqual(self.window_calls, [])
-        self.assertEqual(result["events"]["Bob"][0]["defensives"]["survival"]["deathType"], "oneShot")
-
     def test_bosses_of_another_raid_are_refused(self):
         self._clear_caches()
         error = self._run(selectedBosses=[3470], expect_error=True)
