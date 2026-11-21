@@ -109,6 +109,64 @@ def is_duplicate_pull(seen_by_boss, boss_id, abs_start, abs_end, is_kill=None):
 TRUNCATED_COPY_MS = 5000
 
 
+# Two raiders' logs of one night can disagree on the time by over a minute (each logger's PC clock):
+# Unluck's two logs of 2026-11-04 were 90.3-90.8 s apart, so each copy overlapped its own pull by under
+# half and the next pull too, and pulls were kept twice. Copies of a pull still last the same (99% of
+# copies within 0.1 s, above), so the gap between two logs is read from pulls of one boss whose lengths
+# match, and copies are compared on one clock.
+CLOCK_SAME_LENGTH_MS = 200       # two copies of one pull last the same to within this
+CLOCK_MAX_GAP_MS = 10 * 60_000   # a larger gap is another night or another group
+CLOCK_AGREE_MS = 2_000           # matched pulls agreeing on the gap to within this (clocks drift a little)
+CLOCK_MIN_MATCHES = 2            # one pair of equally long pulls can be chance
+CLOCK_JITTER_MS = 1_000          # smaller gaps are left alone: the overlap rules already match those copies
+
+
+def _clock_gap(a, b):
+    """The gap (ms, b's clock minus a's) read from pulls of one boss lasting the same, or None."""
+    gaps = sorted(q['abs_start'] - p['abs_start'] for p in a for q in b
+                  if p['boss_id'] == q['boss_id']
+                  and abs((p['abs_end'] - p['abs_start']) - (q['abs_end'] - q['abs_start'])) <= CLOCK_SAME_LENGTH_MS
+                  and abs(q['abs_start'] - p['abs_start']) <= CLOCK_MAX_GAP_MS)
+    best = []
+    for i, g in enumerate(gaps):
+        agree = [x for x in gaps[i:] if x - g <= CLOCK_AGREE_MS]
+        if len(agree) > len(best):
+            best = agree
+    if len(best) < CLOCK_MIN_MATCHES:
+        return None
+    return best[len(best) // 2]
+
+
+def report_clock_shifts(pulls):
+    """{reportId: ms to add to its pulls' times so every log of the night reads one clock}.
+
+    Each log's gap to the others is read pair by pair (_clock_gap) and carried from the log with the most
+    pulls (ties by report code) to every log linked to it; a log linked to none, or less than
+    CLOCK_JITTER_MS off, is not moved."""
+    by_report = defaultdict(list)
+    for p in pulls:
+        by_report[p['reportId']].append(p)
+    reports = sorted(by_report, key=lambda r: (-len(by_report[r]), r))
+    gaps = {}
+    for i, a in enumerate(reports):
+        for b in reports[i + 1:]:
+            g = _clock_gap(by_report[a], by_report[b])
+            if g is not None:
+                gaps[(a, b)], gaps[(b, a)] = g, -g
+    shift = {}
+    for root in reports:
+        if root in shift:
+            continue
+        shift[root], todo = 0, [root]
+        while todo:
+            a = todo.pop(0)
+            for b in reports:
+                if b not in shift and (a, b) in gaps:
+                    shift[b] = shift[a] - gaps[(a, b)]
+                    todo.append(b)
+    return {r: (0 if abs(v) < CLOCK_JITTER_MS else v) for r, v in shift.items()}
+
+
 def dedup_pulls(pulls):
     """One copy of each boss pull, from all raiders' logs of it.
 
@@ -117,23 +175,31 @@ def dedup_pulls(pulls):
     fight id), and a copy overlapping a kept pull of the same boss
     (is_duplicate_pull) is another raider's log of it. The earliest copy is
     kept, unless another copy lasts more than TRUNCATED_COPY_MS longer: then
-    the longest one is. Returns the kept copies in time order.
+    the longest one is. Copies are matched on one clock (report_clock_shifts),
+    but which copy is earliest is read on each log's own clock, so logs whose
+    clocks agree keep exactly the copy they kept before. The kept copies are
+    returned unchanged, in time order.
     """
-    order = sorted(pulls, key=lambda x: (x['abs_start'], x['reportId'], x['fight']['id']))
+    shift = report_clock_shifts(pulls)
+    start = lambda x: x['abs_start'] + shift[x['reportId']]
+    end = lambda x: x['abs_end'] + shift[x['reportId']]
+    order = sorted(pulls, key=lambda x: (start(x), x['reportId'], x['fight']['id']))
     seen, groups = {}, []
     by_boss = defaultdict(list)          # boss -> indexes of groups
     for p in order:
-        if is_duplicate_pull(seen, p['boss_id'], p['abs_start'], p['abs_end'], p['is_kill']):
+        if is_duplicate_pull(seen, p['boss_id'], start(p), end(p), p['is_kill']):
             for i in by_boss[p['boss_id']]:
                 first = groups[i][0]
-                if _same_pull(p['abs_start'], p['abs_end'], first['abs_start'], first['abs_end']):
+                if _same_pull(start(p), end(p), start(first), end(first)):
                     groups[i].append(p)
                     break
             continue
         by_boss[p['boss_id']].append(len(groups))
         groups.append([p])
     kept = []
+    own_clock = lambda x: (x['abs_start'], x['reportId'], x['fight']['id'])
     for copies in groups:
+        copies = sorted(copies, key=own_clock)
         first = copies[0]
         longest = max(copies, key=lambda c: c['abs_end'] - c['abs_start'])
         cut_short = (longest['abs_end'] - longest['abs_start']) - (first['abs_end'] - first['abs_start'])
@@ -328,18 +394,39 @@ def resolve_report_window(selected_raid, user_start, user_end):
     return start, end
 
 
-def analyze_fights(fights, fight_zone, difficulty, selected_raid=None):
+def selected_encounters(selected_raid, bosses=None):
+    """The raid's encounter IDs the visitor chose to analyze (the Analyze page's boss picker).
+
+    `bosses` is a list of encounter IDs (numbers or digit strings). Missing, empty or not a list:
+    every boss of the raid. It can only narrow the raid's own list, never add another raid's
+    boss; a list that names none of them gives an empty set, which the caller reports. None for a
+    raid key the site doesn't know (no allowlist)."""
+    allowed = RAID_ENCOUNTERS.get(selected_raid)
+    if allowed is None:
+        return None
+    if not isinstance(bosses, list) or not bosses:
+        return set(allowed)
+    chosen = set()
+    for b in bosses:
+        if isinstance(b, bool):
+            continue
+        if isinstance(b, int) or (isinstance(b, str) and b.strip().isdigit()):
+            chosen.add(int(b))
+    return chosen & allowed
+
+
+def analyze_fights(fights, fight_zone, difficulty, selected_raid=None, bosses=None):
     """Keep only this raid's boss pulls at the chosen difficulty.
 
     Primary guard is an explicit encounter-ID allowlist per raid
-    (`selected_raid`). This both isolates the chosen raid (critical for
-    Midnight, where 3 raids share one WCL zone) and excludes Mythic+/
-    dungeon bosses outright even when one log mixes raid + dungeons.
+    (`selected_raid`), narrowed to the chosen `bosses` (selected_encounters). This both
+    isolates the chosen raid (critical for Midnight, where 3 raids share one WCL zone) and
+    excludes Mythic+/dungeon bosses outright even when one log mixes raid + dungeons.
     If the raid key is unknown, fall back to the older zone/difficulty
     heuristic so nothing regresses.
     """
     diff = int(difficulty)
-    allowed = RAID_ENCOUNTERS.get(selected_raid)
+    allowed = selected_encounters(selected_raid, None if bosses is None else list(bosses))
     if allowed is not None:
         return [f for f in fights
                 if f.get("boss") in allowed and f.get("difficulty") == diff]
@@ -355,13 +442,14 @@ def analyze_fights(fights, fight_zone, difficulty, selected_raid=None):
 # CORE DEATH ANALYSIS
 # =============================================================================
 
-def _fetch_remaining_events(token, report_code, data_type, filter_expr, start_time, end_time, max_pages=50):
+def _fetch_remaining_events(token, report_code, data_type, filter_expr, start_time, end_time, max_pages=50,
+                            fight_ids=None):
     """Follow WCL's nextPageTimestamp for one event type and return the extra events."""
     query = """
-    query($code: String!, $startTime: Float!, $endTime: Float!, $filter: String) {
+    query($code: String!, $startTime: Float!, $endTime: Float!, $filter: String, $fightIDs: [Int]) {
       reportData {
         report(code: $code) {
-          events(startTime: $startTime, endTime: $endTime, dataType: %s,
+          events(startTime: $startTime, endTime: $endTime, fightIDs: $fightIDs, dataType: %s,
                  filterExpression: $filter, limit: 10000) {
             data
             nextPageTimestamp
@@ -374,7 +462,8 @@ def _fetch_remaining_events(token, report_code, data_type, filter_expr, start_ti
     next_ts = start_time
     for _ in range(max_pages):
         data = graphql_query(token, query, {"code": report_code, "startTime": next_ts,
-                                            "endTime": end_time, "filter": filter_expr})
+                                            "endTime": end_time, "filter": filter_expr,
+                                            "fightIDs": fight_ids})
         block = ((data.get("reportData") or {}).get("report") or {}).get("events") or {}
         events.extend(block.get("data") or [])
         next_ts = block.get("nextPageTimestamp")
@@ -411,6 +500,10 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
     # Get the time range for ALL fights we care about
     start_time = min(f['start_time'] for f in fights)
     end_time = max(f['end_time'] for f in fights)
+    # Scoped to those pulls, not the whole span: a death outside them is never read, and WCL charges
+    # less for the pulls alone (measured 2026-11-20 on 8 warm Mythic reports: 1.0 point every time,
+    # against 1.24-2.53 for the span, and 9.8 on one report of the site's own run), same deaths.
+    fight_ids = sorted(f['id'] for f in fights)
     
     # Build query that gets deaths + optionally cheat-death debuffs
     # Use GraphQL aliases to fetch multiple event types at once
@@ -424,11 +517,13 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
     if enable_cheat_death:
         print(f"[ENABLED] Cheat death detection ENABLED - querying deaths AND debuffs in one call...")
         combined_query = """
-        query($code: String!, $startTime: Float!, $endTime: Float!, $cheatFilter: String, $cheatHealFilter: String) {
+        query($code: String!, $startTime: Float!, $endTime: Float!, $fightIDs: [Int], $cheatFilter: String,
+              $cheatHealFilter: String) {
           reportData {
             report(code: $code) {
               deaths: events(
                 startTime: $startTime
+                fightIDs: $fightIDs
                 endTime: $endTime
                 dataType: Deaths
                 limit: 10000
@@ -438,6 +533,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
               }
               debuffs: events(
                 startTime: $startTime
+                fightIDs: $fightIDs
                 endTime: $endTime
                 dataType: Debuffs
                 filterExpression: $cheatFilter
@@ -448,6 +544,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
               }
               saveHeals: events(
                 startTime: $startTime
+                fightIDs: $fightIDs
                 endTime: $endTime
                 dataType: Healing
                 filterExpression: $cheatHealFilter
@@ -465,17 +562,19 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
             "code": report_code,
             "startTime": start_time,
             "endTime": end_time,
+            "fightIDs": fight_ids,
             "cheatFilter": cheat_filter,
             "cheatHealFilter": cheat_heal_filter,
         }
     else:
         # Just deaths (no cheat death detection)
         combined_query = """
-        query($code: String!, $startTime: Float!, $endTime: Float!) {
+        query($code: String!, $startTime: Float!, $endTime: Float!, $fightIDs: [Int]) {
           reportData {
             report(code: $code) {
               deaths: events(
                 startTime: $startTime
+                fightIDs: $fightIDs
                 endTime: $endTime
                 dataType: Deaths
                 limit: 10000
@@ -491,7 +590,8 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
         variables = {
             "code": report_code,
             "startTime": start_time,
-            "endTime": end_time
+            "endTime": end_time,
+            "fightIDs": fight_ids,
         }
     
     try:
@@ -510,7 +610,7 @@ def get_report_deaths_bulk(token, report_code, fights, friendlies, ability_map, 
             if block and block.get("nextPageTimestamp"):
                 block["data"] = (block.get("data") or []) + _fetch_remaining_events(
                     token, report_code, data_type, filter_expr,
-                    block["nextPageTimestamp"], end_time)
+                    block["nextPageTimestamp"], end_time, fight_ids=fight_ids)
         
         # Extract death events
         events_data = report_data.get("deaths", {}).get("data", [])

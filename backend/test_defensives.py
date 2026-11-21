@@ -2672,3 +2672,16 @@ class SoulburnTests(unittest.TestCase):
         self.assertEqual(len(queries), 1)
         self.assertIn("fightIDs: [3, 4]", queries[0])
         self.assertEqual([e["timestamp"] for e in got[1]], [30_000, 130_000])     # 70,000 is in no span
+
+
+class WindowGroupTests(unittest.TestCase):
+    def test_leaving_out_whole_blocks_keeps_the_others(self):
+        m = 60_000
+        pulls = [(1, [(1 * m, "A")]), (2, [(5 * m, "B")]), (3, [(14 * m, "C")]),    # one block (within 15 min)
+                 (4, [(30 * m, "A")]), (5, [(40 * m, "B")]),                       # the next
+                 (6, [(60 * m, "C"), (61 * m, "A")])]                               # and the last
+        groups = defensives.window_groups(pulls)
+        self.assertEqual([[f for f, _ in g] for g in groups], [[1, 2, 3], [4, 5], [6]])
+        for drop in range(3):
+            kept = [p for i, g in enumerate(groups) if i != drop for p in g]
+            self.assertEqual(defensives.window_groups(kept), [g for i, g in enumerate(groups) if i != drop])

@@ -2,7 +2,13 @@
 
 Copies of one pull (several officers logging it) are found by plain transitive interval overlap:
 pulls of the same boss whose start-end spans overlap, directly or through another copy, are one
-cluster. The spec's 5-second start rule was dropped; overlap alone passed live on all eight raids."""
+cluster. The spec's 5-second start rule was dropped; overlap alone passed live on all eight raids.
+
+Logs are first put on one clock: two loggers' PC clocks can disagree by over a minute (90.4 s on Unluck's
+2026-11-04 logs), which chained every pull of a boss into one cluster. A log's gap to another is the most
+common whole-second start difference among pulls of one boss lasting the same to 0.2 s, when 2+ pairs
+agree on it."""
+from collections import Counter
 from datetime import datetime, timezone
 
 import analysis
@@ -11,8 +17,42 @@ from checks.verdict import PASS, fail, skip
 from warcraftlogs import get_guild_reports, get_report_fights
 
 
+def _report(p):
+    return p["key"].rsplit("_", 1)[0]
+
+
+def clock_shifts(pulls):
+    """{report: ms added to its times}, relative to the log with the most pulls; unlinked logs stay put."""
+    logs = {}
+    for p in pulls:
+        logs.setdefault(_report(p), []).append(p)
+    order = sorted(logs, key=lambda r: (-len(logs[r]), r))
+    shift = {}
+    for root in order:
+        if root in shift:
+            continue
+        shift[root], queue = 0, [root]
+        while queue:
+            a = queue.pop()
+            for b in order:
+                if b in shift:
+                    continue
+                votes = Counter(round((q["start"] - p["start"]) / 1000) for p in logs[a] for q in logs[b]
+                                if p["boss"] == q["boss"] and abs(q["start"] - p["start"]) <= 600_000
+                                and abs((q["end"] - q["start"]) - (p["end"] - p["start"])) <= 200)
+                if votes:
+                    gap, n = votes.most_common(1)[0]
+                    n += votes.get(gap - 1, 0) + votes.get(gap + 1, 0)      # a gap on a second's edge
+                    if n >= 2:
+                        shift[b] = shift[a] - gap * 1000
+                        queue.append(b)
+    return shift
+
+
 def cluster(pulls):
-    """Group pulls of one boss whose intervals overlap, transitively."""
+    """Group pulls of one boss whose intervals overlap, transitively, with every log on one clock."""
+    shift = clock_shifts(pulls)
+    pulls = [dict(p, start=p["start"] + shift[_report(p)], end=p["end"] + shift[_report(p)]) for p in pulls]
     out = []
     by_boss = {}
     for p in pulls:

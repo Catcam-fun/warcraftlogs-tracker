@@ -47,6 +47,9 @@ def main(argv):
     from checks.common import Run, parse_target, points
     from warcraftlogs import get_access_token
 
+    # Results name rules like "B′": a Windows console redirected to a file would write cp1252 and crash.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     token = get_access_token(os.environ["WCL_CLIENT_ID"], os.environ["WCL_CLIENT_SECRET"])
     all_verdicts, results = [], []
     for t in targets:
@@ -55,13 +58,13 @@ def main(argv):
         verdicts = run_checks(run, checks)
         after = points(token)
         spent = after - before if before is not None and after is not None else None
-        print(f"== {t}")
-        print(format_lines(verdicts, spent), end="")
         all_verdicts.extend(verdicts)
         results.append({"target": t, **to_json(verdicts, spent)})
-    if json_path:
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump({"targets": results}, f, indent=2)
+        if json_path:  # saved after every target, before printing: a run's points are already spent
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump({"targets": results}, f, indent=2, ensure_ascii=False)
+        print(f"== {t}")
+        print(format_lines(verdicts, spent), end="", flush=True)
     return exit_code(all_verdicts)
 
 

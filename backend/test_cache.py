@@ -105,15 +105,28 @@ class ReportCacheEvictionTests(unittest.TestCase):
         rows = [{"key": f"k{i:04d}", "size_bytes": size, "last_used_at": f"2026-10-{1 + i // 100:02d}T{i % 100:02d}"}
                 for i in range(2500)]
         db = CappedCacheTable(rows)
-        with mock.patch.object(supabase_client, 'db', db):
+        with mock.patch.object(supabase_client, 'db', db), \
+                mock.patch.object(supabase_client, 'STALE_CACHE_KEY', None):
             supabase_client.evict_report_cache()
         self.assertEqual(len(db.rows), supabase_client.REPORT_CACHE_BUDGET_BYTES // size)
         self.assertEqual(min(r["key"] for r in db.rows), "k0452")   # the oldest ones went
 
+    def test_rows_no_code_can_read_go_first(self):
+        # Rows the running code can never read (an older format) are deleted even under budget, and don't
+        # count toward it: only the readable rows are kept by last use.
+        rows = [{"key": f"old{i}", "size_bytes": 1024, "last_used_at": f"9{i}"} for i in range(5)] + \
+               [{"key": f"k{i}", "size_bytes": 1024, "last_used_at": str(i)} for i in range(10)]
+        db = CappedCacheTable(rows)
+        with mock.patch.object(supabase_client, 'db', db), \
+                mock.patch.object(supabase_client, 'STALE_CACHE_KEY', lambda k: k.startswith("old")):
+            supabase_client.evict_report_cache(budget=8 * 1024)
+        self.assertEqual(sorted(r["key"] for r in db.rows), [f"k{i}" for i in range(2, 10)])
+
     def test_eviction_keeps_a_table_under_budget(self):
         rows = [{"key": f"k{i}", "size_bytes": 1024, "last_used_at": str(i)} for i in range(1500)]
         db = CappedCacheTable(rows)
-        with mock.patch.object(supabase_client, 'db', db):
+        with mock.patch.object(supabase_client, 'db', db), \
+                mock.patch.object(supabase_client, 'STALE_CACHE_KEY', None):
             supabase_client.evict_report_cache()
         self.assertEqual(len(db.rows), 1500)
 
@@ -151,3 +164,37 @@ class ReportCacheConnectionTests(unittest.TestCase):
                 mock.patch.object(supabase_client.time, 'sleep'):
             self.assertEqual(supabase_client.cache_get('k1'), {"a": 1})
             self.assertTrue(supabase_client._cache_available())
+
+
+class StaleKeyTests(unittest.TestCase):
+    """app.report_cache_key_is_stale: the stored keys the running code can never read again."""
+
+    def test_stale_and_live_keys(self):
+        import app
+        import defensives
+        x, fp = defensives.WINDOW_EXTRAS_KEY, defensives.CATALOG_FINGERPRINT
+        lw = defensives.LETHAL_WINDOW_MS
+        live = [
+            "v2:fights:'AbC'",
+            "v2:meta:('AbC', 'actor-ids')",
+            "v2:deaths:('AbC', (1, 2), False, None)",
+            f"v2:killing-blows:('AbC', ((1, ((5000, 'Bob'),)),), 'lethal-window', {lw}, 'window-extras', '{x}')",
+            "v2:killing-blows:('AbC', (1, 2), 'instakills')",
+            f"v2:defensives:('AbC', (1, 2), (5,), '12.0', '{fp}', 'pull-specs', 'since-last-encounter')",
+        ]
+        stale = [
+            "v1:fights:'AbC'",                                                       # another cache version
+            "v2:meta:'AbC'",                                                         # meta before actor IDs
+            f"v2:killing-blows:('AbC', ((1, ((5000, 'Bob'),)),), 'lethal-window', {lw})",   # before the extras block
+            f"v2:killing-blows:('AbC', ((1, ((5000, 'Bob'),)),), 'lethal-window', {lw}, 'window-extras', 'abc123')",
+            f"v2:killing-blows:('AbC', ((1, ((5000, 'Bob'),)),), 'lethal-window', {lw + 1}, 'window-extras', '{x}')",
+            "v2:defensives:('AbC', (1, 2), (5,), '12.0', 'f00f00f00f00', 'pull-specs', 'since-last-encounter')",
+            f"v2:defensives:('AbC', (1, 2), (5,), '12.0', '{fp}', 'pull-specs')",    # casts over the shorter span
+        ]
+        for k in live:
+            self.assertFalse(app.report_cache_key_is_stale(k), k)
+        for k in stale:
+            self.assertTrue(app.report_cache_key_is_stale(k), k)
+        # The running app hands its rule to the cache's eviction.
+        import supabase_client
+        self.assertIs(supabase_client.STALE_CACHE_KEY, app.report_cache_key_is_stale)
