@@ -5,7 +5,7 @@ import { supabase, sessionEndedByBrowserClose, setSessionOnly } from './supabase
 import Auth from './Auth';
 import Settings from './Settings';
 import LandingPage from './LandingPage';
-import AnalyzeConfig, { bossScopeLabel } from './AnalyzeConfig';
+import AnalyzeConfig, { bossScopeLabel, chosenBossIds } from './AnalyzeConfig';
 import { SEASON_TWO_RAIDS } from './seasonTwoRaids';
 import InfoModal from './InfoModal';
 import FpxRail from './FpxRail';
@@ -688,6 +688,11 @@ export default function WarcraftLogsApp() {
   const handleSubmit = async () => {
     if (!config.clientId || !config.clientSecret || !config.guildName || !config.server) {
       setError('Please fill in all required fields (Client ID, Client Secret, Guild Name, and Server)');
+      return;
+    }
+    // No boss selected: the server would read the empty choice as every boss.
+    if (!chosenBossIds(config.selectedRaid, config.selectedBosses).length) {
+      setError('Pick at least one boss to analyze.');
       return;
     }
 

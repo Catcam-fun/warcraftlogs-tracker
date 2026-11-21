@@ -32,10 +32,14 @@ const bossImg = (n) => `${process.env.PUBLIC_URL}/art/bosses/${slug(n)}.webp`;
 /* Each raid's bosses and their encounter IDs (same order), for the boss picker. */
 export const RAID_BOSS_IDS = Object.fromEntries(RAIDS.map((r) => [r.key, { bosses: r.bosses, ids: r.bossIds }]));
 
+/* config.selectedBosses when every boss was deselected. Never sent: the Analyze button is off. */
+export const NO_BOSSES = 'none';
+
 /* The chosen bosses of a raid as encounter IDs. config.selectedBosses holds them; an empty list,
    or one naming none of this raid's bosses (left over from another raid), means every boss. */
 export function chosenBossIds(raidKey, selectedBosses) {
   const ids = RAID_BOSS_IDS[raidKey]?.ids || [];
+  if (selectedBosses === NO_BOSSES) return [];
   const picked = ids.filter((id) => (selectedBosses || []).map(Number).includes(id));
   return picked.length ? picked : ids;
 }
@@ -55,18 +59,17 @@ export default function AnalyzeConfig({
   const [railCollapsed, setRailCollapsed] = useState(false);
   const selected = RAIDS.find((r) => r.key === config.selectedRaid) || RAIDS[0];
   const chosen = chosenBossIds(selected.key, config.selectedBosses);
-  // Every boss is stored as an empty list, so a later new boss is in by default.
-  const setChosen = (ids) => setConfig((prev) => ({
-    ...prev,
-    selectedBosses: ids.length === selected.bossIds.length ? [] : selected.bossIds.filter((id) => ids.includes(id)),
-  }));
-  const toggleBoss = (id) => {
-    if (chosen.includes(id)) {
-      if (chosen.length > 1) setChosen(chosen.filter((x) => x !== id));
-    } else {
-      setChosen([...chosen, id]);
-    }
-  };
+  // Every boss is stored as an empty list, so a later new boss is in by default; none as NO_BOSSES.
+  const stored = (ids) => (ids.length === selected.bossIds.length ? []
+    : ids.length === 0 ? NO_BOSSES : selected.bossIds.filter((id) => ids.includes(id)));
+  const setChosen = (ids) => setConfig((prev) => ({ ...prev, selectedBosses: stored(ids) }));
+  // From the latest choice, so two quick clicks both count.
+  const toggleBoss = (id) => setConfig((prev) => {
+    const now = chosenBossIds(selected.key, prev.selectedBosses);
+    return { ...prev, selectedBosses: stored(now.includes(id) ? now.filter((x) => x !== id) : [...now, id]) };
+  });
+  const allChosen = chosen.length === selected.bossIds.length;
+  const noBoss = chosen.length === 0;
 
   const raidCard = (raid) => {
     return (
@@ -153,15 +156,15 @@ export default function AnalyzeConfig({
             {/* selected raid's lineup */}
             <div className="fpx-slab fpx-rv" style={{ marginTop: 30 }}>
               <h3 id="selected-raid-heading">{selected.name.toUpperCase()}</h3>
-              <span>click a boss to leave it out</span><div className="rule" />
-              <span className="fpx-bosscount">
-                {chosen.length === selected.bossIds.length
-                  ? `All ${chosen.length} bosses`
-                  : `${chosen.length} of ${selected.bossIds.length} bosses`}
-              </span>
-              {chosen.length < selected.bossIds.length && (
+              <span>click a boss to leave it out or add it back</span><div className="rule" />
+              <span className="fpx-bosscount">{`${chosen.length} of ${selected.bossIds.length} bosses selected`}</span>
+              {!allChosen && (
                 <button type="button" className="fpx-link" aria-label="Select all bosses"
                   onClick={() => setChosen(selected.bossIds)}>Select all</button>
+              )}
+              {!noBoss && (
+                <button type="button" className="fpx-link" aria-label="Deselect all bosses"
+                  onClick={() => setChosen([])}>Deselect all</button>
               )}
             </div>
             <section className="fpx-lineup fpx-rv" aria-labelledby="selected-raid-heading">
@@ -174,15 +177,17 @@ export default function AnalyzeConfig({
                     <div className="art" />
                     <div className="cap"><div className="nm">{b}</div></div>
                     <button type="button" className="fpx-boss-toggle" aria-label={b} aria-pressed={on}
-                      title={on ? (chosen.length > 1 ? 'Leave this boss out' : 'At least one boss is analyzed')
-                        : 'Include this boss'}
+                      title={on ? 'Leave this boss out' : 'Include this boss'}
                       onClick={() => toggleBoss(id)} />
-                    <button type="button" className="fpx-boss-only" aria-label={`Only ${b}`}
-                      onClick={() => setChosen([id])}>only</button>
                   </div>
                 );
               })}
             </section>
+            {noBoss && (
+              <div className="fpx-bosswarn fpx-rv" role="alert">
+                No bosses selected. Pick at least one boss to analyze.
+              </div>
+            )}
 
             {/* CONFIG FORM */}
             <div className="fpx-slab fpx-rv" style={{ marginTop: 34 }}>
@@ -282,8 +287,9 @@ export default function AnalyzeConfig({
             )}
 
             <div className="fpx-runrow fpx-rv">
-              <button className="fpx-btn" onClick={onSubmit} disabled={loading}
-                style={{ opacity: loading ? 0.65 : 1, cursor: loading ? 'not-allowed' : 'pointer' }}>
+              <button className="fpx-btn" onClick={onSubmit} disabled={loading || noBoss}
+                title={noBoss ? 'Pick at least one boss to analyze' : undefined}
+                style={{ opacity: loading || noBoss ? 0.65 : 1, cursor: loading || noBoss ? 'not-allowed' : 'pointer' }}>
                 {loading ? <><Loader2 size={18} className="fpx-spin" /> Analyzing…</>
                   : <><Search size={18} /> Analyze Reports <ChevronRight size={16} /></>}
               </button>
