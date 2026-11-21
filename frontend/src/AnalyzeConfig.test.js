@@ -68,31 +68,59 @@ function BossPicker({ onConfig }) {
     onChange={jest.fn()} onSubmit={jest.fn()} onRaidChange={jest.fn()} />;
 }
 
-test('bosses can be left out of the analysis, never all of them', () => {
+test('bosses can be left out of the analysis, down to none', () => {
   let config;
   render(<BossPicker onConfig={(c) => { config = c; }} />);
   const lineup = screen.getByRole('region', { name: 'MANAFORGE OMEGA' });
   const tile = (name) => within(lineup).getByRole('button', { name });
-  // Every boss is in by default; an empty list means all of them.
+  // Every boss is in by default; an empty list means all of them, and the count says so.
   lineup.querySelectorAll('.fpx-boss-toggle').forEach((b) => expect(b).toHaveAttribute('aria-pressed', 'true'));
-  expect(screen.getByText('All 8 bosses')).toBeInTheDocument();
+  expect(screen.getByText('8 of 8 bosses selected')).toBeInTheDocument();
+  expect(lineup.querySelector('.fpx-boss-only')).toBeNull();          // no "only" chip
+  expect(screen.queryByRole('alert')).toBeNull();
 
   fireEvent.click(tile('Dimensius, the All-Devouring'));
   expect(tile('Dimensius, the All-Devouring')).toHaveAttribute('aria-pressed', 'false');
   expect(config.selectedBosses).toEqual([3129, 3131, 3130, 3132, 3122, 3133, 3134]);
-  expect(screen.getByText('7 of 8 bosses')).toBeInTheDocument();
+  expect(screen.getByText('7 of 8 bosses selected')).toBeInTheDocument();
 
-  // Only one boss.
-  fireEvent.click(screen.getByRole('button', { name: 'Only Nexus-King Salhadaar' }));
-  expect(config.selectedBosses).toEqual([3134]);
-  // The last boss can't be left out.
+  // Deselect all: no boss left, a warning, and nothing can be analyzed.
+  fireEvent.click(screen.getByRole('button', { name: 'Deselect all bosses' }));
+  lineup.querySelectorAll('.fpx-boss-toggle').forEach((b) => expect(b).toHaveAttribute('aria-pressed', 'false'));
+  expect(screen.getByText('0 of 8 bosses selected')).toBeInTheDocument();
+  expect(screen.getByRole('alert')).toHaveTextContent('No bosses selected');
+  expect(screen.getByRole('button', { name: /Analyze Reports/ })).toBeDisabled();
+
+  // One boss back in.
   fireEvent.click(tile('Nexus-King Salhadaar'));
   expect(config.selectedBosses).toEqual([3134]);
-  expect(tile('Nexus-King Salhadaar')).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.getByRole('button', { name: /Analyze Reports/ })).toBeEnabled();
+  // The last boss can be clicked out too.
+  fireEvent.click(tile('Nexus-King Salhadaar'));
+  expect(screen.getByText('0 of 8 bosses selected')).toBeInTheDocument();
 
   // Back to every boss: stored as an empty list.
   fireEvent.click(screen.getByRole('button', { name: 'Select all bosses' }));
   expect(config.selectedBosses).toEqual([]);
+  expect(screen.getByText('8 of 8 bosses selected')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Deselect all bosses' })).toBeInTheDocument();
+});
+
+test('no boss selected never reaches the server', () => {
+  const onSubmit = jest.fn();
+  function Form() {
+    const [config, setConfig] = useState({
+      selectedRaid: 'manaforge', selectedBosses: [], clientId: 'a', clientSecret: 'b', guildName: 'g',
+      server: 's', region: 'us', difficulty: '5', startDate: '', endDate: '', maxCutoff: '5', enableCheatDeath: false,
+    });
+    return <AnalyzeConfig config={config} setConfig={setConfig}
+      onChange={jest.fn()} onSubmit={onSubmit} onRaidChange={jest.fn()} />;
+  }
+  render(<Form />);
+  fireEvent.click(screen.getByRole('button', { name: 'Deselect all bosses' }));
+  fireEvent.click(screen.getByRole('button', { name: /Analyze Reports/ }));
+  expect(onSubmit).not.toHaveBeenCalled();
 });
 
 test('a choice left from another raid reads as every boss', () => {
