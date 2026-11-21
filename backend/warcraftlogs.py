@@ -416,7 +416,7 @@ def get_fights(token, report_code):
 
     One GraphQL round-trip per report: ability names used to be a second,
     separate query. Returns
-      {"report_start", "fights", "friendlies", "player_details", "abilities"}
+      {"report_start", "fights", "friendlies", "abilities"}
     or the same shape with empty values if the report can't be read.
     """
     query = """
@@ -453,12 +453,11 @@ def get_fights(token, report_code):
               icon
             }
           }
-          playerDetails(startTime: 0, endTime: 999999999999)
         }
       }
     }
     """
-    empty = {"report_start": 0, "fights": [], "friendlies": [], "player_details": {}, "abilities": {},
+    empty = {"report_start": 0, "fights": [], "friendlies": [], "abilities": {},
              "ability_schools": {}, "ability_icons": {}}
 
     try:
@@ -504,26 +503,13 @@ def get_fights(token, report_code):
         ability_icons = {a["gameID"]: a["icon"] for a in master.get("abilities") or []
                          if a.get("gameID") and a.get("icon")}
 
-        # playerDetails: { data: { playerDetails: { tanks: [], healers: [], dps: [] } } }
-        player_spec_map = {}
-        details = ((report.get("playerDetails") or {}).get("data") or {}).get("playerDetails") or {}
-        for role in ("tanks", "healers", "dps"):
-            for player in details.get(role) or []:
-                actor_id = player.get("id")
-                if not actor_id:
-                    continue
-                specs = player.get("specs") or []  # [{"spec": "Brewmaster", "count": 31}]
-                player_spec_map[actor_id] = {
-                    "class": player.get("type", ""),
-                    "spec": specs[0].get("spec", "Unknown") if specs else "Unknown",
-                    "name": normalize_character_name(player.get("name", "")),
-                }
+        # No playerDetails: it made this read cost 3 points instead of 2 (4 of 4 reports, 2026-11-20). A
+        # player's class is their actor's subType; their spec, each pull's talent record (defensives.pull_specs).
 
         return {
             "report_start": report.get("startTime", 0),
             "fights": fights,
             "friendlies": friendlies,
-            "player_details": player_spec_map,
             "abilities": abilities,
             "ability_schools": ability_schools,
             "ability_icons": ability_icons,

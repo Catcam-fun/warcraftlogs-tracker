@@ -367,7 +367,6 @@ def analyze():
                     'ability_map': meta.get("abilities", {}),
                     'ability_schools': meta.get("ability_schools", {}),
                     'ability_icons': meta.get("ability_icons", {}),
-                    'player_details': meta.get("player_details", {}),
                 })
 
             yield f"data: {json.dumps({'stage': 'dedup', 'message': f'After deduplication: {len(all_fights_deduped)} unique fights'})}\n\n"
@@ -410,6 +409,7 @@ def analyze():
                                                     or normalize_character_name(d.get("targetName") or ""))]
                 return out
 
+            report_specs = {}            # rid -> {(fightID, player ID): spec} from each pull's talent record
             report_attacked = {}         # rid -> units the raid attacked (fetch_attacked_units)
             report_aoe = {}              # rid -> (abilities AoE in the report, those it couldn't tell)
             report_soulburn = {}         # rid -> {Warlock ID: casts and Soulburn buff} (fetch_soulburn_windows)
@@ -449,6 +449,9 @@ def analyze():
                     def_data = defensive_lru.get(def_key(dead_in(deaths))) if finished and deaths is not None else None
                     def_error = hits_error = None
                     combatants = None
+                    # Each pull's spec, for every death row (the report-wide spec is no longer read).
+                    specs_key = (rid, tuple(fight_ids), "pull-specs-index")
+                    specs = recap_lru.get(specs_key) if finished else None
                     if deaths is None:
                         # Talent loadouts first, alone: the cheapest first query on a cold report (~2
                         # points; Deaths or Casts first cost 4-17). The report then stays warm 10-30 s,
@@ -462,6 +465,17 @@ def analyze():
                         if finished:
                             deaths_lru.set(cache_key, deaths)
                         def_data = defensive_lru.get(def_key(dead_in(deaths))) if finished else None
+                    if specs is None and combatants is None and def_error is None:
+                        # Deaths came from the cache: the talent records only for the specs.
+                        try:
+                            combatants = defensives.fetch_combatants(token, rid, fight_ids, first_start, last_end)
+                        except Exception as e:
+                            def_error = e
+                    if specs is None and combatants is not None:
+                        specs = defensives.pull_specs(combatants)
+                        if finished:
+                            recap_lru.set(specs_key, specs)
+                    report_specs[rid] = specs or {}
 
                     # Only the chosen bosses' pulls have deaths that count; the report's other pulls
                     # are read for their defensive data alone.
@@ -652,6 +666,7 @@ def analyze():
             
             total_deaths = 0
             pullCutoffTimestamps = {}
+            usual_specs_by_report = {}
             
             for fight_idx, fight_data in enumerate(all_fights_deduped, 1):
                 if fight_idx % 10 == 0:
@@ -664,7 +679,10 @@ def analyze():
                 is_kill = fight_data['is_kill']
                 report_abs_start = fight_data['report_abs_start']
                 friendlies = fight_data['friendlies']
-                player_details = fight_data.get("player_details", {})
+                pull_specs = report_specs.get(rid) or {}
+                if rid not in usual_specs_by_report:
+                    usual_specs_by_report[rid] = defensives.usual_specs(pull_specs)
+                usual_specs = usual_specs_by_report[rid]
                 renamed_ids = fight_data['current_names']
                 friendly_class = {f.get("id"): f.get("type") for f in friendlies}
                 friendly_names_by_id = {f.get("id"): renamed_ids.get(f.get("id")) or f.get("name") for f in friendlies}
@@ -724,11 +742,11 @@ def analyze():
                     main_char = get_main_character(target_name, character_groups)
                     target_id = ev.get("targetID")
                     
-                    player_class = None
-                    player_spec = None
-                    if target_id and target_id in player_details:
-                        player_class = player_details[target_id].get("class", None)
-                        player_spec = player_details[target_id].get("spec", None)
+                    # Class from the report's player list; spec from this pull's talent record, or for a pull
+                    # without one the spec they played in most pulls of the report.
+                    player_class = friendly_class.get(target_id)
+                    usual_spec = usual_specs.get(target_id)
+                    player_spec = pull_specs.get((fid, target_id)) or usual_spec
                     
                     death_event = {
                         "player": main_char,
@@ -760,7 +778,7 @@ def analyze():
                             player_id=target_id,
                             player_class=friendly_class.get(target_id),
                             # The spec they played in this pull, not the report's main one.
-                            spec=defensives.pull_spec(def_data, fid, target_id, player_spec),
+                            spec=defensives.pull_spec(def_data, fid, target_id, usual_spec),
                             fight_id=fid,
                             fight_start=fight['start_time'],
                             death_ts=ev["timestamp"],

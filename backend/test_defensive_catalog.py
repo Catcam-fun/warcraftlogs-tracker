@@ -290,7 +290,7 @@ class EarthElementalAuraTests(unittest.TestCase):
         def check(end):
             run = mock.Mock(); run.code = "X"
             run.pulls = [{"id": 1, "start_time": 0, "end_time": 100_000}]
-            run.meta = {"abilities": {381755: "Primordial Bond"}, "player_details": {}}
+            run.meta = {"abilities": {381755: "Primordial Bond"}}
             run.cat = defensives._LATEST
             buffs = [{"type": "applybuff", "abilityGameID": 381755, "targetID": 7, "timestamp": 1_000},
                      {"type": "removebuff", "abilityGameID": 381755, "targetID": 7, "timestamp": 1_000 + end}]
@@ -425,7 +425,7 @@ class ZealotsParagonTests(unittest.TestCase):
         def check(n_casts):
             run = mock.Mock(); run.code = "X"
             run.pulls = [{"id": 1, "start_time": 0, "end_time": 100_000}]
-            run.meta = {"abilities": {389539: "Sentinel"}, "player_details": {}}
+            run.meta = {"abilities": {389539: "Sentinel"}}
             run.cat = defensives._LATEST
             buffs = [{"type": "applybuff", "abilityGameID": 389539, "targetID": 7, "timestamp": 1_000},
                      {"type": "removebuff", "abilityGameID": 389539, "targetID": 7, "timestamp": 21_000}]

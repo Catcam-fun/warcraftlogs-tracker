@@ -41,6 +41,7 @@ def check(run):
     raw = defensives.fetch_defensive_raw(run.token, run.code, ids, min(f["start_time"] for f in fights),
                                          max(f["end_time"] for f in fights), cat)
     idx = defensives.filter_defensive_raw(raw, {e["sourceID"] for e in raw["combatants"]}, cat)
+    usual = defensives.usual_specs(idx.get("specs") or {})
     spans = [(f["start_time"], f["end_time"], f["id"]) for f in fights]
     casts = defaultdict(list)
     for e in raw["casts"]:
@@ -79,7 +80,7 @@ def check(run):
             talents = idx["talents"].get((fid, pid))
             if fid is None or talents is None:
                 continue
-            spec = defensives.pull_spec(idx, fid, pid, (meta["player_details"].get(pid) or {}).get("spec"))
+            spec = defensives.pull_spec(idx, fid, pid, usual.get(pid))
             want = defensives._talented_duration(entry, talents, spec)
             ext = entry.get("extended_by")
             rank = defensives._mod_rank(ext, talents, spec) if ext else 0
