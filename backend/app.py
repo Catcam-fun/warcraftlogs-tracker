@@ -247,7 +247,7 @@ def analyze():
             
             # Collect all fights. Every report's light fight list (fights only) is read
             # in parallel, duplicate pulls are dropped, and only the reports pulls are
-            # kept from are read in full (players, specs, abilities). Finished reports
+            # kept from are read in full (players, abilities). Finished reports
             # come from the cache.
             yield f"data: {json.dumps({'stage': 'fights', 'message': 'Collecting fights from reports...'})}\n\n"
             all_fights_raw = []

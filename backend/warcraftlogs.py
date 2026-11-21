@@ -364,7 +364,7 @@ def get_guild_roster(token, guild_name, server, region):
 
 def get_report_fights(token, report_code):
     """A report's start and its fights, without players or abilities: the light
-    query (1 WCL point, against 3 for get_fights), read for every report so
+    query (1 WCL point, against 2 for get_fights), read for every report so
     duplicate pulls can be dropped before anything heavier is fetched. Returns
       {"report_start", "fights"} (fights as get_fights shapes them, without
     friendlyPlayers), or empty values if the report can't be read.
