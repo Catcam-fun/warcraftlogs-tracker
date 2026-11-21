@@ -952,6 +952,17 @@ class PullSpecTests(unittest.TestCase):
         self.assertEqual(defensives.pull_spec(idx, 4, 1, "Demonology"), "Destruction")
         self.assertEqual(defensives.pull_spec(idx, 5, 1, "Demonology"), "Demonology")   # not recorded
 
+    def test_pull_specs_and_the_spec_played_most(self):
+        # The spec of each pull, and for a pull without a record the spec they played in most pulls of the
+        # report (what WCL's report-wide playerDetails counted); a tie goes to the earliest pull's spec.
+        combatants = [{"fight": 3, "sourceID": 1, "specID": 266}, {"fight": 4, "sourceID": 1, "specID": 267},
+                      {"fight": 5, "sourceID": 1, "specID": 267}, {"fight": 3, "sourceID": 2, "specID": 62},
+                      {"fight": 4, "sourceID": 2, "specID": 63}, {"fight": 4, "sourceID": 9, "specID": 99999}]
+        specs = defensives.pull_specs(combatants)
+        self.assertEqual(specs, {(3, 1): "Demonology", (4, 1): "Destruction", (5, 1): "Destruction",
+                                 (3, 2): "Arcane", (4, 2): "Fire"})
+        self.assertEqual(defensives.usual_specs(specs), {1: "Destruction", 2: "Arcane"})
+
     def test_an_empty_talent_tree_is_an_unknown_loadout(self):
         # Every loadout in the cached logs (6,096 pull loadouts over 8 raids' reports) lists 11 to 82 entries:
         # a player always has some, so an empty tree means the log didn't record it. Unknown (no entry), as a

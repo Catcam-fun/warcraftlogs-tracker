@@ -273,7 +273,6 @@ class AnalyzeFlowTests(unittest.TestCase):
                         "friendlyPlayers": [10, 11]}],
             "friendlies": [{"id": 10, "name": "Bob", "type": "Mage"},
                            {"id": 11, "name": "Amy", "type": "Priest"}],
-            "player_details": {10: {"class": "Mage", "spec": "Fire", "name": "Bob"}},
             "abilities": {},
         }
 
@@ -288,7 +287,7 @@ class AnalyzeFlowTests(unittest.TestCase):
                       "overkill": 100, "hitPoints": 0, "maxHitPoints": 900, "resourceActor": 2}]}
 
     def _run(self, roster_patch=True, bulk_effect=None, fights_effect=None, same_night=False, expect_error=False,
-             **extra):
+             combatants_effect=None, **extra):
         from analysis import RAID_ENCOUNTERS
         raid = next(k for k, v in RAID_ENCOUNTERS.items() if 3129 in v)
         deaths = {1: [{"timestamp": 5_000, "targetName": "Bob", "targetID": 10,
@@ -306,7 +305,7 @@ class AnalyzeFlowTests(unittest.TestCase):
                 mock.patch.object(app_module, 'get_report_deaths_bulk', autospec=True, return_value=deaths,
                                   side_effect=bulk_effect) as bulk, \
                 mock.patch.object(app_module.defensives, 'fetch_combatants', autospec=True,
-                                  return_value=[]) as combatants, \
+                                  return_value=[], side_effect=combatants_effect) as combatants, \
                 mock.patch.object(app_module.defensives, 'fetch_defensive_raw', autospec=True,
                                   return_value={}) as raw, \
                 mock.patch.object(app_module.defensives, 'fetch_instakills', autospec=True,
@@ -329,6 +328,24 @@ class AnalyzeFlowTests(unittest.TestCase):
         self.window_calls = windows.call_args_list
         self.combatant_calls, self.raw_calls = combatants.call_args_list, raw.call_args_list
         return json.loads(results[0][6:])["result"], fights.call_count, bulk.call_count
+
+    def test_each_death_shows_the_spec_of_its_pull(self):
+        # Bob played Fire in R1's pull and Frost in R2's: each death row says the spec of its own pull (from
+        # that pull's talent record), not one spec for the whole report, and his class comes from the
+        # report's player list. A second run, served from cache, still has them without reading them again.
+        for c in (app_module.report_meta_cache, app_module.report_fights_cache, app_module.deaths_lru,
+                  app_module.defensive_lru, app_module.recap_lru):
+            c._data.clear()
+
+        def combatants(_token, rid, *_a):
+            return [{"type": "combatantinfo", "fight": 1, "sourceID": 10, "specID": 63 if rid == "R1" else 64},
+                    {"type": "combatantinfo", "fight": 1, "sourceID": 11, "specID": 256}]
+        for run in (1, 2):
+            result, _, _ = self._run(combatants_effect=combatants)
+            by_report = {e["reportId"]: e for e in result["events"]["Bob"]}
+            self.assertEqual({r: (e["class"], e["spec"]) for r, e in by_report.items()},
+                             {"R1": ("Mage", "Fire"), "R2": ("Mage", "Frost")}, f"run {run}")
+        self.assertEqual(self.combatant_calls, [])          # the second run read no talent records
 
     def test_analysis_counts_deaths_and_caches_finished_reports(self):
         app_module.report_meta_cache._data.clear()
@@ -361,7 +378,6 @@ class AnalyzeFlowTests(unittest.TestCase):
         def fights(token, rid, cls="Rogue"):
             meta = base_fights(token, rid)
             meta["friendlies"][0]["type"] = cls
-            meta["player_details"] = {10: {"class": cls, "spec": "Outlaw", "name": "Bob"}}
             return meta
 
         def windows(_token, _rid, pulls):
@@ -540,7 +556,7 @@ class AnalyzeFlowTests(unittest.TestCase):
 
         def fights(token, rid):
             if rid == "R1":
-                return {"report_start": 0, "fights": [], "friendlies": [], "player_details": {}, "abilities": {}}
+                return {"report_start": 0, "fights": [], "friendlies": [], "abilities": {}}
             return self._fights(token, rid)
         result, fights_calls, _ = self._run(same_night=True, fights_effect=fights)
         self.assertEqual(fights_calls, 2)

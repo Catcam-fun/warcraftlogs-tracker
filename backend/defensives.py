@@ -18,7 +18,7 @@ import hashlib
 from bisect import bisect_right
 import json
 import statistics
-from collections import defaultdict
+from collections import defaultdict, Counter
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
@@ -411,6 +411,23 @@ SPEC_NAMES = {
 
 
 _UNKNOWN_SPECS = set()
+
+
+def pull_specs(combatants):
+    """{(fightID, player ID): spec name} from talent records (CombatantInfo, at the start of every pull)."""
+    return {(e.get("fight"), e["sourceID"]): SPEC_NAMES[e["specID"]] for e in combatants or ()
+            if e.get("sourceID") is not None and SPEC_NAMES.get(e.get("specID"))}
+
+
+def usual_specs(specs):
+    """{player ID: the spec they played in most pulls} from pull_specs, for a pull without a record; a tie
+    goes to the spec of their earliest pull. What WCL's report-wide playerDetails counted, read from the
+    talent records the analysis reads anyway."""
+    count, first = defaultdict(Counter), {}
+    for (fid, pid), spec in sorted(specs.items(), key=lambda kv: (kv[0][0] or 0, kv[0][1])):
+        count[pid][spec] += 1
+        first.setdefault((pid, spec), fid or 0)
+    return {pid: max(c, key=lambda sp: (c[sp], -first[(pid, sp)])) for pid, c in count.items()}
 
 
 def pull_spec(indexed, fight_id, player_id, fallback=None):

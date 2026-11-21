@@ -268,7 +268,8 @@ def check(run):
     # Talents can change between pulls, so each hit is judged by its own pull's loadout.
     loadout = {(e["fight"], e["sourceID"]): {t["id"]: t.get("rank") or 1 for t in e.get("talentTree") or []
                                              if t["id"] in cat.relevant_talent_entries} for e in combatants}
-    spec = {pid: (meta["player_details"].get(pid) or {}).get("spec") for pid in players}
+    usual = defensives.usual_specs(defensives.pull_specs(combatants))
+    spec = {pid: usual.get(pid) for pid in players}
     # Players swap specs between pulls: each pull's own spec where the log has it.
     pull_spec = {(e["fight"], e["sourceID"]): defensives.SPEC_NAMES.get(e.get("specID")) for e in combatants}
 

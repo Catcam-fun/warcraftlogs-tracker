@@ -80,7 +80,7 @@ class RunTests(unittest.TestCase):
     def test_no_mythic_pulls_gives_empty_pulls(self):
         with mock.patch("checks.common.get_fights", return_value={"report_start": 0, "fights": [
                 {"id": 1, "start_time": 0, "end_time": 1, "boss": 3129, "difficulty": 4, "kill": False, "zoneID": 44}],
-                "friendlies": [], "player_details": {}, "abilities": {}, "ability_schools": {}}):
+                "friendlies": [], "abilities": {}, "ability_schools": {}}):
             run = Run("t", parse_target("X:manaforge"))
             self.assertEqual(run.pulls, [])
 
@@ -252,7 +252,7 @@ class DurationsCheckTests(unittest.TestCase):
         from checks import source_durations
         run = mock.Mock(); run.code = "X"
         run.pulls = [{"id": 1, "start_time": 0, "end_time": 100_000}]
-        run.meta = {"abilities": {200: "Metamorphosis", 300: "Barkskin"}, "player_details": {}}
+        run.meta = {"abilities": {200: "Metamorphosis", 300: "Barkskin"}}
         run.cat.name_to_id = {"Metamorphosis": 200, "Barkskin": 300}
         run.cat.all = {200: {"name": "Metamorphosis", "kind": "personal", "duration_mods": [{"talent": "x"}]},
                        300: {"name": "Barkskin", "kind": "personal", "duration_mods": [{"talent": "x"}]}}
@@ -270,7 +270,7 @@ class DurationsCheckTests(unittest.TestCase):
         from checks import source_durations
         run = mock.Mock(); run.code = "X"
         run.pulls = [{"id": 1, "start_time": 0, "end_time": 100_000}]
-        run.meta = {"abilities": {}, "player_details": {}}
+        run.meta = {"abilities": {}}
         run.cat.name_to_id, run.cat.all = {}, {}
         raw = {"combatants": [], "casts": [], "buffs": []}
         with mock.patch.object(source_durations.defensives, "fetch_defensive_raw", return_value=raw),              mock.patch.object(source_durations.defensives, "filter_defensive_raw", return_value={"talents": {}}):
@@ -294,7 +294,7 @@ class MitigationCheckTests(unittest.TestCase):
         run.meta = {"abilities": {586: "Fade", 9: "Protective Light", 363916: "Obsidian Scales"},
                     "friendlies": [{"id": 7, "name": "Priest", "type": "Priest"},
                                    {"id": 8, "name": "Lock", "type": "Warlock"}],
-                    "player_details": {}, "ability_schools": {}}
+                    "ability_schools": {}}
         run.cat.name_to_id = {"Fade": 586, "Obsidian Scales": 363916}
         run.cat.all = {586: {"name": "Fade", "kind": "personal", "class": "Priest", "mitigation": [{"dr": 0.1}]},
                        363916: {"name": "Obsidian Scales", "kind": "personal", "class": "Evoker",
@@ -323,7 +323,7 @@ class MitigationCheckTests(unittest.TestCase):
         run = mock.Mock(); run.code = "X"
         run.pulls = [{"id": 1, "start_time": 0, "end_time": 100_000}]
         run.meta = {"abilities": {1966: "Feint"}, "friendlies": [{"id": 2, "name": "Esra", "type": "Rogue"}],
-                    "player_details": {}, "ability_schools": {}}
+                    "ability_schools": {}}
         run.cat.name_to_id = {"Feint": 1966}
         run.cat.all = {1966: {"name": "Feint", "kind": "personal", "class": "Rogue",
                               "mitigation": [{"dr": 0.4, "school": "aoe"}]}}
@@ -376,7 +376,7 @@ class MitigationCheckTests(unittest.TestCase):
         run.pulls = [{"id": 1, "start_time": 0, "end_time": 100_000}]
         run.meta = {"abilities": {22812: "Barkskin", 9: "Mark of the Wild"},
                     "friendlies": [{"id": 3, "name": "Oak", "type": "Druid"}],
-                    "player_details": {}, "ability_schools": {}}
+                    "ability_schools": {}}
         run.cat.name_to_id = {"Barkskin": 22812}
         run.cat.all = {22812: {"name": "Barkskin", "kind": "personal", "class": "Druid", "mitigation": [{"dr": 0.2}]}}
         run.cat.relevant_talent_entries = set()
@@ -395,7 +395,7 @@ class MitigationCheckTests(unittest.TestCase):
     def _wave1_run(self, entries, friendlies, abilities, combatants=()):
         run = mock.Mock(); run.code = "X"
         run.pulls = [{"id": 1, "start_time": 0, "end_time": 100_000}]
-        run.meta = {"abilities": abilities, "friendlies": friendlies, "player_details": {}, "ability_schools": {}}
+        run.meta = {"abilities": abilities, "friendlies": friendlies, "ability_schools": {}}
         run.cat.name_to_id = {e["name"]: sid for sid, e in entries.items()}
         run.cat.all = entries
         run.cat.relevant_talent_entries = set()
