@@ -184,6 +184,28 @@ class MainTests(unittest.TestCase):
         tok.assert_not_called()
         self.assertIn("python -m checks", out.call_args_list[0].args[0])
 
+    def test_results_are_saved_and_printed_on_a_cp1252_console(self):
+        # A Windows console redirected to a file writes cp1252; a reason holding "′" (rule B′) crashed the
+        # printout, and the JSON (written only at the end) was lost with the run's points.
+        import io, json, tempfile
+        from checks import __main__ as m
+        v = [Verdict("avoidable", "rules", "rule B′", fail(["Kyra died ′"], reason="rule B′"))]
+        raw = io.BytesIO()
+        console = io.TextIOWrapper(raw, encoding="cp1252")
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "out.json")
+            with mock.patch("warcraftlogs.get_access_token", return_value="t"), \
+                    mock.patch("checks.common.Run"), mock.patch("checks.common.parse_target"), \
+                    mock.patch("checks.common.points", return_value=1.0), \
+                    mock.patch.object(m, "run_checks", return_value=v), mock.patch("sys.stdout", console), \
+                    mock.patch.dict(os.environ, {"WCL_CLIENT_ID": "a", "WCL_CLIENT_SECRET": "b"}):
+                self.assertEqual(m.main(["all", "AAAA:manaforge", "--json", path]), 1)
+                console.flush()
+                with open(path, encoding="utf-8") as f:
+                    saved = json.load(f)
+        self.assertEqual(len(saved["targets"]), 1)
+        self.assertIn("B′", raw.getvalue().decode("utf-8"))
+
 
 class DeathsCheckTests(unittest.TestCase):
     def _run(self, theirs):
@@ -1262,6 +1284,17 @@ class SelectionTests(unittest.TestCase):
         p = lambda key, boss, s, e, kill=False: {"key": key, "boss": boss, "start": s, "end": e, "kill": kill}
         cs = cluster([p("A_1", 1, 0, 100), p("B_7", 1, 50, 120), p("A_2", 1, 200, 300), p("B_8", 2, 0, 100)])
         self.assertEqual(sorted(sorted(x["key"] for x in c) for c in cs), [["A_1", "B_7"], ["A_2"], ["B_8"]])
+
+    def test_cluster_puts_logs_on_one_clock(self):
+        # Unluck 2026-11-04: the second log's clock ran ~90.4 s ahead, so plain overlap chained every pull of a
+        # boss into one cluster. Ula'tek pulls 28-30 from the live log, lengths to the millisecond.
+        p = lambda key, s, e: {"key": key, "boss": 1, "start": s, "end": e, "kill": False}
+        t = [(1_000_000, 1_073_000), (1_117_000, 1_302_000), (1_383_000, 1_628_000)]
+        pulls = [p(f"T_{i}", s, e) for i, (s, e) in enumerate(t)]
+        pulls += [p(f"J_{i}", s + 90_400, e + 90_430) for i, (s, e) in enumerate(t)]
+        cs = cluster(pulls)
+        self.assertEqual(sorted(sorted(x["key"] for x in c) for c in cs),
+                         [["J_0", "T_0"], ["J_1", "T_1"], ["J_2", "T_2"]])
 
     def test_check_accepts_either_copy_and_flags_a_missing_one(self):
         pulls = [{"key": "A_1", "boss": 1, "start": 0, "end": 100, "kill": True},

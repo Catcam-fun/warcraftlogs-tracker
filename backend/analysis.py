@@ -109,6 +109,64 @@ def is_duplicate_pull(seen_by_boss, boss_id, abs_start, abs_end, is_kill=None):
 TRUNCATED_COPY_MS = 5000
 
 
+# Two raiders' logs of one night can disagree on the time by over a minute (each logger's PC clock):
+# Unluck's two logs of 2026-11-04 were 90.3-90.8 s apart, so each copy overlapped its own pull by under
+# half and the next pull too, and pulls were kept twice. Copies of a pull still last the same (99% of
+# copies within 0.1 s, above), so the gap between two logs is read from pulls of one boss whose lengths
+# match, and copies are compared on one clock.
+CLOCK_SAME_LENGTH_MS = 200       # two copies of one pull last the same to within this
+CLOCK_MAX_GAP_MS = 10 * 60_000   # a larger gap is another night or another group
+CLOCK_AGREE_MS = 2_000           # matched pulls agreeing on the gap to within this (clocks drift a little)
+CLOCK_MIN_MATCHES = 2            # one pair of equally long pulls can be chance
+CLOCK_JITTER_MS = 1_000          # smaller gaps are left alone: the overlap rules already match those copies
+
+
+def _clock_gap(a, b):
+    """The gap (ms, b's clock minus a's) read from pulls of one boss lasting the same, or None."""
+    gaps = sorted(q['abs_start'] - p['abs_start'] for p in a for q in b
+                  if p['boss_id'] == q['boss_id']
+                  and abs((p['abs_end'] - p['abs_start']) - (q['abs_end'] - q['abs_start'])) <= CLOCK_SAME_LENGTH_MS
+                  and abs(q['abs_start'] - p['abs_start']) <= CLOCK_MAX_GAP_MS)
+    best = []
+    for i, g in enumerate(gaps):
+        agree = [x for x in gaps[i:] if x - g <= CLOCK_AGREE_MS]
+        if len(agree) > len(best):
+            best = agree
+    if len(best) < CLOCK_MIN_MATCHES:
+        return None
+    return best[len(best) // 2]
+
+
+def report_clock_shifts(pulls):
+    """{reportId: ms to add to its pulls' times so every log of the night reads one clock}.
+
+    Each log's gap to the others is read pair by pair (_clock_gap) and carried from the log with the most
+    pulls (ties by report code) to every log linked to it; a log linked to none, or less than
+    CLOCK_JITTER_MS off, is not moved."""
+    by_report = defaultdict(list)
+    for p in pulls:
+        by_report[p['reportId']].append(p)
+    reports = sorted(by_report, key=lambda r: (-len(by_report[r]), r))
+    gaps = {}
+    for i, a in enumerate(reports):
+        for b in reports[i + 1:]:
+            g = _clock_gap(by_report[a], by_report[b])
+            if g is not None:
+                gaps[(a, b)], gaps[(b, a)] = g, -g
+    shift = {}
+    for root in reports:
+        if root in shift:
+            continue
+        shift[root], todo = 0, [root]
+        while todo:
+            a = todo.pop(0)
+            for b in reports:
+                if b not in shift and (a, b) in gaps:
+                    shift[b] = shift[a] - gaps[(a, b)]
+                    todo.append(b)
+    return {r: (0 if abs(v) < CLOCK_JITTER_MS else v) for r, v in shift.items()}
+
+
 def dedup_pulls(pulls):
     """One copy of each boss pull, from all raiders' logs of it.
 
@@ -117,23 +175,31 @@ def dedup_pulls(pulls):
     fight id), and a copy overlapping a kept pull of the same boss
     (is_duplicate_pull) is another raider's log of it. The earliest copy is
     kept, unless another copy lasts more than TRUNCATED_COPY_MS longer: then
-    the longest one is. Returns the kept copies in time order.
+    the longest one is. Copies are matched on one clock (report_clock_shifts),
+    but which copy is earliest is read on each log's own clock, so logs whose
+    clocks agree keep exactly the copy they kept before. The kept copies are
+    returned unchanged, in time order.
     """
-    order = sorted(pulls, key=lambda x: (x['abs_start'], x['reportId'], x['fight']['id']))
+    shift = report_clock_shifts(pulls)
+    start = lambda x: x['abs_start'] + shift[x['reportId']]
+    end = lambda x: x['abs_end'] + shift[x['reportId']]
+    order = sorted(pulls, key=lambda x: (start(x), x['reportId'], x['fight']['id']))
     seen, groups = {}, []
     by_boss = defaultdict(list)          # boss -> indexes of groups
     for p in order:
-        if is_duplicate_pull(seen, p['boss_id'], p['abs_start'], p['abs_end'], p['is_kill']):
+        if is_duplicate_pull(seen, p['boss_id'], start(p), end(p), p['is_kill']):
             for i in by_boss[p['boss_id']]:
                 first = groups[i][0]
-                if _same_pull(p['abs_start'], p['abs_end'], first['abs_start'], first['abs_end']):
+                if _same_pull(start(p), end(p), start(first), end(first)):
                     groups[i].append(p)
                     break
             continue
         by_boss[p['boss_id']].append(len(groups))
         groups.append([p])
     kept = []
+    own_clock = lambda x: (x['abs_start'], x['reportId'], x['fight']['id'])
     for copies in groups:
+        copies = sorted(copies, key=own_clock)
         first = copies[0]
         longest = max(copies, key=lambda c: c['abs_end'] - c['abs_start'])
         cut_short = (longest['abs_end'] - longest['abs_start']) - (first['abs_end'] - first['abs_start'])
